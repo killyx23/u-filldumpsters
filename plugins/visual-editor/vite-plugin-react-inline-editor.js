@@ -51,10 +51,10 @@ function validateImageSrc(openingNode) {
         return { isValid: true, reason: null }; // Not an image, skip validation
     }
 
-    const hasPropsSpread = openingNode.attributes.some(attr => 
-        t.isJSXSpreadAttribute(attr) && 
-        attr.argument && 
-        t.isIdentifier(attr.argument) && 
+    const hasPropsSpread = openingNode.attributes.some(attr =>
+        t.isJSXSpreadAttribute(attr) &&
+        attr.argument &&
+        t.isIdentifier(attr.argument) &&
         attr.argument.name === 'props'
     );
 
@@ -62,9 +62,9 @@ function validateImageSrc(openingNode) {
         return { isValid: false, reason: 'props-spread' };
     }
 
-    const srcAttr = openingNode.attributes.find(attr => 
-        t.isJSXAttribute(attr) && 
-        attr.name && 
+    const srcAttr = openingNode.attributes.find(attr =>
+        t.isJSXAttribute(attr) &&
+        attr.name &&
         attr.name.name === 'src'
     );
 
@@ -317,9 +317,9 @@ export default function inlineEditPlugin() {
             const generateFunction = generate.default || generate;
             const targetOpeningElement = targetNodePath.node;
             const parentElementNode = targetNodePath.parentPath?.node;
-            
+
             const isImageElement = targetOpeningElement.name && targetOpeningElement.name.name === 'img';
-            
+
             let beforeCode = '';
             let afterCode = '';
             let modified = false;
@@ -328,15 +328,15 @@ export default function inlineEditPlugin() {
               // Handle image src attribute update
               const beforeOutput = generateFunction(targetOpeningElement, {});
               beforeCode = beforeOutput.code;
-              
-              const srcAttr = targetOpeningElement.attributes.find(attr => 
+
+              const srcAttr = targetOpeningElement.attributes.find(attr =>
                 t.isJSXAttribute(attr) && attr.name && attr.name.name === 'src'
               );
-              
+
               if (srcAttr && t.isStringLiteral(srcAttr.value)) {
                 srcAttr.value = t.stringLiteral(newFullText);
                 modified = true;
-                
+
                 const afterOutput = generateFunction(targetOpeningElement, {});
                 afterCode = afterOutput.code;
               }
@@ -344,14 +344,14 @@ export default function inlineEditPlugin() {
               if (parentElementNode && t.isJSXElement(parentElementNode)) {
                 const beforeOutput = generateFunction(parentElementNode, {});
                 beforeCode = beforeOutput.code;
-                
+
                 parentElementNode.children = [];
                 if (newFullText && newFullText.trim() !== '') {
                   const newTextNode = t.jsxText(newFullText);
                   parentElementNode.children.push(newTextNode);
                 }
                 modified = true;
-                
+
                 const afterOutput = generateFunction(parentElementNode, {});
                 afterCode = afterOutput.code;
               }
@@ -364,13 +364,6 @@ export default function inlineEditPlugin() {
 
             const output = generateFunction(babelAst, {});
             const newContent = output.code;
-
-            try {
-              fs.writeFileSync(absoluteFilePath, newContent, 'utf-8');
-            } catch (writeError) {
-              console.error(`[vite][visual-editor] Error during direct write for ${filePath}:`, writeError);
-              throw writeError;
-            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
