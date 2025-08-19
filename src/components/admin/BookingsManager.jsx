@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Truck, ArrowUpCircle, User, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
-import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth } from 'date-fns';
+import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth, startOfMonth } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
 import FullCalendar from '@fullcalendar/react';
@@ -50,31 +51,38 @@ export const BookingsManager = () => {
     const [bookings, setBookings] = useState([]);
     const [weather, setWeather] = useState({});
     const [loading, setLoading] = useState(true);
+    const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
     const navigate = useNavigate();
 
-    const fetchBookingData = useCallback(async (currentMonth) => {
+    const fetchBookingData = useCallback(async (date) => {
         setLoading(true);
-        const [bookingRes, weatherRes] = await Promise.all([
-             supabase.from('bookings').select('*, customers!inner(*)').order('drop_off_date', { ascending: true }),
-             supabase.functions.invoke('get-weather', { body: { startDate: formatISO(currentMonth, { representation: 'date' }), endDate: formatISO(endOfMonth(currentMonth), { representation: 'date' }) }})
-        ]);
+        try {
+            const monthStart = startOfMonth(date);
+            const monthEnd = endOfMonth(date);
 
-        if (bookingRes.error) {
-            toast({ title: 'Error fetching bookings', description: bookingRes.error.message, variant: 'destructive' });
-            setBookings([]);
-        } else {
+            const [bookingRes, weatherRes] = await Promise.all([
+                 supabase.from('bookings').select('*, customers!inner(*)').order('drop_off_date', { ascending: true }),
+                 supabase.functions.invoke('get-weather', { body: { startDate: formatISO(monthStart, { representation: 'date' }), endDate: formatISO(monthEnd, { representation: 'date' }) }})
+            ]);
+
+            if (bookingRes.error) throw bookingRes.error;
             setBookings(bookingRes.data || []);
+            
+            if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
+        } catch (error) {
+            toast({ title: 'Error fetching bookings', description: error.message, variant: 'destructive' });
+            setBookings([]);
+        } finally {
+            setLoading(false);
         }
-        if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
-        setLoading(false);
     }, []);
 
     useEffect(() => {
-        fetchBookingData(new Date());
-    }, [fetchBookingData]);
+        fetchBookingData(currentCalendarDate);
+    }, [fetchBookingData, currentCalendarDate]);
 
     const handleMonthChange = (info) => {
-        fetchBookingData(info.start);
+        setCurrentCalendarDate(info.start);
     };
 
     const { todaysDeliveries, todaysPickups, activeDumpLoaders, calendarEvents } = useMemo(() => {
@@ -206,3 +214,4 @@ export const BookingsManager = () => {
         </div>
     );
 };
+  

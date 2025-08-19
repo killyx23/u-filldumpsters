@@ -4,7 +4,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { Loader2, Save, Ban, AlertTriangle, Truck, Settings, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
-import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval } from 'date-fns';
+import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval, startOfMonth } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -82,41 +82,53 @@ export const AvailabilityManager = () => {
     const [unavailableDates, setUnavailableDates] = useState([]);
     const [showDateModal, setShowDateModal] = useState(false);
     const [selectedDateInfo, setSelectedDateInfo] = useState(null);
+    const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
     const navigate = useNavigate();
 
-    const fetchAvailabilityData = useCallback(async (currentMonth) => {
+    const fetchInitialData = useCallback(async (date) => {
         setLoading(true);
-        const [availRes, unavailRes, bookingRes, weatherRes] = await Promise.all([
-            supabase.from('service_availability').select('*').order('service_id, day_of_week'),
-            supabase.from('unavailable_dates').select('*'),
-            supabase.from('bookings').select('*, customers!inner(name)'),
-            supabase.functions.invoke('get-weather', { body: { startDate: formatISO(currentMonth, { representation: 'date' }), endDate: formatISO(endOfMonth(currentMonth), { representation: 'date' }) }})
-        ]);
+        try {
+            const monthStart = startOfMonth(date);
+            const monthEnd = endOfMonth(date);
 
-        if (availRes.error) toast({ title: 'Error fetching service availability', description: availRes.error.message, variant: 'destructive' });
-        else setAvailability(availRes.data || []);
+            const [availRes, unavailRes, weatherRes] = await Promise.all([
+                supabase.from('service_availability').select('*').order('service_id, day_of_week'),
+                supabase.from('unavailable_dates').select('*'),
+                supabase.functions.invoke('get-weather', { body: { startDate: formatISO(monthStart, { representation: 'date' }), endDate: formatISO(monthEnd, { representation: 'date' }) }})
+            ]);
 
-        if (unavailRes.error) toast({ title: 'Error fetching specific date availability', description: unavailRes.error.message, variant: 'destructive' });
-        else setUnavailableDates(unavailRes.data || []);
-        
-        if (bookingRes.error) {
-            toast({ title: 'Error fetching bookings', description: bookingRes.error.message, variant: 'destructive' });
+            if (availRes.error) throw availRes.error;
+            setAvailability(availRes.data || []);
+
+            if (unavailRes.error) throw unavailRes.error;
+            setUnavailableDates(unavailRes.data || []);
+            
+            if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
+
+            const { data: bookingData, error: bookingError } = await supabase
+                .from('bookings')
+                .select('*, customers!inner(name)')
+                .gte('drop_off_date', formatISO(monthStart, { representation: 'date' }))
+                .lte('drop_off_date', formatISO(monthEnd, { representation: 'date' }));
+
+            if (bookingError) throw bookingError;
+            setBookings(bookingData || []);
+
+        } catch (error) {
+            toast({ title: 'Error fetching data', description: error.message, variant: 'destructive' });
+            setAvailability([]);
             setBookings([]);
-        } else {
-            setBookings(bookingRes.data || []);
+        } finally {
+            setLoading(false);
         }
-        
-        if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
-        
-        setLoading(false);
     }, []);
 
     useEffect(() => {
-        fetchAvailabilityData(new Date());
-    }, [fetchAvailabilityData]);
+        fetchInitialData(currentCalendarDate);
+    }, [fetchInitialData, currentCalendarDate]);
     
     const handleMonthChange = (info) => {
-        fetchAvailabilityData(info.start);
+        setCurrentCalendarDate(info.start);
     };
 
     const handleAvailabilityChange = (serviceId, dayOfWeek, field, value) => {
@@ -141,7 +153,7 @@ export const AvailabilityManager = () => {
         if (error) toast({ title: `Failed to update settings`, description: error.message, variant: 'destructive' });
         else {
             toast({ title: `Settings updated successfully` });
-            fetchAvailabilityData(new Date());
+            fetchInitialData(currentCalendarDate);
         }
     };
     
@@ -201,7 +213,7 @@ export const AvailabilityManager = () => {
         }
         setShowDateModal(false);
         setSelectedDateInfo(null);
-        fetchAvailabilityData(new Date());
+        fetchInitialData(currentCalendarDate);
     };
 
     const renderDayCellContent = (dayRenderInfo) => {
@@ -248,7 +260,7 @@ export const AvailabilityManager = () => {
         );
     };
 
-    if (loading && !availability.length) return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
+    if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
     
     if (!loading && !availability.length) {
         return (
