@@ -10,6 +10,8 @@ import BookingConfirmation from '@/pages/BookingConfirmation';
 import { AuthProvider } from '@/contexts/SupabaseAuthContext';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import CustomerDetailPage from '@/pages/CustomerDetailPage';
+import ContactPage from '@/pages/ContactPage';
+import FaqPage from '@/pages/FaqPage';
 
 function App() {
   return (
@@ -30,6 +32,8 @@ function App() {
                   <Route path="/admin" element={<AdminDashboard />} />
                   <Route path="/admin/customer/:id" element={<CustomerDetailPage />} />
                   <Route path="/confirmation" element={<BookingConfirmation />} />
+                  <Route path="/contact" element={<ContactPage />} />
+                  <Route path="/faq" element={<FaqPage />} />
               </Routes>
           </main>
 

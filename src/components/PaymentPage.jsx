@@ -73,7 +73,7 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
       if (updateError) {
         throw new Error("Failed to link Stripe session to booking.");
       }
-
+      console.log(`I have the stripe session id ${data.sessionId}`)
       const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: data.sessionId });
 
       if (stripeError) {

@@ -1,5 +1,4 @@
-
-    import React, { useState } from 'react';
+import React, { useState } from 'react';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
@@ -379,4 +378,3 @@
             </div>
         );
     };
-  
