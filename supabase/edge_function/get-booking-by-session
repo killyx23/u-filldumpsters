@@ -1,0 +1,89 @@
+import { corsHeaders } from "./cors.ts";
+import { createClient } from 'npm:@supabase/supabase-js@2';
+const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_ANON_KEY'));
+Deno.serve(async (req)=>{
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders
+    });
+  }
+  try {
+    const { sessionId } = await req.json();
+    if (!sessionId) {
+      throw new Error("Session ID is required.");
+    }
+    
+    // First, get the booking to check if it needs status update
+    const { data: existingBooking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*, customers(*)')
+      .eq('stripe_checkout_session_id', sessionId)
+      .single();
+      
+    if (fetchError) {
+      console.error("Error fetching booking by session ID:", fetchError);
+      throw new Error("Could not find a booking for the provided session.");
+    }
+
+    // Update the booking status to 'Confirmed' 
+    // Only update if the status is not already 'Confirmed' or 'Completed'
+    if (existingBooking.status !== 'Confirmed' && existingBooking.status !== 'Completed') {
+      const { error: updateError } = await supabase
+        .from('bookings')
+        .update({ 
+          status: 'Confirmed'
+        })
+        .eq('id', existingBooking.id);
+
+      if (updateError) {
+        console.error("Error updating booking status:", updateError);
+        // Don't throw error here - we still want to return the booking data
+        // The status update is a bonus, not critical for the confirmation page
+      } else {
+        console.log(`Updated booking ${existingBooking.id} status to Confirmed`);
+      }
+    }
+
+    // Fetch the updated booking data to return
+    const { data: updatedBooking, error: finalFetchError } = await supabase
+      .from('bookings')
+      .select('*, customers(*)')
+      .eq('id', existingBooking.id)
+      .single();
+
+    if (finalFetchError) {
+      console.error("Error fetching updated booking:", finalFetchError);
+      // Fall back to the original booking data if we can't get the updated version
+      return new Response(JSON.stringify({
+        booking: existingBooking
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        },
+        status: 200
+      });
+    }
+
+    return new Response(JSON.stringify({
+      booking: updatedBooking
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 200
+    });
+  } catch (error) {
+    console.error("Get booking by session error:", error.message);
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 500
+    });
+  }
+});
