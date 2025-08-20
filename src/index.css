@@ -1,0 +1,101 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.calendar-container .fc {
+    --fc-border-color: rgba(255, 255, 255, 0.2);
+    --fc-daygrid-event-dot-width: 8px;
+    --fc-today-bg-color: rgba(250, 204, 21, 0.15); /* yellow-400 with opacity */
+    --fc-button-text-color: #ffffff;
+    --fc-button-bg-color: rgba(255, 255, 255, 0.1);
+    --fc-button-border-color: rgba(255, 255, 255, 0.2);
+    --fc-button-hover-bg-color: rgba(255, 255, 255, 0.2);
+    --fc-button-hover-border-color: rgba(255, 255, 255, 0.3);
+    --fc-button-active-bg-color: rgba(255, 255, 255, 0.25);
+    --fc-button-active-border-color: rgba(255, 255, 255, 0.3);
+    --fc-event-bg-color: #3b82f6;
+    --fc-event-border-color: #3b82f6;
+    --fc-event-text-color: #ffffff;
+}
+
+.calendar-container .fc .fc-daygrid-day.fc-day-today {
+    background-color: var(--fc-today-bg-color);
+}
+
+.calendar-container .fc .fc-toolbar-title {
+    color: #facc15; /* yellow-400 */
+}
+
+.calendar-container .fc .fc-daygrid-day-number {
+    color: #d1d5db; /* gray-300 */
+}
+
+.calendar-container .fc .fc-col-header-cell-cushion {
+    color: #9ca3af; /* gray-400 */
+}
+
+.fc-daygrid-day-frame-custom {
+    @apply flex flex-col p-1 h-full w-full cursor-pointer;
+}
+
+.fc-daygrid-day-top-custom {
+    @apply flex items-center justify-between w-full;
+}
+
+.fc-daygrid-day-number-custom {
+    @apply text-sm font-medium text-gray-300;
+}
+
+.fc-daygrid-day-events-custom {
+    @apply mt-1 space-y-1 overflow-hidden;
+}
+
+.fc-event-custom {
+    @apply text-xs text-white px-1.5 py-0.5 rounded truncate;
+}
+
+.fc-event-more-custom {
+    @apply text-xs text-yellow-300 mt-1;
+}
+
+.calendar-container .fc-day-past .fc-daygrid-day-frame-custom {
+    @apply opacity-50;
+}
+
+.calendar-container .fc-daygrid-day-events {
+    display: none;
+}
