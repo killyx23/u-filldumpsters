@@ -82,7 +82,7 @@ export const AvailabilityManager = () => {
     const [unavailableDates, setUnavailableDates] = useState([]);
     const [showDateModal, setShowDateModal] = useState(false);
     const [selectedDateInfo, setSelectedDateInfo] = useState(null);
-    const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+    const [viewDate, setViewDate] = useState(new Date());
     const navigate = useNavigate();
 
     const fetchInitialData = useCallback(async (date) => {
@@ -90,11 +90,18 @@ export const AvailabilityManager = () => {
         try {
             const monthStart = startOfMonth(date);
             const monthEnd = endOfMonth(date);
+            const monthStartISO = formatISO(monthStart, { representation: 'date' });
+            const monthEndISO = formatISO(monthEnd, { representation: 'date' });
 
-            const [availRes, unavailRes, weatherRes] = await Promise.all([
+            const [availRes, unavailRes, weatherRes, bookingRes] = await Promise.all([
                 supabase.from('service_availability').select('*').order('service_id, day_of_week'),
                 supabase.from('unavailable_dates').select('*'),
-                supabase.functions.invoke('get-weather', { body: { startDate: formatISO(monthStart, { representation: 'date' }), endDate: formatISO(monthEnd, { representation: 'date' }) }})
+                supabase.functions.invoke('get-weather', { body: { startDate: monthStartISO, endDate: monthEndISO } }),
+                supabase
+                    .from('bookings')
+                    .select('*, customers!inner(name)')
+                    .gte('drop_off_date', monthStartISO)
+                    .lte('drop_off_date', monthEndISO)
             ]);
 
             if (availRes.error) throw availRes.error;
@@ -104,15 +111,9 @@ export const AvailabilityManager = () => {
             setUnavailableDates(unavailRes.data || []);
             
             if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
-
-            const { data: bookingData, error: bookingError } = await supabase
-                .from('bookings')
-                .select('*, customers!inner(name)')
-                .gte('drop_off_date', formatISO(monthStart, { representation: 'date' }))
-                .lte('drop_off_date', formatISO(monthEnd, { representation: 'date' }));
-
-            if (bookingError) throw bookingError;
-            setBookings(bookingData || []);
+            
+            if (bookingRes.error) throw bookingRes.error;
+            setBookings(bookingRes.data || []);
 
         } catch (error) {
             toast({ title: 'Error fetching data', description: error.message, variant: 'destructive' });
@@ -124,11 +125,12 @@ export const AvailabilityManager = () => {
     }, []);
 
     useEffect(() => {
-        fetchInitialData(currentCalendarDate);
-    }, [fetchInitialData, currentCalendarDate]);
+        fetchInitialData(viewDate);
+    }, [fetchInitialData, viewDate]);
     
     const handleMonthChange = (info) => {
-        setCurrentCalendarDate(info.start);
+        const newDate = info.view.currentStart;
+        setViewDate(newDate);
     };
 
     const handleAvailabilityChange = (serviceId, dayOfWeek, field, value) => {
@@ -153,7 +155,7 @@ export const AvailabilityManager = () => {
         if (error) toast({ title: `Failed to update settings`, description: error.message, variant: 'destructive' });
         else {
             toast({ title: `Settings updated successfully` });
-            fetchInitialData(currentCalendarDate);
+            fetchInitialData(viewDate);
         }
     };
     
@@ -213,7 +215,7 @@ export const AvailabilityManager = () => {
         }
         setShowDateModal(false);
         setSelectedDateInfo(null);
-        fetchInitialData(currentCalendarDate);
+        fetchInitialData(viewDate);
     };
 
     const renderDayCellContent = (dayRenderInfo) => {
