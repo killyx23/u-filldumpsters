@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, User, Mail, Phone, Home, MapPin, Calendar as CalendarIcon, AlertTriangle, Loader2, Info, Clock } from 'lucide-react';
+import { ArrowLeft, ArrowRight, User, Mail, Phone, Home, MapPin, Calendar as CalendarIcon, AlertTriangle, Loader2, Info, Clock, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from "@/components/ui/checkbox";
 import { Calendar } from '@/components/ui/calendar';
@@ -19,6 +20,7 @@ export const BookingForm = ({ plan, bookingData, setBookingData, onSubmit, onBac
   const [isVerifyingAddress, setIsVerifyingAddress] = useState(false);
   const [addressWarning, setAddressWarning] = useState(null);
   const [phoneWarning, setPhoneWarning] = useState(null);
+  const [showEmailConfirmDialog, setShowEmailConfirmDialog] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const fetchAvailability = useCallback(async (month) => {
@@ -159,6 +161,14 @@ export const BookingForm = ({ plan, bookingData, setBookingData, onSubmit, onBac
     return true;
   };
 
+  const proceedToNextStep = (addressSkipped) => {
+    if (plan.id === 2) {
+      setShowEmailConfirmDialog(true);
+    } else {
+      onSubmit(totalPrice, addressSkipped);
+    }
+  };
+
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!validatePhoneNumber()) {
@@ -176,13 +186,18 @@ export const BookingForm = ({ plan, bookingData, setBookingData, onSubmit, onBac
     if (error || !data.isValid) {
         setAddressWarning(data?.message || "The address could not be verified.");
     } else {
-        onSubmit(totalPrice, false); // False for addressVerificationSkipped
+        proceedToNextStep(false); // False for addressVerificationSkipped
     }
   };
 
   const handleProceedWithRisk = () => {
     setAddressWarning(null);
-    onSubmit(totalPrice, true); // True for addressVerificationSkipped
+    proceedToNextStep(true); // True for addressVerificationSkipped
+  };
+  
+  const handleEmailConfirmed = () => {
+      setShowEmailConfirmDialog(false);
+      onSubmit(totalPrice, !!addressWarning);
   };
 
   return (
@@ -309,6 +324,30 @@ export const BookingForm = ({ plan, bookingData, setBookingData, onSubmit, onBac
             </DialogDescription>
             <DialogFooter>
                 <Button onClick={() => setPhoneWarning(null)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">OK</Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+    <Dialog open={showEmailConfirmDialog} onOpenChange={setShowEmailConfirmDialog}>
+        <DialogContent className="bg-gray-900 border-yellow-500 text-white">
+            <DialogHeader>
+                <DialogTitle className="flex items-center text-yellow-400 text-2xl">
+                    <ShieldCheck className="mr-3 h-8 w-8" />
+                    Please Confirm Your Email
+                </DialogTitle>
+            </DialogHeader>
+            <div className="my-4 text-base">
+                <p className="text-blue-200">Please take a moment to verify that your email address is correct before proceeding:</p>
+                <p className="font-bold text-white text-lg my-3 text-center bg-white/10 p-3 rounded-md">{bookingData.email}</p>
+                <div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-md text-sm mt-4">
+                    <p className="font-bold text-blue-300 mb-2">Important Information Disclaimer</p>
+                    <p className="text-blue-200">
+                        Your booking confirmation, which contains critical rental details, will be sent to this email address. This includes the precise pickup location for the trailer, access codes for the security lock, and essential instructions regarding proper equipment usage and safety protocols. An incorrect email address will result in you not receiving this vital information. By confirming, you acknowledge the accuracy of this email for receiving all official correspondence related to your rental.
+                    </p>
+                </div>
+            </div>
+            <DialogFooter className="gap-2 sm:justify-end">
+                <Button onClick={() => setShowEmailConfirmDialog(false)} variant="outline" className="border-white/50 text-white hover:bg-white/20 hover:text-white">Edit Email</Button>
+                <Button onClick={handleEmailConfirmed} className="bg-yellow-500 text-black hover:bg-yellow-600">Email is Correct, Continue</Button>
             </DialogFooter>
         </DialogContent>
     </Dialog>

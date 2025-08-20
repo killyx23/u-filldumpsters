@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -51,7 +50,7 @@ export const BookingsManager = () => {
     const [bookings, setBookings] = useState([]);
     const [weather, setWeather] = useState({});
     const [loading, setLoading] = useState(true);
-    const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+    const [viewDate, setViewDate] = useState(new Date());
     const navigate = useNavigate();
 
     const fetchBookingData = useCallback(async (date) => {
@@ -59,10 +58,17 @@ export const BookingsManager = () => {
         try {
             const monthStart = startOfMonth(date);
             const monthEnd = endOfMonth(date);
+            const monthStartISO = formatISO(monthStart, { representation: 'date' });
+            const monthEndISO = formatISO(monthEnd, { representation: 'date' });
 
             const [bookingRes, weatherRes] = await Promise.all([
-                 supabase.from('bookings').select('*, customers!inner(*)').order('drop_off_date', { ascending: true }),
-                 supabase.functions.invoke('get-weather', { body: { startDate: formatISO(monthStart, { representation: 'date' }), endDate: formatISO(monthEnd, { representation: 'date' }) }})
+                supabase
+                    .from('bookings')
+                    .select('*, customers!inner(*)')
+                    .gte('drop_off_date', monthStartISO)
+                    .lte('drop_off_date', monthEndISO)
+                    .order('drop_off_date', { ascending: true }),
+                supabase.functions.invoke('get-weather', { body: { startDate: monthStartISO, endDate: monthEndISO } })
             ]);
 
             if (bookingRes.error) throw bookingRes.error;
@@ -78,11 +84,12 @@ export const BookingsManager = () => {
     }, []);
 
     useEffect(() => {
-        fetchBookingData(currentCalendarDate);
-    }, [fetchBookingData, currentCalendarDate]);
+        fetchBookingData(viewDate);
+    }, [fetchBookingData, viewDate]);
 
     const handleMonthChange = (info) => {
-        setCurrentCalendarDate(info.start);
+        const newDate = info.view.currentStart;
+        setViewDate(newDate);
     };
 
     const { todaysDeliveries, todaysPickups, activeDumpLoaders, calendarEvents } = useMemo(() => {
@@ -214,4 +221,3 @@ export const BookingsManager = () => {
         </div>
     );
 };
-  
