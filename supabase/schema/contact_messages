@@ -1,0 +1,8 @@
+create table public.contact_messages (
+  id serial not null,
+  name text not null,
+  email text not null,
+  message text not null,
+  created_at timestamp with time zone null default CURRENT_TIMESTAMP,
+  constraint contact_messages_pkey primary key (id)
+) TABLESPACE pg_default;
