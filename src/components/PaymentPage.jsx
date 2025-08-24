@@ -4,7 +4,7 @@ import { ArrowLeft, CreditCard, Lock, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useStripe } from '@stripe/react-stripe-js';
 import { toast } from '@/components/ui/use-toast';
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 
 const addonPrices = {
@@ -28,15 +28,16 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handlePayment = async () => {
-    if (!stripe || isProcessing || !bookingId) {
-      if (!bookingId) {
-        toast({
-          title: "Error",
-          description: "Booking ID is missing. Cannot proceed with payment.",
-          variant: "destructive",
-          duration: 15000,
-        });
-      }
+    if (!stripe || isProcessing) {
+        return;
+    }
+    if (!bookingId) {
+      toast({
+        title: "Error",
+        description: "Booking ID is missing. Cannot proceed with payment.",
+        variant: "destructive",
+        duration: 15000,
+      });
       return;
     }
     setIsProcessing(true);
@@ -65,15 +66,6 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
         throw new Error("Could not create Stripe session.");
       }
       
-      const { error: updateError } = await supabase
-        .from('bookings')
-        .update({ stripe_checkout_session_id: data.sessionId })
-        .eq('id', bookingId);
-
-      if (updateError) {
-        throw new Error("Failed to link Stripe session to booking.");
-      }
-      console.log(`I have the stripe session id ${data.sessionId}`)
       const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: data.sessionId });
 
       if (stripeError) {
@@ -93,7 +85,24 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
 
   const formatTime = (timeString) => {
     if (!timeString) return '';
-    return format(new Date(`1970-01-01T${timeString}`), 'h:mm a');
+    try {
+        const date = new Date(`1970-01-01T${timeString}`);
+        if (!isValid(date)) return "Invalid Time";
+        return format(date, 'h:mm a');
+    } catch (e) {
+        return "Invalid Time";
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return 'N/A';
+    try {
+        const parsedDate = date instanceof Date ? date : parseISO(date.toString());
+        if (!isValid(parsedDate)) return "Invalid Date";
+        return format(parsedDate, 'PPP');
+    } catch (e) {
+        return "Invalid Date";
+    }
   };
 
   return (
@@ -119,8 +128,8 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
             <ConfirmationLine label="Name" value={bookingData.name} />
             <ConfirmationLine label="Email" value={bookingData.email} />
             <ConfirmationLine label="Address" value={`${bookingData.street}, ${bookingData.city}, ${bookingData.state} ${bookingData.zip}`} />
-            <ConfirmationLine label={plan.id === 2 ? 'Pickup' : 'Drop-off'} value={`${bookingData.dropOffDate ? format(new Date(bookingData.dropOffDate), 'PPP') : 'N/A'} at ${formatTime(bookingData.dropOffTimeSlot)}`} />
-            <ConfirmationLine label={plan.id === 2 ? 'Return' : 'Pickup'} value={`${bookingData.pickupDate ? format(new Date(bookingData.pickupDate), 'PPP') : 'N/A'} by ${formatTime(bookingData.pickupTimeSlot)}`} />
+            <ConfirmationLine label={plan.id === 2 ? 'Pickup' : 'Drop-off'} value={`${formatDate(bookingData.dropOffDate)} at ${formatTime(bookingData.dropOffTimeSlot)}`} />
+            <ConfirmationLine label={plan.id === 2 ? 'Return' : 'Pickup'} value={`${formatDate(bookingData.pickupDate)} by ${formatTime(bookingData.pickupTimeSlot)}`} />
 
             {addonsData.insurance === 'accept' && <ConfirmationLine label="Rental Insurance" value={`$${addonPrices.insurance.toFixed(2)}`} />}
             {plan.id !== 2 && addonsData.drivewayProtection === 'accept' && <ConfirmationLine label="Driveway Protection" value={`$${addonPrices.drivewayProtection.toFixed(2)}`} />}
