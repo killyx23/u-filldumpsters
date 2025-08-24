@@ -1,13 +1,21 @@
 import React from 'react';
-import { Truck, Phone, Mail, TestTube2, MessageSquare, HelpCircle } from 'lucide-react';
+import { Truck, Phone, Mail, TestTube2, MessageSquare, HelpCircle, LogOut } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
 
 export const Header = () => {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+  const isAdmin = user?.user_metadata?.is_admin;
 
   const handleTestClick = () => {
     navigate('/admin');
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
   };
 
   return (
@@ -24,13 +32,15 @@ export const Header = () => {
             >
               <TestTube2 className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
             </Button>
-            <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-3 rounded-xl">
-              <Truck className="h-8 w-8 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white">U-Fill Dumpsters</h1>
-              <p className="text-blue-200 text-sm">Premium Waste Solutions</p>
-            </div>
+            <Link to="/" className="flex items-center space-x-3 cursor-pointer group">
+                <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-3 rounded-xl group-hover:scale-105 transition-transform">
+                <Truck className="h-8 w-8 text-white" />
+                </div>
+                <div>
+                <h1 className="text-2xl font-bold text-white group-hover:text-yellow-300 transition-colors">U-Fill Dumpsters</h1>
+                <p className="text-blue-200 text-sm">Premium Waste Solutions</p>
+                </div>
+            </Link>
           </div>
           <div className="hidden md:flex items-center space-x-6 text-white">
             <div className="flex items-center space-x-2">
@@ -49,6 +59,12 @@ export const Header = () => {
               <HelpCircle className="h-4 w-4" />
               <span>FAQ</span>
             </Link>
+            {isAdmin && (
+              <Button onClick={handleSignOut} variant="ghost" className="hover:bg-red-500/20 hover:text-red-300">
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
+            )}
           </div>
         </div>
       </div>

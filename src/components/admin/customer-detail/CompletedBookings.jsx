@@ -1,7 +1,8 @@
+
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip, XCircle } from 'lucide-react';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -25,11 +26,12 @@ export const CompletedBookings = ({ bookings, equipment }) => {
 
     return (
         <div className="space-y-8">
-            <h3 className="text-2xl font-bold text-yellow-400">Completed Rentals</h3>
+            <h3 className="text-2xl font-bold text-yellow-400">Completed & Cancelled Rentals</h3>
             {bookings.map(booking => {
                  const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
                  const returnIssues = booking.return_issues || {};
                  const fees = booking.fees || {};
+                 const refundDetails = booking.refund_details || null;
 
                  return (
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
@@ -56,6 +58,15 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                                 <ul className="list-disc list-inside text-white pl-4">
                                     {relevantEquipment.map(e => <li key={e.id}>{e.equipment.name} (x{e.quantity})</li>)}
                                 </ul>
+                            </div>
+                        )}
+
+                        {refundDetails && (
+                            <div className="mt-4 border-t border-red-400/50 pt-4 space-y-2">
+                                <h5 className="font-bold text-red-300 flex items-center"><XCircle className="mr-2 h-5 w-5" />Cancellation & Refund Details</h5>
+                                <p className="text-red-200"><strong>Reason:</strong> {refundDetails.reason}</p>
+                                <p className="text-red-200"><strong>Amount Refunded:</strong> <span className="font-bold">${refundDetails.amount.toFixed(2)}</span></p>
+                                <p className="text-xs text-gray-400">Refund ID: {refundDetails.refund_id}</p>
                             </div>
                         )}
                         

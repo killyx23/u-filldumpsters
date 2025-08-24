@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2 } from 'lucide-react';
@@ -64,6 +65,23 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
 
       if (!data.sessionId) {
         throw new Error("Could not create Stripe session.");
+      }
+      
+      const { error: dbError } = await supabase
+        .from('stripe_payment_info')
+        .insert({
+          booking_id: bookingId,
+          stripe_checkout_session_id: data.sessionId
+        });
+        
+      if (dbError) {
+        console.error("Failed to save Stripe session ID to DB, but proceeding to checkout:", dbError);
+        toast({
+          title: "Database logging issue",
+          description: "Could not save session info. Your payment will still be processed.",
+          variant: "destructive",
+          duration: 8000
+        });
       }
       
       const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: data.sessionId });

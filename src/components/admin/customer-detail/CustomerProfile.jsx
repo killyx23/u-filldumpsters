@@ -1,98 +1,104 @@
-import React, { useState, useEffect, useCallback } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Mail, Phone, Home, Save, X, Calendar, Clock, Route, Hash } from 'lucide-react';
+import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { format, parseISO } from 'date-fns';
-import { CustomerProfileHeader } from './CustomerProfileHeader';
+import { EditInput } from '@/components/admin/EditInput';
+import { Textarea } from '@/components/ui/textarea';
 
-export const CustomerProfile = ({ customer, setCustomer, bookingsCount }) => {
+export const CustomerProfile = ({ customer, setCustomer, bookingsCount, onUpdate }) => {
     const [isEditing, setIsEditing] = useState(false);
-    const [editableCustomer, setEditableCustomer] = useState(customer);
-    const [eta, setEta] = useState(null);
-    const [distance, setDistance] = useState(null);
-    const [loadingEta, setLoadingEta] = useState(false);
-
-    const fetchEta = useCallback(async (destination) => {
-        if (!destination) return;
-        setLoadingEta(true);
-        try {
-            const { data, error } = await supabase.functions.invoke('get-eta', { body: { destination } });
-            if (error) throw error;
-            setEta(data.eta);
-            setDistance(data.distance);
-        } catch (error) {
-            console.error("ETA Error:", error.message);
-            setEta("Unavailable");
-            setDistance("N/A");
-        } finally {
-            setLoadingEta(false);
-        }
-    }, []);
+    const [editedCustomer, setEditedCustomer] = useState(customer);
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        if (customer && customer.street) {
-            const destination = `${customer.street}, ${customer.city}, ${customer.state} ${customer.zip}`;
-            fetchEta(destination);
-        }
-    }, [customer, fetchEta]);
-    
-    useEffect(() => {
-        setEditableCustomer(customer);
+        setEditedCustomer(customer);
     }, [customer]);
 
-    const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        setEditableCustomer(prev => ({ ...prev, [name]: value }));
+    const handleInputChange = (field, value) => {
+        setEditedCustomer(prev => ({ ...prev, [field]: value }));
     };
 
     const handleSave = async () => {
-        const { name, email, phone, street, city, state, zip } = editableCustomer;
-        const { error } = await supabase
+        setIsSaving(true);
+        const { admin_notes, ...customerUpdateData } = editedCustomer;
+        
+        const { data, error } = await supabase
             .from('customers')
-            .update({ name, email, phone, street, city, state, zip })
-            .eq('id', customer.id);
+            .update(customerUpdateData)
+            .eq('id', customer.id)
+            .select()
+            .single();
 
         if (error) {
-            toast({ title: 'Failed to save customer info', description: error.message, variant: 'destructive' });
+            toast({ title: 'Error saving profile', description: error.message, variant: 'destructive' });
         } else {
-            toast({ title: 'Customer info saved successfully!' });
+            setCustomer(data);
             setIsEditing(false);
-            setCustomer(editableCustomer);
+            toast({ title: 'Profile updated successfully!' });
+            onUpdate();
         }
+        setIsSaving(false);
     };
 
-    return !isEditing ? (
-        <>
-            <CustomerProfileHeader customer={customer} bookingsCount={bookingsCount} />
-            <div className="mt-4 space-y-2 text-blue-200">
-               <p className="flex items-center"><Mail className="mr-3 h-4 w-4" /> {customer.email}</p>
-               <p className="flex items-center"><Phone className="mr-3 h-4 w-4" /> {customer.phone}</p>
-               <p className="flex items-start"><Home className="mr-3 h-4 w-4 mt-1 flex-shrink-0" /> <span>{`${customer.street}, ${customer.city}, ${customer.state} ${customer.zip}`}</span></p>
-               <p className="flex items-center"><Clock className="mr-3 h-4 w-4" /> ETA: {loadingEta ? <Loader2 className="h-4 w-4 animate-spin" /> : eta}</p>
-               <p className="flex items-center"><Route className="mr-3 h-4 w-4" /> Distance: {loadingEta ? <Loader2 className="h-4 w-4 animate-spin" /> : distance} (one way)</p>
-               <p className="flex items-center"><Calendar className="mr-3 h-4 w-4" /> Member since {format(parseISO(customer.created_at), 'PPP')}</p>
-               <p className="flex items-start"><Hash className="mr-3 h-4 w-4 mt-1 flex-shrink-0" /> <span className="break-all">Stripe ID: {customer.stripe_customer_id || 'N/A'}</span></p>
+    const handleSaveAdminNotes = async () => {
+        setIsSaving(true);
+        const { error } = await supabase
+            .from('customers')
+            .update({ admin_notes: editedCustomer.admin_notes })
+            .eq('id', customer.id);
+        
+        if (error) {
+            toast({ title: "Failed to save admin notes", description: error.message, variant: "destructive" });
+        } else {
+            toast({ title: "Admin notes saved!" });
+            setCustomer(prev => ({...prev, admin_notes: editedCustomer.admin_notes}));
+        }
+        setIsSaving(false);
+    };
+
+    return (
+        <div className="grid md:grid-cols-2 gap-8">
+            <div>
+                <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4">Contact & Billing Information</h3>
+                <div className="space-y-4">
+                    <EditInput label="Name" icon={<User />} value={editedCustomer.name} onChange={(e) => handleInputChange('name', e.target.value)} isEditing={isEditing} />
+                    <EditInput label="Email" icon={<Mail />} value={editedCustomer.email} onChange={(e) => handleInputChange('email', e.target.value)} isEditing={isEditing} type="email" />
+                    <EditInput label="Phone" icon={<Phone />} value={editedCustomer.phone} onChange={(e) => handleInputChange('phone', e.target.value)} isEditing={isEditing} type="tel" />
+                    <EditInput label="Street" icon={<Home />} value={editedCustomer.street} onChange={(e) => handleInputChange('street', e.target.value)} isEditing={isEditing} />
+                    <EditInput label="City" icon={<MapPin />} value={editedCustomer.city} onChange={(e) => handleInputChange('city', e.target.value)} isEditing={isEditing} />
+                    <EditInput label="State" icon={<MapPin />} value={editedCustomer.state} onChange={(e) => handleInputChange('state', e.target.value)} isEditing={isEditing} />
+                    <EditInput label="ZIP" icon={<MapPin />} value={editedCustomer.zip} onChange={(e) => handleInputChange('zip', e.target.value)} isEditing={isEditing} />
+                    <EditInput label="Stripe ID" icon={<Hash />} value={editedCustomer.stripe_customer_id || "Not Available"} isEditing={false} />
+                </div>
+                <div className="mt-6">
+                    {isEditing ? (
+                        <div className="flex gap-2">
+                            <Button onClick={handleSave} disabled={isSaving}>
+                                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Save
+                            </Button>
+                            <Button variant="ghost" onClick={() => setIsEditing(false)}>Cancel</Button>
+                        </div>
+                    ) : (
+                        <Button onClick={() => setIsEditing(true)}>Edit Profile</Button>
+                    )}
+                </div>
             </div>
-            <div className="text-right mt-4">
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>Edit Profile</Button>
-            </div>
-        </>
-    ) : (
-        <div className="space-y-4">
-            <Input name="name" value={editableCustomer.name} onChange={handleInputChange} placeholder="Full Name" className="bg-white/10" />
-            <Input name="email" value={editableCustomer.email} onChange={handleInputChange} placeholder="Email" className="bg-white/10" />
-            <Input name="phone" value={editableCustomer.phone} onChange={handleInputChange} placeholder="Phone" className="bg-white/10" />
-            <Input name="street" value={editableCustomer.street} onChange={handleInputChange} placeholder="Street" className="bg-white/10" />
-            <Input name="city" value={editableCustomer.city} onChange={handleInputChange} placeholder="City" className="bg-white/10" />
-            <div className="grid grid-cols-2 gap-2">
-                <Input name="state" value={editableCustomer.state} onChange={handleInputChange} placeholder="State" className="bg-white/10" />
-                <Input name="zip" value={editableCustomer.zip} onChange={handleInputChange} placeholder="Zip" className="bg-white/10" />
-            </div>
-            <div className="flex justify-end space-x-2 mt-4">
-                <Button variant="ghost" size="sm" onClick={() => { setIsEditing(false); setEditableCustomer(customer); }}><X className="mr-2 h-4 w-4" />Cancel</Button>
-                <Button size="sm" onClick={handleSave} className="bg-green-600 hover:bg-green-700"><Save className="mr-2 h-4 w-4" />Save</Button>
+            
+            <div>
+                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><StickyNote className="mr-2"/>Admin-Only Notes</h3>
+                 <p className="text-sm text-blue-200 mb-2">These notes are private and only visible to administrators.</p>
+                 <Textarea 
+                    value={editedCustomer.admin_notes || ''}
+                    onChange={(e) => handleInputChange('admin_notes', e.target.value)}
+                    className="bg-white/10 min-h-[200px]"
+                    placeholder="Add private notes here..."
+                 />
+                 <Button onClick={handleSaveAdminNotes} className="mt-4" disabled={isSaving}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} 
+                    Save Notes
+                </Button>
             </div>
         </div>
     );

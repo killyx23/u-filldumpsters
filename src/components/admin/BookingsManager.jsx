@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Truck, ArrowUpCircle, User, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
-import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth, startOfMonth } from 'date-fns';
+import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth, startOfMonth, isSameDay } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
 import FullCalendar from '@fullcalendar/react';
@@ -89,7 +90,9 @@ export const BookingsManager = () => {
 
     const handleMonthChange = (info) => {
         const newDate = info.view.currentStart;
-        setViewDate(newDate);
+        if (!isSameDay(startOfMonth(newDate), startOfMonth(viewDate))) {
+            setViewDate(newDate);
+        }
     };
 
     const { todaysDeliveries, todaysPickups, activeDumpLoaders, calendarEvents } = useMemo(() => {
@@ -204,7 +207,6 @@ export const BookingsManager = () => {
                 <h2 className="text-2xl font-bold mb-4">Monthly Booking Calendar</h2>
                 <FullCalendar
                     plugins={[dayGridPlugin, interactionPlugin]}
-                    initialView="dayGridMonth"
                     events={calendarEvents}
                     eventClick={handleEventClick}
                     headerToolbar={{

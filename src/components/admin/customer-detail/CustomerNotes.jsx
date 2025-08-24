@@ -1,43 +1,101 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Save, X } from 'lucide-react';
+import { BookOpen, Clock, Loader2, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { format, parseISO } from 'date-fns';
+
+const NoteCard = ({ note }) => (
+    <div className="bg-white/10 p-4 rounded-lg relative">
+        {!note.is_read && <span className="absolute top-2 right-2 h-3 w-3 rounded-full bg-yellow-400"></span>}
+        <div className="flex justify-between items-center mb-2">
+            <p className="font-semibold text-blue-200 flex items-center">
+                <BookOpen className="mr-2 h-4 w-4" />
+                {note.source}
+            </p>
+            <p className="text-xs text-gray-400 flex items-center">
+                <Clock className="mr-1 h-3 w-3" />
+                {format(parseISO(note.created_at), 'MMM d, yyyy @ h:mm a')}
+            </p>
+        </div>
+        <p className="text-white whitespace-pre-wrap">{note.content}</p>
+        {note.booking_id && <p className="text-xs text-gray-500 mt-2">Related to Booking #{note.booking_id}</p>}
+    </div>
+);
+
 
 export const CustomerNotes = ({ customer, setCustomer }) => {
-    const [isEditing, setIsEditing] = useState(false);
-    const [notes, setNotes] = useState(customer.notes || '');
+    const [notes, setNotes] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    const handleSave = async () => {
-        const { error } = await supabase
+    const fetchNotes = useCallback(async () => {
+        if (!customer) return;
+        setLoading(true);
+        const { data, error } = await supabase
+            .from('customer_notes')
+            .select('*')
+            .eq('customer_id', customer.id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            toast({ title: 'Failed to load customer notes', description: error.message, variant: 'destructive' });
+        } else {
+            setNotes(data);
+        }
+        setLoading(false);
+    }, [customer]);
+
+    useEffect(() => {
+        fetchNotes();
+    }, [fetchNotes]);
+
+    const markAllAsRead = async () => {
+        const unreadNoteIds = notes.filter(n => !n.is_read).map(n => n.id);
+        if (unreadNoteIds.length === 0) return;
+
+        const { error: updateNotesError } = await supabase
+            .from('customer_notes')
+            .update({ is_read: true })
+            .in('id', unreadNoteIds);
+
+        const { error: updateCustomerError } = await supabase
             .from('customers')
-            .update({ notes: notes })
+            .update({ has_unread_notes: false })
             .eq('id', customer.id);
         
-        if (error) {
-            toast({ title: 'Failed to save notes', description: error.message, variant: 'destructive' });
+        if (updateNotesError || updateCustomerError) {
+            toast({ title: 'Failed to mark notes as read', variant: 'destructive' });
         } else {
-            toast({ title: 'Notes saved successfully!' });
-            setIsEditing(false);
-            setCustomer(prev => ({ ...prev, notes }));
+            toast({ title: 'Notes marked as read!' });
+            setNotes(prev => prev.map(n => ({...n, is_read: true})));
+            setCustomer(prev => ({...prev, has_unread_notes: false}));
         }
     };
-
-    return isEditing ? (
-        <>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="bg-white/10 min-h-[120px]" placeholder="Add notes about this customer..." />
-            <div className="flex justify-end space-x-2 mt-4">
-                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}><X className="mr-2 h-4 w-4" />Cancel</Button>
-                <Button size="sm" onClick={handleSave} className="bg-green-600 hover:bg-green-700"><Save className="mr-2 h-4 w-4" />Save</Button>
+    
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-4">
+                <h3 className="flex items-center text-xl font-bold text-yellow-400">Customer Communication Log</h3>
+                {customer.has_unread_notes && (
+                    <Button size="sm" onClick={markAllAsRead} variant="outline" className="text-yellow-400 border-yellow-400 hover:bg-yellow-400 hover:text-black">
+                       <CheckCircle className="mr-2 h-4 w-4"/> Mark All as Read
+                    </Button>
+                )}
             </div>
-        </>
-    ) : (
-        <>
-            <p className="text-blue-200 whitespace-pre-wrap min-h-[120px]">{notes || 'No internal notes for this customer yet.'}</p>
-            <div className="text-right mt-4">
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>Edit Notes</Button>
-            </div>
-        </>
+            {loading ? (
+                <div className="flex justify-center items-center h-48">
+                    <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
+                </div>
+            ) : (
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    {notes.length > 0 ? (
+                        notes.map(note => <NoteCard key={note.id} note={note} />)
+                    ) : (
+                        <p className="text-center text-blue-200 py-16">No notes or correspondence history for this customer.</p>
+                    )}
+                </div>
+            )}
+        </div>
     );
 };

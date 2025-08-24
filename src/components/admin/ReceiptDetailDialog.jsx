@@ -23,7 +23,8 @@ const equipmentMeta = [
 export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
     if (!booking) return null;
 
-    const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees } = booking;
+    const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
+    const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
 
     const formatTime = (timeString) => {
         if (!timeString) return 'N/A';
@@ -45,18 +46,17 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                     </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
-                    {/* Customer & Booking Info */}
                     <section>
                         <h4 className="font-bold text-lg text-yellow-400 mb-2">Customer & Booking Information</h4>
                         <DetailRow icon={<User />} label="Customer" value={customers.name} />
                         <DetailRow icon={<Mail />} label="Email" value={customers.email} />
                         <DetailRow icon={<Phone />} label="Phone" value={customers.phone} />
                         <DetailRow icon={<Home />} label="Address" value={`${customers.street}, ${customers.city}, ${customers.state} ${customers.zip}`} />
-                        <DetailRow icon={<Hash />} label="Stripe Customer ID" value={customers.stripe_customer_id || 'N/A'} />
-                        <DetailRow icon={<Hash />} label="Payment Intent ID" value={booking.stripe_payment_intent_id || 'N/A'} />
+                        <DetailRow icon={<Hash />} label="Stripe Customer ID" value={paymentInfo?.stripe_customer_id || 'N/A'} />
+                        <DetailRow icon={<Hash />} label="Payment Intent ID" value={paymentInfo?.stripe_payment_intent_id || 'N/A'} />
+                        <DetailRow icon={<Hash />} label="Stripe Charge ID" value={paymentInfo?.stripe_charge_id || 'N/A'} />
                     </section>
 
-                    {/* Rental Details */}
                     <section>
                         <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Rental Details</h4>
                         <DetailRow icon={<Info />} label="Service" value={plan.name} />
@@ -66,7 +66,6 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                         {booking.returned_at && <DetailRow icon={<Clock />} label="Actual Returned" value={format(parseISO(booking.returned_at), 'Pp')} />}
                     </section>
 
-                    {/* Addons & Protection */}
                     <section>
                         <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
                         <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? 'Accepted' : 'Declined'} />
@@ -86,7 +85,6 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                         )}
                     </section>
 
-                    {/* Notes */}
                     {notes && (
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Customer Notes</h4>
@@ -94,7 +92,6 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                         </section>
                     )}
 
-                    {/* Post-Rental Issues & Fees */}
                     {(return_issues || fees) && (
                         <section>
                             <h4 className="font-bold text-lg text-red-400 mt-4 mb-2">Issues & Additional Fees</h4>
@@ -102,14 +99,13 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                                 <DetailRow key={key} icon={<AlertTriangle />} label={`Issue: ${key}`} value={value.status.replace(/_/g, ' ')} className="capitalize" />
                             ))}
                             {fees && Object.entries(fees).map(([key, value]) => (
-                                <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`$${parseFloat(value.amount).toFixed(2)}`} />
+                                <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`${parseFloat(value.amount).toFixed(2)}`} />
                             ))}
                         </section>
                     )}
 
-                    {/* Total */}
                     <div className="border-t-2 border-yellow-400 pt-4 mt-4">
-                        <DetailRow icon={<DollarSign />} label="Grand Total Paid" value={`$${total_price.toFixed(2)}`} className="text-xl font-bold" />
+                        <DetailRow icon={<DollarSign />} label="Grand Total Paid" value={`${total_price.toFixed(2)}`} className="text-xl font-bold" />
                     </div>
                 </div>
                 <DialogFooter>
