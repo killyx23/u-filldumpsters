@@ -4,7 +4,7 @@ import React, { useState } from 'react';
     import { toast } from '@/components/ui/use-toast';
     import { StatusBadge } from '@/components/admin/StatusBadge';
     import { format, parseISO } from 'date-fns';
-    import { Clock, Hash, DollarSign, AlertTriangle, CheckCircle, Truck, ArrowUpCircle, Package, ImagePlus, Loader2, Trash2 } from 'lucide-react';
+    import { Clock, Hash, DollarSign, AlertTriangle, CheckCircle, Truck, ArrowUpCircle, Package, ImagePlus, Loader2, Trash2, Map, Navigation, UploadCloud } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { Checkbox } from '@/components/ui/checkbox';
     import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -42,20 +42,16 @@ import React, { useState } from 'react';
 
         const renderButtons = () => {
             if (isDumpLoader) {
-                // "Mark as Picked Up" by customer
                 if (booking.status === 'Confirmed' && !booking.rented_out_at) {
                     return <Button onClick={() => handleUpdate({ rented_out_at: new Date().toISOString(), status: 'waiting_to_be_returned' })}><Truck className="mr-2 h-4 w-4" /> Mark as Picked Up</Button>;
                 }
-                // "Mark as Returned" by customer
                 if (booking.status === 'waiting_to_be_returned' && !booking.returned_at) {
                     return <Button onClick={() => handleUpdate({ returned_at: new Date().toISOString() })}><ArrowUpCircle className="mr-2 h-4 w-4" /> Mark as Returned</Button>;
                 }
             } else { // 16yd Dumpster
-                // "Mark as Delivered" by staff
                 if (booking.status === 'Confirmed' && !booking.delivered_at) {
                     return <Button onClick={() => handleUpdate({ delivered_at: new Date().toISOString(), status: 'Delivered' })}><Truck className="mr-2 h-4 w-4" /> Mark as Delivered</Button>;
                 }
-                // "Mark as Picked Up" by staff
                 if (booking.status === 'Delivered' && !booking.picked_up_at) {
                     return <Button onClick={() => handleUpdate({ picked_up_at: new Date().toISOString() })}><ArrowUpCircle className="mr-2 h-4 w-4" /> Mark as Picked Up</Button>;
                 }
@@ -155,6 +151,7 @@ import React, { useState } from 'react';
         const [showFeeDialog, setShowFeeDialog] = useState(false);
         const [currentFeeType, setCurrentFeeType] = useState(null);
         const [currentItemDetails, setCurrentItemDetails] = useState(null);
+        const fileInputRef = React.useRef(null);
 
         const isChecklistReady = booking.returned_at || booking.picked_up_at;
         if (!isChecklistReady) return null;
@@ -216,20 +213,15 @@ import React, { useState } from 'react';
             if (!file) return;
 
             setIsUploading(true);
-            const { data: user, error: userError } = await supabase.auth.getUser();
-            if (userError || !user) {
-                toast({ title: "Authentication Error", description: "Could not identify user for upload.", variant: "destructive" });
-                setIsUploading(false);
-                return;
-            }
+            const { data: { user } } = await supabase.auth.getUser();
 
-            const filePath = `${user.user.id}/${booking.id}-${Date.now()}-${file.name}`;
-            const { error: uploadError } = await supabase.storage.from('damage-reports').upload(filePath, file);
+            const filePath = `${user.id}/damage_reports/${booking.id}-${Date.now()}-${file.name}`;
+            const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
 
             if (uploadError) {
                 toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
             } else {
-                const { data: { publicUrl } } = supabase.storage.from('damage-reports').getPublicUrl(filePath);
+                const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
                 const newPhoto = { url: publicUrl, path: filePath, name: file.name };
                 const newDamagePhotos = [...damagePhotos, newPhoto];
                 setDamagePhotos(newDamagePhotos);
@@ -240,7 +232,7 @@ import React, { useState } from 'react';
         };
         
         const handlePhotoDelete = async (photoToDelete) => {
-            const { error: storageError } = await supabase.storage.from('damage-reports').remove([photoToDelete.path]);
+            const { error: storageError } = await supabase.storage.from('customer-uploads').remove([photoToDelete.path]);
             if(storageError) {
                 toast({ title: "Deletion Failed", description: storageError.message, variant: "destructive" });
                 return;
@@ -299,11 +291,11 @@ import React, { useState } from 'react';
                 </div>
                 {!checklist['no_damage'] && (
                     <div className="mt-4 pl-8">
-                        <Label htmlFor="damage-photo-upload" className="flex items-center cursor-pointer text-blue-300 hover:text-yellow-400">
-                            <ImagePlus className="mr-2 h-5 w-5" />
+                        <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                            <UploadCloud className="mr-2 h-5 w-5" />
                             {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Upload Damage Photo'}
-                        </Label>
-                        <Input id="damage-photo-upload" type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} />
+                        </Button>
+                        <Input ref={fileInputRef} id="damage-photo-upload" type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*" />
                         <div className="mt-2 space-y-2">
                             {damagePhotos.map((photo, index) => (
                                 <div key={index} className="text-sm text-green-400 flex items-center justify-between">
@@ -336,6 +328,8 @@ import React, { useState } from 'react';
                 {bookings.map(booking => {
                     const isChecklistReady = booking.returned_at || booking.picked_up_at;
                     const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
+                    const distanceInfo = booking.addons?.distanceInfo;
+                    const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
 
                     return (
                         <motion.div
@@ -353,10 +347,21 @@ import React, { useState } from 'react';
                                 <StatusBadge status={booking.status} />
                             </div>
 
+                            {distanceInfo && (
+                                <div className="mt-4 p-4 bg-red-900/40 border border-red-500 rounded-lg">
+                                    <h4 className="font-bold text-red-300 flex items-center"><AlertTriangle className="mr-2 h-5 w-5"/> Extended Delivery Red Flag</h4>
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-2 text-sm">
+                                        <div className="flex items-center"><Map className="mr-2 h-4 w-4 text-red-400" />Extra Miles: <span className="font-bold ml-1">{distanceInfo.miles.toFixed(1)} mi</span></div>
+                                        <div className="flex items-center"><Clock className="mr-2 h-4 w-4 text-red-400" />Est. Extra Time (one-way): <span className="font-bold ml-1">{distanceInfo.duration}</span></div>
+                                        <div className="col-span-2 flex items-center"><Navigation className="mr-2 h-4 w-4 text-red-400" />This will require extra travel time for both delivery and pickup.</div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 <DetailItem icon={<Package />} label="Service" value={booking.plan.name} />
                                 <DetailItem icon={<DollarSign />} label="Total Price" value={`$${booking.total_price.toFixed(2)}`} />
-                                <DetailItem icon={<Hash />} label="Stripe Payment ID" value={booking.stripe_payment_intent_id || 'N/A'} />
+                                <DetailItem icon={<Hash />} label="Stripe Charge ID" value={paymentInfo?.stripe_charge_id || 'N/A'} />
                                 <DetailItem icon={<Clock />} label={booking.plan.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${booking.drop_off_time_slot}`} />
                                 <DetailItem icon={<Clock />} label={booking.plan.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${format(parseISO(booking.pickup_date), 'PPP')} at ${booking.pickup_time_slot}`} />
                             </div>

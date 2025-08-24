@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -52,7 +51,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
                 <div>
                     <p className="font-bold text-lg text-white">{booking.plan.name}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
-                    <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {paymentInfo?.stripe_charge_id || 'N/A'}</p>
+                    <p className="text-xs text-gray-400 mt-1">Stripe Intent ID: {paymentInfo?.stripe_payment_intent_id || 'N/A'}</p>
                 </div>
                 <div className="text-right">
                     <StatusBadge status={booking.status} />

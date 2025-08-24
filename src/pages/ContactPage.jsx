@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -19,13 +20,29 @@ const ContactPage = () => {
         e.preventDefault();
         setIsLoading(true);
 
-        const { error } = await supabase
-            .from('contact_messages')
-            .insert([{ name, email, message }]);
+        const { data: customerData, error: customerError } = await supabase
+            .from('customers')
+            .select('id')
+            .eq('email', email)
+            .single();
+
+        if (customerError && customerError.code !== 'PGRST116') { // Ignore "no rows found"
+            toast({ variant: "destructive", title: "An error occurred." });
+            setIsLoading(false);
+            return;
+        }
+
+        const { error: messageError } = await supabase
+            .from('customer_notes')
+            .insert([{ 
+                customer_id: customerData?.id, // Can be null if customer not found
+                source: 'Contact Form',
+                content: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`
+             }]);
 
         setIsLoading(false);
 
-        if (error) {
+        if (messageError) {
             toast({
                 variant: "destructive",
                 title: "Uh oh! Something went wrong.",

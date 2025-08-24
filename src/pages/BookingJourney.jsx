@@ -12,12 +12,48 @@ import React, { useState, useMemo } from 'react';
     import { AddonsForm } from '@/components/AddonsForm';
     import { PaymentPage } from '@/components/PaymentPage';
     import { UserAgreement } from '@/components/UserAgreement';
+    import { cn } from '@/lib/utils';
 
     const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBBbSQ9zxPaxMaBaizd1gteqQkA1heNW84b4V08gttanJuCj4Q77pr00FWtGRp28");
 
     const initialBookingData = {
       name: '', email: '', phone: '', street: '', city: '', state: '', zip: '',
       dropOffDate: null, pickupDate: null, dropOffTimeSlot: '', pickupTimeSlot: '',
+    };
+
+    const StepIndicator = ({ currentStep, onStepClick }) => {
+      const steps = ["Service", "Details", "Add-ons", "Payment"];
+      return (
+        <div className="w-full max-w-md mx-auto mb-8">
+          <div className="flex items-center justify-between">
+            {steps.map((step, index) => (
+              <React.Fragment key={index}>
+                <div className="flex flex-col items-center">
+                  <button
+                    onClick={() => onStepClick(index)}
+                    disabled={index >= currentStep}
+                    className={cn(
+                      "w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold transition-all duration-300",
+                      currentStep > index ? "bg-green-500 text-white cursor-pointer hover:bg-green-600" : "",
+                      currentStep === index ? "bg-yellow-400 text-black" : "",
+                      currentStep < index ? "bg-gray-600 text-gray-400 cursor-not-allowed" : ""
+                    )}
+                  >
+                    {index + 1}
+                  </button>
+                  <span className={cn("text-xs mt-2", currentStep >= index ? "text-white" : "text-gray-400")}>{step}</span>
+                </div>
+                {index < steps.length - 1 && (
+                  <div className={cn(
+                    "flex-1 h-1 mx-2 transition-colors duration-300",
+                    currentStep > index ? "bg-green-500" : "bg-gray-600"
+                  )}></div>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      );
     };
 
     export default function BookingJourney() {
@@ -39,6 +75,7 @@ import React, { useState, useMemo } from 'react';
           equipment: [],
           notes: '',
           addressVerificationSkipped: false,
+          verificationSkipped: false,
           distanceInfo: null,
         };
       }, [selectedPlan]);
@@ -52,6 +89,7 @@ import React, { useState, useMemo } from 'react';
           equipment: [],
           notes: '',
           addressVerificationSkipped: false,
+          verificationSkipped: false,
           distanceInfo: null,
         });
         setStep(1);
@@ -63,18 +101,9 @@ import React, { useState, useMemo } from 'react';
         setStep(2);
       };
 
-      const handleAddonsSubmit = async (finalPrice, verificationData) => {
+      const handleAddonsSubmit = async (finalPrice, verificationData, finalAddonsData) => {
         const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
         const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
-        
-        let finalStatus = 'pending_payment';
-        if(verificationData?.verificationSkipped || addonsData.addressVerificationSkipped) {
-            finalStatus = 'pending_review';
-        } else if (verificationData?.status) {
-            finalStatus = verificationData.status;
-        }
-
-        const finalAddonsData = { ...addonsData, addressVerificationSkipped: addonsData.addressVerificationSkipped || verificationData?.verificationSkipped };
 
         const pendingBookingPayload = {
           name: bookingData.name,
@@ -89,7 +118,7 @@ import React, { useState, useMemo } from 'react';
           plan: selectedPlan,
           addons: finalAddonsData,
           total_price: finalPrice,
-          status: finalStatus,
+          status: 'pending_payment',
           drop_off_date: dropOffDate.toISOString().split('T')[0],
           pickup_date: pickupDate.toISOString().split('T')[0],
           notes: finalAddonsData.notes,
@@ -105,11 +134,16 @@ import React, { useState, useMemo } from 'react';
 
           if (error) throw error;
           
-          if(verificationData?.licensePlate) {
-              await supabase.from('customers').update({
+          if(verificationData?.licensePlate || verificationData?.licenseImageUrls?.length > 0) {
+              const { error: customerUpdateError } = await supabase
+                .from('customers')
+                .update({
                   license_plate: verificationData.licensePlate,
                   license_image_urls: verificationData.licenseImageUrls
-              }).eq('id', data.customer_id);
+                })
+                .eq('id', data.customer_id);
+
+              if (customerUpdateError) throw customerUpdateError;
           }
           
           setBookingId(data.id);
@@ -131,6 +165,12 @@ import React, { useState, useMemo } from 'react';
       const handleBack = () => {
         if (step > 0) {
           setStep(step - 1);
+        }
+      };
+
+      const handleStepClick = (targetStep) => {
+        if (targetStep < step) {
+          setStep(targetStep);
         }
       };
 
@@ -181,7 +221,8 @@ import React, { useState, useMemo } from 'react';
       };
 
       return (
-        <>
+        <div className="pt-8">
+          {step > 0 && <StepIndicator currentStep={step} onStepClick={handleStepClick} />}
           <AnimatePresence mode="wait">
             {renderStep()}
           </AnimatePresence>
@@ -197,6 +238,6 @@ import React, { useState, useMemo } from 'react';
               />
             )}
           </AnimatePresence>
-        </>
+        </div>
       );
     }

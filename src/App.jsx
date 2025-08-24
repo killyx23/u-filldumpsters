@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { Toaster } from '@/components/ui/toaster';
 import { Header } from '@/components/Header';
@@ -12,6 +12,14 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import CustomerDetailPage from '@/pages/CustomerDetailPage';
 import ContactPage from '@/pages/ContactPage';
 import FaqPage from '@/pages/FaqPage';
+import AdminLogin from '@/pages/AdminLogin';
+import AdminRouteGuard from '@/components/AdminRouteGuard';
+
+const AdminLayout = () => (
+  <AdminRouteGuard>
+    <Outlet />
+  </AdminRouteGuard>
+);
 
 function App() {
   return (
@@ -29,8 +37,13 @@ function App() {
           <main className="min-h-[calc(100vh-120px)]">
               <Routes>
                   <Route path="/" element={<BookingJourney />} />
-                  <Route path="/admin" element={<AdminDashboard />} />
-                  <Route path="/admin/customer/:id" element={<CustomerDetailPage />} />
+                  <Route path="/admin/login" element={<AdminLogin />} />
+                  
+                  <Route element={<AdminLayout />}>
+                    <Route path="/admin" element={<AdminDashboard />} />
+                    <Route path="/admin/customer/:id" element={<CustomerDetailPage />} />
+                  </Route>
+
                   <Route path="/confirmation" element={<BookingConfirmation />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/faq" element={<FaqPage />} />
