@@ -1,96 +1,127 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/customSupabaseClient';
-import { toast } from '@/components/ui/use-toast';
-import { Loader2, User, Mail, Phone, AlertTriangle } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split('');
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/customSupabaseClient';
+import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Loader2, UserPlus, Search, User, AlertCircle, Bell } from 'lucide-react';
+import { toast } from '@/components/ui/use-toast';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 export const CustomersManager = () => {
     const [customers, setCustomers] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filterLetter, setFilterLetter] = useState('All');
-    const navigate = useNavigate();
+    const [searchTerm, setSearchTerm] = useState('');
 
     const fetchCustomers = useCallback(async () => {
         setLoading(true);
-        const { data, error } = await supabase.from('customers').select('*').order('name', { ascending: true });
+        let query = supabase.from('customers').select('*');
+        if (searchTerm) {
+            query = query.or(`name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
+        }
+        query = query.order('created_at', { ascending: false });
+
+        const { data, error } = await query;
 
         if (error) {
-            toast({ title: "Failed to load customers", variant: "destructive" });
+            toast({ title: "Failed to fetch customers", description: error.message, variant: "destructive" });
         } else {
             setCustomers(data);
         }
         setLoading(false);
-    }, []);
+    }, [searchTerm]);
 
     useEffect(() => {
-        fetchCustomers();
-    }, [fetchCustomers]);
-
-    const filteredCustomers = useMemo(() => {
-        if (filterLetter === 'All') return customers;
-        return customers.filter(c => c.name.toUpperCase().startsWith(filterLetter));
-    }, [customers, filterLetter]);
-
-    if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
-
+        const handler = setTimeout(() => {
+            fetchCustomers();
+        }, 500); // Debounce search
+        return () => clearTimeout(handler);
+    }, [searchTerm, fetchCustomers]);
+    
     return (
-        <div className="flex">
-            <div className="w-16 flex-shrink-0 bg-white/5 p-2 rounded-lg flex flex-col items-center gap-1 mr-6">
-                <button 
-                    onClick={() => setFilterLetter('All')} 
-                    className={`w-10 h-10 flex items-center justify-center rounded-md text-lg font-bold transition-colors ${filterLetter === 'All' ? 'bg-yellow-400 text-gray-900' : 'hover:bg-white/20'}`}
-                >
-                    All
-                </button>
-                {ALPHABET.map(letter => (
-                    <button 
-                        key={letter} 
-                        onClick={() => setFilterLetter(letter)}
-                        className={`w-10 h-10 flex items-center justify-center rounded-md text-lg font-bold transition-colors ${filterLetter === letter ? 'bg-yellow-400 text-gray-900' : 'hover:bg-white/20'}`}
-                    >
-                        {letter}
-                    </button>
-                ))}
-            </div>
-            <div className="flex-grow bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
-                {filteredCustomers.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {filteredCustomers.map(customer => (
-                            <div 
-                                key={customer.id} 
-                                onClick={() => navigate(`/admin/customer/${customer.id}`)} 
-                                className="bg-white/5 p-4 rounded-lg cursor-pointer hover:bg-white/10 transition-colors"
-                            >
-                                <div className="flex items-center mb-2">
-                                    <User className="h-5 w-5 mr-2 text-yellow-400" />
-                                    <h3 className="font-bold text-lg truncate flex-grow">{customer.name}</h3>
-                                    {customer.unverified_address && (
-                                        <Tooltip>
-                                            <TooltipTrigger>
-                                                <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0" />
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                                <p>Address verification was skipped by this customer.</p>
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    )}
-                                </div>
-                                <div className="text-sm space-y-1 text-blue-200">
-                                    <p className="flex items-center truncate"><Mail className="h-4 w-4 mr-2 flex-shrink-0" />{customer.email}</p>
-                                    <p className="flex items-center truncate"><Phone className="h-4 w-4 mr-2 flex-shrink-0" />{customer.phone}</p>
-                                </div>
-                            </div>
-                        ))}
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="bg-white/10 p-6 rounded-2xl shadow-xl"
+        >
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-white">Manage Customers</h2>
+                <div className="flex gap-4">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <Input 
+                            placeholder="Search by name, email, phone..." 
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-10 bg-white/5 border-white/20"
+                        />
                     </div>
-                ) : (
-                    <div className="text-center py-16">
-                        <p className="text-xl">No customers found starting with "{filterLetter}".</p>
-                    </div>
-                )}
+                    <Button disabled className="bg-green-600 hover:bg-green-700">
+                        <UserPlus className="mr-2 h-4 w-4" /> Add Customer
+                    </Button>
+                </div>
             </div>
-        </div>
+
+            {loading ? (
+                <div className="flex justify-center items-center py-20">
+                    <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
+                </div>
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="border-b border-white/20">
+                                <th className="p-4 text-blue-200">Name</th>
+                                <th className="p-4 text-blue-200">Contact</th>
+                                <th className="p-4 text-blue-200">Address</th>
+                                <th className="p-4 text-blue-200 text-center">Status</th>
+                                <th className="p-4 text-blue-200 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {customers.map(customer => (
+                                <tr key={customer.id} className="border-b border-white/10 hover:bg-white/5 transition-colors">
+                                    <td className="p-4 font-medium">{customer.name}</td>
+                                    <td className="p-4">
+                                        <p>{customer.email}</p>
+                                        <p className="text-sm text-gray-400">{customer.phone}</p>
+                                    </td>
+                                    <td className="p-4 text-sm">{`${customer.street}, ${customer.city}`}</td>
+                                    <td className="p-4 text-center">
+                                         <div className="flex justify-center items-center gap-2">
+                                            {customer.unverified_address && (
+                                                 <Tooltip>
+                                                    <TooltipTrigger><AlertCircle className="h-5 w-5 text-red-400" /></TooltipTrigger>
+                                                    <TooltipContent><p>Address was not verified by customer.</p></TooltipContent>
+                                                 </Tooltip>
+                                            )}
+                                            {customer.has_unread_notes && (
+                                                 <Tooltip>
+                                                    <TooltipTrigger><Bell className="h-5 w-5 text-yellow-400 animate-pulse" /></TooltipTrigger>
+                                                    <TooltipContent><p>This customer has unread notes.</p></TooltipContent>
+                                                 </Tooltip>
+                                            )}
+                                         </div>
+                                    </td>
+                                    <td className="p-4 text-right">
+                                        <Link to={`/admin/customer/${customer.id}`}>
+                                            <Button variant="outline" size="sm" className="text-white border-white/30 hover:bg-white/10 hover:text-white">
+                                                <User className="mr-2 h-4 w-4" /> View Details
+                                            </Button>
+                                        </Link>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </motion.div>
     );
 };

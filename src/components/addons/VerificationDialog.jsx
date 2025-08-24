@@ -1,141 +1,179 @@
-import React, { useState } from 'react';
+
+import React, { useState, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
-import { Loader2, Car, ImageDown as ImageUp, Info, CheckCircle, UploadCloud } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Loader2, Camera, AlertTriangle, ShieldCheck, UploadCloud, X } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+const FilePreview = ({ file, onRemove }) => {
+    if (!file) return null;
+    const url = URL.createObjectURL(file);
+    return (
+        <div className="relative group w-full h-32 rounded-lg overflow-hidden">
+            <img src={url} alt="Preview" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="destructive" size="icon" className="h-8 w-8" onClick={onRemove}>
+                    <X className="h-5 w-5" />
+                </Button>
+            </div>
+        </div>
+    );
+};
 
 export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => {
     const [licensePlate, setLicensePlate] = useState('');
-    const [licenseImages, setLicenseImages] = useState([]);
+    const [licenseFront, setLicenseFront] = useState(null);
+    const [licenseBack, setLicenseBack] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
-    const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
-    const [incompleteReason, setIncompleteReason] = useState('');
-    const { user } = useAuth();
+    const [verificationNotes, setVerificationNotes] = useState('');
 
-    const handleImageUpload = async (e) => {
-        const files = Array.from(e.target.files);
-        if (files.length === 0) return;
+    const fileInputFrontRef = useRef(null);
+    const fileInputBackRef = useRef(null);
 
-        setIsUploading(true);
-        const uploadedFilePaths = [];
-
-        for (const file of files) {
-            const filePath = `${user.id}/${Date.now()}-${file.name}`;
-            const { error: uploadError } = await supabase.storage.from('license-images').upload(filePath, file);
-
-            if (uploadError) {
-                toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
-                setIsUploading(false);
-                return;
-            }
-            const { data: { publicUrl } } = supabase.storage.from('license-images').getPublicUrl(filePath);
-            uploadedFilePaths.push({ url: publicUrl, path: filePath, name: file.name });
+    const isFormComplete = licensePlate && licenseFront && licenseBack;
+    
+    const handleFileChange = (setter) => (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setter(file);
+        }
+    };
+    
+    const uploadFile = useCallback(async (file, folder) => {
+        if (!file) return null;
+        
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            toast({ title: "Authentication Error", description: "You must be logged in to upload files.", variant: "destructive" });
+            return null;
         }
 
-        setLicenseImages(prev => [...prev, ...uploadedFilePaths].slice(0, 2)); // Ensure only 2 images max
-        setIsUploading(false);
-        toast({ title: `${files.length} image(s) uploaded successfully!` });
-    };
+        const filePath = `${user.id}/${folder}/${Date.now()}-${file.name}`;
+        
+        const { error } = await supabase.storage.from('customer-uploads').upload(filePath, file);
 
-    const handleSubmit = () => {
-        if (!licensePlate || licenseImages.length < 2) {
-            setShowIncompleteWarning(true);
+        if (error) {
+            toast({ title: `Upload Failed for ${file.name}`, description: error.message, variant: "destructive" });
+            return null;
+        }
+        
+        const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+        return { url: data.publicUrl, path: filePath, name: file.name };
+    }, []);
+
+    const handleSubmit = async (e, isSkipping) => {
+        e.preventDefault();
+        
+        if (isSkipping && !verificationNotes) {
+            toast({ title: 'Reason Required', description: 'Please provide a reason for skipping verification.', variant: 'destructive'});
             return;
         }
-        onVerifiedSubmit({ licensePlate, licenseImages, verificationSkipped: false });
-    };
 
-    const handleAcknowledgeIncomplete = () => {
-        onVerifiedSubmit({ licensePlate, licenseImages, verificationSkipped: true, verificationNotes: incompleteReason });
-        setShowIncompleteWarning(false);
+        setIsUploading(true);
+
+        const frontImage = await uploadFile(licenseFront, 'licenses');
+        const backImage = await uploadFile(licenseBack, 'licenses');
+        
+        if ((licenseFront && !frontImage) || (licenseBack && !backImage)) {
+            setIsUploading(false);
+            return;
+        }
+
+        const licenseImageUrls = [frontImage, backImage].filter(Boolean);
+        
+        onVerifiedSubmit({
+            licensePlate,
+            licenseImageUrls,
+            wasVerificationSkipped: isSkipping,
+            verificationNotes: isSkipping ? verificationNotes : null
+        });
+
+        setIsUploading(false);
     };
 
     return (
-        <>
-            <Dialog open={open && !showIncompleteWarning} onOpenChange={onOpenChange}>
-                <DialogContent className="bg-gradient-to-br from-gray-900 to-blue-900/50 border-yellow-500 text-white max-w-3xl p-0">
-                    <div className="flex">
-                        <div className="w-1/3 bg-black/20 p-8 flex flex-col justify-center items-center text-center border-r border-yellow-500/30">
-                            <Car className="h-16 w-16 text-yellow-400 mb-4" />
-                            <DialogHeader>
-                                <DialogTitle className="text-2xl text-yellow-400">Final Verification Step</DialogTitle>
-                                <DialogDescription className="text-blue-200">
-                                    For security and insurance purposes, please provide the following for the towing vehicle.
-                                </DialogDescription>
-                            </DialogHeader>
-                        </div>
-                        <div className="w-2/3 p-8 space-y-6">
-                            <div>
-                                <div className="flex items-center justify-between">
-                                    <Label htmlFor="license-plate" className="text-lg font-semibold flex items-center"><Car className="mr-2 h-5 w-5" />Towing Vehicle License Plate</Label>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Info className="h-5 w-5 text-blue-300 cursor-pointer" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            <p>Required for fraud protection, legalities, and insurance information.</p>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </div>
-                                <Input id="license-plate" value={licensePlate} onChange={e => setLicensePlate(e.target.value)} placeholder="e.g., 5X5 5X5" className="bg-white/10 mt-2" />
-                            </div>
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="bg-gray-900 border-yellow-500 text-white max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center text-yellow-400 text-2xl">
+                        <ShieldCheck className="mr-3 h-8 w-8" />
+                        Driver & Vehicle Verification
+                    </DialogTitle>
+                    <DialogDescription className="text-blue-200 pt-2">
+                        For security and to comply with our rental agreement, please provide the following information for the person picking up the trailer.
+                    </DialogDescription>
+                </DialogHeader>
 
-                            <div>
-                                <Label htmlFor="license-images" className="text-lg font-semibold flex items-center"><ImageUp className="mr-2 h-5 w-5" />Driver's License (Front & Back)</Label>
-                                <div className="mt-2 grid grid-cols-2 gap-4">
-                                    {[0, 1].map(index => (
-                                        <div key={index} className="aspect-video bg-white/5 rounded-lg flex flex-col items-center justify-center p-4 border-2 border-dashed border-white/20">
-                                            {licenseImages[index] ? (
-                                                <div className="text-center text-green-400">
-                                                    <CheckCircle className="h-8 w-8 mx-auto mb-2" />
-                                                    <p className="text-xs font-semibold truncate">{licenseImages[index].name}</p>
-                                                </div>
-                                            ) : (
-                                                <div className="text-center text-blue-300">
-                                                    <UploadCloud className="h-8 w-8 mx-auto mb-2" />
-                                                    <p className="text-xs font-semibold">{index === 0 ? 'Upload Front' : 'Upload Back'}</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                                <div className="mt-2">
-                                     <Input id="license-images" type="file" multiple accept="image/*" onChange={handleImageUpload} className="bg-white/20 file:text-yellow-300" disabled={isUploading || licenseImages.length >= 2} />
-                                     {isUploading && <Loader2 className="h-4 w-4 animate-spin mt-2" />}
-                                </div>
-                                <p className="text-sm text-blue-200 mt-2">{licenseImages.length} of 2 images uploaded.</p>
-                            </div>
-                            <DialogFooter>
-                                <Button onClick={handleSubmit} size="lg" className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 text-black font-bold text-lg hover:from-yellow-600 hover:to-orange-700">Submit Verification</Button>
-                            </DialogFooter>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-4">
+                     <div className="mb-4">
+                        <Label htmlFor="licensePlate">Towing Vehicle License Plate</Label>
+                        <Input 
+                            id="licensePlate" 
+                            value={licensePlate} 
+                            onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
+                            placeholder="e.g., 555-ABC"
+                            className="bg-white/20 uppercase"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Driver's License (Front)</Label>
+                            <FilePreview file={licenseFront} onRemove={() => setLicenseFront(null)} />
+                             <Button type="button" variant="outline" className="w-full" onClick={() => fileInputFrontRef.current?.click()} disabled={isUploading}>
+                                <UploadCloud className="mr-2 h-4 w-4"/> Upload Front
+                            </Button>
+                            <Input ref={fileInputFrontRef} id="licenseFront" type="file" className="hidden" onChange={handleFileChange(setLicenseFront)} disabled={isUploading} accept="image/*" />
+                        </div>
+                         <div className="space-y-2">
+                            <Label>Driver's License (Back)</Label>
+                            <FilePreview file={licenseBack} onRemove={() => setLicenseBack(null)} />
+                             <Button type="button" variant="outline" className="w-full" onClick={() => fileInputBackRef.current?.click()} disabled={isUploading}>
+                                <UploadCloud className="mr-2 h-4 w-4"/> Upload Back
+                            </Button>
+                            <Input ref={fileInputBackRef} id="licenseBack" type="file" className="hidden" onChange={handleFileChange(setLicenseBack)} disabled={isUploading} accept="image/*" />
                         </div>
                     </div>
-                </DialogContent>
-            </Dialog>
+                </motion.div>
 
-            <Dialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
-                <DialogContent className="bg-gray-900 border-red-500 text-white">
-                    <DialogHeader>
-                        <DialogTitle className="text-red-400">Incomplete Verification</DialogTitle>
-                        <DialogDescription>
-                            You have not provided all the required information. You may continue, but your booking will be flagged for manual review and may be cancelled if verification cannot be completed.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="py-4">
-                        <Label htmlFor="incomplete-reason">Please provide a reason (optional)</Label>
-                        <Input id="incomplete-reason" value={incompleteReason} onChange={e => setIncompleteReason(e.target.value)} placeholder="e.g., Will provide at pickup" className="bg-white/20 mt-1" />
+                {!isFormComplete && (
+                     <div className="bg-orange-900/30 border border-orange-500/50 p-4 rounded-md">
+                        <h4 className="font-bold text-orange-300 flex items-center mb-2"><AlertTriangle className="h-5 w-5 mr-2"/> Incomplete Information</h4>
+                        <p className="text-sm text-orange-200">If you continue without providing all three items, your booking will be placed on hold pending manual review by our team.</p>
+                        <Label htmlFor="verificationNotes" className="mt-3 block">Reason for skipping (required if incomplete):</Label>
+                         <Textarea 
+                            id="verificationNotes"
+                            value={verificationNotes}
+                            onChange={(e) => setVerificationNotes(e.target.value)}
+                            className="bg-white/20 mt-1"
+                            placeholder="e.g., Will provide at pickup, technical issue."
+                        />
                     </div>
-                    <DialogFooter>
-                        <Button onClick={() => setShowIncompleteWarning(false)} variant="outline">Go Back</Button>
-                        <Button onClick={handleAcknowledgeIncomplete} variant="destructive">Acknowledge & Continue</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </>
-    )
+                )}
+
+                <DialogFooter className="gap-2 sm:justify-between mt-4">
+                     <Button 
+                        variant="destructive"
+                        onClick={(e) => handleSubmit(e, true)}
+                        disabled={isUploading || !verificationNotes}
+                     >
+                        {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <AlertTriangle className="mr-2 h-4 w-4"/>}
+                        Continue without Info
+                    </Button>
+                     <Button 
+                        onClick={(e) => handleSubmit(e, false)}
+                        disabled={isUploading || !isFormComplete}
+                        className="bg-green-600 hover:bg-green-700"
+                     >
+                        {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <ShieldCheck className="mr-2 h-4 w-4"/>}
+                        Submit & Verify
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
 };

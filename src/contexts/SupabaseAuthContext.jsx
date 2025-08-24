@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 
 import { supabase } from '@/lib/customSupabaseClient';
@@ -19,20 +20,37 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    const getSession = async () => {
+    const getSessionAndValidate = async () => {
+      setLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
-      handleSession(session);
+
+      if (session) {
+        // This check is crucial. It validates the token with the server.
+        const { error } = await supabase.auth.getUser();
+        if (error) {
+          console.error("Invalid session detected, signing out.", error);
+          await supabase.auth.signOut();
+          handleSession(null); // This will clear user and session state
+        } else {
+          handleSession(session);
+        }
+      } else {
+        handleSession(null);
+      }
+      setLoading(false);
     };
 
-    getSession();
+    getSessionAndValidate();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (_event, session) => {
         handleSession(session);
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [handleSession]);
 
   const signUp = useCallback(async (email, password, options) => {

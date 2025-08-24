@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, DollarSign } from 'lucide-react';
+import { AlertTriangle, DollarSign, ShieldAlert } from 'lucide-react';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 
-const ActionItemCard = ({ title, icon, bookings, onBookingClick }) => (
+const ActionItemCard = ({ title, icon, bookings, onBookingClick, emptyText }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
         <div className="flex items-center mb-4">
             {icon}
@@ -19,7 +19,7 @@ const ActionItemCard = ({ title, icon, bookings, onBookingClick }) => (
                     <p className="text-xs text-gray-400 mt-1">{booking.plan.name}</p>
                 </div>
             )) : (
-                <p className="text-center text-blue-200 py-4">No items require action.</p>
+                <p className="text-center text-blue-200 py-4">{emptyText || "No items require action."}</p>
             )}
         </div>
     </div>
@@ -30,24 +30,38 @@ export const ActionItemsManager = ({ bookings }) => {
 
     const pendingPayments = bookings.filter(b => b.status === 'pending_payment');
     const flaggedBookings = bookings.filter(b => b.status === 'flagged');
+    const pendingVerification = bookings.filter(b => b.status === 'pending_verification' || b.status === 'pending_review');
 
     const handleBookingClick = (booking) => {
-        navigate(`/admin/customer/${booking.customer_id}`);
+        navigate(`/admin/customer/${booking.customer_id}?tab=verification`);
+    };
+    
+    const handleFlaggedClick = (booking) => {
+         navigate(`/admin/customer/${booking.customer_id}?tab=rentals`);
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
             <ActionItemCard 
-                title="Pending Payments" 
-                icon={<DollarSign className="h-6 w-6 text-red-400" />} 
-                bookings={pendingPayments} 
-                onBookingClick={handleBookingClick} 
+                title="Pending Verification" 
+                icon={<ShieldAlert className="h-6 w-6 text-orange-400" />} 
+                bookings={pendingVerification} 
+                onBookingClick={handleBookingClick}
+                emptyText="No bookings pending verification."
+            />
+             <ActionItemCard 
+                title="Flagged for Follow-up" 
+                icon={<AlertTriangle className="h-6 w-6 text-red-400" />} 
+                bookings={flaggedBookings} 
+                onBookingClick={handleFlaggedClick}
+                emptyText="No bookings are flagged."
             />
             <ActionItemCard 
-                title="Flagged for Follow-up" 
-                icon={<AlertTriangle className="h-6 w-6 text-orange-400" />} 
-                bookings={flaggedBookings} 
-                onBookingClick={handleBookingClick} 
+                title="Pending Payments" 
+                icon={<DollarSign className="h-6 w-6 text-yellow-400" />} 
+                bookings={pendingPayments} 
+                onBookingClick={handleBookingClick}
+                emptyText="No payments are pending." 
             />
         </div>
     );

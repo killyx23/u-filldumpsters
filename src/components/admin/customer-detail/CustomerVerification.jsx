@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2 } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [reason, setReason] = useState("Admin cancelled due to missing, not provided, or improper verification information.");
     const [isRefunding, setIsRefunding] = useState(false);
     const receiptRef = React.useRef();
+    const paymentInfo = Array.isArray(booking?.stripe_payment_info) ? booking.stripe_payment_info[0] : booking?.stripe_payment_info;
 
     const handlePrint = useReactToPrint({
         content: () => receiptRef.current,
@@ -31,15 +32,18 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     }, [cancellationFee, booking]);
 
     const handleRefund = async () => {
+        if (!paymentInfo?.stripe_charge_id) {
+            toast({ title: "Refund Failed", description: "This booking is missing a Stripe Charge ID and cannot be refunded automatically.", variant: "destructive" });
+            return;
+        }
         setIsRefunding(true);
         try {
-            const { error: refundError } = await supabase.functions.invoke('charge-customer', {
+            const { error: refundError } = await supabase.functions.invoke('refund-payment', {
                 body: {
-                    action: 'refund',
                     bookingId: booking.id,
                     amount: parseFloat(refundAmount),
                     reason,
-                    paymentIntentId: booking.stripe_payment_intent_id,
+                    chargeId: paymentInfo.stripe_charge_id,
                 }
             });
 
@@ -108,6 +112,62 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     );
 };
 
+const ImageUploader = ({ customer, onUpdate }) => {
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = React.useRef(null);
+
+    const handlePhotoUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setIsUploading(true);
+
+        const filePath = `${customer.id}/licenses/${Date.now()}-${file.name}`;
+        const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
+
+        if (uploadError) {
+            toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
+        } else {
+            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+            
+            const existingUrls = customer.license_image_urls || [];
+            const newImage = { url: publicUrl, path: filePath, name: file.name };
+            const updatedUrls = [...existingUrls, newImage];
+
+            const { error: dbUpdateError } = await supabase.from('customers').update({ license_image_urls: updatedUrls }).eq('id', customer.id);
+
+            if (dbUpdateError) {
+                 toast({ title: "DB Update Failed", description: dbUpdateError.message, variant: "destructive" });
+            } else {
+                toast({ title: "Photo uploaded and linked successfully!" });
+                onUpdate();
+            }
+        }
+        setIsUploading(false);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    };
+
+    return (
+        <div>
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                <UploadCloud className="mr-2 h-4 w-4" />
+                {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Upload License Image"}
+            </Button>
+            <Input
+                ref={fileInputRef}
+                id="license-image-upload"
+                type="file"
+                className="hidden"
+                onChange={handlePhotoUpload}
+                disabled={isUploading}
+                accept="image/*"
+            />
+        </div>
+    );
+};
+
 
 export const CustomerVerification = ({ customer, verificationBookings, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
@@ -129,6 +189,23 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
     const handleCancelClick = (booking) => {
         setSelectedBookingForRefund(booking);
     };
+
+    const handleDownload = async (url, filename) => {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const blob = await response.blob();
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (error) {
+            console.error("Download Error:", error);
+            toast({ title: "Download Failed", description: "Could not download the image. Check console for details.", variant: "destructive" });
+        }
+    };
     
     return (
         <>
@@ -143,15 +220,23 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
                     </div>
                      <div>
                         <p className="font-semibold text-blue-200">Driver's License Images:</p>
-                        <div className="mt-2 grid grid-cols-2 gap-4">
-                           {customer.license_images && customer.license_images.length > 0 ? customer.license_images.map((img, index) => (
-                               <a key={index} href={img.url} target="_blank" rel="noopener noreferrer" className="block relative group">
-                                  <img src={img.url} alt={`License ${index+1}`} className="w-full h-auto rounded-lg object-cover aspect-video" />
-                                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                      <ImageIcon className="h-8 w-8 text-white"/>
-                                  </div>
-                               </a>
+                        <div className="mt-2 grid grid-cols-1 gap-4">
+                           {customer.license_image_urls && customer.license_image_urls.length > 0 ? customer.license_image_urls.map((img, index) => (
+                               <div key={index} className="relative group">
+                                  <a href={img.url} target="_blank" rel="noopener noreferrer" className="block relative">
+                                    <img src={img.url} alt={`License ${index+1}`} className="w-full h-auto rounded-lg object-cover aspect-video" />
+                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <ImageIcon className="h-8 w-8 text-white"/>
+                                    </div>
+                                  </a>
+                                  <Button size="sm" variant="secondary" className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => {e.preventDefault(); handleDownload(img.url, `license_${customer.id}_${index+1}.jpg`);}}>
+                                    <Download className="h-4 w-4 mr-2" /> Download
+                                  </Button>
+                               </div>
                            )) : <p className="text-blue-200 col-span-2 text-center py-4">No images uploaded.</p>}
+                        </div>
+                        <div className="mt-4">
+                            <ImageUploader customer={customer} onUpdate={onUpdate} />
                         </div>
                     </div>
                 </div>

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { Loader2, Save, Ban, AlertTriangle, Truck, Settings, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
-import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval, startOfMonth } from 'date-fns';
+import { Loader2, Save, Ban, AlertTriangle, Truck, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
+import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval, startOfMonth, isValid } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -104,15 +104,15 @@ export const AvailabilityManager = () => {
                     .lte('drop_off_date', monthEndISO)
             ]);
 
-            if (availRes.error) throw availRes.error;
+            if (availRes.error) throw new Error(`Service Availability: ${availRes.error.message}`);
             setAvailability(availRes.data || []);
 
-            if (unavailRes.error) throw unavailRes.error;
+            if (unavailRes.error) throw new Error(`Unavailable Dates: ${unavailRes.error.message}`);
             setUnavailableDates(unavailRes.data || []);
             
             if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
             
-            if (bookingRes.error) throw bookingRes.error;
+            if (bookingRes.error) throw new Error(`Bookings: ${bookingRes.error.message}`);
             setBookings(bookingRes.data || []);
 
         } catch (error) {
@@ -130,7 +130,9 @@ export const AvailabilityManager = () => {
     
     const handleMonthChange = (info) => {
         const newDate = info.view.currentStart;
-        setViewDate(newDate);
+        if (!isSameDay(newDate, viewDate)) {
+            setViewDate(newDate);
+        }
     };
 
     const handleAvailabilityChange = (serviceId, dayOfWeek, field, value) => {
@@ -221,8 +223,11 @@ export const AvailabilityManager = () => {
     const renderDayCellContent = (dayRenderInfo) => {
         const dateStr = format(dayRenderInfo.date, 'yyyy-MM-dd');
         const dayEvents = calendarEvents.filter(event => {
-            const eventStart = startOfDay(parseISO(event.start));
+            const eventStartRaw = parseISO(event.start);
+            if (!isValid(eventStartRaw)) return false;
+            const eventStart = startOfDay(eventStartRaw);
             const eventEnd = event.end ? endOfToday(parseISO(event.end)) : eventStart;
+            if (!isValid(eventEnd)) return false;
             return isWithinInterval(dayRenderInfo.date, { start: eventStart, end: eventEnd });
         }).sort((a, b) => a.title.localeCompare(b.title));
 
@@ -299,8 +304,10 @@ export const AvailabilityManager = () => {
                     </div>
                 </div>
                  <FullCalendar
+                    key={viewDate.toISOString()}
                     plugins={[dayGridPlugin, interactionPlugin]}
                     initialView="dayGridMonth"
+                    initialDate={viewDate}
                     dateClick={handleDateClick}
                     eventClick={handleEventClick}
                     events={calendarEvents}

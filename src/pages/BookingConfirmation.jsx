@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -9,12 +10,12 @@ import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 
-const ConfirmationLine = ({ label, value, icon, isFee = false }) => (
+const ConfirmationLine = ({ label, value, icon, isFee = false, isPending = false }) => (
   <div className="flex items-start py-3">
-    <div className={`${isFee ? 'text-orange-400' : 'text-yellow-400'} mr-4 flex-shrink-0`}>{icon}</div>
+    <div className={`${isFee || isPending ? 'text-red-400' : 'text-yellow-400'} mr-4 flex-shrink-0`}>{icon}</div>
     <div>
       <p className="font-semibold text-blue-100">{label}</p>
-      <p className="text-white break-words">{value}</p>
+      <p className={`break-words ${isPending ? 'text-red-400 font-bold' : 'text-white'}`}>{value}</p>
     </div>
   </div>
 );
@@ -49,13 +50,11 @@ function BookingConfirmation() {
         return;
       }
 
-      // At this point, payment is confirmed. Now we poll for the booking record.
       const { data, error } = await supabase.functions.invoke('get-booking-by-session', {
         body: { sessionId },
       });
 
       if (error || !data.booking) {
-        // If it's not found, we set to pending and the interval will retry.
         if (status !== 'pending') setStatus('pending');
         return;
       }
@@ -64,7 +63,6 @@ function BookingConfirmation() {
       setStatus('success');
     } catch (err) {
       console.error("Error in verification/fetch process:", err);
-      // Don't set to error immediately if it's a polling failure, give it a chance to recover
       if (status !== 'pending') {
           setStatus('pending');
       }
@@ -87,20 +85,22 @@ function BookingConfirmation() {
         if (status !== 'success') {
            await verifyAndFetch();
         }
-        if (attempts >= maxAttempts && status !== 'success') {
+        if (status === 'success' || (attempts >= maxAttempts && status !== 'success')) {
             clearInterval(intervalId);
-            setStatus('error');
-            toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 20000 });
+            if (status !== 'success') {
+                setStatus('error');
+                toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 20000 });
+            }
         }
     };
     
-    poll(); // Initial check
+    poll();
     intervalId = setInterval(poll, 5000); 
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [sessionId]); // Removed dependencies to avoid re-triggering interval creation
+  }, [sessionId, verifyAndFetch, status]);
 
   if (status === 'loading') {
     return (
@@ -167,7 +167,7 @@ function BookingConfirmation() {
   const { name, email, phone, street, city, state, zip } = customers;
   const fullAddress = `${street}, ${city}, ${state} ${zip}`;
   const distanceInfo = addons?.distanceInfo;
-  const isPendingReview = bookingStatus === 'pending_review';
+  const isPendingVerification = bookingStatus === 'pending_verification';
 
   return (
     <>
@@ -186,21 +186,23 @@ function BookingConfirmation() {
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 20 }}
           >
-            <CheckCircle className="h-24 w-24 text-green-400 mx-auto mb-6" />
+             {isPendingVerification ? (
+                 <AlertTriangle className="h-24 w-24 text-red-400 mx-auto mb-6" />
+             ) : (
+                <CheckCircle className="h-24 w-24 text-green-400 mx-auto mb-6" />
+             )}
           </motion.div>
-          <h1 className="text-4xl font-bold text-white mb-4">Booking Confirmed!</h1>
+          <h1 className="text-4xl font-bold text-white mb-4">
+            {isPendingVerification ? 'Booking on Hold' : 'Booking Confirmed!'}
+          </h1>
           <p className="text-lg text-blue-200 mb-8">
-            Thank you, {name}! Your rental is scheduled. A confirmation email with all details has been sent to {email}.
+            {isPendingVerification ? 
+             `Thank you for your rental, your account has been flagged for a manual review due to a lack of or incomplete information provided. Please contact us at (801) 810-8832 or email us at scheduling@u-filldumpsters.com to fix the missing information and finish your order so it can be scheduled.` :
+             `Thank you, ${name}! Your rental is scheduled. A confirmation email with all details has been sent to ${email}.`
+            }
           </p>
-
-           {isPendingReview && (
-            <div className="bg-red-900/40 border border-red-500 p-6 rounded-lg mb-8 text-left">
-              <h3 className="flex items-center text-xl font-bold text-red-300 mb-3"><AlertTriangle className="mr-3 h-6 w-6"/>Pending Manual Review</h3>
-              <p className="text-red-200">Your booking has been flagged for manual review due to incomplete verification information. We will contact you shortly. If verification cannot be completed, your booking may be cancelled.</p>
-            </div>
-          )}
           
-          {plan.id === 2 && !isPendingReview && (
+          {plan.id === 2 && !isPendingVerification && (
             <div className="bg-blue-900/30 border border-blue-500/50 p-6 rounded-lg mb-8 text-left">
               <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Truck className="mr-3 h-6 w-6"/>Important Pickup Information</h3>
               <p className="text-blue-200"><strong>Pickup Location:</strong> 227 W. Casi Way, Saratoga Springs, UT 84045.</p>
@@ -215,8 +217,8 @@ function BookingConfirmation() {
             <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
              {plan.id !== 2 && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
             <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
-            <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} />
-             <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} />
+            <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
+             <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
              {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
             <ConfirmationLine icon={<DollarSign className="h-6 w-6" />} label="Total Amount Paid" value={`$${total_price.toFixed(2)}`} />
           </div>
