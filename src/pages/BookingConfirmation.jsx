@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer } from 'lucide-react';
+import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer, Truck, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -9,9 +9,9 @@ import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 
-const ConfirmationLine = ({ label, value, icon }) => (
+const ConfirmationLine = ({ label, value, icon, isFee = false }) => (
   <div className="flex items-start py-3">
-    <div className="text-yellow-400 mr-4 flex-shrink-0">{icon}</div>
+    <div className={`${isFee ? 'text-orange-400' : 'text-yellow-400'} mr-4 flex-shrink-0`}>{icon}</div>
     <div>
       <p className="font-semibold text-blue-100">{label}</p>
       <p className="text-white break-words">{value}</p>
@@ -31,6 +31,46 @@ function BookingConfirmation() {
     documentTitle: `U-Fill-Receipt-${booking?.id || 'booking'}`,
   });
 
+  const verifyAndFetch = useCallback(async () => {
+    try {
+      const { data: sessionStatusData, error: sessionStatusError } = await supabase.functions.invoke('get-session-status', {
+        body: { sessionId }
+      });
+
+      if (sessionStatusError) {
+        setStatus('error');
+        toast({ title: "Payment Verification Failed", description: "Could not verify payment session status.", variant: "destructive" });
+        return;
+      }
+      
+      if (sessionStatusData.status !== 'complete' || sessionStatusData.payment_status !== 'paid') {
+        setStatus('error');
+        toast({ title: "Payment Not Completed", description: "Your payment was not successfully processed.", variant: "destructive" });
+        return;
+      }
+
+      // At this point, payment is confirmed. Now we poll for the booking record.
+      const { data, error } = await supabase.functions.invoke('get-booking-by-session', {
+        body: { sessionId },
+      });
+
+      if (error || !data.booking) {
+        // If it's not found, we set to pending and the interval will retry.
+        if (status !== 'pending') setStatus('pending');
+        return;
+      }
+
+      setBooking(data.booking);
+      setStatus('success');
+    } catch (err) {
+      console.error("Error in verification/fetch process:", err);
+      // Don't set to error immediately if it's a polling failure, give it a chance to recover
+      if (status !== 'pending') {
+          setStatus('pending');
+      }
+    }
+  }, [sessionId, status]);
+
   useEffect(() => {
     if (!sessionId) {
       setStatus('error');
@@ -38,38 +78,29 @@ function BookingConfirmation() {
       return;
     }
 
-    const verifySessionAndFetchBooking = async () => {
-      try {
-        const { data: sessionStatusData, error: sessionStatusError } = await supabase.functions.invoke('get-session-status', {
-          body: { sessionId }
-        });
+    let attempts = 0;
+    const maxAttempts = 12; // Poll for 60 seconds (12 * 5s)
+    let intervalId;
 
-        if (sessionStatusError) throw new Error("Could not verify payment session.");
-
-        if (sessionStatusData.status === 'complete' && sessionStatusData.payment_status === 'paid') {
-           const { data: bookingData, error: bookingError } = await supabase.functions.invoke('get-booking-by-session', {
-             body: { sessionId }
-           });
-            if(bookingError || !bookingData.booking) {
-                // This can happen if webhook is slightly delayed. We show a pending screen.
-                setStatus('pending');
-            } else {
-                setBooking(bookingData.booking);
-                setStatus('success');
-            }
-        } else {
-          throw new Error("Payment was not completed successfully.");
+    const poll = async () => {
+        attempts++;
+        if (status !== 'success') {
+           await verifyAndFetch();
         }
-      } catch (err) {
-        console.error("Error verifying payment and fetching booking:", err);
-        setStatus('error');
-        toast({ title: "Payment Verification Failed", description: err.message, variant: "destructive", duration: 10000 });
-      }
+        if (attempts >= maxAttempts && status !== 'success') {
+            clearInterval(intervalId);
+            setStatus('error');
+            toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 20000 });
+        }
     };
+    
+    poll(); // Initial check
+    intervalId = setInterval(poll, 5000); 
 
-    verifySessionAndFetchBooking();
-
-  }, [sessionId]);
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [sessionId]); // Removed dependencies to avoid re-triggering interval creation
 
   if (status === 'loading') {
     return (
@@ -96,7 +127,7 @@ function BookingConfirmation() {
        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
         <XCircle className="h-16 w-16 text-red-500" />
         <h1 className="text-white text-3xl mt-4 font-bold">Payment Issue Encountered</h1>
-        <p className="text-blue-200 mt-2 max-w-md">There was an issue verifying your payment. If you believe this is an error, please contact support. Otherwise, you can return to the homepage to try again.</p>
+        <p className="text-blue-200 mt-2 max-w-md">There was an issue verifying your payment or booking details. If you believe this is an error, please contact support. Otherwise, you can return to the homepage to try again.</p>
          <Link to="/">
           <Button className="mt-8">
             <Home className="mr-2" /> Back to Homepage
@@ -106,7 +137,7 @@ function BookingConfirmation() {
     );
   }
   
-  const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons } = booking;
+  const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, status: bookingStatus } = booking;
   
   if (!customers) {
      return (
@@ -135,6 +166,8 @@ function BookingConfirmation() {
 
   const { name, email, phone, street, city, state, zip } = customers;
   const fullAddress = `${street}, ${city}, ${state} ${zip}`;
+  const distanceInfo = addons?.distanceInfo;
+  const isPendingReview = bookingStatus === 'pending_review';
 
   return (
     <>
@@ -160,14 +193,31 @@ function BookingConfirmation() {
             Thank you, {name}! Your rental is scheduled. A confirmation email with all details has been sent to {email}.
           </p>
 
+           {isPendingReview && (
+            <div className="bg-red-900/40 border border-red-500 p-6 rounded-lg mb-8 text-left">
+              <h3 className="flex items-center text-xl font-bold text-red-300 mb-3"><AlertTriangle className="mr-3 h-6 w-6"/>Pending Manual Review</h3>
+              <p className="text-red-200">Your booking has been flagged for manual review due to incomplete verification information. We will contact you shortly. If verification cannot be completed, your booking may be cancelled.</p>
+            </div>
+          )}
+          
+          {plan.id === 2 && !isPendingReview && (
+            <div className="bg-blue-900/30 border border-blue-500/50 p-6 rounded-lg mb-8 text-left">
+              <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Truck className="mr-3 h-6 w-6"/>Important Pickup Information</h3>
+              <p className="text-blue-200"><strong>Pickup Location:</strong> 227 W. Casi Way, Saratoga Springs, UT 84045.</p>
+              <p className="text-blue-200 mt-1"><strong>Pickup Time:</strong> Your trailer is available from <strong>8:00 a.m.</strong> on your pickup date.</p>
+              <p className="text-blue-200 mt-1"><strong>Return Time:</strong> Please return the trailer by <strong>10:00 p.m.</strong> on your return date. Remember to clean it out to avoid fines.</p>
+            </div>
+          )}
+
           <div className="bg-white/5 p-6 rounded-lg mb-8 text-left divide-y divide-white/10">
             <ConfirmationLine icon={<User className="h-6 w-6" />} label="Name" value={name} />
              <ConfirmationLine icon={<Mail className="h-6 w-6" />} label="Email" value={email} />
             <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
-             <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Address" value={fullAddress} />
+             {plan.id !== 2 && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
             <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
             <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} />
              <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} />
+             {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
             <ConfirmationLine icon={<DollarSign className="h-6 w-6" />} label="Total Amount Paid" value={`$${total_price.toFixed(2)}`} />
           </div>
 
