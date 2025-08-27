@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -47,8 +48,35 @@ const PlateInfoTooltip = () => (
   </Tooltip>
 );
 
+const IncompleteInfoPopover = () => (
+    <Popover>
+        <PopoverTrigger asChild>
+            <button type="button" className="text-yellow-400 hover:text-yellow-300 transition-colors relative">
+                <AlertTriangle className="h-5 w-5 mr-2" />
+                <div className="absolute top-0 left-0 h-full w-full bg-yellow-400 rounded-full animate-ping opacity-75"></div>
+            </button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="bg-gray-900 border-yellow-500 text-white max-w-md p-4">
+            <h4 className="font-bold text-yellow-300 mb-2">Vital Information Required</h4>
+            <p className="text-sm text-blue-200">
+                This information is vital for securing your ability to rent our equipment. By selecting "Continue without Info," you acknowledge and agree that failure to provide this information may result in:
+            </p>
+            <ul className="text-xs text-yellow-200 list-disc list-inside space-y-1 my-2">
+                <li>Cancellation of your rental order.</li>
+                <li>Significant delays in your ability to pick up the equipment.</li>
+                <li>Assessment of additional cancellation fees as outlined in the rental agreement.</li>
+            </ul>
+            <p className="text-sm text-blue-200 mt-2">
+                You can add the required information later via your Customer Portal to resolve any holds on your account.
+            </p>
+        </PopoverContent>
+    </Popover>
+);
+
+
 export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => {
     const [licensePlate, setLicensePlate] = useState('');
+    const [plateError, setPlateError] = useState('');
     const [licenseFront, setLicenseFront] = useState(null);
     const [licenseBack, setLicenseBack] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
@@ -57,7 +85,22 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
 
-    const isFormComplete = licensePlate && licenseFront && licenseBack;
+    const isFormComplete = useMemo(() => {
+        const plateRegex = /^[A-Z0-9]{6,7}$/;
+        return plateRegex.test(licensePlate) && licenseFront && licenseBack;
+    }, [licensePlate, licenseFront, licenseBack]);
+
+    const handlePlateChange = (e) => {
+        const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        setLicensePlate(value);
+        
+        const plateRegex = /^[A-Z0-9]{6,7}$/;
+        if (value && !plateRegex.test(value)) {
+            setPlateError("Plate must be 6-7 letters and numbers.");
+        } else {
+            setPlateError('');
+        }
+    };
     
     const handleFileChange = (setter) => (e) => {
         const file = e.target.files[0];
@@ -90,9 +133,13 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
             return;
         }
 
+        if (!isSkipping && plateError) {
+             toast({ title: 'Invalid License Plate', description: 'Please correct the license plate format before submitting.', variant: 'destructive', duration: 15000});
+            return;
+        }
+
         setIsUploading(true);
 
-        // We use a placeholder ID for anonymous users. The backend will associate this with the customer record later.
         const tempUserId = `unassigned-${Date.now()}`;
 
         const frontImage = await uploadFile(licenseFront, 'licenses', tempUserId);
@@ -138,10 +185,12 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
                             <Input 
                                 id="licensePlate" 
                                 value={licensePlate} 
-                                onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
-                                placeholder="e.g., 555-ABC"
+                                onChange={handlePlateChange}
+                                placeholder="e.g., ABC1234"
                                 className="bg-white/20 uppercase"
+                                maxLength="7"
                             />
+                            {plateError && <p className="text-red-400 text-xs mt-1">{plateError}</p>}
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
@@ -165,15 +214,18 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
 
                     {!isFormComplete && (
                          <div className="bg-orange-900/30 border border-orange-500/50 p-4 rounded-md">
-                            <h4 className="font-bold text-orange-300 flex items-center mb-2"><AlertTriangle className="h-5 w-5 mr-2"/> Incomplete Information</h4>
-                            <p className="text-sm text-orange-200">If you continue without providing all three items, your booking will be placed on hold pending manual review by our team.</p>
+                            <h4 className="font-bold text-orange-300 flex items-center mb-2">
+                                <IncompleteInfoPopover />
+                                Incomplete Information
+                            </h4>
+                            <p className="text-sm text-orange-200">If you continue without providing all required items, your booking will be placed on hold pending manual review by our team.</p>
                             <Label htmlFor="verificationNotes" className="mt-3 block">Reason for skipping (required if incomplete):</Label>
                              <Textarea 
                                 id="verificationNotes"
                                 value={verificationNotes}
                                 onChange={(e) => setVerificationNotes(e.target.value)}
                                 className="bg-white/20 mt-1"
-                                placeholder="e.g., Will provide at pickup, technical issue."
+                                placeholder="i.e., Technical issue."
                             />
                         </div>
                     )}

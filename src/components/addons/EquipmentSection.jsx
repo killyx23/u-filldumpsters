@@ -1,5 +1,4 @@
-
-    import React from 'react';
+import React from 'react';
     import { Loader2, PackagePlus } from 'lucide-react';
     import { AddonSection } from './AddonSection';
     import { EquipmentItem } from './EquipmentItem';
@@ -33,4 +32,3 @@
             </AddonSection>
         );
     };
-  

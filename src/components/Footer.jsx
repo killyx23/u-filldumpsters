@@ -1,5 +1,7 @@
 import React from 'react';
-import { Truck } from 'lucide-react';
+import { Truck, Phone, Mail, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
 export const Footer = () => {
   return <footer className="bg-black/20 py-12 px-4 mt-16">
       <div className="container mx-auto text-center">
@@ -9,14 +11,25 @@ export const Footer = () => {
           </div>
           <div>
             <span className="text-2xl font-bold text-white">U-Fill Dumpsters</span>
-            <p className="text-blue-200 text-sm">Premium Waste Solutions</p>
+            <p className="text-blue-200 text-sm">Premium Waste & Delivery Solutions</p>
           </div>
         </div>
         <div className="grid md:grid-cols-3 gap-8 mb-8">
           <div>
-            <h3 className="font-semibold text-white mb-3">Contact Info</h3>
-            <p className="text-blue-200">(801) 810-8832</p>
-            <p className="text-blue-200">billing@u-filldumpsters.com</p>
+            <Link to="/contact" className="inline-flex items-center justify-center group">
+                <h3 className="font-semibold text-white mb-3 flex items-center group-hover:text-yellow-400 transition-colors">
+                    <Info className="mr-2 h-5 w-5" />
+                    Contact Us
+                </h3>
+            </Link>
+            <div className="flex items-center justify-center space-x-2 text-blue-200">
+                <Phone className="h-4 w-4" />
+                <span>(801) 810-8832</span>
+            </div>
+            <a href="mailto:support@u-filldumpsters.com" className="flex items-center justify-center space-x-2 text-blue-200 hover:text-yellow-400 transition-colors mt-2">
+                <Mail className="h-4 w-4" />
+                <span>support@u-filldumpsters.com</span>
+            </a>
           </div>
           <div>
             <h3 className="font-semibold text-white mb-3">Service Areas</h3>

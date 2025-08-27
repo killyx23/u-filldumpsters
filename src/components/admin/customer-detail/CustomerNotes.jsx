@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { BookOpen, Clock, Loader2, CheckCircle } from 'lucide-react';
@@ -25,31 +24,8 @@ const NoteCard = ({ note }) => (
 );
 
 
-export const CustomerNotes = ({ customer, setCustomer }) => {
-    const [notes, setNotes] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    const fetchNotes = useCallback(async () => {
-        if (!customer) return;
-        setLoading(true);
-        const { data, error } = await supabase
-            .from('customer_notes')
-            .select('*')
-            .eq('customer_id', customer.id)
-            .order('created_at', { ascending: false });
-
-        if (error) {
-            toast({ title: 'Failed to load customer notes', description: error.message, variant: 'destructive' });
-        } else {
-            setNotes(data);
-        }
-        setLoading(false);
-    }, [customer]);
-
-    useEffect(() => {
-        fetchNotes();
-    }, [fetchNotes]);
-
+export const CustomerNotes = ({ customer, notes, setCustomer, setNotes, loading }) => {
+    
     const markAllAsRead = async () => {
         const unreadNoteIds = notes.filter(n => !n.is_read).map(n => n.id);
         if (unreadNoteIds.length === 0) return;

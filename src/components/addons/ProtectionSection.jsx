@@ -33,7 +33,7 @@ import React from 'react';
                             <li>Effective on concrete, asphalt, gravel, and even turf.</li>
                           </ul>
                           <p className="text-xs text-amber-300/80">
-                            <strong>Disclaimer:</strong> This is an added preventative measure to significantly reduce the risk of damage. While highly effective, it does not constitute a guarantee against all potential driveway damage.
+                            <strong>Disclaimer:</strong> This is an added preventative measure to significantly reduce the risk of damage. While highly effective, it does not constitute a guarantee against all potential driveway damage. U-Fill Dumpsters LLC is not responsible for any driveway damage if this protection is declined.
                           </p>
                         </>
                       }
