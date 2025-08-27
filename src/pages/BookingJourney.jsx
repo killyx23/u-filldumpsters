@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
     import { AnimatePresence } from 'framer-motion';
     import { loadStripe } from '@stripe/stripe-js';
     import { Elements } from '@stripe/react-stripe-js';
@@ -65,23 +65,11 @@ import React, { useState, useMemo } from 'react';
       const [showAgreement, setShowAgreement] = useState(false);
       const [agreementAccepted, setAgreementAccepted] = useState(false);
       const [bookingId, setBookingId] = useState(null);
-
-      const initialAddonsData = useMemo(() => {
-        if (!selectedPlan) return null;
-        const isDumpsterOrMaterial = selectedPlan.id === 1 || selectedPlan.id === 3;
-        return {
-          insurance: 'accept',
-          drivewayProtection: isDumpsterOrMaterial ? 'accept' : 'decline',
-          equipment: [],
-          notes: '',
-          addressVerificationSkipped: false,
-          verificationSkipped: false,
-          distanceInfo: null,
-        };
-      }, [selectedPlan]);
       
       const handlePlanSelect = (plan) => {
         setSelectedPlan(plan);
+        setBookingData(initialBookingData);
+        setAgreementAccepted(false);
         const isDumpsterOrMaterial = plan.id === 1 || plan.id === 3;
         setAddonsData({
           insurance: 'accept',
@@ -105,6 +93,8 @@ import React, { useState, useMemo } from 'react';
         const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
         const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
 
+        const wasVerificationSkipped = verificationData?.verificationSkipped ?? finalAddonsData.verificationSkipped;
+
         const pendingBookingPayload = {
           name: bookingData.name,
           email: bookingData.email,
@@ -116,15 +106,16 @@ import React, { useState, useMemo } from 'react';
           drop_off_time_slot: bookingData.dropOffTimeSlot,
           pickup_time_slot: bookingData.pickupTimeSlot,
           plan: selectedPlan,
-          addons: finalAddonsData,
+          addons: { ...finalAddonsData, verificationSkipped: wasVerificationSkipped, distanceInfo: finalAddonsData.distanceInfo, addressVerificationSkipped: finalAddonsData.addressVerificationSkipped },
           total_price: finalPrice,
           status: 'pending_payment',
           drop_off_date: dropOffDate.toISOString().split('T')[0],
           pickup_date: pickupDate.toISOString().split('T')[0],
           notes: finalAddonsData.notes,
+          was_verification_skipped: wasVerificationSkipped,
           verification_notes: verificationData?.verificationNotes || null,
         };
-
+        
         try {
           const { data, error } = await supabase
             .from('bookings')
@@ -134,7 +125,7 @@ import React, { useState, useMemo } from 'react';
 
           if (error) throw error;
           
-          if(verificationData?.licensePlate || verificationData?.licenseImageUrls?.length > 0) {
+          if(verificationData?.licenseImageUrls?.length > 0) {
               const { error: customerUpdateError } = await supabase
                 .from('customers')
                 .update({
@@ -154,9 +145,9 @@ import React, { useState, useMemo } from 'react';
         } catch (error) {
           toast({
             title: "Booking Error",
-            description: "Could not create a pending booking. Please try again. " + error.message,
+            description: "Could not create your booking record. Please try again. " + error.message,
             variant: "destructive",
-            duration: 15000,
+            duration: 30000,
           });
           console.error("Error creating pending booking:", error);
         }
@@ -185,7 +176,7 @@ import React, { useState, useMemo } from 'react';
                 bookingData={bookingData}
                 setBookingData={setBookingData}
                 onSubmit={handleBookingFormSubmit}
-                onBack={() => setStep(0)}
+                onBack={() => { setStep(0); setSelectedPlan(null); }}
                 onShowAgreement={() => setShowAgreement(true)}
                 agreementAccepted={agreementAccepted}
               />
@@ -194,7 +185,6 @@ import React, { useState, useMemo } from 'react';
             return (
               <AddonsForm
                 plan={selectedPlan}
-                bookingData={bookingData}
                 basePrice={totalPrice}
                 addonsData={addonsData}
                 setAddonsData={setAddonsData}

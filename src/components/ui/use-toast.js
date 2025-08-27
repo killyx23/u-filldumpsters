@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react"
 
 const TOAST_LIMIT = 1
@@ -86,7 +87,7 @@ export function useToast() {
 
       const timeout = setTimeout(() => {
         toast.dismiss()
-      }, toast.duration || 15000)
+      }, toast.duration || 30000)
 
       timeouts.push(timeout)
     })

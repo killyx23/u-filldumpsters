@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -121,17 +120,26 @@ const ImageUploader = ({ customer, onUpdate }) => {
         if (!file) return;
 
         setIsUploading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+             toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+             setIsUploading(false);
+             return;
+        }
 
+        // Use the customer's ID for the folder path, not the admin's.
         const filePath = `${customer.id}/licenses/${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
+        const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file, {
+            upsert: false,
+        });
 
         if (uploadError) {
             toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
         } else {
-            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+            const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
             
             const existingUrls = customer.license_image_urls || [];
-            const newImage = { url: publicUrl, path: filePath, name: file.name };
+            const newImage = { url: data.publicUrl, path: filePath, name: file.name };
             const updatedUrls = [...existingUrls, newImage];
 
             const { error: dbUpdateError } = await supabase.from('customers').update({ license_image_urls: updatedUrls }).eq('id', customer.id);
@@ -190,20 +198,22 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
         setSelectedBookingForRefund(booking);
     };
 
-    const handleDownload = async (url, filename) => {
+    const handleDownload = async (filePath, filename) => {
         try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const blob = await response.blob();
+            const { data, error } = await supabase.storage.from('customer-uploads').download(filePath);
+            if (error) throw error;
+            
+            const blob = data;
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = filename;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
         } catch (error) {
             console.error("Download Error:", error);
-            toast({ title: "Download Failed", description: "Could not download the image. Check console for details.", variant: "destructive" });
+            toast({ title: "Download Failed", description: error.message || "Could not download the image.", variant: "destructive" });
         }
     };
     
@@ -229,7 +239,7 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
                                         <ImageIcon className="h-8 w-8 text-white"/>
                                     </div>
                                   </a>
-                                  <Button size="sm" variant="secondary" className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => {e.preventDefault(); handleDownload(img.url, `license_${customer.id}_${index+1}.jpg`);}}>
+                                  <Button size="sm" variant="secondary" className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => {e.preventDefault(); handleDownload(img.path, img.name);}}>
                                     <Download className="h-4 w-4 mr-2" /> Download
                                   </Button>
                                </div>

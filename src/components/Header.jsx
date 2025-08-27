@@ -1,5 +1,5 @@
 import React from 'react';
-import { Truck, Phone, Mail, TestTube2, MessageSquare, HelpCircle, LogOut } from 'lucide-react';
+import { Truck, Phone, Mail, LogIn, LogOut, MessageSquare, HelpCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,9 @@ export const Header = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const isAdmin = user?.user_metadata?.is_admin;
+  const isCustomer = user && !isAdmin;
 
-  const handleTestClick = () => {
+  const handleAdminClick = () => {
     navigate('/admin');
   };
 
@@ -18,21 +19,44 @@ export const Header = () => {
     navigate('/');
   };
 
+  const AuthButtons = () => {
+    if (isAdmin) {
+      return (
+        <>
+          <Button onClick={handleAdminClick} variant="outline" className="text-green-300 border-green-300 hover:bg-green-300 hover:text-black">
+            Admin Dashboard
+          </Button>
+          <Button onClick={handleSignOut} variant="ghost" className="hover:bg-red-500/20 hover:text-red-300">
+            <LogOut className="mr-2 h-4 w-4" />
+            Logout
+          </Button>
+        </>
+      );
+    }
+
+    if (isCustomer) {
+      return (
+        <Button onClick={handleSignOut} variant="outline" className="text-yellow-300 border-yellow-300 hover:bg-yellow-300 hover:text-black">
+          <LogOut className="mr-2 h-4 w-4" />
+          Logout
+        </Button>
+      );
+    }
+    
+    return (
+      <Button onClick={() => navigate('/login')} variant="outline" className="text-white border-white/50 hover:bg-white/20 hover:text-white">
+        <LogIn className="mr-2 h-4 w-4" />
+        Customer Portal
+      </Button>
+    );
+  };
+
   return (
     <header className="bg-white/10 backdrop-blur-md border-b border-white/20 sticky top-0 z-40">
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="group hover:bg-purple-600/50"
-              onClick={handleTestClick}
-              aria-label="Admin Test Button"
-            >
-              <TestTube2 className="h-6 w-6 text-purple-300 group-hover:text-white transition-colors" />
-            </Button>
-            <Link to="/" className="flex items-center space-x-3 cursor-pointer group">
+             <Link to="/" className="flex items-center space-x-3 cursor-pointer group">
                 <div className="bg-gradient-to-r from-blue-500 to-purple-600 p-3 rounded-xl group-hover:scale-105 transition-transform">
                 <Truck className="h-8 w-8 text-white" />
                 </div>
@@ -59,12 +83,7 @@ export const Header = () => {
               <HelpCircle className="h-4 w-4" />
               <span>FAQ</span>
             </Link>
-            {isAdmin && (
-              <Button onClick={handleSignOut} variant="ghost" className="hover:bg-red-500/20 hover:text-red-300">
-                <LogOut className="mr-2 h-4 w-4" />
-                Logout
-              </Button>
-            )}
+             <AuthButtons />
           </div>
         </div>
       </div>
