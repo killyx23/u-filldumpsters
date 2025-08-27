@@ -51,6 +51,7 @@ import React, { useState, useEffect, useCallback } from 'react';
       }, [fetchInventory]);
 
       useEffect(() => {
+        if (!addonsData) return;
         let newTotal = basePrice;
         if (addonsData.insurance === 'accept') {
           newTotal += addonPrices.insurance;
@@ -115,7 +116,7 @@ import React, { useState, useEffect, useCallback } from 'react';
         if (plan.id === 2) {
           setShowVerificationDialog(true);
         } else {
-          onSubmit(totalPrice);
+          onSubmit(totalPrice, null, addonsData);
         }
       };
 
@@ -124,6 +125,10 @@ import React, { useState, useEffect, useCallback } from 'react';
         const finalAddons = { ...addonsData, verificationSkipped: verificationData.verificationSkipped };
         onSubmit(totalPrice, verificationData, finalAddons);
       };
+
+      if (!addonsData) {
+        return null; // or a loading indicator
+      }
 
       return (
         <>
@@ -208,14 +213,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 
     const DeclineWarningDialog = ({ open, onOpenChange, onConfirm, title, description }) => (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="bg-gray-900 border-yellow-500 text-white">
+            <DialogContent>
                 <DialogHeader>
                     <DialogTitle className="flex items-center text-yellow-400 text-2xl">
                         <ArrowLeft className="mr-3 h-8 w-8" />
                         {title}
                     </DialogTitle>
                 </DialogHeader>
-                <DialogDescription className="text-blue-200 my-4 text-base">{description}</DialogDescription>
+                <DialogDescription className="my-4 text-base">{description}</DialogDescription>
                 <DialogFooter className="gap-2 sm:justify-center">
                     <Button onClick={() => onOpenChange(false)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">Go Back & Accept</Button>
                     <Button onClick={onConfirm} variant="destructive">I Understand & Decline</Button>

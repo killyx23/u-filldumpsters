@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote } from 'lucide-react';
+import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote, Key } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EditInput } from '@/components/admin/EditInput';
 import { Textarea } from '@/components/ui/textarea';
@@ -63,6 +62,7 @@ export const CustomerProfile = ({ customer, setCustomer, bookingsCount, onUpdate
             <div>
                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4">Contact & Billing Information</h3>
                 <div className="space-y-4">
+                    <EditInput label="Customer ID" icon={<Key />} value={editedCustomer.customer_id_text || 'N/A'} isEditing={false} />
                     <EditInput label="Name" icon={<User />} value={editedCustomer.name} onChange={(e) => handleInputChange('name', e.target.value)} isEditing={isEditing} />
                     <EditInput label="Email" icon={<Mail />} value={editedCustomer.email} onChange={(e) => handleInputChange('email', e.target.value)} isEditing={isEditing} type="email" />
                     <EditInput label="Phone" icon={<Phone />} value={editedCustomer.phone} onChange={(e) => handleInputChange('phone', e.target.value)} isEditing={isEditing} type="tel" />

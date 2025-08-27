@@ -2,7 +2,7 @@ import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag } from 'lucide-react';
+import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key } from 'lucide-react';
 
 const DetailRow = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -48,6 +48,7 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                 <div className="py-4 space-y-4 max-h-[70vh] overflow-y-auto pr-4">
                     <section>
                         <h4 className="font-bold text-lg text-yellow-400 mb-2">Customer & Booking Information</h4>
+                        <DetailRow icon={<Key />} label="Customer ID" value={customers.customer_id_text || 'N/A'} />
                         <DetailRow icon={<User />} label="Customer" value={customers.name} />
                         <DetailRow icon={<Mail />} label="Email" value={customers.email} />
                         <DetailRow icon={<Phone />} label="Phone" value={customers.phone} />

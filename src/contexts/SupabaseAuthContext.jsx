@@ -1,6 +1,4 @@
-
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -13,7 +11,7 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const handleSession = useCallback(async (session) => {
+  const handleSession = useCallback((session) => {
     setSession(session);
     setUser(session?.user ?? null);
     setLoading(false);
@@ -21,23 +19,20 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const getSessionAndValidate = async () => {
-      setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session: initialSession } } = await supabase.auth.getSession();
 
-      if (session) {
-        // This check is crucial. It validates the token with the server.
+      if (initialSession) {
         const { error } = await supabase.auth.getUser();
         if (error) {
-          console.error("Invalid session detected, signing out.", error);
+          console.error("Invalid session detected on load, signing out.", error);
           await supabase.auth.signOut();
-          handleSession(null); // This will clear user and session state
+          handleSession(null);
         } else {
-          handleSession(session);
+          handleSession(initialSession);
         }
       } else {
-        handleSession(null);
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     getSessionAndValidate();
