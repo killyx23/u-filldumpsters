@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2 } from 'lucide-react';
@@ -170,10 +169,13 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
             )}
 
             <div className="border-t border-white/20 pt-4 mt-4">
-              <p className="text-white text-2xl font-semibold flex justify-between">
+              <div className="text-white text-2xl font-semibold flex justify-between">
                 <span>Total Amount:</span>
-                <span className="text-green-400">${totalPrice.toFixed(2)}</span>
-              </p>
+                <div className='flex items-baseline'>
+                  <span className="text-green-400">${totalPrice.toFixed(2)}</span>
+                  <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -182,7 +184,7 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
           <p className="text-blue-200 mb-4">You will be redirected to Stripe for secure payment processing.</p>
           <Button onClick={handlePayment} disabled={isProcessing || !stripe} className="w-full py-4 text-xl font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white disabled:opacity-50">
             {isProcessing ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <CreditCard className="mr-3" />}
-            {isProcessing ? `Processing...` : `Pay $${totalPrice.toFixed(2)} with Card`}
+            {isProcessing ? `Processing...` : `Pay $${totalPrice.toFixed(2)} with Card (plus taxes)`}
           </Button>
           <p className="text-xs text-gray-400 mt-4 flex items-center justify-center">
             <Lock className="h-3 w-3 mr-1.5" /> Secure SSL Encrypted Payment

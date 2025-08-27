@@ -1,5 +1,4 @@
-
-    import React from 'react';
+import React from 'react';
     import { Button } from '@/components/ui/button';
     import { Label } from '@/components/ui/label';
     import { Textarea } from '@/components/ui/textarea';
@@ -13,6 +12,12 @@
     );
 
     export const OrderSummary = ({ basePrice, addonsData, totalPrice, setAddonsData, handleBookingSubmit, plan, equipmentMeta, addonPrices }) => {
+        const isDumpLoader = plan.id === 2;
+        const notesLabel = isDumpLoader ? "Questions" : "Special Instructions";
+        const notesPlaceholder = isDumpLoader 
+            ? "Any questions or things that you wanted us to know?" 
+            : "Any special instructions for delivery or pickup? (e.g., gate code, specific placement)";
+
         return (
             <div className="bg-white/5 p-6 rounded-lg flex flex-col">
                 <h3 className="text-2xl font-bold text-yellow-400 mb-4">Your Order Summary</h3>
@@ -31,18 +36,21 @@
                 </div>
                 <div className="border-t border-white/20 pt-4 mt-4">
                     <p className="text-white text-lg font-semibold">Final Total:</p>
-                    <p className="text-5xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
+                    <div className="flex items-baseline">
+                        <p className="text-5xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
+                        <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
+                    </div>
                 </div>
                 <div className="mt-6">
                     <Label htmlFor="customer-notes" className="flex items-center text-lg font-semibold text-white mb-2">
                         <MessageSquare className="h-5 w-5 mr-2 text-yellow-400" />
-                        Special Instructions
+                        {notesLabel}
                     </Label>
                     <Textarea 
                         id="customer-notes"
                         value={addonsData.notes || ''}
                         onChange={(e) => setAddonsData(prev => ({ ...prev, notes: e.target.value }))}
-                        placeholder="Any special instructions for delivery or pickup? (e.g., gate code, specific placement)"
+                        placeholder={notesPlaceholder}
                         className="bg-white/10 min-h-[100px]"
                     />
                 </div>
@@ -52,4 +60,3 @@
             </div>
         );
     };
-  

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud, Edit, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -127,7 +127,6 @@ const ImageUploader = ({ customer, onUpdate }) => {
              return;
         }
 
-        // Use the customer's ID for the folder path, not the admin's.
         const filePath = `${customer.id}/licenses/${Date.now()}-${file.name}`;
         const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file, {
             upsert: false,
@@ -179,6 +178,26 @@ const ImageUploader = ({ customer, onUpdate }) => {
 
 export const CustomerVerification = ({ customer, verificationBookings, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
+    const [isEditingPlate, setIsEditingPlate] = useState(false);
+    const [plate, setPlate] = useState(customer.license_plate || '');
+    const [isSavingPlate, setIsSavingPlate] = useState(false);
+
+    const handleSavePlate = async () => {
+        setIsSavingPlate(true);
+        const { error } = await supabase
+            .from('customers')
+            .update({ license_plate: plate })
+            .eq('id', customer.id);
+        
+        if (error) {
+            toast({ title: "Error saving license plate", description: error.message, variant: "destructive" });
+        } else {
+            toast({ title: "License plate updated!" });
+            onUpdate();
+            setIsEditingPlate(false);
+        }
+        setIsSavingPlate(false);
+    };
     
     const handleApprove = async (bookingId) => {
         const { error } = await supabase
@@ -225,8 +244,24 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><Car className="mr-3 h-6 w-6"/>Vehicle & License Details</h3>
                 <div className="space-y-4">
                     <div>
-                        <p className="font-semibold text-blue-200">License Plate:</p>
-                        <p className="text-white font-mono text-lg bg-white/10 p-2 rounded-md">{customer.license_plate || 'Not Provided'}</p>
+                        <div className="flex justify-between items-center">
+                            <p className="font-semibold text-blue-200">License Plate:</p>
+                            {isEditingPlate ? (
+                                <div className="flex items-center gap-2">
+                                    <Button size="sm" onClick={handleSavePlate} disabled={isSavingPlate}>
+                                        {isSavingPlate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                    </Button>
+                                    <Button size="sm" variant="ghost" onClick={() => setIsEditingPlate(false)}><X className="h-4 w-4" /></Button>
+                                </div>
+                            ) : (
+                                <Button size="sm" variant="outline" onClick={() => setIsEditingPlate(true)}><Edit className="mr-2 h-4 w-4" /> Edit</Button>
+                            )}
+                        </div>
+                        {isEditingPlate ? (
+                            <Input value={plate} onChange={(e) => setPlate(e.target.value.toUpperCase())} className="font-mono text-lg mt-2" />
+                        ) : (
+                            <p className="text-white font-mono text-lg bg-white/10 p-2 rounded-md mt-2">{plate || 'Not Provided'}</p>
+                        )}
                     </div>
                      <div>
                         <p className="font-semibold text-blue-200">Driver's License Images:</p>

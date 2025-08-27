@@ -13,8 +13,8 @@ import React, { useState } from 'react';
     import { PaymentPage } from '@/components/PaymentPage';
     import { UserAgreement } from '@/components/UserAgreement';
     import { cn } from '@/lib/utils';
-
-    const stripePromise = loadStripe("REDACTED_STRIPE_PUBLISHABLE_KEY");
+    
+    const stripePromise = loadStripe("pk_test_51RitdJQRQGuzCKNtr6a8Yw88AxUgKFInAPc17jzwYZtaueINdqFBSh8J0HAijDL3kLq5VEvrYhA30b9sBDvOi9PP00dTRFDisG");
 
     const initialBookingData = {
       name: '', email: '', phone: '', street: '', city: '', state: '', zip: '',
