@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer, Truck, Info } from 'lucide-react';
+import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer, Truck, Info, Key } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
@@ -32,215 +32,246 @@ function BookingConfirmation() {
     documentTitle: `U-Fill-Receipt-${booking?.id || 'booking'}`,
   });
 
-  const verifyAndFetch = useCallback(async () => {
+  const finalizeBooking = useCallback(async (bookingId) => {
     try {
-      const { data: sessionStatusData, error: sessionStatusError } = await supabase.functions.invoke('get-session-status', {
-        body: { sessionId }
+      const { data, error } = await supabase.functions.invoke('finalize-booking', {
+        body: { bookingId },
       });
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
 
-      if (sessionStatusError) {
-        setStatus('error');
-        toast({ title: "Payment Verification Failed", description: "Could not verify payment session status.", variant: "destructive" });
-        return;
+      // Re-fetch the fully finalized booking data to display
+      const { data: finalBooking, error: fetchError } = await supabase
+        .from('bookings')
+        .select(`*, customers!inner(*), stripe_payment_info!inner(*)`)
+        .eq('id', bookingId)
+        .single();
+      
+      if(fetchError) throw fetchError;
+      
+      setBooking(finalBooking);
+      setStatus('success');
+      return 'success';
+
+    } catch (err) {
+      console.error("Error finalizing booking:", err);
+      toast({ title: "Finalization Error", description: `There was a problem finalizing your booking details. Please contact support. Error: ${err.message}`, variant: "destructive", duration: 30000 });
+      return 'error';
+    }
+  }, []);
+
+  const pollForWebhookUpdate = useCallback(async () => {
+    if (!sessionId) {
+      setStatus('error');
+      toast({ title: "Missing Payment Session", description: "Cannot find booking confirmation details.", variant: "destructive", duration: 30000 });
+      return { status: 'error' };
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('id, status, stripe_payment_info!inner(stripe_payment_intent_id)')
+        .eq('stripe_payment_info.stripe_checkout_session_id', sessionId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error("Polling error:", error);
+        return { status: 'pending' };
+      }
+
+      if (data && data.status === 'awaiting_processing' && data.stripe_payment_info) {
+        return { status: 'ready_to_finalize', bookingId: data.id };
       }
       
-      if (sessionStatusData.status !== 'complete' || sessionStatusData.payment_status !== 'paid') {
-        setStatus('error');
-        toast({ title: "Payment Not Completed", description: "Your payment was not successfully processed.", variant: "destructive" });
-        return;
-      }
+      return { status: 'pending' };
 
-      const { data, error } = await supabase.functions.invoke('get-booking-by-session', {
-        body: { sessionId },
-      });
-
-      if (error || !data.booking) {
-        if (status !== 'pending') setStatus('pending');
-        return;
-      }
-
-      setBooking(data.booking);
-      setStatus('success');
     } catch (err) {
-      console.error("Error in verification/fetch process:", err);
-      if (status !== 'pending') {
-          setStatus('pending');
-      }
+      console.error("Error in polling process:", err);
+      toast({ title: "Polling Error", description: err.message, variant: "destructive", duration: 30000 });
+      return { status: 'error' };
     }
-  }, [sessionId, status]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
       setStatus('error');
-      toast({ title: "Missing Payment Session", description: "Cannot find booking confirmation details.", variant: "destructive" });
       return;
     }
 
     let attempts = 0;
-    const maxAttempts = 12; // Poll for 60 seconds (12 * 5s)
+    const maxAttempts = 15; // Poll for 75 seconds (15 * 5s)
     let intervalId;
 
     const poll = async () => {
-        attempts++;
-        if (status !== 'success') {
-           await verifyAndFetch();
-        }
-        if (status === 'success' || (attempts >= maxAttempts && status !== 'success')) {
-            clearInterval(intervalId);
-            if (status !== 'success') {
-                setStatus('error');
-                toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 20000 });
-            }
-        }
+      attempts++;
+      const result = await pollForWebhookUpdate();
+      
+      if (result.status === 'ready_to_finalize') {
+        clearInterval(intervalId);
+        setStatus('finalizing');
+        finalizeBooking(result.bookingId);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(intervalId);
+        setStatus('error');
+        toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 30000 });
+      }
     };
     
-    poll();
+    setStatus('loading');
+    poll(); // Initial call
     intervalId = setInterval(poll, 5000); 
 
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [sessionId, verifyAndFetch, status]);
+    return () => clearInterval(intervalId);
+  }, [sessionId, pollForWebhookUpdate, finalizeBooking]);
 
-  if (status === 'loading') {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-        <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
-        <p className="text-white text-2xl mt-4">Verifying your payment...</p>
-        <p className="text-blue-200 mt-2">Please wait a moment.</p>
-      </div>
-    );
-  }
-
-  if (status === 'pending') {
-     return (
-       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
-        <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
-        <h1 className="text-white text-3xl mt-4 font-bold">Confirmation Processing</h1>
-        <p className="text-blue-200 mt-2 max-w-md">Your payment was successful! We are finalizing your booking details. This page will update automatically. If it doesn't, please check your email for a receipt.</p>
-      </div>
-    );
-  }
-
-  if (status === 'error' || !booking) {
-    return (
-       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
-        <XCircle className="h-16 w-16 text-red-500" />
-        <h1 className="text-white text-3xl mt-4 font-bold">Payment Issue Encountered</h1>
-        <p className="text-blue-200 mt-2 max-w-md">There was an issue verifying your payment or booking details. If you believe this is an error, please contact support. Otherwise, you can return to the homepage to try again.</p>
-         <Link to="/">
-          <Button className="mt-8">
-            <Home className="mr-2" /> Back to Homepage
-          </Button>
-        </Link>
-      </div>
-    );
-  }
-  
-  const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, status: bookingStatus } = booking;
-  
-  if (!customers) {
-     return (
-       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
-        <AlertTriangle className="h-16 w-16 text-red-500" />
-        <h1 className="text-white text-3xl mt-4 font-bold">Error Loading Details</h1>
-        <p className="text-blue-200 mt-2 max-w-md">Could not load customer details for this booking. Please refer to your confirmation email.</p>
-         <Link to="/">
-          <Button className="mt-8">
-            <Home className="mr-2" /> Back to Homepage
-          </Button>
-        </Link>
-      </div>
-    );
-  }
-  
-  const formatTime = (timeString) => {
-      if (!timeString) return 'N/A';
-      try {
-          const date = new Date(`1970-01-01T${timeString}`);
-          return format(date, 'h:mm a');
-      } catch (e) {
-          return 'N/A';
-      }
-  };
-
-  const { name, email, phone, street, city, state, zip } = customers;
-  const fullAddress = `${street}, ${city}, ${state} ${zip}`;
-  const distanceInfo = addons?.distanceInfo;
-  const isPendingVerification = bookingStatus === 'pending_verification';
-
-  return (
-    <>
-      <div className="hidden">
-        <PrintableReceipt ref={receiptRef} booking={booking} />
-      </div>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="container mx-auto py-16 px-4"
-      >
-        <div className="max-w-3xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 text-center">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 20 }}
-          >
-             {isPendingVerification ? (
-                 <AlertTriangle className="h-24 w-24 text-red-400 mx-auto mb-6" />
-             ) : (
-                <CheckCircle className="h-24 w-24 text-green-400 mx-auto mb-6" />
-             )}
-          </motion.div>
-          <h1 className="text-4xl font-bold text-white mb-4">
-            {isPendingVerification ? 'Booking on Hold' : 'Booking Confirmed!'}
-          </h1>
-          <p className="text-lg text-blue-200 mb-8">
-            {isPendingVerification ? 
-             `Thank you for your rental, your account has been flagged for a manual review due to a lack of or incomplete information provided. Please contact us at (801) 810-8832 or email us at scheduling@u-filldumpsters.com to fix the missing information and finish your order so it can be scheduled.` :
-             `Thank you, ${name}! Your rental is scheduled. A confirmation email with all details has been sent to ${email}.`
-            }
-          </p>
-          
-          {plan.id === 2 && !isPendingVerification && (
-            <div className="bg-blue-900/30 border border-blue-500/50 p-6 rounded-lg mb-8 text-left">
-              <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Truck className="mr-3 h-6 w-6"/>Important Pickup Information</h3>
-              <p className="text-blue-200"><strong>Pickup Location:</strong> 227 W. Casi Way, Saratoga Springs, UT 84045.</p>
-              <p className="text-blue-200 mt-1"><strong>Pickup Time:</strong> Your trailer is available from <strong>8:00 a.m.</strong> on your pickup date.</p>
-              <p className="text-blue-200 mt-1"><strong>Return Time:</strong> Please return the trailer by <strong>10:00 p.m.</strong> on your return date. Remember to clean it out to avoid fines.</p>
-            </div>
-          )}
-
-          <div className="bg-white/5 p-6 rounded-lg mb-8 text-left divide-y divide-white/10">
-            <ConfirmationLine icon={<User className="h-6 w-6" />} label="Name" value={name} />
-             <ConfirmationLine icon={<Mail className="h-6 w-6" />} label="Email" value={email} />
-            <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
-             {plan.id !== 2 && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
-            <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
-            <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
-             <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
-             {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
-            <ConfirmationLine icon={<DollarSign className="h-6 w-6" />} label="Total Amount Paid" value={`$${total_price.toFixed(2)}`} />
+  const renderContent = () => {
+    switch (status) {
+      case 'loading':
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
+            <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
+            <p className="text-white text-2xl mt-4">Confirming payment with Stripe...</p>
+            <p className="text-blue-200 mt-2">This may take a moment. Please don't refresh the page.</p>
           </div>
-
-          <p className="text-blue-200 mb-8">
-            If you have any questions, please don't hesitate to contact us.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Button onClick={handlePrint} variant="outline" className="w-full py-3 text-lg font-semibold border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">
-              <Printer className="mr-2" /> Print Receipt
-            </Button>
-            <Link to="/" className="w-full">
-              <Button className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-black">
+        );
+      case 'finalizing':
+         return (
+           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
+            <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
+            <h1 className="text-white text-3xl mt-4 font-bold">Finalizing Your Booking</h1>
+            <p className="text-blue-200 mt-2 max-w-md">Payment confirmed! We're just getting the last few details in order and sending your confirmation email.</p>
+          </div>
+        );
+      case 'error':
+      case 'timeout':
+        return (
+           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
+            <XCircle className="h-16 w-16 text-red-500" />
+            <h1 className="text-white text-3xl mt-4 font-bold">There was an issue with your confirmation</h1>
+            <p className="text-blue-200 mt-2 max-w-md">Your payment was likely successful, but we had trouble displaying the details. Please check your email for a receipt or contact support if it doesn't arrive shortly.</p>
+             <Link to="/">
+              <Button className="mt-8">
                 <Home className="mr-2" /> Back to Homepage
               </Button>
             </Link>
           </div>
-        </div>
-      </motion.div>
-    </>
-  );
+        );
+      case 'success':
+        if (!booking || !booking.customers) {
+           return (
+             <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
+              <AlertTriangle className="h-16 w-16 text-red-500" />
+              <h1 className="text-white text-3xl mt-4 font-bold">Error Loading Details</h1>
+              <p className="text-blue-200 mt-2 max-w-md">Could not load customer details for this booking. Please refer to your confirmation email.</p>
+               <Link to="/">
+                <Button className="mt-8">
+                  <Home className="mr-2" /> Back to Homepage
+                </Button>
+              </Link>
+            </div>
+          );
+        }
+
+        const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, status: bookingStatus } = booking;
+        const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
+        const fullAddress = `${street}, ${city}, ${state} ${zip}`;
+        const distanceInfo = addons?.distanceInfo;
+        const isPendingVerification = bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
+         const formatTime = (timeString) => {
+            if (!timeString) return 'N/A';
+            try {
+                const date = new Date(`1970-01-01T${timeString}`);
+                return isValid(date) ? format(date, 'h:mm a') : 'N/A';
+            } catch (e) {
+                return 'N/A';
+            }
+        };
+
+        return (
+          <>
+            <div className="hidden">
+              <PrintableReceipt ref={receiptRef} booking={booking} />
+            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="container mx-auto py-16 px-4"
+            >
+              <div className="max-w-3xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 text-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.2, type: 'spring', stiffness: 260, damping: 20 }}
+                >
+                   {isPendingVerification ? (
+                       <AlertTriangle className="h-24 w-24 text-red-400 mx-auto mb-6" />
+                   ) : (
+                      <CheckCircle className="h-24 w-24 text-green-400 mx-auto mb-6" />
+                   )}
+                </motion.div>
+                <h1 className="text-4xl font-bold text-white mb-4">
+                  {isPendingVerification ? 'Booking on Hold' : 'Booking Confirmed!'}
+                </h1>
+                <p className="text-lg text-blue-200 mb-8">
+                  {isPendingVerification ? 
+                   `Thank you for your rental. Your account has been flagged for a manual review due to incomplete information. Please contact us at (801) 810-8832 to finalize your order.` :
+                   `Thank you, ${name}! Your rental is scheduled. A confirmation email with all details has been sent to ${email}.`
+                  }
+                </p>
+      
+                <div className="bg-yellow-900/30 border border-yellow-500/50 p-6 rounded-lg mb-8 text-left">
+                  <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Key className="mr-3 h-6 w-6"/>Your Customer Portal Login</h3>
+                  <p className="text-yellow-200">Use the following credentials to access your <Link to="/login" className="font-bold underline hover:text-white">Customer Portal</Link> to view your booking status, add notes, or upload files.</p>
+                  <p className="text-white mt-2"><strong>Your Customer ID:</strong> <span className="font-mono bg-black/30 p-1 rounded">{customer_id_text}</span></p>
+                  <p className="text-white"><strong>Your Phone Number:</strong> <span className="font-mono bg-black/30 p-1 rounded">{phone}</span></p>
+                </div>
+                
+                {plan.id === 2 && !isPendingVerification && (
+                  <div className="bg-blue-900/30 border border-blue-500/50 p-6 rounded-lg mb-8 text-left">
+                    <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Truck className="mr-3 h-6 w-6"/>Important Pickup Information</h3>
+                    <p className="text-blue-200"><strong>Pickup Location:</strong> 227 W. Casi Way, Saratoga Springs, UT 84045.</p>
+                    <p className="text-blue-200 mt-1"><strong>Pickup Time:</strong> Your trailer is available from <strong>8:00 a.m.</strong> on your pickup date.</p>
+                    <p className="text-blue-200 mt-1"><strong>Return Time:</strong> Please return the trailer by <strong>10:00 p.m.</strong> on your return date. Remember to clean it out to avoid fines.</p>
+                  </div>
+                )}
+      
+                <div className="bg-white/5 p-6 rounded-lg mb-8 text-left divide-y divide-white/10">
+                  <ConfirmationLine icon={<User className="h-6 w-6" />} label="Name" value={name} />
+                   <ConfirmationLine icon={<Mail className="h-6 w-6" />} label="Email" value={email} />
+                  <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
+                   {plan.id !== 2 && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
+                  <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
+                  <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
+                   <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
+                   {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
+                  <ConfirmationLine icon={<DollarSign className="h-6 w-6" />} label="Total Amount Paid" value={`$${total_price.toFixed(2)}`} />
+                </div>
+      
+                <p className="text-blue-200 mb-8">
+                  If you have any questions, please don't hesitate to contact us.
+                </p>
+      
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <Button onClick={handlePrint} variant="outline" className="w-full py-3 text-lg font-semibold border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">
+                    <Printer className="mr-2" /> Print Receipt
+                  </Button>
+                  <Link to="/" className="w-full">
+                    <Button className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-black">
+                      <Home className="mr-2" /> Back to Homepage
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return renderContent();
 }
 
 export default BookingConfirmation;

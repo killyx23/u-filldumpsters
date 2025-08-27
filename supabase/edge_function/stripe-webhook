@@ -1,0 +1,103 @@
+import { corsHeaders } from "./cors.ts";
+import { Stripe } from "npm:stripe@15.8.0";
+import { createClient } from 'npm:@supabase/supabase-js@2';
+const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY"), {
+  apiVersion: "2024-06-20"
+});
+const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+const fulfillOrder = async (session)=>{
+  const bookingId = session.metadata?.booking_id || session.client_reference_id;
+  const checkoutSessionId = session.id;
+  const paymentIntentId = session.payment_intent;
+  const stripeCustomerId = session.customer;
+  if (!bookingId) {
+    console.error(`Webhook Error: Missing booking_id in metadata or client_reference_id on session ${checkoutSessionId}`);
+    return;
+  }
+  try {
+    // First, update the booking with Stripe IDs and set status to Confirmed
+    const { data: updatedBooking, error: updateError } = await supabase.from('bookings').update({
+      status: 'Confirmed',
+      stripe_payment_intent_id: typeof paymentIntentId === 'string' ? paymentIntentId : null,
+      stripe_checkout_session_id: checkoutSessionId
+    }).eq('id', bookingId).select(`*, customers!inner(*)`).single();
+    if (updateError) {
+      console.error(`Failed to update booking ${bookingId} for session ${checkoutSessionId}:`, updateError);
+      throw updateError;
+    }
+    // Then, update the customer record with the Stripe Customer ID
+    if (stripeCustomerId && updatedBooking.customers.id) {
+      const { error: customerUpdateError } = await supabase.from('customers').update({
+        stripe_customer_id: stripeCustomerId.toString()
+      }).eq('id', updatedBooking.customers.id);
+      if (customerUpdateError) {
+        // Log error but don't fail the whole process
+        console.error(`Failed to update stripe_customer_id for customer ${updatedBooking.customers.id}:`, customerUpdateError);
+      }
+    }
+    // Process addons after main booking is confirmed
+    const addons = updatedBooking.addons || {};
+    if (addons.equipment && addons.equipment.length > 0) {
+      const { data: equipmentList, error: equipmentListError } = await supabase.from('equipment').select('id, name');
+      if (equipmentListError) throw equipmentListError;
+      const equipmentMap = new Map(equipmentList.map((e)=>[
+          e.name.toLowerCase().replace(/ /g, ''),
+          e.id
+        ]));
+      const equipmentToInsert = addons.equipment.map((item)=>{
+        const equipmentKey = item.id.toLowerCase().replace(/ /g, '');
+        const equipmentId = equipmentMap.get(equipmentKey);
+        if (!equipmentId) {
+          console.warn(`Webhook: Could not find equipment mapping for addon ID: ${item.id}`);
+          return null;
+        }
+        return {
+          booking_id: bookingId,
+          equipment_id: equipmentId,
+          quantity: item.quantity
+        };
+      }).filter((item)=>item !== null);
+      if (equipmentToInsert.length > 0) {
+        const { error: insertError } = await supabase.from('booking_equipment').insert(equipmentToInsert);
+        if (insertError) {
+          console.error(`Webhook: Failed to insert booking_equipment for booking ${bookingId}`, insertError);
+        }
+      }
+    }
+    // Send confirmation email
+    await supabase.functions.invoke('send-booking-confirmation', {
+      body: {
+        booking: updatedBooking
+      }
+    });
+    console.log(`Successfully fulfilled order for booking ${bookingId}`);
+  } catch (error) {
+    console.error(`Error fulfilling order for booking ${bookingId}:`, error);
+  }
+};
+Deno.serve(async (req)=>{
+  const signature = req.headers.get("Stripe-Signature");
+  const body = await req.text();
+  let event;
+  try {
+    event = await stripe.webhooks.constructEvent(body, signature, Deno.env.get("STRIPE_WEBHOOK_SIGNING_SECRET"));
+  } catch (err) {
+    console.error(`Webhook signature verification failed: ${err.message}`);
+    return new Response(err.message, {
+      status: 400
+    });
+  }
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    await fulfillOrder(session);
+  }
+  return new Response(JSON.stringify({
+    received: true
+  }), {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json"
+    },
+    status: 200
+  });
+});

@@ -14,11 +14,17 @@ import ContactPage from '@/pages/ContactPage';
 import FaqPage from '@/pages/FaqPage';
 import AdminLogin from '@/pages/AdminLogin';
 import AdminRouteGuard from '@/components/AdminRouteGuard';
+import CustomerPortal from '@/pages/CustomerPortal';
+import CustomerLogin from '@/pages/CustomerLogin';
 
 const AdminLayout = () => (
   <AdminRouteGuard>
     <Outlet />
   </AdminRouteGuard>
+);
+
+const CustomerLayout = () => (
+    <Outlet />
 );
 
 function App() {
@@ -42,6 +48,11 @@ function App() {
                   <Route element={<AdminLayout />}>
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/admin/customer/:id" element={<CustomerDetailPage />} />
+                  </Route>
+
+                  <Route element={<CustomerLayout />}>
+                    <Route path="/portal" element={<CustomerPortal />} />
+                    <Route path="/login" element={<CustomerLogin />} />
                   </Route>
 
                   <Route path="/confirmation" element={<BookingConfirmation />} />

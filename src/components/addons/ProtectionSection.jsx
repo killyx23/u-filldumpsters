@@ -1,11 +1,12 @@
-
-    import React from 'react';
+import React from 'react';
     import { RadioGroup } from '@/components/ui/radio-group';
     import { Shield, HardHat } from 'lucide-react';
     import { AddonSection } from './AddonSection';
     import { RadioCard } from './RadioCard';
 
     export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDrivewayProtectionChange, plan, addonPrices }) => {
+        if (!addonsData) return null;
+        
         return (
             <>
                 <AddonSection icon={<Shield />} title="Rental Insurance">
@@ -47,4 +48,3 @@
             </>
         );
     };
-  
