@@ -11,6 +11,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { BookingHistory } from './BookingHistory';
     import { CompletedBookings } from './CompletedBookings';
     import { ReceiptDetailDialog } from '@/components/admin/ReceiptDetailDialog';
+    import { ComprehensiveHistoryDialog } from './ComprehensiveHistoryDialog';
     import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
     import { CustomerVerification } from './CustomerVerification';
     import { CustomerProfileHeader } from './CustomerProfileHeader';
@@ -21,29 +22,32 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const [customer, setCustomer] = useState(null);
         const [bookings, setBookings] = useState([]);
         const [equipment, setEquipment] = useState([]);
+        const [notes, setNotes] = useState([]);
         const [loading, setLoading] = useState(true);
         const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
+        const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
         const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'rentals');
 
 
         const fetchCustomerDetails = useCallback(async () => {
             setLoading(true);
             try {
-                // Fetch customer, bookings (with Stripe info), and equipment in parallel
                 const customerPromise = supabase.from('customers').select('*').eq('id', id).single();
                 const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', id).order('created_at', { ascending: false });
-                
-                const [{ data: customerData, error: customerError }, { data: bookingsData, error: bookingsError }] = await Promise.all([customerPromise, bookingsPromise]);
+                const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', id).order('created_at', { ascending: false });
+
+                const [{ data: customerData, error: customerError }, { data: bookingsData, error: bookingsError }, { data: notesData, error: notesError }] = await Promise.all([customerPromise, bookingsPromise, notesPromise]);
                 
                 if (customerError) throw customerError;
                 if (bookingsError) throw bookingsError;
+                if (notesError) throw notesError;
 
                 let equipmentData = [];
                 if (bookingsData && bookingsData.length > 0) {
                     const bookingIds = bookingsData.map(b => b.id);
                     const { data, error: equipmentError } = await supabase
                         .from('booking_equipment')
-                        .select('*, equipment(name)')
+                        .select('*, equipment(name, total_quantity)')
                         .in('booking_id', bookingIds);
                     if (equipmentError) throw equipmentError;
                     equipmentData = data;
@@ -52,12 +56,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 setCustomer(customerData);
                 setBookings(bookingsData || []);
                 setEquipment(equipmentData || []);
+                setNotes(notesData || []);
 
             } catch(error) {
                  toast({ title: "Failed to load customer details", description: error.message, variant: "destructive" });
                  setCustomer(null);
                  setBookings([]);
                  setEquipment([]);
+                 setNotes([]);
             } finally {
                 setLoading(false);
             }
@@ -139,7 +145,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                     </TabsContent>
                      <TabsContent value="notes">
                         <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CustomerNotes customer={customer} setCustomer={setCustomer} />
+                           <CustomerNotes customer={customer} notes={notes} setCustomer={setCustomer} setNotes={setNotes} />
                         </div>
                     </TabsContent>
                     <TabsContent value="history">
@@ -147,7 +153,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                     </TabsContent>
                     <TabsContent value="profile">
                          <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CustomerProfile customer={customer} setCustomer={setCustomer} bookingsCount={bookings.length} onUpdate={fetchCustomerDetails} />
+                           <CustomerProfile 
+                                customer={customer} 
+                                setCustomer={setCustomer} 
+                                onUpdate={fetchCustomerDetails} 
+                                onHistoryClick={() => setIsHistoryDialogOpen(true)}
+                            />
                         </div>
                     </TabsContent>
                 </Tabs>
@@ -157,6 +168,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                     onOpenChange={(isOpen) => !isOpen && setSelectedBookingForReceipt(null)}
                     booking={selectedBookingForReceipt}
                     equipment={equipment}
+                />
+                <ComprehensiveHistoryDialog
+                    isOpen={isHistoryDialogOpen}
+                    onOpenChange={setIsHistoryDialogOpen}
+                    customer={customer}
+                    bookings={bookings}
+                    equipment={equipment}
+                    notes={notes}
                 />
             </motion.div>
         );

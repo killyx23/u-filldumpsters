@@ -1,5 +1,5 @@
 import React from 'react';
-import { Truck, Phone, Mail, LogIn, LogOut, MessageSquare, HelpCircle } from 'lucide-react';
+import { Truck, Mail, LogIn, LogOut, MessageSquare, HelpCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
@@ -67,14 +67,6 @@ export const Header = () => {
             </Link>
           </div>
           <div className="hidden md:flex items-center space-x-6 text-white">
-            <div className="flex items-center space-x-2">
-              <Phone className="h-4 w-4" />
-              <span>(801) 810-8832</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Mail className="h-4 w-4" />
-              <span>billing@u-filldumpsters.com</span>
-            </div>
             <Link to="/contact" className="flex items-center space-x-2 hover:text-yellow-400 transition-colors">
               <MessageSquare className="h-4 w-4" />
               <span>Contact</span>

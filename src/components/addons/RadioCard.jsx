@@ -1,5 +1,4 @@
-
-    import React from 'react';
+import React from 'react';
     import { RadioGroupItem } from '@/components/ui/radio-group';
     import { Label } from '@/components/ui/label';
 
@@ -11,4 +10,3 @@
             </Label>
         </div>
     );
-  

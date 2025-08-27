@@ -205,7 +205,7 @@ import React, { useState, useEffect, useCallback } from 'react';
             onOpenChange={setShowDrivewayDeclineWarning}
             onConfirm={confirmDeclineDrivewayProtection}
             title="Confirm Your Choice"
-            description="By declining driveway protection, you acknowledge that U-Fill Dumpsters is not liable for any potential damage, including but not limited to cracks, scratches, or stains, to your driveway or the surrounding area."
+            description="By declining driveway protection, you acknowledge that U-Fill Dumpsters LLC is not liable for any potential damage, including but not limited to cracks, scratches, or stains, to your driveway or the surrounding area."
           />
         </>
       );

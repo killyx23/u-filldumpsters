@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -20,38 +19,24 @@ const ContactPage = () => {
         e.preventDefault();
         setIsLoading(true);
 
-        const { data: customerData, error: customerError } = await supabase
-            .from('customers')
-            .select('id')
-            .eq('email', email)
-            .single();
-
-        if (customerError && customerError.code !== 'PGRST116') { // Ignore "no rows found"
-            toast({ variant: "destructive", title: "An error occurred." });
-            setIsLoading(false);
-            return;
-        }
-
-        const { error: messageError } = await supabase
-            .from('customer_notes')
-            .insert([{ 
-                customer_id: customerData?.id, // Can be null if customer not found
-                source: 'Contact Form',
-                content: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`
-             }]);
+        const { error } = await supabase.rpc('handle_contact_form', {
+            contact_name: name,
+            contact_email: email,
+            contact_message: message
+        });
 
         setIsLoading(false);
 
-        if (messageError) {
+        if (error) {
             toast({
                 variant: "destructive",
                 title: "Uh oh! Something went wrong.",
-                description: "There was a problem sending your message. Please try again.",
+                description: "There was a problem sending your message. " + error.message,
             });
         } else {
             toast({
                 title: "Message Sent!",
-                description: "Thanks for reaching out. We'll get back to you soon.",
+                description: "Thanks for reaching out. We've logged your message and will get back to you soon.",
             });
             setName('');
             setEmail('');
@@ -75,6 +60,9 @@ const ContactPage = () => {
                     <div className="text-center mb-8">
                         <h1 className="text-4xl font-bold text-yellow-400 mb-2">Contact Us</h1>
                         <p className="text-lg text-blue-200">Have a question? We'd love to hear from you.</p>
+                         <p className="text-sm text-blue-300 mt-4 bg-blue-900/30 p-3 rounded-lg">
+                           For the fastest response, please use the contact form below. This ensures your message is logged in our system. If you prefer, you can email <a href="mailto:support@u-filldumpsters.com" className="font-bold text-yellow-300 hover:underline">support@u-filldumpsters.com</a> directly, but please note that response times may take up to 48 hours.
+                        </p>
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-6">

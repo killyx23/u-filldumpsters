@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -245,7 +244,16 @@ function BookingConfirmation() {
                   <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
                    <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
                    {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
-                  <ConfirmationLine icon={<DollarSign className="h-6 w-6" />} label="Total Amount Paid" value={`$${total_price.toFixed(2)}`} />
+                  <div className="flex items-center py-3">
+                    <div className="text-yellow-400 mr-4 flex-shrink-0"><DollarSign className="h-6 w-6" /></div>
+                    <div>
+                      <p className="font-semibold text-blue-100">Total Amount Paid</p>
+                      <div className="flex items-baseline">
+                        <p className="break-words text-white">${total_price.toFixed(2)}</p>
+                        <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
       
                 <p className="text-blue-200 mb-8">

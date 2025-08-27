@@ -1,5 +1,4 @@
-
-    import React from 'react';
+import React from 'react';
     import { Button } from '@/components/ui/button';
     import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
     import { Minus, Plus } from 'lucide-react';
@@ -49,4 +48,3 @@
             </div>
         );
     };
-  
