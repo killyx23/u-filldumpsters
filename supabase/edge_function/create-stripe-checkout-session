@@ -13,8 +13,8 @@ Deno.serve(async (req)=>{
   }
   try {
     const { totalPrice, planName, customerEmail, customerName, success_url, cancel_url, bookingId } = await req.json();
-    if (!success_url || !cancel_url || !bookingId) {
-      throw new Error("Success URL, Cancel URL, and Booking ID are required.");
+    if (!totalPrice || !planName || !customerEmail || !customerName || !success_url || !cancel_url || !bookingId) {
+      throw new Error("Missing one or more required parameters for checkout session creation.");
     }
     let stripeCustomer;
     const existingCustomers = await stripe.customers.list({
@@ -29,12 +29,17 @@ Deno.serve(async (req)=>{
         name: customerName
       });
     }
-    // Link Stripe customer ID to our DB customer
-    const { data: dbCustomer } = await supabase.from('customers').select('id').eq('email', customerEmail).single();
-    if (dbCustomer) {
-      await supabase.from('customers').update({
+    const { data: dbCustomer, error: customerFetchError } = await supabase.from('bookings').select('customers!inner(id)').eq('id', bookingId).single();
+    if (customerFetchError) throw new Error(`Could not find customer for booking ${bookingId}: ${customerFetchError.message}`);
+    if (dbCustomer && dbCustomer.customers) {
+      const { error: customerUpdateError } = await supabase.from('customers').update({
         stripe_customer_id: stripeCustomer.id
-      }).eq('id', dbCustomer.id);
+      }).eq('id', dbCustomer.customers.id);
+      if (customerUpdateError) {
+        console.warn(`Could not update customer ${dbCustomer.customers.id} with stripe_customer_id: ${customerUpdateError.message}`);
+      }
+    } else {
+      console.warn(`Could not find associated DB customer for booking ${bookingId} to update Stripe ID.`);
     }
     const session = await stripe.checkout.sessions.create({
       payment_method_types: [
@@ -59,6 +64,10 @@ Deno.serve(async (req)=>{
       client_reference_id: bookingId.toString(),
       metadata: {
         booking_id: bookingId.toString()
+      },
+      customer_update: {
+        address: 'auto',
+        name: 'auto'
       }
     });
     return new Response(JSON.stringify({
@@ -73,7 +82,7 @@ Deno.serve(async (req)=>{
   } catch (error) {
     console.error("Stripe session creation error:", error);
     return new Response(JSON.stringify({
-      error: error.message
+      error: `Failed to create Stripe session: ${error.message}`
     }), {
       headers: {
         ...corsHeaders,
