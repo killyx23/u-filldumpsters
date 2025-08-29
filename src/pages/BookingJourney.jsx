@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+    import React, { useState, useEffect } from 'react';
     import { AnimatePresence } from 'framer-motion';
     import { loadStripe } from '@stripe/stripe-js';
     import { Elements } from '@stripe/react-stripe-js';
@@ -13,8 +14,10 @@ import React, { useState } from 'react';
     import { PaymentPage } from '@/components/PaymentPage';
     import { UserAgreement } from '@/components/UserAgreement';
     import { cn } from '@/lib/utils';
+    import { Loader2 } from 'lucide-react';
     
-    const stripePromise = loadStripe("pk_test_51RitdJQRQGuzCKNtr6a8Yw88AxUgKFInAPc17jzwYZtaueINdqFBSh8J0HAijDL3kLq5VEvrYhA30b9sBDvOi9PP00dTRFDisG");
+    
+const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBBbSQ9zxPaxMaBaizd1gteqQkA1heNW84b4V08gttanJuCj4Q77pr00FWtGRp28");
 
     const initialBookingData = {
       name: '', email: '', phone: '', street: '', city: '', state: '', zip: '',
@@ -65,8 +68,48 @@ import React, { useState } from 'react';
       const [showAgreement, setShowAgreement] = useState(false);
       const [agreementAccepted, setAgreementAccepted] = useState(false);
       const [bookingId, setBookingId] = useState(null);
-      
+      const [serviceAvailability, setServiceAvailability] = useState(null);
+      const [loadingAvailability, setLoadingAvailability] = useState(true);
+
+      useEffect(() => {
+        const fetchServicesAvailability = async () => {
+          setLoadingAvailability(true);
+          try {
+            const { data, error } = await supabase
+              .from('service_availability')
+              .select('service_id, is_available');
+
+            if (error) {
+              throw error;
+            }
+
+            const availabilityStatus = dumpsterPlans.reduce((acc, plan) => {
+              const serviceAvailabilities = data.filter(d => d.service_id === plan.id);
+              const isAvailable = serviceAvailabilities.length > 0 && serviceAvailabilities.some(d => d.is_available);
+              acc[plan.id] = isAvailable;
+              return acc;
+            }, {});
+
+            setServiceAvailability(availabilityStatus);
+          } catch (error) {
+            toast({ title: "Could not fetch service status", description: error.message, variant: "destructive" });
+          } finally {
+            setLoadingAvailability(false);
+          }
+        };
+
+        fetchServicesAvailability();
+      }, []);
+
       const handlePlanSelect = (plan) => {
+        if (!serviceAvailability?.[plan.id]) {
+          toast({
+            title: "Service Unavailable",
+            description: "This service is temporarily unavailable for booking.",
+            variant: "destructive"
+          });
+          return;
+        }
         setSelectedPlan(plan);
         setBookingData(initialBookingData);
         setAgreementAccepted(false);
@@ -134,7 +177,9 @@ import React, { useState } from 'react';
                 })
                 .eq('id', data.customer_id);
 
-              if (customerUpdateError) throw customerUpdateError;
+              if (customerUpdateError) {
+                  console.warn("Could not update customer with license info, but proceeding:", customerUpdateError);
+              }
           }
           
           setBookingId(data.id);
@@ -166,9 +211,18 @@ import React, { useState } from 'react';
       };
 
       const renderStep = () => {
+        if (loadingAvailability) {
+          return (
+            <div className="flex flex-col items-center justify-center h-[50vh]">
+              <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
+              <p className="mt-4 text-xl">Loading Services...</p>
+            </div>
+          );
+        }
+
         switch (step) {
           case 0:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} serviceAvailability={serviceAvailability} />;
           case 1:
             return (
               <BookingForm
@@ -206,7 +260,7 @@ import React, { useState } from 'react';
               </Elements>
             );
           default:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} serviceAvailability={serviceAvailability} />;
         }
       };
 
@@ -231,3 +285,4 @@ import React, { useState } from 'react';
         </div>
       );
     }
+  

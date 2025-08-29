@@ -23,7 +23,7 @@ function BookingConfirmation() {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get('session_id');
   const [booking, setBooking] = useState(null);
-  const [status, setStatus] = useState('loading'); // loading, success, error, pending
+  const [status, setStatus] = useState('loading');
   const receiptRef = useRef();
 
   const handlePrint = useReactToPrint({
@@ -31,97 +31,66 @@ function BookingConfirmation() {
     documentTitle: `U-Fill-Receipt-${booking?.id || 'booking'}`,
   });
 
-  const finalizeBooking = useCallback(async (bookingId) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('finalize-booking', {
-        body: { bookingId },
-      });
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
-      // Re-fetch the fully finalized booking data to display
-      const { data: finalBooking, error: fetchError } = await supabase
-        .from('bookings')
-        .select(`*, customers!inner(*), stripe_payment_info!inner(*)`)
-        .eq('id', bookingId)
-        .single();
-      
-      if(fetchError) throw fetchError;
-      
-      setBooking(finalBooking);
-      setStatus('success');
-      return 'success';
-
-    } catch (err) {
-      console.error("Error finalizing booking:", err);
-      toast({ title: "Finalization Error", description: `There was a problem finalizing your booking details. Please contact support. Error: ${err.message}`, variant: "destructive", duration: 30000 });
-      return 'error';
-    }
-  }, []);
-
-  const pollForWebhookUpdate = useCallback(async () => {
+  const fetchBookingDetails = useCallback(async (sessionId, attempt = 1) => {
     if (!sessionId) {
       setStatus('error');
-      toast({ title: "Missing Payment Session", description: "Cannot find booking confirmation details.", variant: "destructive", duration: 30000 });
-      return { status: 'error' };
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('id, status, stripe_payment_info!inner(stripe_payment_intent_id)')
-        .eq('stripe_payment_info.stripe_checkout_session_id', sessionId)
-        .maybeSingle();
-      
-      if (error) {
-        console.error("Polling error:", error);
-        return { status: 'pending' };
-      }
-
-      if (data && data.status === 'awaiting_processing' && data.stripe_payment_info) {
-        return { status: 'ready_to_finalize', bookingId: data.id };
-      }
-      
-      return { status: 'pending' };
-
-    } catch (err) {
-      console.error("Error in polling process:", err);
-      toast({ title: "Polling Error", description: err.message, variant: "destructive", duration: 30000 });
-      return { status: 'error' };
-    }
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!sessionId) {
-      setStatus('error');
+      toast({ title: "Missing Payment Session", description: "Cannot find booking confirmation details.", variant: "destructive" });
       return;
     }
 
-    let attempts = 0;
-    const maxAttempts = 15; // Poll for 75 seconds (15 * 5s)
-    let intervalId;
-
-    const poll = async () => {
-      attempts++;
-      const result = await pollForWebhookUpdate();
+    try {
+      // First, verify the session status with Stripe
+      const { data: sessionStatus, error: sessionStatusError } = await supabase.functions.invoke('get-session-status', { body: { sessionId } });
       
-      if (result.status === 'ready_to_finalize') {
-        clearInterval(intervalId);
-        setStatus('finalizing');
-        finalizeBooking(result.bookingId);
-      } else if (attempts >= maxAttempts) {
-        clearInterval(intervalId);
-        setStatus('error');
-        toast({ title: "Confirmation Timed Out", description: "We received your payment, but there was a delay processing your booking. Please check your email for a confirmation or contact support.", variant: "destructive", duration: 30000 });
+      if (sessionStatusError || sessionStatus?.payment_status !== 'paid') {
+          if (attempt < 8) {
+              console.log(`Attempt ${attempt}: Payment not yet confirmed for session ${sessionId}. Retrying...`);
+              setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 1500 * attempt);
+              return;
+          } else {
+              throw new Error("Payment could not be confirmed with Stripe.");
+          }
       }
-    };
-    
-    setStatus('loading');
-    poll(); // Initial call
-    intervalId = setInterval(poll, 5000); 
 
-    return () => clearInterval(intervalId);
-  }, [sessionId, pollForWebhookUpdate, finalizeBooking]);
+      // Once payment is confirmed, try to fetch the booking details from our DB
+      const { data: bookingData, error: bookingError } = await supabase.functions.invoke('get-booking-by-session', {
+        body: { sessionId }
+      });
+      
+      if (bookingError || (bookingData && bookingData.error)) {
+        const errorMessage = (bookingData && bookingData.error) || bookingError.message;
+        // If booking not found AFTER payment is confirmed, it means webhook is just slow. Let's retry.
+        if (errorMessage.includes('Could not find a booking') && attempt < 12) { // Allow more attempts for this
+          console.log(`Attempt ${attempt}: Payment confirmed, but booking data not yet available for session ${sessionId}. Retrying...`);
+          setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 1500 * attempt);
+        } else {
+          throw new Error(errorMessage);
+        }
+      } else if (bookingData.booking) {
+        setBooking(bookingData.booking);
+        setStatus('success');
+      } else {
+        throw new Error("Invalid response format from server.");
+      }
+    } catch (err) {
+      console.error("Error fetching booking details:", err);
+      setStatus('error');
+      toast({
+        title: "Could Not Load Confirmation",
+        description: "There was a problem loading your booking details. Please check your email or contact support.",
+        variant: "destructive",
+        duration: 30000
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchBookingDetails(sessionId);
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [sessionId, fetchBookingDetails]);
 
   const renderContent = () => {
     switch (status) {
@@ -129,20 +98,11 @@ function BookingConfirmation() {
         return (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
             <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
-            <p className="text-white text-2xl mt-4">Confirming payment with Stripe...</p>
+            <p className="text-white text-2xl mt-4">Finalizing your booking...</p>
             <p className="text-blue-200 mt-2">This may take a moment. Please don't refresh the page.</p>
           </div>
         );
-      case 'finalizing':
-         return (
-           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
-            <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
-            <h1 className="text-white text-3xl mt-4 font-bold">Finalizing Your Booking</h1>
-            <p className="text-blue-200 mt-2 max-w-md">Payment confirmed! We're just getting the last few details in order and sending your confirmation email.</p>
-          </div>
-        );
       case 'error':
-      case 'timeout':
         return (
            <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] text-center">
             <XCircle className="h-16 w-16 text-red-500" />

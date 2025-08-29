@@ -2,6 +2,7 @@ import React from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 
 const faqData = [
   {
@@ -89,29 +90,32 @@ const FaqPage = () => {
                 <title>FAQ - U-Fill Dumpsters</title>
                 <meta name="description" content="Find answers to frequently asked questions about our dumpster rental services, pricing, allowed materials, and booking process." />
             </Helmet>
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="container mx-auto max-w-4xl py-16 px-4"
-            >
-                <div className="text-center mb-12">
-                    <h1 className="text-4xl font-bold text-yellow-400 mb-2">Frequently Asked Questions</h1>
-                    <p className="text-lg text-blue-200">Your questions, answered.</p>
-                </div>
-                
-                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl">
-                    {faqData.map((item, index) => (
-                        <FaqItem
-                            key={index}
-                            q={item.question}
-                            a={item.answer}
-                            isOpen={openIndex === index}
-                            onClick={() => handleClick(index)}
-                        />
-                    ))}
-                </div>
-            </motion.div>
+            <div className="relative">
+                <BackButton className="absolute top-4 left-4 z-20" />
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="container mx-auto max-w-4xl py-16 px-4"
+                >
+                    <div className="text-center mb-12">
+                        <h1 className="text-4xl font-bold text-yellow-400 mb-2">Frequently Asked Questions</h1>
+                        <p className="text-lg text-blue-200">Your questions, answered.</p>
+                    </div>
+                    
+                    <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl">
+                        {faqData.map((item, index) => (
+                            <FaqItem
+                                key={index}
+                                q={item.question}
+                                a={item.answer}
+                                isOpen={openIndex === index}
+                                onClick={() => handleClick(index)}
+                            />
+                        ))}
+                    </div>
+                </motion.div>
+            </div>
         </>
     );
 };

@@ -1,24 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, LogIn } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
 
 const CustomerLogin = () => {
   const [customerId, setCustomerId] = useState('');
   const [phone, setPhone] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { session, user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, customerPortalLogin } = useAuth();
   const navigate = useNavigate();
-  const { toast } = useToast();
 
   useEffect(() => {
-    // If user is already logged in (and not an admin), redirect to portal
     if (!authLoading && user && !user.user_metadata?.is_admin) {
       navigate('/portal');
     }
@@ -26,38 +22,12 @@ const CustomerLogin = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setIsSubmitting(true);
     
-    try {
-      const { data, error } = await supabase.functions.invoke('customer-portal-login', {
-        body: { customerId, phone },
-      });
+    await customerPortalLogin(customerId, phone);
 
-      if (error) throw new Error(error.message);
-
-      if (data.error) {
-        toast({
-          variant: "destructive",
-          title: "Login Failed",
-          description: data.error,
-        });
-      } else {
-        // The AuthProvider's onAuthStateChange will handle setting the session
-        // and trigger the useEffect to navigate to the portal.
-        toast({
-          title: "Login Successful",
-          description: "Redirecting to your portal...",
-        });
-      }
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Login Failed",
-        description: error.message || 'An unexpected error occurred. Please try again.',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+    setIsSubmitting(false);
   };
 
   return (
@@ -100,8 +70,8 @@ const CustomerLogin = () => {
             />
           </div>
           <div>
-            <Button type="submit" disabled={isSubmitting} className="w-full py-3 text-lg font-semibold">
-              {isSubmitting ? (
+            <Button type="submit" disabled={isSubmitting || authLoading} className="w-full py-3 text-lg font-semibold">
+              {isSubmitting || authLoading ? (
                 <Loader2 className="mr-2 h-6 w-6 animate-spin" />
               ) : (
                 <LogIn className="mr-2 h-5 w-5" />

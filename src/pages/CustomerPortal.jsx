@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { useNavigate } from 'react-router-dom';
+import BackButton from '@/components/BackButton';
 
 const Section = ({ title, icon, children }) => (
     <motion.div
@@ -74,31 +75,20 @@ export default function CustomerPortal() {
         }
 
         setLoading(true);
-
         try {
-            const { data: customer, error: customerError } = await supabase
-                .from('customers')
-                .select('*')
-                .eq('id', customerDbId)
-                .single();
+            const { data, error } = await supabase.functions.invoke('get-customer-details', {
+                body: { customerId: customerDbId }
+            });
 
-            if (customerError) throw customerError;
+            if (error) throw new Error(error.message);
+            if (data.error) throw new Error(data.error);
 
-            const { data: bookings, error: bookingsError } = await supabase
-                .from('bookings')
-                .select('*')
-                .eq('customer_id', customer.id)
-                .order('created_at', { ascending: false });
-            if (bookingsError) throw bookingsError;
+            setCustomerData({
+                ...data.customer,
+                bookings: data.bookings || [],
+                notes: data.notes || [],
+            });
 
-            const { data: notes, error: notesError } = await supabase
-                .from('customer_notes')
-                .select('*')
-                .eq('customer_id', customer.id)
-                .order('created_at', { ascending: false });
-            if (notesError) throw notesError;
-
-            setCustomerData({ ...customer, bookings, notes });
         } catch (error) {
             toast({ title: "Error loading portal data", description: error.message, variant: "destructive" });
         } finally {
@@ -131,7 +121,7 @@ export default function CustomerPortal() {
         } else {
             toast({ title: "Note added successfully!" });
             setNewNote('');
-            fetchData(); // Refresh data
+            fetchData();
         }
         setIsSubmittingNote(false);
     };
@@ -141,7 +131,6 @@ export default function CustomerPortal() {
         if (!file) return;
 
         setIsUploading(true);
-        // Use the database customer ID for the folder path to be consistent
         const filePath = `${customerData.id}/licenses/${Date.now()}-${file.name}`;
         
         const { error: uploadError } = await supabase.storage
@@ -151,9 +140,9 @@ export default function CustomerPortal() {
         if (uploadError) {
             toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
         } else {
-            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+            const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
             const existingUrls = customerData.license_image_urls || [];
-            const newImage = { url: publicUrl, path: filePath, name: file.name, uploadedAt: new Date().toISOString() };
+            const newImage = { url: data.publicUrl, path: filePath, name: file.name, uploadedAt: new Date().toISOString() };
             const updatedUrls = [...existingUrls, newImage];
 
             const { error: dbError } = await supabase.from('customers').update({ license_image_urls: updatedUrls }).eq('id', customerData.id);
@@ -180,7 +169,7 @@ export default function CustomerPortal() {
             document.body.removeChild(link);
             URL.revokeObjectURL(link.href);
         } catch (error) {
-            toast({ title: "Download Failed", description: "This may be due to new storage policies. Please contact support if this issue persists.", variant: "destructive" });
+            toast({ title: "Download Failed", description: error.message, variant: "destructive" });
         }
     };
 
@@ -193,8 +182,9 @@ export default function CustomerPortal() {
     }
 
     return (
-        <div className="container mx-auto py-12 px-4">
-            <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
+        <div className="container mx-auto py-12 px-4 relative">
+             <BackButton className="absolute top-4 left-4 z-20" />
+            <div className="flex flex-wrap justify-between items-center mb-8 gap-4 pt-12 md:pt-0">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-bold text-white">Welcome, {customerData.name}</h1>
                     <p className="text-blue-200">Customer ID: {customerData.customer_id_text}</p>
@@ -242,7 +232,7 @@ export default function CustomerPortal() {
                         {customerData.license_image_urls && customerData.license_image_urls.length > 0 ? (
                            customerData.license_image_urls.map((img, i) => (
                                 <div key={i} className="relative group aspect-video">
-                                     <img  class="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src="https://images.unsplash.com/photo-1595872018818-97555653a011" />
+                                     <img  className="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src={img.url} />
                                      <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
                                         <Button size="sm" onClick={() => handleDownload(img.path, img.name)}><Download className="h-4 w-4 mr-2"/> Download</Button>
                                     </div>
