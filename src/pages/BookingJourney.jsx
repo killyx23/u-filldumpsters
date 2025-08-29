@@ -14,7 +14,8 @@ import React, { useState } from 'react';
     import { UserAgreement } from '@/components/UserAgreement';
     import { cn } from '@/lib/utils';
     
-    const stripePromise = loadStripe("pk_test_51RitdJQRQGuzCKNtr6a8Yw88AxUgKFInAPc17jzwYZtaueINdqFBSh8J0HAijDL3kLq5VEvrYhA30b9sBDvOi9PP00dTRFDisG");
+    
+const stripePromise = loadStripe("REDACTED_STRIPE_PUBLISHABLE_KEY");
 
     const initialBookingData = {
       name: '', email: '', phone: '', street: '', city: '', state: '', zip: '',
@@ -134,7 +135,9 @@ import React, { useState } from 'react';
                 })
                 .eq('id', data.customer_id);
 
-              if (customerUpdateError) throw customerUpdateError;
+              if (customerUpdateError) {
+                  console.warn("Could not update customer with license info, but proceeding:", customerUpdateError);
+              }
           }
           
           setBookingId(data.id);

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { Loader2, Save, Ban, AlertTriangle, Truck, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
+import { Loader2, Save, Ban, AlertTriangle, Truck, Sun, Cloud, CloudRain, Snowflake, ChevronDown, ChevronUp } from 'lucide-react';
 import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval, startOfMonth, isValid } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { motion, AnimatePresence } from 'framer-motion';
 
 const services = [
     { id: 1, name: "16yd Dumpster Rental" },
@@ -31,7 +32,11 @@ const WeatherIcon = ({ condition }) => {
 
 const ServiceAvailabilityCard = ({ service, availability, onAvailabilityChange, onSaveChanges }) => {
     const daysOfWeek = useMemo(() => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], []);
-    const serviceAvail = availability.filter(a => a.service_id === service.id);
+    const [expandedDay, setExpandedDay] = useState(null);
+
+    const toggleDay = (index) => {
+        setExpandedDay(expandedDay === index ? null : index);
+    };
 
     return (
         <div className="bg-white/5 p-6 rounded-2xl shadow-lg border border-white/10 h-full flex flex-col">
@@ -39,33 +44,48 @@ const ServiceAvailabilityCard = ({ service, availability, onAvailabilityChange, 
                 <Truck className="h-6 w-6 text-yellow-400" />
                 <h3 className="text-xl font-bold text-yellow-400 ml-3">{service.name}</h3>
             </div>
-            <div className="flex-grow space-y-4 overflow-y-auto pr-2">
+            <div className="flex-grow space-y-2 overflow-y-auto pr-2">
                 {daysOfWeek.map((dayName, index) => {
-                    const dayData = serviceAvail.find(d => d.day_of_week === index) || {
+                    const dayData = availability.find(d => d.service_id === service.id && d.day_of_week === index) || {
                         day_of_week: index, is_available: false, delivery_start_time: '08:00', delivery_end_time: '10:00',
                         pickup_start_time: '08:00', pickup_end_time: '10:00',
                     };
+                    const isExpanded = expandedDay === index;
+
                     return (
-                        <div key={index} className="bg-white/10 p-3 rounded-md">
-                            <div className="flex items-center justify-between">
+                        <div key={index} className="bg-white/10 p-3 rounded-md transition-all duration-300">
+                            <div className="flex items-center justify-between cursor-pointer" onClick={() => toggleDay(index)}>
                                 <Label className="text-lg font-semibold">{dayName}</Label>
-                                <div className="flex items-center gap-2">
-                                    <Switch id={`available-${service.id}-${index}`} checked={dayData.is_available} onCheckedChange={(c) => onAvailabilityChange(service.id, index, 'is_available', c)} />
-                                    <Label htmlFor={`available-${service.id}-${index}`}>{dayData.is_available ? "Open" : "Closed"}</Label>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                        <Switch id={`available-${service.id}-${index}`} checked={dayData.is_available} onCheckedChange={(c) => onAvailabilityChange(service.id, index, 'is_available', c)} />
+                                        <Label htmlFor={`available-${service.id}-${index}`}>{dayData.is_available ? "Open" : "Closed"}</Label>
+                                    </div>
+                                    {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                                 </div>
                             </div>
-                            {dayData.is_available && (
-                                <div className="mt-4 space-y-3 text-sm">
-                                    <p className="font-semibold text-blue-200">Delivery/Pickup Window</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <Input type="time" value={dayData.delivery_start_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_start_time', e.target.value)} className="bg-white/20"/>
-                                        <Input type="time" value={dayData.delivery_end_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_end_time', e.target.value)} className="bg-white/20"/>
+                            <AnimatePresence>
+                            {isExpanded && dayData.is_available && (
+                                <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    transition={{ duration: 0.3 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="mt-4 pt-4 border-t border-white/20 space-y-3 text-sm">
+                                        <p className="font-semibold text-blue-200">Delivery/Pickup Window</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <Input type="time" value={dayData.delivery_start_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_start_time', e.target.value)} className="bg-white/20"/>
+                                            <Input type="time" value={dayData.delivery_end_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_end_time', e.target.value)} className="bg-white/20"/>
+                                        </div>
+                                        <div className="text-right mt-2">
+                                            <Button onClick={() => onSaveChanges(dayData)} size="sm"><Save className="mr-2 h-4 w-4" /> Save Changes</Button>
+                                        </div>
                                     </div>
-                                    <div className="text-right mt-2">
-                                        <Button onClick={() => onSaveChanges(dayData)} size="sm"><Save className="mr-2 h-4 w-4" /> Save</Button>
-                                    </div>
-                                </div>
+                                </motion.div>
                             )}
+                            </AnimatePresence>
                         </div>
                     )
                 })}

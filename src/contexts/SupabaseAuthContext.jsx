@@ -17,24 +17,31 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    const getSessionAndValidate = async () => {
-      const { data: { session: initialSession } } = await supabase.auth.getSession();
+  const getSessionAndValidate = useCallback(async () => {
+    const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.error("Error fetching session:", sessionError);
+      handleSession(null);
+      return;
+    }
 
-      if (initialSession) {
-        const { error } = await supabase.auth.getUser();
-        if (error) {
-          console.error("Invalid session detected on load, signing out.", error);
-          await supabase.auth.signOut();
-          handleSession(null);
-        } else {
-          handleSession(initialSession);
-        }
+    if (initialSession) {
+      const { data: { user: authedUser }, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error("Invalid session detected, signing out.", error);
+        await supabase.auth.signOut();
+        handleSession(null);
       } else {
-        setLoading(false);
+        handleSession({ ...initialSession, user: authedUser });
       }
-    };
+    } else {
+      handleSession(null);
+    }
+  }, [handleSession]);
 
+  useEffect(() => {
+    setLoading(true);
     getSessionAndValidate();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -46,7 +53,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [handleSession]);
+  }, [getSessionAndValidate]);
 
   const signUp = useCallback(async (email, password, options) => {
     const { error } = await supabase.auth.signUp({
@@ -82,6 +89,35 @@ export const AuthProvider = ({ children }) => {
 
     return { error };
   }, [toast]);
+  
+  const customerPortalLogin = useCallback(async (customerId, phone) => {
+      const { data, error } = await supabase.functions.invoke('customer-portal-login', {
+        body: { customerId, phone },
+      });
+
+      if (error || (data && data.error)) {
+        const errorMessage = (data && data.error) || error.message || 'An unexpected error occurred.';
+        toast({
+          variant: "destructive",
+          title: "Login Failed",
+          description: errorMessage,
+        });
+        return { error: errorMessage };
+      }
+      
+      if (data.session) {
+        const { error: sessionError } = await supabase.auth.setSession(data.session);
+        if(sessionError) {
+          toast({ variant: "destructive", title: "Login Failed", description: "Could not establish a session." });
+        } else {
+          toast({ title: "Login Successful", description: "Redirecting to your portal..." });
+        }
+      } else {
+         toast({ variant: "destructive", title: "Login Failed", description: "Could not establish a session." });
+      }
+      return { data };
+  }, [toast]);
+
 
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
@@ -103,8 +139,9 @@ export const AuthProvider = ({ children }) => {
     loading,
     signUp,
     signIn,
+    customerPortalLogin,
     signOut,
-  }), [user, session, loading, signUp, signIn, signOut]);
+  }), [user, session, loading, signUp, signIn, customerPortalLogin, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

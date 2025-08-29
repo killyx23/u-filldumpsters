@@ -5,10 +5,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { Checkbox } from "@/components/ui/checkbox";
     import { Calendar } from '@/components/ui/calendar';
     import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-    import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
     import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
     import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-    import { format, startOfDay, isBefore, isSameDay, parseISO, startOfMonth, endOfMonth, formatISO } from 'date-fns';
+    import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid } from 'date-fns';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
 
@@ -55,15 +54,26 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
         try {
           const { data, error } = await supabase.functions.invoke('get-availability', {
-            body: { serviceId: plan.id, startDate, endDate, fetchBookings: false }
+            body: { serviceId: plan.id, startDate, endDate }
           });
           
-          if (error) throw new Error(`Failed to send request to the edge function: ${error.message}`);
+          if (error) {
+              let errorMsg = `Function invoke failed: ${error.message}`;
+              try {
+                  const contextError = await error.context.json();
+                  if (contextError.error) {
+                      errorMsg = contextError.error;
+                  }
+              } catch (e) {
+                // Ignore if context is not valid JSON
+              }
+              throw new Error(errorMsg);
+          }
           if(data.error) throw new Error(data.error);
           
           setAvailability(prev => ({ ...prev, ...data.availability }));
         } catch (error) {
-          toast({ title: "Error fetching availability", description: error.message, variant: "destructive" });
+          toast({ title: "Error fetching availability", description: error.message, variant: "destructive", duration: 30000 });
         } finally {
           setLoadingAvailability(false);
         }
@@ -74,10 +84,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
       }, [fetchAvailability, currentMonth]);
 
       const handleMonthChange = (month) => {
-        setCurrentMonth(startOfMonth(month));
+        const newMonth = startOfMonth(month);
+        if (newMonth.getMonth() !== currentMonth.getMonth() || newMonth.getFullYear() !== currentMonth.getFullYear()) {
+             setCurrentMonth(newMonth);
+        }
       };
 
-      const disabledDates = useMemo(() => ([{ before: startOfDay(new Date()) }, ...Object.entries(availability).filter(([, data]) => !data.available).map(([dateStr]) => parseISO(dateStr))]), [availability]);
+      const disabledDates = useMemo(() => ([{ before: startOfDay(new Date()) }, ...Object.entries(availability).filter(([, data]) => !data.available).map(([dateStr]) => parse(dateStr, 'yyyy-MM-dd', new Date()))]), [availability]);
 
       const timeSlots = useMemo(() => {
         const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
@@ -111,7 +124,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         if (!bookingData.dropOffDate || !bookingData.pickupDate) return plan.price;
         const dropOff = startOfDay(new Date(bookingData.dropOffDate));
         const pickup = startOfDay(new Date(bookingData.pickupDate));
-        if (isBefore(pickup, dropOff)) return plan.price;
+        if (!isValid(dropOff) || !isValid(pickup) || isBefore(pickup, dropOff)) return plan.price;
         const dayDiff = Math.max(0, Math.ceil((pickup.getTime() - dropOff.getTime()) / (1000 * 3600 * 24))) + 1;
         
         let price = plan.price;
@@ -167,7 +180,18 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         
         try {
             const { data, error } = await supabase.functions.invoke('verify-address-and-distance', { body: { address: fullAddress, serviceType: plan.id } });
-            if (error) throw new Error(error.message || 'An unknown error occurred during verification.');
+            if (error) {
+                let errorMsg = `Function invoke failed: ${error.message}`;
+                try {
+                    const contextError = await error.context.json();
+                    if (contextError.error) {
+                        errorMsg = contextError.error;
+                    }
+                } catch (e) {
+                  // Ignore
+                }
+                throw new Error(errorMsg);
+            }
             
             if (data.error) throw new Error(data.error);
 
@@ -186,7 +210,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 proceedToNextStep(false);
             }
         } catch(err) {
-            toast({ title: 'Verification Error', description: err.message, variant: 'destructive' });
+            toast({ title: 'Verification Error', description: err.message, variant: 'destructive', duration: 30000 });
             setIsVerifying(false);
         }
       };
@@ -260,4 +284,4 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     };
     const InputField = ({ icon, ...props }) => (<div className="relative flex items-center"><span className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-blue-300">{icon}</span><input {...props} className="w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-4 py-3 placeholder-blue-200" /></div>);
     const DatePickerField = ({ label, date, setDate, disabledDates, onMonthChange }) => (<div className="md:col-span-1"><label className="text-sm font-medium text-white mb-2 block">{label}</label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4"/>{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger><PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent></Popover></div>);
-    const TimeSlotPicker = ({ label, value, onValueChange, slots, disabled, loading }) => (<div className="md:col-span-1"><label className="text-sm font-medium text-white mb-2 block invisible">{label}</label><Select onValueChange={onValueChange} value={value} disabled={disabled || loading}><SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder="Select a time" /></SelectTrigger><SelectContent className="bg-gray-800 border-gray-700 text-white">{loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots && slots.length > 0 ? slots.map(slot => (<SelectItem key={slot} value={slot}>{format(new Date(`1970-01-01T${slot}`), 'h:mm a')}</SelectItem>)) : <SelectItem value="no-slots" disabled>No available slots</SelectItem>}</SelectContent></Select></div>);
+    const TimeSlotPicker = ({ label, value, onValueChange, slots, disabled, loading }) => (<div className="md:col-span-1"><label className="text-sm font-medium text-white mb-2 block invisible">{label}</label><Select onValueChange={onValueChange} value={value} disabled={disabled || loading}><SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder="Select a time" /></SelectTrigger><SelectContent className="bg-gray-800 border-gray-700 text-white">{loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots && slots.length > 0 ? slots.map(slot => (<SelectItem key={slot} value={slot}>{format(parse(slot, 'HH:mm', new Date()), 'h:mm a')}</SelectItem>)) : <SelectItem value="no-slots" disabled>No available slots</SelectItem>}</SelectContent></Select></div>);

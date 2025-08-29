@@ -22,9 +22,9 @@ import React, { useState, useEffect, useCallback } from 'react';
     };
 
     const equipmentMeta = [
-      { id: 'wheelbarrow', dbName: 'Wheelbarrow', label: 'Wheelbarrow', price: addonPrices.equipment.wheelbarrow, icon: <ShoppingCart className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false },
-      { id: 'handTruck', dbName: 'Hand Truck', label: 'Hand Truck', price: addonPrices.equipment.handTruck, icon: <Hammer className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false },
-      { id: 'gloves', dbName: 'Working Gloves', label: 'Working Gloves (Pair)', price: addonPrices.equipment.gloves, icon: <HardHat className="h-6 w-6 mr-3 text-yellow-400" />, quantity: true },
+      { id: 'wheelbarrow', dbId: 1, label: 'Wheelbarrow', price: addonPrices.equipment.wheelbarrow, icon: <ShoppingCart className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false },
+      { id: 'handTruck', dbId: 2, label: 'Hand Truck', price: addonPrices.equipment.handTruck, icon: <Hammer className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false },
+      { id: 'gloves', dbId: 3, label: 'Working Gloves (Pair)', price: addonPrices.equipment.gloves, icon: <HardHat className="h-6 w-6 mr-3 text-yellow-400" />, quantity: true },
     ];
 
     export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan }) => {
@@ -99,12 +99,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 
       const handleEquipmentQuantityChange = (itemId, newQuantity) => {
         setAddonsData(prev => {
+          const equipmentInfo = equipmentMeta.find(e => e.id === itemId);
+          if(!equipmentInfo) return prev;
+
           const existingItem = prev.equipment.find(item => item.id === itemId);
           if (newQuantity > 0) {
             if (existingItem) {
               return { ...prev, equipment: prev.equipment.map(item => item.id === itemId ? { ...item, quantity: newQuantity } : item) };
             } else {
-              return { ...prev, equipment: [...prev.equipment, { id: itemId, quantity: newQuantity }] };
+              return { ...prev, equipment: [...prev.equipment, { id: itemId, dbId: equipmentInfo.dbId, quantity: newQuantity }] };
             }
           } else {
             return { ...prev, equipment: prev.equipment.filter(item => item.id !== itemId) };
