@@ -29,6 +29,7 @@ create table public.bookings (
   verification_notes text null,
   refund_details jsonb null,
   is_manually_verified boolean not null default false,
+  was_verification_skipped boolean null default false,
   constraint bookings_pkey primary key (id),
   constraint bookings_customer_id_fkey foreign KEY (customer_id) references customers (id)
 ) TABLESPACE pg_default;

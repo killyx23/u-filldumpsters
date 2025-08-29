@@ -16,9 +16,13 @@ create table public.customers (
   license_image_urls jsonb null,
   has_incomplete_verification boolean null default false,
   admin_notes text null,
+  customer_id_text text null,
   constraint customers_pkey primary key (id),
   constraint customers_email_key unique (email),
   constraint customers_stripe_customer_id_key unique (stripe_customer_id)
 ) TABLESPACE pg_default;
 
 create index IF not exists idx_customers_user_id on public.customers using btree (id) TABLESPACE pg_default;
+
+create trigger before_customer_insert_generate_id BEFORE INSERT on customers for EACH row
+execute FUNCTION generate_customer_id ();
