@@ -59,28 +59,20 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
       });
 
       if (functionError) {
-        throw new Error(functionError.message);
-      }
-
-      if (!data.sessionId) {
-        throw new Error("Could not create Stripe session.");
+          let errorMsg = `Stripe session creation failed: ${functionError.message}`;
+          try {
+              const contextError = await functionError.context.json();
+              if (contextError.error) {
+                  errorMsg = contextError.error;
+              }
+          } catch(e) {
+            // Ignore
+          }
+          throw new Error(errorMsg);
       }
       
-      const { error: dbError } = await supabase
-        .from('stripe_payment_info')
-        .insert({
-          booking_id: bookingId,
-          stripe_checkout_session_id: data.sessionId
-        });
-        
-      if (dbError) {
-        console.error("Failed to save Stripe session ID to DB, but proceeding to checkout:", dbError);
-        toast({
-          title: "Database logging issue",
-          description: "Could not save session info. Your payment will still be processed.",
-          variant: "destructive",
-          duration: 8000
-        });
+      if (!data || !data.sessionId) {
+        throw new Error("Could not create Stripe session.");
       }
       
       const { error: stripeError } = await stripe.redirectToCheckout({ sessionId: data.sessionId });
