@@ -1,0 +1,96 @@
+import { corsHeaders } from "./cors.ts";
+import { createClient } from 'npm:@supabase/supabase-js@2';
+const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+const supabaseUserClient = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_ANON_KEY'));
+Deno.serve(async (req)=>{
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders
+    });
+  }
+  try {
+    const { customerId, phone } = await req.json();
+    if (!customerId || !phone) {
+      throw new Error("Customer ID and phone number are required.");
+    }
+    const sanitizedPhone = phone.replace(/\D/g, '');
+    const { data: customer, error: customerError } = await supabaseAdmin.from('customers').select('id, email, phone, name').eq('customer_id_text', customerId.toUpperCase()).single();
+    if (customerError || !customer) {
+      return new Response(JSON.stringify({
+        error: "Invalid credentials. Please check your Customer ID and phone number."
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        },
+        status: 401
+      });
+    }
+    const dbPhone = customer.phone.replace(/\D/g, '');
+    if (dbPhone !== sanitizedPhone) {
+      return new Response(JSON.stringify({
+        error: "Invalid credentials. Please check your Customer ID and phone number."
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        },
+        status: 401
+      });
+    }
+    const tempPassword = `portal-login-${Deno.env.get("SUPABASE_JWT_SECRET")}`;
+    const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers({
+      email: customer.email
+    });
+    if (listError) throw listError;
+    let authUser = users.length > 0 ? users[0] : null;
+    if (!authUser) {
+      const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: customer.email,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: {
+          is_admin: false,
+          full_name: customer.name,
+          customer_db_id: customer.id
+        }
+      });
+      if (createError) throw createError;
+      authUser = newUser.user;
+    } else {
+      await supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+        user_metadata: {
+          ...authUser.user_metadata,
+          customer_db_id: customer.id
+        },
+        password: tempPassword
+      });
+    }
+    const { data: signInData, error: signInError } = await supabaseUserClient.auth.signInWithPassword({
+      email: customer.email,
+      password: tempPassword
+    });
+    if (signInError) {
+      console.error("Sign-in error during portal login:", signInError);
+      throw new Error("Could not authenticate user. Please try again.");
+    }
+    return new Response(JSON.stringify(signInData), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 200
+    });
+  } catch (error) {
+    console.error("Customer portal login error:", error.message);
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 500
+    });
+  }
+});
