@@ -1,0 +1,133 @@
+import { corsHeaders } from "./cors.ts";
+import { Resend } from "npm:resend@3.2.0";
+const formatTime = (timeString)=>{
+  if (!timeString) return '';
+  try {
+    const [hour, minute] = timeString.split(':');
+    const date = new Date();
+    date.setHours(parseInt(hour, 10));
+    date.setMinutes(parseInt(minute, 10));
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch (e) {
+    return 'N/A';
+  }
+};
+Deno.serve(async (req)=>{
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders
+    });
+  }
+  try {
+    const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+    const { booking, customMessage } = await req.json();
+    const { customers: { name, email, phone, street, city, state, zip, customer_id_text }, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, plan, total_price, status: bookingStatus } = booking;
+    const formattedDropOff = new Date(drop_off_date).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    const formattedPickup = new Date(pickup_date).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    const formattedDropOffTime = formatTime(drop_off_time_slot);
+    const formattedPickupTime = formatTime(pickup_time_slot);
+    const fullAddress = `${street}, ${city}, ${state} ${zip}`;
+    const isPendingVerification = bookingStatus === 'pending_verification';
+    let rentalSpecificInfo = '';
+    if (plan.id === 2 && !isPendingVerification) {
+      rentalSpecificInfo = `
+            <p style="font-weight: bold;">Pickup Location:</p>
+            <p>227 W. Casi Way, Saratoga Springs, UT 84045</p>
+            <p style="font-weight: bold;">Rental Times:</p>
+            <p>Your rental is available for pickup at <strong>8:00 a.m.</strong> on the pickup date and must be returned by <strong>10:00 p.m.</strong> on the return date.</p>
+        `;
+    } else if (plan.id !== 2) {
+      rentalSpecificInfo = `
+            <p style="font-weight: bold;">Delivery Address:</p>
+            <p>${fullAddress}</p>
+        `;
+    }
+    const formattedPrice = typeof total_price === 'number' ? total_price.toFixed(2) : '0.00';
+    const subject = isPendingVerification ? "Your U-Fill Dumpsters Booking is on Hold" : "Your U-Fill Dumpsters Booking is Confirmed!";
+    const title = isPendingVerification ? "Booking on Hold" : "Booking Confirmed!";
+    const mainMessage = isPendingVerification ? `Thank you for your rental. Your account has been flagged for a manual review due to a lack of or incomplete information provided. Please contact us at (801) 810-8832 or email us at scheduling@u-filldumpsters.com to fix the missing information and finish your order so it can be scheduled.` : `Thank you for your booking with U-Fill Dumpsters. Your rental is scheduled and we're excited to serve you.`;
+    const { data, error } = await resend.emails.send({
+      from: "U-Fill Dumpsters <scheduling@u-filldumpsters.com>",
+      to: [
+        email
+      ],
+      subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; padding: 20px; border-radius: 8px;">
+          <h1 style="color: ${isPendingVerification ? '#d9534f' : '#1e3a8a'}; text-align: center;">${title}</h1>
+          <p>Hi ${name},</p>
+          <p>${mainMessage}</p>
+          
+          ${customMessage ? `
+          <div style="background-color: #f0f8ff; border-left: 4px solid #1e3a8a; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0; font-style: italic;">${customMessage}</p>
+          </div>
+          ` : ''}
+
+          <div style="background-color: #fefce8; border: 1px solid #fde047; padding: 15px; margin: 20px 0; border-radius: 8px;">
+              <h3 style="margin-top: 0; color: #ca8a04;">Customer Portal Login</h3>
+              <p>Use the following details to access your portal:</p>
+              <p><strong>Customer ID:</strong> <span style="font-family: monospace; background-color: #e5e7eb; padding: 2px 5px; border-radius: 4px;">${customer_id_text}</span></p>
+              <p><strong>Phone Number:</strong> The phone number you provided at checkout.</p>
+          </div>
+
+          <h2 style="color: #1e3a8a; border-bottom: 2px solid #eee; padding-bottom: 5px;">Your Booking Details:</h2>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px; font-weight: bold;">Service:</td><td style="padding: 8px;">${plan.name}</td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px; font-weight: bold;">${plan.id === 2 ? "Pickup" : "Drop-off"}:</td><td style="padding: 8px; ${isPendingVerification ? 'color: #d9534f; font-weight: bold;' : ''}">${isPendingVerification ? 'Pending Verification' : `${formattedDropOff} at ${formattedDropOffTime}`}</td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px; font-weight: bold;">${plan.id === 2 ? "Return" : "Pickup"}:</td><td style="padding: 8px; ${isPendingVerification ? 'color: #d9534f; font-weight: bold;' : ''}">${isPendingVerification ? 'Pending Verification' : `${formattedPickup} by ${formattedPickupTime}`}</td></tr>
+            <tr style="border-bottom: 1px solid #eee;"><td style="padding: 8px; font-weight: bold;">Total Price:</td><td style="padding: 8px;">$${formattedPrice}</td></tr>
+          </table>
+          
+          ${rentalSpecificInfo}
+
+          <p style="margin-top: 20px;">If you have any questions, feel free to reply to this email or contact us at (801) 810-8832.</p>
+          <p style="text-align: center; margin-top: 30px;"><strong>Best regards,<br/>The U-Fill Dumpsters Team</strong></p>
+        </div>
+      `
+    });
+    if (error) {
+      console.error({
+        error
+      });
+      return new Response(JSON.stringify({
+        error: error.message
+      }), {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        },
+        status: 500
+      });
+    }
+    return new Response(JSON.stringify(data), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 200
+    });
+  } catch (err) {
+    return new Response(String(err?.message ?? err), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 500
+    });
+  }
+});
