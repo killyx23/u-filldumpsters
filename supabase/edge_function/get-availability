@@ -2,9 +2,11 @@ import { corsHeaders } from "./cors.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { eachDayOfInterval, format, parse, isBefore, isSameDay, addHours, isValid, startOfDay } from 'npm:date-fns';
 import { toZonedTime } from 'npm:date-fns-tz';
+
 const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_ANON_KEY'));
 const TIME_ZONE = 'America/Denver';
 const DUMP_LOADER_SERVICE_ID = 2;
+
 const generateTimeSlots = (start, end, interval = 60)=>{
   if (!isValid(start) || !isValid(end) || isBefore(end, start)) {
     return [];
@@ -17,6 +19,15 @@ const generateTimeSlots = (start, end, interval = 60)=>{
   }
   return slots;
 };
+
+// NEW: helper for windows
+const generateWindow = (start, end)=>{
+  if (!isValid(start) || !isValid(end) || isBefore(end, start)) {
+    return [];
+  }
+  return [`${format(start, 'HH:mm')}-${format(end, 'HH:mm')}`];
+};
+
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -31,70 +42,103 @@ Deno.serve(async (req)=>{
     } catch (e) {
       throw new Error("Invalid JSON body provided.");
     }
+
     const { serviceId, startDate, endDate } = body;
     const serviceIdInt = parseInt(serviceId, 10);
     if (isNaN(serviceIdInt) || !startDate || !endDate) {
       throw new Error("Service ID, start date, and end date are required.");
     }
+
     const sDate = parse(startDate, 'yyyy-MM-dd', new Date());
     const eDate = parse(endDate, 'yyyy-MM-dd', new Date());
     if (!isValid(sDate) || !isValid(eDate) || isBefore(eDate, sDate)) {
       throw new Error("Invalid start or end date format.");
     }
-    const { data: unavailableDates, error: unavailError } = await supabase.from('unavailable_dates').select('date, service_id');
+
+    // DEBUG: show now vs MST
+    console.log("Now UTC:", new Date().toISOString());
+    const nowInMST = toZonedTime(new Date(), TIME_ZONE);
+    console.log("Now MST:", nowInMST.toISOString());
+
+    const { data: unavailableDates, error: unavailError } = await supabase
+      .from('unavailable_dates')
+      .select('date, service_id');
     if (unavailError) throw unavailError;
-    const unavailableDatesForService = new Set((unavailableDates || []).filter((d)=>d.service_id === serviceIdInt || d.service_id === null).map((d)=>d.date));
+
+    const unavailableDatesForService = new Set(
+      (unavailableDates || [])
+        .filter((d)=>d.service_id === serviceIdInt || d.service_id === null)
+        .map((d)=>d.date)
+    );
+
+    // handle dump loader special case
     if (serviceIdInt === DUMP_LOADER_SERVICE_ID) {
-      const { data: dumpLoaderBookings, error: dlBookingError } = await supabase.from('bookings').select('drop_off_date, pickup_date').eq('plan->>id', DUMP_LOADER_SERVICE_ID).in('status', [
-        'Confirmed',
-        'Delivered',
-        'flagged',
-        'waiting_to_be_returned',
-        'pending_payment'
-      ]);
+      const { data: dumpLoaderBookings, error: dlBookingError } = await supabase
+        .from('bookings')
+        .select('drop_off_date, pickup_date')
+        .eq('plan->>id', DUMP_LOADER_SERVICE_ID)
+        .in('status', [
+          'Confirmed',
+          'Delivered',
+          'flagged',
+          'waiting_to_be_returned',
+          'pending_payment'
+        ]);
       if (dlBookingError) throw dlBookingError;
       if (dumpLoaderBookings) {
         dumpLoaderBookings.forEach((booking)=>{
           const bookingStart = parse(booking.drop_off_date, 'yyyy-MM-dd', new Date());
           const bookingEnd = parse(booking.pickup_date, 'yyyy-MM-dd', new Date());
           if (isValid(bookingStart) && isValid(bookingEnd)) {
-            const bookingIntervalDays = eachDayOfInterval({
-              start: bookingStart,
-              end: bookingEnd
-            });
-            bookingIntervalDays.forEach((day)=>unavailableDatesForService.add(format(day, 'yyyy-MM-dd')));
+            const bookingIntervalDays = eachDayOfInterval({ start: bookingStart, end: bookingEnd });
+            bookingIntervalDays.forEach((day)=>
+              unavailableDatesForService.add(format(day, 'yyyy-MM-dd'))
+            );
           }
         });
       }
     }
-    const { data: serviceAvailability, error: serviceAvailError } = await supabase.from('service_availability').select('*').eq('service_id', serviceIdInt);
+
+    // pull weekly availability
+    const { data: serviceAvailability, error: serviceAvailError } = await supabase
+      .from('service_availability')
+      .select('*')
+      .eq('service_id', serviceIdInt);
     if (serviceAvailError) throw serviceAvailError;
+
     const serviceAvailMap = new Map();
     if (serviceAvailability) {
       for (const d of serviceAvailability){
         serviceAvailMap.set(d.day_of_week, d);
       }
     }
+
     const availabilityResult = {};
-    const intervalDays = eachDayOfInterval({
-      start: sDate,
-      end: eDate
-    });
-    const nowInMST = toZonedTime(new Date(), TIME_ZONE);
+    const intervalDays = eachDayOfInterval({ start: sDate, end: eDate });
+
     for (const day of intervalDays){
       const dayStr = format(day, 'yyyy-MM-dd');
-      const dayOfWeek = day.getUTCDay();
+
+      // IMPORTANT: interpret day in MST
+      const zonedDay = toZonedTime(day, TIME_ZONE);
+      const dayOfWeek = zonedDay.getDay(); // local day
+      console.log("Checking", dayStr, "-> local dayOfWeek:", dayOfWeek);
+
       const weeklyAvail = serviceAvailMap.get(dayOfWeek);
+
       if (unavailableDatesForService.has(dayStr) || !weeklyAvail || !weeklyAvail.is_available) {
         availabilityResult[dayStr] = {
           available: false,
           dropOffSlots: [],
-          pickupSlots: []
+          pickupSlots: [],
+          usesWindows: false
         };
         continue;
       }
+
       const dropOffStart = parse(`${dayStr}T${weeklyAvail.delivery_start_time || '00:00:00'}`, "yyyy-MM-dd'T'HH:mm:ss", new Date());
       const dropOffEnd = parse(`${dayStr}T${weeklyAvail.delivery_end_time || '00:00:00'}`, "yyyy-MM-dd'T'HH:mm:ss", new Date());
+
       let effectiveDropOffStart = dropOffStart;
       if (isSameDay(startOfDay(day), startOfDay(nowInMST))) {
         const oneHourFromNow = addHours(nowInMST, 1);
@@ -102,34 +146,39 @@ Deno.serve(async (req)=>{
           effectiveDropOffStart = oneHourFromNow;
         }
       }
-      const dropOffSlots = generateTimeSlots(effectiveDropOffStart, dropOffEnd);
+
+      // decide slots vs window
+      const usesWindows = !!weeklyAvail.uses_windows;
+      const dropOffSlots = usesWindows
+        ? generateWindow(effectiveDropOffStart, dropOffEnd)
+        : generateTimeSlots(effectiveDropOffStart, dropOffEnd);
+
       const pickupStart = parse(`${dayStr}T${weeklyAvail.pickup_start_time || '00:00:00'}`, "yyyy-MM-dd'T'HH:mm:ss", new Date());
       const pickupEnd = parse(`${dayStr}T${weeklyAvail.pickup_end_time || '00:00:00'}`, "yyyy-MM-dd'T'HH:mm:ss", new Date());
-      const pickupSlots = generateTimeSlots(pickupStart, pickupEnd);
+
+      const pickupSlots = usesWindows
+        ? generateWindow(pickupStart, pickupEnd)
+        : generateTimeSlots(pickupStart, pickupEnd);
+
       availabilityResult[dayStr] = {
         available: true,
         dropOffSlots,
-        pickupSlots
+        pickupSlots,
+        usesWindows
       };
     }
-    return new Response(JSON.stringify({
-      availability: availabilityResult
-    }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      },
+
+    return new Response(JSON.stringify({ availability: availabilityResult }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 200
     });
+
   } catch (error) {
     console.error("Get availability error:", error.message);
     return new Response(JSON.stringify({
       error: `An unexpected error occurred: ${error.message}`
     }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
       status: 500
     });
   }
