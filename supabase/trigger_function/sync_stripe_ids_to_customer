@@ -1,0 +1,23 @@
+
+DECLARE
+    customer_id_to_update BIGINT;
+BEGIN
+    -- Find the customer_id associated with the booking_id of the new payment info
+    SELECT b.customer_id
+    INTO customer_id_to_update
+    FROM public.bookings b
+    WHERE b.id = NEW.booking_id;
+
+    -- If a customer is found, update their record with the new Stripe IDs
+    IF customer_id_to_update IS NOT NULL THEN
+        UPDATE public.customers
+        SET
+            stripe_customer_id = COALESCE(NEW.stripe_customer_id, stripe_customer_id), -- Only update if new value is not null
+            stripe_payment_intent_id = NEW.stripe_payment_intent_id, -- Always update to latest
+            stripe_charge_id = NEW.stripe_charge_id -- Always update to latest
+        WHERE
+            id = customer_id_to_update;
+    END IF;
+
+    RETURN NEW;
+END;
