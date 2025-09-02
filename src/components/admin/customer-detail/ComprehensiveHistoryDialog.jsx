@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -96,6 +97,12 @@ export const ComprehensiveHistoryDialog = ({ isOpen, onOpenChange, customer, boo
                             <DetailItem icon={<AlertTriangle className={!customer.has_incomplete_verification ? "text-green-400" : "text-red-400"} />} label="Vehicle Info Complete" value={!customer.has_incomplete_verification ? 'Yes' : 'No (Flagged)'} />
                         </Section>
 
+                        <Section title="Stripe Payment IDs" icon={<Hash className="mr-2 h-5 w-5" />}>
+                            <DetailItem icon={<Hash />} label="Customer ID" value={customer.stripe_customer_id || 'N/A'} />
+                            <DetailItem icon={<Hash />} label="Last Payment Intent ID" value={customer.stripe_payment_intent_id || 'N/A'} />
+                            <DetailItem icon={<Hash />} label="Last Charge ID" value={customer.stripe_charge_id || 'N/A'} />
+                        </Section>
+
                         <Section title="Communication Log" icon={<FileText className="mr-2 h-5 w-5"/>} className="md:grid-cols-1">
                              <div className="bg-black/20 rounded-lg p-2 max-h-60 overflow-y-auto space-y-2">
                                 {notes && notes.length > 0 ? notes.map(note => <NoteCard key={note.id} note={note} />) : <p className="text-center text-blue-200 py-4">No notes found.</p>}
@@ -120,8 +127,7 @@ export const ComprehensiveHistoryDialog = ({ isOpen, onOpenChange, customer, boo
                                      <DetailItem icon={<CheckCircle className={booking.returned_at || booking.picked_up_at ? "text-green-400" : "text-gray-500"} />} label="Returned/Picked Up" value={booking.returned_at ? format(parseISO(booking.returned_at), 'Pp') : booking.picked_up_at ? format(parseISO(booking.picked_up_at), 'Pp') : 'N/A'} />
                                 </Section>
 
-                                 <Section title="Payment & Stripe IDs" icon={<Hash className="mr-2 h-5 w-5"/>}>
-                                     <DetailItem icon={<Hash />} label="Customer ID" value={paymentInfo?.stripe_customer_id || 'N/A'} />
+                                 <Section title="Booking-Specific Payment IDs" icon={<Hash className="mr-2 h-5 w-5"/>}>
                                      <DetailItem icon={<Hash />} label="Payment Intent ID" value={paymentInfo?.stripe_payment_intent_id || 'N/A'} />
                                      <DetailItem icon={<Hash />} label="Charge ID" value={paymentInfo?.stripe_charge_id || 'N/A'} />
                                 </Section>

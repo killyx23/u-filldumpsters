@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -123,7 +124,9 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                         <InfoRow icon={<Mail />} label="Email" value={editedCustomer.email} href={`mailto:${editedCustomer.email}`} />
                         <InfoRow icon={<Phone />} label="Phone" value={editedCustomer.phone} href={`tel:${editedCustomer.phone}`} />
                         <InfoRow icon={<Home />} label="Address" value={`${editedCustomer.street}, ${editedCustomer.city}, ${editedCustomer.state} ${editedCustomer.zip}`} />
-                        <InfoRow icon={<Hash />} label="Stripe ID" value={editedCustomer.stripe_customer_id || "Not Available"} />
+                        <InfoRow icon={<Hash />} label="Stripe Customer ID" value={editedCustomer.stripe_customer_id || "Not Available"} />
+                        <InfoRow icon={<Hash />} label="Last Payment Intent ID" value={editedCustomer.stripe_payment_intent_id || "Not Available"} />
+                        <InfoRow icon={<Hash />} label="Last Charge ID" value={editedCustomer.stripe_charge_id || "Not Available"} />
                     </div>
                 )}
             </div>

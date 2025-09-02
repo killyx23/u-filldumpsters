@@ -27,6 +27,7 @@ Deno.serve(async (req)=>{
     let body;
     try {
       body = await req.json();
+      console.log("Request body:", body);
     } catch (e) {
       throw new Error("Invalid JSON body provided.");
     }
