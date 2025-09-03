@@ -9,7 +9,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
     import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid } from 'date-fns';
     import { supabase } from '@/lib/customSupabaseClient';
-    import { toast } from '@/components/ui/use-toast';
+import { toast } from '@/components/ui/use-toast';
+
 
     const ImportantInfoIcon = () => {
       const [isOpen, setIsOpen] = useState(false);
@@ -72,9 +73,15 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
               }
               throw new Error(errorMsg);
           }
-          if(data.error) throw new Error(data.error);
+          if (data.error) throw new Error(data.error);
+          const normalized = {};
+          data.availability.forEach(entry => {
+            normalized[entry.date] = entry;
+          });
+
+          console.log("🔄 Normalized availability:", normalized);
           
-          setAvailability(prev => ({ ...prev, ...data.availability }));
+          setAvailability(prev => ({ ...prev, ...normalized }));
         } catch (error) {
           toast({ title: "Error fetching availability", description: error.message, variant: "destructive", duration: 30000 });
         } finally {
@@ -95,16 +102,28 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
       const disabledDates = useMemo(() => ([{ before: startOfDay(new Date()) }, ...Object.entries(availability).filter(([, data]) => !data.available).map(([dateStr]) => parse(dateStr, 'yyyy-MM-dd', new Date()))]), [availability]);
 
-      const timeSlots = useMemo(() => {
-        const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
-        const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
-        return {
-          dropOff: dropOffDateStr && availability[dropOffDateStr] ? availability[dropOffDateStr].dropOffSlots : [],
-          pickup: pickupDateStr && availability[pickupDateStr] ? availability[pickupDateStr].pickupSlots : [],
-          dropOffUsesWindows: dropOffDateStr && availability[dropOffDateStr] ? availability[dropOffDateStr].usesWindows : false,
-          pickupUsesWindows: pickupDateStr && availability[pickupDateStr] ? availability[pickupDateStr].usesWindows : false,
-        };
-      }, [bookingData.dropOffDate, bookingData.pickupDate, availability]);
+     const timeSlots = useMemo(() => {
+  const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
+  const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
+
+  console.log("📊 Availability state:", availability);
+  console.log("📅 dropOffDateStr:", dropOffDateStr, "pickupDateStr:", pickupDateStr);
+
+  return {
+    dropOff: dropOffDateStr && availability[dropOffDateStr] 
+      ? (availability[dropOffDateStr].drop_off_times || []) 
+      : [],
+    pickup: pickupDateStr && availability[pickupDateStr] 
+      ? (availability[pickupDateStr].pickup_times || []) 
+      : [],
+    dropOffUsesWindows: dropOffDateStr && availability[dropOffDateStr] 
+      ? availability[dropOffDateStr].usesWindows 
+      : false,
+    pickupUsesWindows: pickupDateStr && availability[pickupDateStr] 
+      ? availability[pickupDateStr].usesWindows 
+      : false,
+  };
+}, [bookingData.dropOffDate, bookingData.pickupDate, availability]);
 
       const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -269,9 +288,27 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4"><InputField icon={<MapPin />} type="text" name="city" placeholder="City" value={bookingData.city} onChange={handleInputChange} required /><InputField icon={<MapPin />} type="text" name="state" placeholder="State" value={bookingData.state} onChange={handleInputChange} required /><InputField icon={<MapPin />} type="text" name="zip" placeholder="ZIP Code" value={bookingData.zip} onChange={handleInputChange} required /></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <DatePickerField label={plan.id === 2 ? "Pickup Date & Time" : "Drop-off Date & Time"} date={bookingData.dropOffDate} setDate={(d) => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={handleMonthChange} />
-                    <TimeSlotPicker label="Time" value={bookingData.dropOffTimeSlot} onValueChange={(v) => handleTimeChange('dropOffTimeSlot', v)} slots={timeSlots.dropOff} useWindows={timeSlots.dropOffUsesWindows} disabled={!bookingData.dropOffDate} loading={isDropOffLoading} />
+                    <TimeSlotPicker
+                      label="Time"
+                      value={bookingData.dropOffTimeSlot}
+                      onValueChange={(v) => handleTimeChange('dropOffTimeSlot', v)}
+                      slots={timeSlots.dropOff}
+                      useWindows={timeSlots.dropOffUsesWindows}
+                      disabled={!bookingData.dropOffDate}
+                      loading={isDropOffLoading}
+                      dateStr={bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null} // ✅ pass date
+                    />
                     <DatePickerField label={plan.id === 2 ? "Return Date & Time" : "Pickup Date & Time"} date={bookingData.pickupDate} setDate={(d) => handleDateSelect('pickupDate', d)} disabledDates={pickupDisabledDates} onMonthChange={handleMonthChange} />
-                    <TimeSlotPicker label="Time" value={bookingData.pickupTimeSlot} onValueChange={(v) => handleTimeChange('pickupTimeSlot', v)} slots={timeSlots.pickup} useWindows={timeSlots.pickupUsesWindows} disabled={!bookingData.pickupDate} loading={isPickupLoading} />
+                    <TimeSlotPicker
+                          label="Time"
+                          value={bookingData.pickupTimeSlot}
+                          onValueChange={(v) => handleTimeChange('pickupTimeSlot', v)}
+                          slots={timeSlots.pickup}
+                          useWindows={timeSlots.pickupUsesWindows}
+                          disabled={!bookingData.pickupDate}
+                          loading={isPickupLoading}
+                          dateStr={bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null} // ✅ pass date
+                        />
                 </div>
                 <div className="flex items-center space-x-3 pt-2"><Checkbox id="agreement" checked={agreementAccepted} onCheckedChange={onShowAgreement} className="border-white/50 data-[state=checked]:bg-yellow-400" /><label htmlFor="agreement" className="text-sm text-white">I have read and accept the <span onClick={onShowAgreement} className="text-yellow-400 font-bold underline cursor-pointer">user agreement</span>.</label></div>
                 {!agreementAccepted && (<div className="flex items-center text-yellow-300 text-sm"><AlertTriangle className="h-4 w-4 mr-2" />Please accept the agreement to proceed.</div>)}
@@ -289,36 +326,57 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     };
     const InputField = ({ icon, ...props }) => (<div className="relative flex items-center"><span className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-blue-300">{icon}</span><input {...props} className="w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-4 py-3 placeholder-blue-200" /></div>);
     const DatePickerField = ({ label, date, setDate, disabledDates, onMonthChange }) => (<div className="md:col-span-1"><label className="text-sm font-medium text-white mb-2 block">{label}</label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4"/>{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger><PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent></Popover></div>);
-    const TimeSlotPicker = ({ label, value, onValueChange, slots, useWindows, disabled, loading }) => {
-        const formatWindow = (windowStr) => {
-            const [start, end] = windowStr.split('-');
-            const formattedStart = format(parse(start, 'HH:mm', new Date()), 'h:mm a');
-            const formattedEnd = format(parse(end, 'HH:mm', new Date()), 'h:mm a');
-            return `${formattedStart} - ${formattedEnd}`;
-        };
+const TimeSlotPicker = ({ label, value, onValueChange, slots, useWindows, disabled, loading, dateStr }) => {
+  function formatWindow(dateStr, timeStr) {
+    if (!timeStr) return "Invalid time";
 
-        return (
-            <div className="md:col-span-1">
-                <label className="text-sm font-medium text-white mb-2 block invisible">{label}</label>
-                <Select onValueChange={onValueChange} value={value} disabled={disabled || loading}>
-                    <SelectTrigger className="w-full bg-white/10 border-white/30 text-white">
-                        <Clock className="mr-2 h-4 w-4" />
-                        <SelectValue placeholder="Select a time" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                        {loading ? (
-                            <SelectItem value="loading" disabled>Loading...</SelectItem>
-                        ) : slots && slots.length > 0 ? (
-                            slots.map(slot => (
-                                <SelectItem key={slot} value={slot}>
-                                    {useWindows ? formatWindow(slot) : format(parse(slot, 'HH:mm', new Date()), 'h:mm a')}
-                                </SelectItem>
-                            ))
-                        ) : (
-                            <SelectItem value="no-slots" disabled>No available slots</SelectItem>
-                        )}
-                    </SelectContent>
-                </Select>
-            </div>
-        );
-    };
+    try {
+      if (!dateStr) {
+        console.warn("⚠️ No dateStr provided to formatWindow, falling back to raw time", { timeStr });
+        return timeStr;
+      }
+
+      const combined = `${dateStr} ${timeStr}`;
+      const parsed = parse(combined, 'yyyy-MM-dd HH:mm', new Date());
+
+      if (!isValid(parsed)) {
+        console.warn("⚠️ Invalid parsed date in formatWindow:", { dateStr, timeStr, combined });
+        return timeStr; // fallback to raw
+      }
+
+      const pretty = format(parsed, 'h:mm a');
+      console.log("✅ formatWindow success:", { dateStr, timeStr, pretty });
+      return pretty;
+    } catch (err) {
+      console.error("⛔ formatWindow error", { dateStr, timeStr, err });
+      return timeStr;
+    }
+  }
+
+  return (
+    <div className="md:col-span-1">
+      <label className="text-sm font-medium text-white mb-2 block invisible">{label}</label>
+      <Select onValueChange={onValueChange} value={value} disabled={disabled || loading}>
+        <SelectTrigger className="w-full bg-white/10 border-white/30 text-white">
+          <Clock className="mr-2 h-4 w-4" />
+          <SelectValue placeholder="Select a time" />
+        </SelectTrigger>
+        <SelectContent className="bg-gray-800 border-gray-700 text-white">
+          {loading ? (
+            <SelectItem value="loading" disabled>Loading...</SelectItem>
+          ) : slots && slots.length > 0 ? (
+            slots.map(slot => (
+              <SelectItem key={slot} value={slot}>
+                {useWindows
+                  ? formatWindow(dateStr, slot)  // ✅ now using the passed dateStr
+                  : format(parse(slot, 'HH:mm', new Date()), 'h:mm a')}
+              </SelectItem>
+            ))
+          ) : (
+            <SelectItem value="no-slots" disabled>No available slots</SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+};
