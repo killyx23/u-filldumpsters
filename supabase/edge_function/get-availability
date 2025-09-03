@@ -1,96 +1,104 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { eachDayOfInterval, formatISO, parseISO, addHours } from "npm:date-fns";
-const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-Deno.serve(async (req)=>{
+
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL"),
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+);
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: corsHeaders
-    });
+    return new Response("ok", { headers: corsHeaders });
   }
+
   try {
     const { serviceId, startDate, endDate } = await req.json();
-    console.log("📥 Request payload:", {
-      serviceId,
-      startDate,
-      endDate
-    });
+    console.log("📥 Request payload:", { serviceId, startDate, endDate });
+
     if (!serviceId || !startDate || !endDate) {
-      return new Response(JSON.stringify({
-        error: "Missing required parameters"
-      }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        }
-      });
+      return new Response(
+        JSON.stringify({ error: "Missing required parameters" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+
     // Fetch service config
-    const { data: service, error: serviceError } = await supabase.from("services").select("id, name").eq("id", serviceId).single();
+    const { data: service, error: serviceError } = await supabase
+      .from("services")
+      .select("id, name")
+      .eq("id", serviceId)
+      .single();
+
     if (serviceError || !service) {
       console.error("❌ Service fetch error:", serviceError);
-      return new Response(JSON.stringify({
-        error: "Service not found"
-      }), {
-        status: 404,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        }
-      });
+      return new Response(
+        JSON.stringify({ error: "Service not found" }),
+        { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+
     // Fetch service availability rules
-    const { data: availRules, error: availError } = await supabase.from("service_availability").select("day_of_week, window_start_time, window_end_time, is_available").eq("service_id", serviceId).eq("is_available", true);
+    const { data: availRules, error: availError } = await supabase
+      .from("service_availability")
+      .select("day_of_week, window_start_time, window_end_time, is_available")
+      .eq("service_id", serviceId)
+      .eq("is_available", true);
+
     if (availError) {
       console.error("❌ Service availability fetch error:", availError);
     }
-    // Fetch unavailable dates
-    const { data: unavailable, error: unavailError } = await supabase.from("unavailable_dates").select("date").eq("service_id", serviceId).gte("date", startDate).lte("date", endDate);
+
+    // Fetch unavailable dates (global + service-specific)
+    const { data: unavailable, error: unavailError } = await supabase
+      .from("unavailable_dates")
+      .select("date")
+      .or(`service_id.eq.${serviceId},service_id.is.null`)
+      .gte("date", startDate)
+      .lte("date", endDate);
+
     if (unavailError) {
       console.error("❌ Unavailable dates fetch error:", unavailError);
     }
+
     // Fetch existing bookings
-    const { data: bookings, error: bookingsError } = await supabase.from("bookings").select("plan->>id as service_id, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot").gte("drop_off_date", startDate).lte("pickup_date", endDate);
+    const { data: bookings, error: bookingsError } = await supabase
+      .from("bookings")
+      .select("plan->>id as service_id, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot")
+      .gte("drop_off_date", startDate)
+      .lte("pickup_date", endDate);
+
     if (bookingsError) {
       console.error("❌ Bookings fetch error:", bookingsError);
-      return new Response(JSON.stringify({
-        error: "Error fetching bookings"
-      }), {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        }
-      });
+      return new Response(
+        JSON.stringify({ error: "Error fetching bookings" }),
+        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+
     console.log("📊 Bookings:", bookings);
+
     // Build availability per day
-    const days = eachDayOfInterval({
-      start: parseISO(startDate),
-      end: parseISO(endDate)
-    });
+    const days = eachDayOfInterval({ start: parseISO(startDate), end: parseISO(endDate) });
     const availability = [];
     const disabledDates = [];
-    for (const day of days){
-      const dayStr = formatISO(day, {
-        representation: "date"
-      });
-      // JS: 0 = Sun ... 6 = Sat
-      const dowJs = day.getDay();
-      const dow = dowJs === 0 ? 7 : dowJs; // Convert to 1=Mon ... 7=Sun if needed
+
+    for (const day of days) {
+      const dayStr = formatISO(day, { representation: "date" });
+      const dowJs = day.getDay(); // 0=Sun ... 6=Sat
       let available = true;
       let reason;
-      let dropOffSlots = [];
-      let pickupSlots = [];
-      // Check if globally unavailable
-      if (unavailable?.some((u)=>u.date === dayStr)) {
+      let dropOffSlots: string[] = [];
+      let pickupSlots: string[] = [];
+
+      // Check if globally or service-specific unavailable
+      if (unavailable?.some((u) => u.date === dayStr)) {
         available = false;
         reason = "Marked unavailable";
         disabledDates.push(dayStr);
       } else {
         // Find availability rule for this weekday
-        const rule = availRules?.find((r)=>r.day_of_week === dowJs); // Use JS 0-6 index
+        const rule = availRules?.find((r) => r.day_of_week === dowJs);
         if (!rule) {
           available = false;
           reason = "No availability rule for this day";
@@ -99,22 +107,28 @@ Deno.serve(async (req)=>{
           // Generate 1-hour slots
           let slot = parseISO(`${dayStr}T${rule.window_start_time}`);
           const end = parseISO(`${dayStr}T${rule.window_end_time}`);
-          while(slot <= end){
-            const timeStr = formatISO(slot, {
-              representation: "time"
-            }).slice(0, 8);
+          while (slot <= end) {
+            const timeStr = formatISO(slot, { representation: "time" }).slice(0, 8);
             dropOffSlots.push(timeStr);
             pickupSlots.push(timeStr);
             slot = addHours(slot, 1);
           }
+
           // Remove already booked slots
-          const dayBookings = bookings.filter((b)=>b.service_id === String(serviceId) && (b.drop_off_date === dayStr || b.pickup_date === dayStr));
+          const dayBookings = bookings.filter(
+            (b) =>
+              b.service_id === String(serviceId) &&
+              (b.drop_off_date === dayStr || b.pickup_date === dayStr)
+          );
+
           const bookedTimes = [
-            ...dayBookings.map((b)=>b.drop_off_time_slot),
-            ...dayBookings.map((b)=>b.pickup_time_slot)
+            ...dayBookings.map((b) => b.drop_off_time_slot),
+            ...dayBookings.map((b) => b.pickup_time_slot),
           ].filter(Boolean);
-          dropOffSlots = dropOffSlots.filter((s)=>!bookedTimes.includes(s));
-          pickupSlots = pickupSlots.filter((s)=>!bookedTimes.includes(s));
+
+          dropOffSlots = dropOffSlots.filter((s) => !bookedTimes.includes(s));
+          pickupSlots = pickupSlots.filter((s) => !bookedTimes.includes(s));
+
           if (dropOffSlots.length === 0 && pickupSlots.length === 0) {
             available = false;
             reason = "Already booked";
@@ -122,36 +136,27 @@ Deno.serve(async (req)=>{
           }
         }
       }
+
       availability.push({
         date: dayStr,
         available,
         reason,
-        drop_off_times: dropOffSlots.map((t)=>t.slice(0, 5)),
-        pickup_times: pickupSlots.map((t)=>t.slice(0, 5)),
-        usesWindows: true
+        drop_off_times: dropOffSlots.map((t) => t.slice(0, 5)),
+        pickup_times: pickupSlots.map((t) => t.slice(0, 5)),
+        usesWindows: true,
       });
     }
+
     console.log("✅ Final availability:", availability);
-    return new Response(JSON.stringify({
-      availability,
-      disabledDates
-    }), {
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders
-      }
+
+    return new Response(JSON.stringify({ availability, disabledDates }), {
+      headers: { "Content-Type": "application/json", ...corsHeaders },
     });
   } catch (err) {
     console.error("❌ Unexpected error:", err);
-    return new Response(JSON.stringify({
-      error: "Unexpected error",
-      details: String(err)
-    }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders
-      }
-    });
+    return new Response(
+      JSON.stringify({ error: "Unexpected error", details: String(err) }),
+      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
   }
 });
