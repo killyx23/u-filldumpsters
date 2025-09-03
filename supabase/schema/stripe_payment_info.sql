@@ -11,3 +11,7 @@ create table public.stripe_payment_info (
   constraint stripe_payment_info_booking_id_key unique (booking_id),
   constraint stripe_payment_info_booking_id_fkey foreign KEY (booking_id) references bookings (id) on delete CASCADE
 ) TABLESPACE pg_default;
+
+create trigger on_payment_info_insert_sync_customer
+after INSERT on stripe_payment_info for EACH row
+execute FUNCTION sync_stripe_ids_to_customer ();

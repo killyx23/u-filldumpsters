@@ -10,17 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { ServiceAvailabilityCard } from './availability/ServiceAvailabilityCard';
 import { CalendarView } from './availability/CalendarView';
 
-const services = [
-    { id: 1, name: "16yd Dumpster Rental" },
-    { id: 2, name: "Dump Loader Trailer Rental Service" },
-    { id: 3, name: "Rock, Mulch, Gravel" },
-];
-
-const isValidTimeFormat = (time) => {
-    return time === null || (typeof time === 'string' && /^\d{2}:\d{2}$/.test(time));
-};
-
 export const AvailabilityManager = () => {
+    const [services, setServices] = useState([]);
     const [availability, setAvailability] = useState([]);
     const [bookings, setBookings] = useState([]);
     const [weather, setWeather] = useState({});
@@ -39,12 +30,16 @@ export const AvailabilityManager = () => {
             const monthStartISO = formatISO(monthStart, { representation: 'date' });
             const monthEndISO = formatISO(monthEnd, { representation: 'date' });
 
-            const [availRes, unavailRes, weatherRes, bookingRes] = await Promise.all([
+            const [servicesRes, availRes, unavailRes, weatherRes, bookingRes] = await Promise.all([
+                supabase.from('services').select('*').order('id'),
                 supabase.from('service_availability').select('*').order('service_id, day_of_week'),
                 supabase.from('unavailable_dates').select('*'),
                 supabase.functions.invoke('get-weather', { body: { startDate: monthStartISO, endDate: monthEndISO } }),
                 supabase.from('bookings').select('*, customers!inner(name)').gte('drop_off_date', monthStartISO).lte('drop_off_date', monthEndISO)
             ]);
+
+            if (servicesRes.error) throw new Error(`Services: ${servicesRes.error.message}`);
+            setServices(servicesRes.data || []);
 
             if (availRes.error) throw new Error(`Service Availability: ${availRes.error.message}`);
             setAvailability(availRes.data || []);
@@ -75,49 +70,13 @@ export const AvailabilityManager = () => {
         }
     };
     
-    const handleSaveChanges = async (day) => {
-        const { service_id, day_of_week, is_available, delivery_start_time, delivery_end_time, pickup_start_time, pickup_end_time } = day;
-
-        if (!is_available) {
-             const payload = {
-                service_id,
-                day_of_week,
-                is_available: false,
-                delivery_start_time: null,
-                delivery_end_time: null,
-                pickup_start_time: null,
-                pickup_end_time: null,
-                updated_at: new Date().toISOString()
-            };
-            const { error } = await supabase.from('service_availability').upsert(payload, { onConflict: 'service_id, day_of_week' });
-            if (error) {
-                toast({ title: `Failed to update settings for closed day`, description: error.message, variant: 'destructive' });
-            } else {
-                toast({ title: `Settings updated successfully`, description: `Day marked as closed.` });
-                fetchInitialData(viewDate);
-            }
-            return;
-        }
-
-        const timesAreValid = [delivery_start_time, delivery_end_time, pickup_start_time, pickup_end_time].every(isValidTimeFormat);
-
-        if (!timesAreValid) {
-            toast({ title: 'Invalid Time Format', description: 'One or more time slots are not in the correct HH:MM format.', variant: 'destructive' });
-            return;
-        }
-
-        const payload = {
-            service_id,
-            day_of_week,
-            is_available,
-            delivery_start_time,
-            delivery_end_time,
-            pickup_start_time,
-            pickup_end_time,
+    const handleSaveChanges = async (payload) => {
+        const finalPayload = {
+            ...payload,
             updated_at: new Date().toISOString()
         };
 
-        const { error } = await supabase.from('service_availability').upsert(payload, { onConflict: 'service_id, day_of_week' });
+        const { error } = await supabase.from('service_availability').upsert(finalPayload, { onConflict: 'service_id, day_of_week' });
 
         if (error) {
             toast({ title: `Failed to update settings`, description: error.message, variant: 'destructive' });
@@ -154,7 +113,7 @@ export const AvailabilityManager = () => {
             else toast({ title: 'Date is now available for all services' });
         } else {
             const formattedDate = formatISO(selectedDateInfo.date, { representation: 'date' });
-            const { error } = await supabase.from('unavailable_dates').insert({ date: formattedDate, service_id: null });
+            const { error } = await supabase.from('unavailable_dates').insert({ date: formattedDate, service_id: null, reason: 'Admin block out' });
             if (error) toast({ title: 'Failed to mark date as unavailable', description: error.message, variant: 'destructive' });
             else toast({ title: 'Date marked as unavailable for all services' });
         }
@@ -190,6 +149,7 @@ export const AvailabilityManager = () => {
                     onDateClick={handleDateClick}
                     onEventClick={handleEventClick}
                     onMonthChange={handleMonthChange}
+                    services={services}
                 />
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {services.map(service => (
