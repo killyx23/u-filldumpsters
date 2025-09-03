@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -24,17 +25,11 @@ const getEventColor = (status) => {
     return '#3b82f6'; // Blue for others like 'Delivered'
 };
 
-const services = [
-    { id: 1, name: "16yd Dumpster Rental" },
-    { id: 2, name: "Dump Loader Trailer Rental Service" },
-    { id: 3, name: "Rock, Mulch, Gravel" },
-];
-
-export const CalendarView = ({ bookings, unavailableDates, weather, viewDate, onDateClick, onEventClick, onMonthChange }) => {
+export const CalendarView = ({ services, bookings, unavailableDates, weather, viewDate, onDateClick, onEventClick, onMonthChange }) => {
     const calendarEvents = useMemo(() => {
         const unavailEvents = unavailableDates.map(d => ({
             id: `unavail-${d.id}`,
-            title: d.service_id ? `Blocked: ${services.find(s => s.id === d.service_id)?.name}` : 'Blocked: All Services',
+            title: d.service_id ? `Blocked: ${services.find(s => s.id === d.service_id)?.name || 'Unknown'}` : 'Blocked: All Services',
             start: d.date,
             allDay: true,
             backgroundColor: '#ef4444',
@@ -54,7 +49,7 @@ export const CalendarView = ({ bookings, unavailableDates, weather, viewDate, on
         }));
 
         return [...unavailEvents, ...bookingEvents];
-    }, [unavailableDates, bookings]);
+    }, [unavailableDates, bookings, services]);
 
     const renderDayCellContent = (dayRenderInfo) => {
         const dateStr = format(dayRenderInfo.date, 'yyyy-MM-dd');

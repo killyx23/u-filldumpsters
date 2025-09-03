@@ -1,36 +1,42 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, LogOut, FileText, Image as ImageIcon, MessageSquare, Send, UploadCloud, Download } from 'lucide-react';
+import { Loader2, LogOut, FileText, Image as ImageIcon, MessageSquare, Send, UploadCloud, Download, Calendar, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isSameDay } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '@/components/BackButton';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 
-const Section = ({ title, icon, children }) => (
+const Section = ({ title, icon, children, className = '' }) => (
     <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20"
+        className={`bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 ${className}`}
     >
         <h2 className="flex items-center text-2xl font-bold text-yellow-400 mb-4">{icon}{title}</h2>
         <div className="space-y-4">{children}</div>
     </motion.div>
 );
 
-const BookingCard = ({ booking, customer }) => {
+const BookingCard = ({ booking, customer, onAddNoteClick }) => {
     const receiptRef = useRef();
     const handlePrint = useReactToPrint({
         content: () => receiptRef.current,
         documentTitle: `U-Fill-Receipt-${booking.id}`,
     });
+
+    const isActive = booking.status !== 'Completed' && booking.status !== 'Cancelled';
 
     return (
         <div className="bg-white/5 p-4 rounded-lg">
@@ -44,8 +50,9 @@ const BookingCard = ({ booking, customer }) => {
                 </div>
                 <StatusBadge status={booking.status} />
             </div>
-            <div className="text-right mt-2">
-                <Button size="sm" variant="outline" onClick={handlePrint}>View/Print Receipt</Button>
+            <div className="flex justify-end space-x-2 mt-2">
+                <Button size="sm" variant="outline" onClick={handlePrint}>Receipt</Button>
+                {isActive && <Button size="sm" onClick={() => onAddNoteClick(booking)}>Add Note</Button>}
             </div>
         </div>
     );
@@ -60,6 +67,8 @@ export default function CustomerPortal() {
     const [isSubmittingNote, setIsSubmittingNote] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef(null);
+    const [showNoteModal, setShowNoteModal] = useState(false);
+    const [selectedBookingForNote, setSelectedBookingForNote] = useState(null);
 
     const fetchData = useCallback(async () => {
         if (!user || user.user_metadata?.is_admin) {
@@ -83,10 +92,18 @@ export default function CustomerPortal() {
             if (error) throw new Error(error.message);
             if (data.error) throw new Error(data.error);
 
+            const { data: notesData, error: notesError } = await supabase
+                .from('customer_notes')
+                .select('*')
+                .eq('customer_id', customerDbId)
+                .order('created_at', { ascending: false });
+
+            if (notesError) throw notesError;
+
             setCustomerData({
                 ...data.customer,
                 bookings: data.bookings || [],
-                notes: data.notes || [],
+                notes: notesData || [],
             });
 
         } catch (error) {
@@ -106,13 +123,19 @@ export default function CustomerPortal() {
             }
         }
     }, [user, authLoading, fetchData, navigate]);
+    
+    const handleAddNoteClick = (booking) => {
+        setSelectedBookingForNote(booking);
+        setShowNoteModal(true);
+    };
 
     const handleAddNote = async () => {
-        if (!newNote.trim()) return;
+        if (!newNote.trim() || !selectedBookingForNote) return;
         setIsSubmittingNote(true);
 
         const { error } = await supabase.from('customer_notes').insert({
             customer_id: customerData.id,
+            booking_id: selectedBookingForNote.id,
             source: 'Customer Portal',
             content: newNote
         });
@@ -121,6 +144,7 @@ export default function CustomerPortal() {
         } else {
             toast({ title: "Note added successfully!" });
             setNewNote('');
+            setShowNoteModal(false);
             fetchData();
         }
         setIsSubmittingNote(false);
@@ -172,6 +196,18 @@ export default function CustomerPortal() {
             toast({ title: "Download Failed", description: error.message, variant: "destructive" });
         }
     };
+    
+    const calendarEvents = customerData?.bookings.map(booking => {
+        const isPast = isSameDay(parseISO(booking.pickup_date), new Date()) || new Date() > parseISO(booking.pickup_date);
+        return {
+            title: booking.plan.name,
+            start: booking.drop_off_date,
+            end: format(new Date(booking.pickup_date + 'T00:00:00Z'), 'yyyy-MM-dd'),
+            allDay: true,
+            backgroundColor: isPast ? '#4b5563' : '#1d4ed8',
+            borderColor: isPast ? '#4b5563' : '#1d4ed8'
+        };
+    }) || [];
 
     if (loading || authLoading) {
         return <div className="flex justify-center items-center h-screen"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
@@ -191,18 +227,80 @@ export default function CustomerPortal() {
                 </div>
                 <Button onClick={signOut} variant="destructive"><LogOut className="mr-2 h-4 w-4" /> Sign Out</Button>
             </div>
+             <Dialog open={showNoteModal} onOpenChange={setShowNoteModal}>
+                <DialogContent className="bg-gray-900 text-white border-yellow-400">
+                    <DialogHeader>
+                        <DialogTitle>Add a Note</DialogTitle>
+                        <DialogDescription>
+                            Your note will be added to booking #{selectedBookingForNote?.id} for our team to review.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Textarea
+                            value={newNote}
+                            onChange={(e) => setNewNote(e.target.value)}
+                            placeholder="Type your message, question, or special instructions here..."
+                            rows={5}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+                        <Button onClick={handleAddNote} disabled={isSubmittingNote || !newNote.trim()}>
+                            {isSubmittingNote ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Send className="h-4 w-4 mr-2" />}
+                            Submit Note
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
-            <div className="grid lg:grid-cols-2 gap-8">
-                <div className="space-y-8">
-                    <Section title="My Bookings" icon={<FileText className="mr-3 h-6 w-6" />}>
+            <div className="grid lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                     <Section title="My Calendar" icon={<Calendar className="mr-3 h-6 w-6" />} className="calendar-container-customer">
+                        <FullCalendar
+                            plugins={[dayGridPlugin]}
+                            initialView="dayGridMonth"
+                            events={calendarEvents}
+                            height="auto"
+                            headerToolbar={{
+                                left: 'prev,next',
+                                center: 'title',
+                                right: 'today'
+                            }}
+                        />
+                    </Section>
+                    <Section title="Booking History" icon={<FileText className="mr-3 h-6 w-6" />}>
                         {customerData.bookings?.length > 0 ? (
-                            customerData.bookings.map(booking => <BookingCard key={booking.id} booking={booking} customer={customerData} />)
+                            customerData.bookings.map(booking => <BookingCard key={booking.id} booking={booking} customer={customerData} onAddNoteClick={handleAddNoteClick} />)
                         ) : (
                             <p className="text-center text-blue-200 py-4">You have no bookings.</p>
                         )}
                     </Section>
-                    
-                    <Section title="My Notes" icon={<MessageSquare className="mr-3 h-6 w-6" />}>
+                </div>
+                
+                <div className="space-y-8">
+                     <Section title="My Files" icon={<ImageIcon className="mr-3 h-6 w-6" />}>
+                        <p className="text-blue-200 text-sm">These are the files you've uploaded for verification. You can upload new files if requested by our team.</p>
+                         <div className="grid grid-cols-2 gap-4">
+                            {customerData.license_image_urls && customerData.license_image_urls.length > 0 ? (
+                               customerData.license_image_urls.map((img, i) => (
+                                    <div key={i} className="relative group aspect-video">
+                                         <img  className="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src={img.url} />
+                                         <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                            <Button size="sm" onClick={() => handleDownload(img.path, img.name)}><Download className="h-4 w-4 mr-2"/> Download</Button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : <p className="col-span-2 text-center text-blue-200 py-8">No files uploaded.</p>}
+                         </div>
+                         <div className="border-t border-white/20 pt-4">
+                             <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                                 <UploadCloud className="mr-2 h-4 w-4" /> 
+                                 {isUploading ? <Loader2 className="h-4 w-4 animate-spin"/> : 'Upload New File'}
+                             </Button>
+                             <Input ref={fileInputRef} type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*"/>
+                         </div>
+                    </Section>
+                    <Section title="Recent Notes" icon={<MessageSquare className="mr-3 h-6 w-6" />}>
                         <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
                            {customerData.notes?.length > 0 ? customerData.notes.map(note => (
                                 <div key={note.id} className={`p-3 rounded-lg ${note.source === 'Customer Portal' ? 'bg-blue-900/50' : 'bg-gray-700/50'}`}>
@@ -212,42 +310,8 @@ export default function CustomerPortal() {
                                 </div>
                             )) : <p className="text-center text-blue-200 py-4">No notes found.</p>}
                         </div>
-                         <div className="border-t border-white/20 pt-4">
-                            <Textarea
-                                value={newNote}
-                                onChange={(e) => setNewNote(e.target.value)}
-                                placeholder="Add a new note for our team..."
-                            />
-                            <Button onClick={handleAddNote} disabled={isSubmittingNote || !newNote.trim()} className="mt-2">
-                                {isSubmittingNote ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Send className="h-4 w-4 mr-2" />}
-                                Add Note
-                            </Button>
-                        </div>
                     </Section>
                 </div>
-                
-                <Section title="My Files" icon={<ImageIcon className="mr-3 h-6 w-6" />}>
-                    <p className="text-blue-200">These are the files you've uploaded for verification.</p>
-                     <div className="grid grid-cols-2 gap-4">
-                        {customerData.license_image_urls && customerData.license_image_urls.length > 0 ? (
-                           customerData.license_image_urls.map((img, i) => (
-                                <div key={i} className="relative group aspect-video">
-                                     <img  className="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src={img.url} />
-                                     <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
-                                        <Button size="sm" onClick={() => handleDownload(img.path, img.name)}><Download className="h-4 w-4 mr-2"/> Download</Button>
-                                    </div>
-                                </div>
-                            ))
-                        ) : <p className="col-span-2 text-center text-blue-200 py-8">No files uploaded.</p>}
-                     </div>
-                     <div className="border-t border-white/20 pt-4">
-                         <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-                             <UploadCloud className="mr-2 h-4 w-4" /> 
-                             {isUploading ? <Loader2 className="h-4 w-4 animate-spin"/> : 'Upload New File'}
-                         </Button>
-                         <Input ref={fileInputRef} type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*"/>
-                     </div>
-                </Section>
             </div>
         </div>
     );
