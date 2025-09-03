@@ -53,8 +53,11 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const endDate = formatISO(endOfMonth(month), { representation: 'date' });
 
         try {
+          // Ensure plan.id is a string for consistency with the function's expectation
+          const serviceIdentifier = String(plan.id);
+          console.log(`serviceIdentifier ${serviceIdentifier} startDate ${startDate} endDate ${endDate}`);
           const { data, error } = await supabase.functions.invoke('get-availability', {
-            body: { serviceId: plan.id, startDate, endDate }
+            body: { serviceId: serviceIdentifier, startDate, endDate }
           });
           
           if (error) {

@@ -1,12 +1,13 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { Truck, ChevronDown, ChevronUp, Save } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Truck, ChevronDown, ChevronUp, Save, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { formatTime, timeOptions, timeWindowOptions } from './time-helpers';
+import { timeWindowOptions } from './time-helpers';
+import { useToast } from '@/components/ui/use-toast';
 
 const TimeWindowSelector = ({ value, onChange, options, placeholder = "Select time window" }) => (
     <Select value={value || ''} onValueChange={onChange}>
@@ -21,121 +22,107 @@ const TimeWindowSelector = ({ value, onChange, options, placeholder = "Select ti
     </Select>
 );
 
-const TimeSelector = ({ value, onChange, options, placeholder = "Select time" }) => (
-    <Select value={value || ''} onValueChange={onChange}>
-        <SelectTrigger className="bg-white/20">
-            <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-            {options.map(time => (
-                <SelectItem key={time} value={time}>{formatTime(time)}</SelectItem>
-            ))}
-        </SelectContent>
-    </Select>
-);
-
 const DayAvailability = ({ dayName, dayIndex, service, initialDayData, onSaveChanges }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [dayData, setDayData] = useState(initialDayData);
+    const [isSaving, setIsSaving] = useState(false);
+    const { toast } = useToast();
 
     useEffect(() => {
         setDayData(initialDayData);
     }, [initialDayData]);
 
     const handleSwitchChange = (checked) => {
-        const updatedDayData = { ...dayData, is_available: checked };
-        setDayData(updatedDayData);
-        onSaveChanges(updatedDayData);
+        const updatedData = { ...dayData, is_available: checked };
+        setDayData(updatedData);
+        // Immediately save switch changes, as it's a primary action
+        handleSave(updatedData);
     };
 
-    const handleTimeChange = (field, value) => {
-        setDayData(prev => ({ ...prev, [field]: value }));
-    };
-
-    const handleTimeWindowChange = (startField, endField, value) => {
-        if (!value) return;
+    const handleTimeWindowChange = (value) => {
+        if (!value) {
+            setDayData(prev => ({ ...prev, window_start_time: null, window_end_time: null }));
+            return;
+        }
         const [start, end] = value.split('-');
-        setDayData(prev => ({ ...prev, [startField]: start, [endField]: end }));
+        setDayData(prev => ({ ...prev, window_start_time: `${start}:00`, window_end_time: `${end}:00` }));
     };
 
-    const handleSaveTimeClick = () => {
-        onSaveChanges(dayData);
+    const handleSave = async (dataToSave) => {
+        setIsSaving(true);
+        const finalData = dataToSave || dayData;
+
+        const isValid = finalData.is_available ? (
+            service.service_type === 'fullday' ? true : (finalData.window_start_time && finalData.window_end_time)
+        ) : true;
+        
+        if (!isValid) {
+            toast({
+                title: "Incomplete Time Information",
+                description: "Please select an operating window before saving.",
+                variant: "destructive",
+            });
+            setIsSaving(false);
+            return;
+        }
+        
+        await onSaveChanges(finalData);
+        setIsSaving(false);
     };
 
     const renderTimeInputs = () => {
-        switch (service.id) {
-            case 1: // 16yd Dumpster Rental
-                return (
-                    <>
-                        <div>
-                            <p className="font-semibold text-blue-200 mb-1">Drop Off Window</p>
-                            <TimeWindowSelector
-                                options={timeWindowOptions}
-                                value={dayData.delivery_start_time && dayData.delivery_end_time ? `${dayData.delivery_start_time}-${dayData.delivery_end_time}` : ''}
-                                onChange={v => handleTimeWindowChange('delivery_start_time', 'delivery_end_time', v)}
-                            />
-                        </div>
-                        <div>
-                            <p className="font-semibold text-blue-200 mb-1">Pickup Window</p>
-                            <TimeWindowSelector
-                                options={timeWindowOptions}
-                                value={dayData.pickup_start_time && dayData.pickup_end_time ? `${dayData.pickup_start_time}-${dayData.pickup_end_time}` : ''}
-                                onChange={v => handleTimeWindowChange('pickup_start_time', 'pickup_end_time', v)}
-                            />
-                        </div>
-                    </>
-                );
-            case 2: // Dump Loader Trailer Rental Service
-                return (
-                    <>
-                        <div>
-                            <p className="font-semibold text-blue-200 mb-1">Pickup Time</p>
-                            <div className="grid grid-cols-2 gap-2">
-                                <TimeSelector options={timeOptions} value={dayData.delivery_start_time} onChange={v => handleTimeChange('delivery_start_time', v)} />
-                                <TimeSelector options={timeOptions} value={dayData.delivery_end_time} onChange={v => handleTimeChange('delivery_end_time', v)} />
-                            </div>
-                        </div>
-                        <div>
-                            <p className="font-semibold text-blue-200 mb-1">Return Time</p>
-                            <div className="grid grid-cols-2 gap-2">
-                                <TimeSelector options={timeOptions} value={dayData.pickup_start_time} onChange={v => handleTimeChange('pickup_start_time', v)} />
-                                <TimeSelector options={timeOptions} value={dayData.pickup_end_time} onChange={v => handleTimeChange('pickup_end_time', v)} />
-                            </div>
-                        </div>
-                    </>
-                );
-            case 3: // Rock, Mulch, Gravel
-                return (
-                    <div>
-                        <p className="font-semibold text-blue-200 mb-1">Delivery Window</p>
-                        <TimeWindowSelector
-                            options={timeWindowOptions}
-                            value={dayData.delivery_start_time && dayData.delivery_end_time ? `${dayData.delivery_start_time}-${dayData.delivery_end_time}` : ''}
-                            onChange={v => handleTimeWindowChange('delivery_start_time', 'delivery_end_time', v)}
-                        />
-                    </div>
-                );
-            default:
-                return null;
+        if (!dayData.is_available) return null;
+
+        if (service.service_type === 'window') {
+            const timeValue = dayData.window_start_time && dayData.window_end_time ? `${dayData.window_start_time.substring(0,5)}-${dayData.window_end_time.substring(0,5)}` : '';
+            return (
+                <div>
+                    <p className="font-semibold text-blue-200 mb-1">Operating Window</p>
+                    <TimeWindowSelector
+                        options={timeWindowOptions}
+                        value={timeValue}
+                        onChange={handleTimeWindowChange}
+                        placeholder="Select operating window"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Both drop-off and pickup slots are generated within this window.</p>
+                </div>
+            );
         }
+        
+        if (service.service_type === 'fullday') {
+            return (
+                <div className="bg-blue-900/20 p-3 rounded-md border border-blue-500">
+                    <AlertCircle className="inline-block mr-2 h-4 w-4 text-blue-300" />
+                    <span className="text-sm text-blue-200 align-middle">
+                        This service is full-day only (8 AM - 10 PM). Availability is controlled by the open/closed switch.
+                    </span>
+                </div>
+            );
+        }
+        
+        return null;
     };
 
     return (
         <div className="bg-white/10 p-3 rounded-md transition-all duration-300">
-            <div className="flex items-center justify-between cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>
-                <Label className="text-lg font-semibold">{dayName}</Label>
+            <div className="flex items-center justify-between">
+                <Label className="text-lg font-semibold cursor-pointer" onClick={() => setIsExpanded(!isExpanded)}>{dayName}</Label>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                        <Switch id={`available-${service.id}-${dayIndex}`} checked={dayData.is_available} onCheckedChange={handleSwitchChange} />
+                    <div className="flex items-center gap-2">
+                        <Switch
+                            id={`available-${service.id}-${dayIndex}`}
+                            checked={!!dayData.is_available}
+                            onCheckedChange={handleSwitchChange}
+                        />
                         <Label htmlFor={`available-${service.id}-${dayIndex}`}>{dayData.is_available ? "Open" : "Closed"}</Label>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }} className="focus:outline-none">
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="focus:outline-none">
                         {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                     </button>
                 </div>
             </div>
             <AnimatePresence>
-                {isExpanded && dayData.is_available && (
+                {isExpanded && (
                     <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
@@ -145,9 +132,14 @@ const DayAvailability = ({ dayName, dayIndex, service, initialDayData, onSaveCha
                     >
                         <div className="mt-4 pt-4 border-t border-white/20 space-y-4 text-sm">
                             {renderTimeInputs()}
-                            <div className="text-right mt-2">
-                                <Button onClick={handleSaveTimeClick} size="sm"><Save className="mr-2 h-4 w-4" /> Save Time Changes</Button>
-                            </div>
+                             {dayData.is_available && service.service_type === 'window' && (
+                                <div className="text-right mt-2">
+                                    <Button onClick={() => handleSave()} size="sm" disabled={isSaving}>
+                                        <Save className="mr-2 h-4 w-4" /> 
+                                        {isSaving ? 'Saving...' : 'Save Window'}
+                                    </Button>
+                                </div>
+                            )}
                         </div>
                     </motion.div>
                 )}
@@ -157,7 +149,26 @@ const DayAvailability = ({ dayName, dayIndex, service, initialDayData, onSaveCha
 };
 
 export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }) => {
-    const daysOfWeek = useMemo(() => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], []);
+    const daysOfWeek = useMemo(() => ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"], []);
+
+    const handleDaySave = useCallback(async (dayDataFromChild) => {
+        const payload = {
+            service_id: service.id,
+            day_of_week: dayDataFromChild.day_of_week,
+            is_available: dayDataFromChild.is_available,
+            window_start_time: null,
+            window_end_time: null,
+        };
+
+        if (dayDataFromChild.is_available) {
+            if (service.service_type === 'window') {
+                payload.window_start_time = dayDataFromChild.window_start_time;
+                payload.window_end_time = dayDataFromChild.window_end_time;
+            }
+        }
+        
+        await onSaveChanges(payload);
+    }, [service.id, service.service_type, onSaveChanges]);
 
     return (
         <div className="bg-white/5 p-6 rounded-2xl shadow-lg border border-white/10 h-full flex flex-col">
@@ -168,9 +179,11 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
             <div className="flex-grow space-y-2 overflow-y-auto pr-2">
                 {daysOfWeek.map((dayName, index) => {
                     const dayData = availability.find(d => d.day_of_week === index) || {
-                        service_id: service.id, day_of_week: index, is_available: false, 
-                        delivery_start_time: '08:00', delivery_end_time: '10:00',
-                        pickup_start_time: '08:00', pickup_end_time: '10:00',
+                        service_id: service.id, 
+                        day_of_week: index, 
+                        is_available: false,
+                        window_start_time: null,
+                        window_end_time: null,
                     };
                     return (
                         <DayAvailability
@@ -179,7 +192,7 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                             dayIndex={index}
                             service={service}
                             initialDayData={dayData}
-                            onSaveChanges={onSaveChanges}
+                            onSaveChanges={handleDaySave}
                         />
                     );
                 })}
@@ -187,3 +200,4 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
         </div>
     );
 };
+  
