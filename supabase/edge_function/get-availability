@@ -115,11 +115,20 @@ Deno.serve(async (req) => {
           }
 
           // Remove already booked slots
-          const dayBookings = bookings.filter(
-            (b) =>
-              b.service_id === String(serviceId) &&
-              (b.drop_off_date === dayStr || b.pickup_date === dayStr)
-          );
+          const dayBookings = bookings.filter((b) => {
+            if (b.service_id !== String(serviceId)) return false;
+
+            const drop = parseISO(b.drop_off_date);
+            const pickup = parseISO(b.pickup_date);
+
+            if (serviceId === 2) {
+              // For service 2, block all days between drop-off and pickup
+              return day >= drop && day <= pickup;
+            } else {
+              // For other services, only block exact drop-off or pickup dates
+              return dayStr === b.drop_off_date || dayStr === b.pickup_date;
+            }
+          });
 
           const bookedTimes = [
             ...dayBookings.map((b) => b.drop_off_time_slot),
