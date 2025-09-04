@@ -144,34 +144,49 @@ window.fetch = function(...args) {
 const addTransformIndexHtml = {
 	name: 'add-transform-index-html',
 	transformIndexHtml(html) {
+		const tags = [
+			{
+				tag: 'script',
+				attrs: { type: 'module' },
+				children: configHorizonsRuntimeErrorHandler,
+				injectTo: 'head',
+			},
+			{
+				tag: 'script',
+				attrs: { type: 'module' },
+				children: configHorizonsViteErrorHandler,
+				injectTo: 'head',
+			},
+			{
+				tag: 'script',
+				attrs: {type: 'module'},
+				children: configHorizonsConsoleErrroHandler,
+				injectTo: 'head',
+			},
+			{
+				tag: 'script',
+				attrs: { type: 'module' },
+				children: configWindowFetchMonkeyPatch,
+				injectTo: 'head',
+			},
+		];
+
+		if (!isDev && process.env.TEMPLATE_BANNER_SCRIPT_URL && process.env.TEMPLATE_REDIRECT_URL) {
+			tags.push(
+				{
+					tag: 'script',
+					attrs: { 
+						src: process.env.TEMPLATE_BANNER_SCRIPT_URL,
+						'template-redirect-url': process.env.TEMPLATE_REDIRECT_URL,
+					},
+					injectTo: 'head',
+				}
+			);
+		}
+
 		return {
 			html,
-			tags: [
-				{
-					tag: 'script',
-					attrs: { type: 'module' },
-					children: configHorizonsRuntimeErrorHandler,
-					injectTo: 'head',
-				},
-				{
-					tag: 'script',
-					attrs: { type: 'module' },
-					children: configHorizonsViteErrorHandler,
-					injectTo: 'head',
-				},
-				{
-					tag: 'script',
-					attrs: {type: 'module'},
-					children: configHorizonsConsoleErrroHandler,
-					injectTo: 'head',
-				},
-				{
-					tag: 'script',
-					attrs: { type: 'module' },
-					children: configWindowFetchMonkeyPatch,
-					injectTo: 'head',
-				},
-			],
+			tags,
 		};
 	},
 };

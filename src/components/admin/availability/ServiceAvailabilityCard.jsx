@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Truck, ChevronDown, ChevronUp, Save, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -200,4 +199,3 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
         </div>
     );
 };
-  
