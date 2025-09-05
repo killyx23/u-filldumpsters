@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Loader2, UserPlus, Search, User, AlertCircle, Bell } from 'lucide-react';
@@ -10,7 +10,101 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  TooltipProvider,
 } from "@/components/ui/tooltip"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
+
+const UnreadNotesIcon = ({ customerId }) => {
+    const [notes, setNotes] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const navigate = useNavigate();
+
+    const fetchUnreadNotes = async () => {
+        setLoading(true);
+        const { data, error } = await supabase
+            .from('customer_notes')
+            .select('content, created_at')
+            .eq('customer_id', customerId)
+            .eq('is_read', false)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        if (error) {
+            toast({ title: 'Error fetching notes', description: error.message, variant: 'destructive' });
+        } else {
+            setNotes(data);
+        }
+        setLoading(false);
+    };
+
+    const handleClick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(`/admin/customer/${customerId}?tab=notes`);
+    };
+
+    return (
+        <Popover onOpenChange={(open) => open && fetchUnreadNotes()}>
+            <PopoverTrigger asChild>
+                <span onClick={handleClick} className="cursor-pointer">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Bell className="h-5 w-5 text-yellow-400 animate-pulse" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                <p>This customer has unread notes. Click to view.</p>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </span>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 bg-gray-900 border-yellow-500 text-white">
+                <div className="font-bold text-yellow-400 mb-2">Unread Notes</div>
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> :
+                    notes.length > 0 ? (
+                        <div className="space-y-2">
+                            {notes.map((note, index) => (
+                                <div key={index} className="text-sm p-2 bg-white/10 rounded-md">
+                                    <p className="line-clamp-2">{note.content}</p>
+                                </div>
+                            ))}
+                        </div>
+                    ) : <p className="text-sm">No unread notes found.</p>
+                }
+            </PopoverContent>
+        </Popover>
+    );
+};
+
+const UnverifiedAddressIcon = ({ customerId }) => {
+    const navigate = useNavigate();
+    
+    const handleClick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(`/admin/customer/${customerId}?tab=profile`);
+    };
+
+    return (
+         <span onClick={handleClick} className="cursor-pointer">
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                       <AlertCircle className="h-5 w-5 text-orange-400" />
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-gray-900 border-orange-500 text-white">
+                        <p>Address verification was skipped. Click to review.</p>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        </span>
+    );
+};
 
 export const CustomersManager = () => {
     const [customers, setCustomers] = useState([]);
@@ -94,18 +188,8 @@ export const CustomersManager = () => {
                                     <td className="p-4 text-sm">{`${customer.street}, ${customer.city}`}</td>
                                     <td className="p-4 text-center">
                                          <div className="flex justify-center items-center gap-2">
-                                            {customer.unverified_address && (
-                                                 <Tooltip>
-                                                    <TooltipTrigger><AlertCircle className="h-5 w-5 text-red-400" /></TooltipTrigger>
-                                                    <TooltipContent><p>Address was not verified by customer.</p></TooltipContent>
-                                                 </Tooltip>
-                                            )}
-                                            {customer.has_unread_notes && (
-                                                 <Tooltip>
-                                                    <TooltipTrigger><Bell className="h-5 w-5 text-yellow-400 animate-pulse" /></TooltipTrigger>
-                                                    <TooltipContent><p>This customer has unread notes.</p></TooltipContent>
-                                                 </Tooltip>
-                                            )}
+                                            {customer.unverified_address && <UnverifiedAddressIcon customerId={customer.id} />}
+                                            {customer.has_unread_notes && <UnreadNotesIcon customerId={customer.id} />}
                                          </div>
                                     </td>
                                     <td className="p-4 text-right">

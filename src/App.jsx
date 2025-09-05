@@ -36,11 +36,11 @@ function App() {
           <meta name="description" content="Professional dumpster rental services with same-day delivery. Choose from our rental options for your home or business projects. Book online today!" />
         </Helmet>
 
-        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 text-white relative">
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 text-white relative flex flex-col">
           <Toaster />
           <Header />
           
-          <main className="min-h-[calc(100vh-120px)]">
+          <main className="flex-grow">
               <Routes>
                   <Route path="/" element={<BookingJourney />} />
                   <Route path="/admin/login" element={<AdminLogin />} />
