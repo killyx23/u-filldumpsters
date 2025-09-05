@@ -171,7 +171,7 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
       const renderStep = () => {
         switch (step) {
           case 0:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans onBookingSubmit={handleAddonsSubmit} />;
           case 1:
             return (
               <BookingForm
@@ -209,7 +209,7 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
               </Elements>
             );
           default:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans onBookingSubmit={handleAddonsSubmit} />;
         }
       };
 

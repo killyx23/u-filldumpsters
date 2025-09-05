@@ -26,7 +26,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const [loading, setLoading] = useState(true);
         const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
         const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
-        const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'rentals');
+        const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
 
 
         const fetchCustomerDetails = useCallback(async () => {
@@ -126,32 +126,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full mt-8">
                     <TabsList className="grid w-full grid-cols-5 bg-white/10 text-white mb-6">
-                        <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
-                        <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
-                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Notes</TabsTrigger>
-                        <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
                         <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile & Notes</TabsTrigger>
+                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Notes</TabsTrigger>
+                        <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
+                        <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
+                        <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
                     </TabsList>
-                    <TabsContent value="rentals">
-                        <div className="space-y-8">
-                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={fetchCustomerDetails} />
-                            <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
-                        </div>
-                    </TabsContent>
-                    <TabsContent value="verification">
-                        <div className="space-y-8">
-                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} onUpdate={fetchCustomerDetails} />
-                        </div>
-                    </TabsContent>
-                     <TabsContent value="notes">
-                        <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CustomerNotes customer={customer} notes={notes} setCustomer={setCustomer} setNotes={setNotes} />
-                        </div>
-                    </TabsContent>
-                    <TabsContent value="history">
-                        <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} />
-                    </TabsContent>
-                    <TabsContent value="profile">
+                     <TabsContent value="profile">
                          <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                            <CustomerProfile 
                                 customer={customer} 
@@ -160,6 +141,25 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                                 onHistoryClick={() => setIsHistoryDialogOpen(true)}
                             />
                         </div>
+                    </TabsContent>
+                     <TabsContent value="notes">
+                        <div className="bg-white/5 p-6 rounded-lg shadow-lg">
+                           <CustomerNotes customer={customer} notes={notes} setNotes={setNotes} onUpdate={fetchCustomerDetails} loading={loading} />
+                        </div>
+                    </TabsContent>
+                     <TabsContent value="verification">
+                        <div className="space-y-8">
+                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} onUpdate={fetchCustomerDetails} />
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="rentals">
+                        <div className="space-y-8">
+                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={fetchCustomerDetails} />
+                            <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="history">
+                        <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} />
                     </TabsContent>
                 </Tabs>
                 

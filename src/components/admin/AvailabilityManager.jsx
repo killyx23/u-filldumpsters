@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Ban } from 'lucide-react';
+import { Loader2, Ban, Calendar as CalendarIcon, List } from 'lucide-react';
 import { formatISO, isSameDay, isBefore, startOfDay, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
@@ -8,6 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { ServiceAvailabilityCard } from './availability/ServiceAvailabilityCard';
 import { CalendarView } from './availability/CalendarView';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const AvailabilityManager = () => {
     const [services, setServices] = useState([]);
@@ -139,28 +140,36 @@ export const AvailabilityManager = () => {
                 </DialogContent>
             </Dialog>
 
-            <div className="space-y-8">
-                <CalendarView
-                    bookings={bookings}
-                    unavailableDates={unavailableDates}
-                    weather={weather}
-                    viewDate={viewDate}
-                    onDateClick={handleDateClick}
-                    onEventClick={handleEventClick}
-                    onMonthChange={handleMonthChange}
-                    services={services}
-                />
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {services.map(service => (
-                        <ServiceAvailabilityCard
-                            key={service.id}
-                            service={service}
-                            availability={availability.filter(a => a.service_id === service.id)}
-                            onSaveChanges={handleSaveChanges}
-                        />
-                    ))}
-                </div>
-            </div>
+            <Tabs defaultValue="calendar" className="w-full">
+                <TabsList className="grid w-full grid-cols-2 bg-white/10 text-white mb-4">
+                    <TabsTrigger value="calendar"><CalendarIcon className="mr-2 h-4 w-4" />Calendar View</TabsTrigger>
+                    <TabsTrigger value="list"><List className="mr-2 h-4 w-4" />Weekly Rules</TabsTrigger>
+                </TabsList>
+                <TabsContent value="calendar">
+                    <CalendarView
+                        bookings={bookings}
+                        unavailableDates={unavailableDates}
+                        weather={weather}
+                        viewDate={viewDate}
+                        onDateClick={handleDateClick}
+                        onEventClick={handleEventClick}
+                        onMonthChange={handleMonthChange}
+                        services={services}
+                    />
+                </TabsContent>
+                <TabsContent value="list">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
+                        {services.map(service => (
+                            <ServiceAvailabilityCard
+                                key={service.id}
+                                service={service}
+                                availability={availability.filter(a => a.service_id === service.id)}
+                                onSaveChanges={handleSaveChanges}
+                            />
+                        ))}
+                    </div>
+                </TabsContent>
+            </Tabs>
         </>
     );
 };
