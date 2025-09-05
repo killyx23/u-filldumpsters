@@ -171,7 +171,7 @@ const stripePromise = loadStripe("REDACTED_STRIPE_PUBLISHABLE_KEY");
       const renderStep = () => {
         switch (step) {
           case 0:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans onBookingSubmit={handleAddonsSubmit} />;
           case 1:
             return (
               <BookingForm
@@ -209,7 +209,7 @@ const stripePromise = loadStripe("REDACTED_STRIPE_PUBLISHABLE_KEY");
               </Elements>
             );
           default:
-            return <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />;
+            return <Plans onBookingSubmit={handleAddonsSubmit} />;
         }
       };
 
