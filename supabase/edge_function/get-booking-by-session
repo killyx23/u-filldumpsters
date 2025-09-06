@@ -12,37 +12,18 @@ Deno.serve(async (req)=>{
     if (!sessionId) {
       throw new Error("Session ID is required.");
     }
-    // Instead of multiple queries, we can join the data in one go, starting from stripe_payment_info
-    const { data: booking, error: bookingError } = await supabase.from('stripe_payment_info').select(`
-        bookings!inner(
-          *,
-          customers!inner(*)
-        ),
-        *
-      `).eq('stripe_checkout_session_id', sessionId).single();
-    if (bookingError || !booking || !booking.bookings) {
+    const { data: booking, error: bookingError } = await supabase.from('bookings').select(`
+        *,
+        customers!inner(*),
+        stripe_payment_info!inner(*)
+      `).eq('stripe_payment_info.stripe_checkout_session_id', sessionId).single();
+    if (bookingError || !booking) {
       console.error("Error fetching booking by session ID:", bookingError);
       const errorMessage = bookingError ? bookingError.message : "Could not find a booking for the provided session.";
       throw new Error(errorMessage);
     }
-    // Restructure the data to match what the frontend expects
-    const finalBookingData = {
-      ...booking.bookings,
-      stripe_payment_info: [
-        {
-          id: booking.id,
-          booking_id: booking.booking_id,
-          stripe_customer_id: booking.stripe_customer_id,
-          stripe_payment_intent_id: booking.stripe_payment_intent_id,
-          stripe_charge_id: booking.stripe_charge_id,
-          stripe_checkout_session_id: booking.stripe_checkout_session_id,
-          created_at: booking.created_at,
-          updated_at: booking.updated_at
-        }
-      ]
-    };
     return new Response(JSON.stringify({
-      booking: finalBookingData
+      booking
     }), {
       headers: {
         ...corsHeaders,

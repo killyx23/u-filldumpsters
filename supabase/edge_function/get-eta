@@ -13,7 +13,66 @@ Deno.serve(async (req)=>{
       error: "Server configuration error."
     }), {
       headers: {
-        ...corsHeaders,
+        ...corsHeaders,import { corsHeaders } from "./cors.ts";
+        const GOOGLE_MAPS_API_KEY = Deno.env.get("GOOGLE_MAPS_API_KEY");
+        const ORIGIN_ADDRESS = "227 West Casi Way, Saratoga Springs, Utah 84045";
+        Deno.serve(async (req)=>{
+          if (req.method === "OPTIONS") {
+            return new Response("ok", {
+              headers: corsHeaders
+            });
+          }
+          if (!GOOGLE_MAPS_API_KEY) {
+            console.error("Google Maps API key is not set.");
+            return new Response(JSON.stringify({
+              error: "Server configuration error."
+            }), {
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json"
+              },
+              status: 500
+            });
+          }
+          try {
+            const { destination } = await req.json();
+            if (!destination) {
+              throw new Error("Destination address is required.");
+            }
+            const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(ORIGIN_ADDRESS)}&destination=${encodeURIComponent(destination)}&key=${GOOGLE_MAPS_API_KEY}&units=imperial`;
+            const response = await fetch(url);
+            const data = await response.json();
+            if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
+              console.error("Google Maps API Error:", data.error_message || data.status);
+              throw new Error("Could not calculate ETA. Check address validity.");
+            }
+            const leg = data.routes[0].legs[0];
+            const eta = leg.duration.text;
+            const distance = leg.distance.text;
+            return new Response(JSON.stringify({
+              eta,
+              distance
+            }), {
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json"
+              },
+              status: 200
+            });
+          } catch (error) {
+            console.error("Get ETA function error:", error.message);
+            return new Response(JSON.stringify({
+              error: error.message
+            }), {
+              headers: {
+                ...corsHeaders,
+                "Content-Type": "application/json"
+              },
+              status: 500
+            });
+          }
+        });
+        
         "Content-Type": "application/json"
       },
       status: 500

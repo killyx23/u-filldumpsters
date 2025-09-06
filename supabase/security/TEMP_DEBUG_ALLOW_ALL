@@ -1,0 +1,9 @@
+alter policy "TEMP_DEBUG_ALLOW_ALL"
+on "public"."contact_messages"
+to public
+using ( true 
+with check (
+  true
+);
+
+

@@ -1,26 +1,7 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { DateTime, Interval } from "https://esm.sh/luxon@3.4.0";
-const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_ANON_KEY"));
-const TIME_ZONE = "America/Denver"; // Mountain Standard Time
-const DUMP_LOADER_SERVICE_ID = 2;
-const generateTimeSlots = (start, end, interval = 60)=>{
-  const slots = [];
-  let current = start;
-  while(current <= end){
-    slots.push(current.toFormat("HH:mm"));
-    current = current.plus({
-      minutes: interval
-    });
-  }
-  return slots;
-};
-// Convert ISO string to DateTime in UTC
-const parseISOUTC = (isoStr)=>DateTime.fromISO(isoStr, {
-    zone: "UTC"
-  });
-// Convert UTC DateTime to target timezone
-const toTimeZone = (dt, zone)=>dt.setZone(zone);
+import { eachDayOfInterval, formatISO, parseISO, addMinutes } from "npm:date-fns";
+const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -28,109 +9,184 @@ Deno.serve(async (req)=>{
     });
   }
   try {
-    const { serviceId, startDate, endDate, fetchBookings } = await req.json();
-    const serviceIdInt = parseInt(serviceId, 10);
-    if (!serviceIdInt || !startDate || !endDate) {
-      throw new Error("Service ID, start date, and end date are required.");
-    }
-    const sDate = parseISOUTC(startDate);
-    const eDate = parseISOUTC(endDate);
-    const { data: unavailableDates, error: unavailError } = await supabase.from("unavailable_dates").select("date, service_id");
-    if (unavailError) throw unavailError;
-    const unavailableDatesForService = new Set(unavailableDates.filter((d)=>d.service_id === serviceIdInt || d.service_id === null).map((d)=>parseISOUTC(d.date).toISODate()));
-    // Dump Loader bookings
-    if (serviceIdInt === DUMP_LOADER_SERVICE_ID) {
-      const { data: dumpLoaderBookings, error: dlBookingError } = await supabase.from("bookings").select("drop_off_date, pickup_date").eq("plan->>id", DUMP_LOADER_SERVICE_ID).in("status", [
-        "Confirmed",
-        "Delivered",
-        "flagged",
-        "waiting_to_be_returned"
-      ]);
-      if (dlBookingError) throw dlBookingError;
-      dumpLoaderBookings?.forEach((booking)=>{
-        const intervalDays = Interval.fromDateTimes(parseISOUTC(booking.drop_off_date), parseISOUTC(booking.pickup_date)).splitBy({
-          days: 1
-        }).map((i)=>i.start);
-        intervalDays.forEach((day)=>unavailableDatesForService.add(day.toISODate()));
+    const { serviceId, startDate, endDate } = await req.json();
+    console.log("🔥 Request payload:", {
+      serviceId,
+      startDate,
+      endDate
+    });
+    if (!serviceId || !startDate || !endDate) {
+      return new Response(JSON.stringify({
+        error: "Missing required parameters"
+      }), {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
       });
     }
-    // Service availability
-    const { data: serviceAvailability, error: serviceAvailError } = await supabase.from("service_availability").select("*").eq("service_id", serviceIdInt);
-    if (serviceAvailError) throw serviceAvailError;
-    const serviceAvailMap = new Map();
-    for (const d of serviceAvailability){
-      serviceAvailMap.set(d.day_of_week, d);
+    // Fetch service config
+    const { data: service, error: serviceError } = await supabase.from("services").select("id, name").eq("id", serviceId).single();
+    if (serviceError || !service) {
+      console.error("❌ Service fetch error:", serviceError);
+      return new Response(JSON.stringify({
+        error: "Service not found"
+      }), {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
     }
-    const availabilityResult = {};
-    const intervalDays = Interval.fromDateTimes(sDate, eDate).splitBy({
-      days: 1
-    }).map((i)=>i.start);
-    const nowInMST = DateTime.now().setZone(TIME_ZONE);
-    for (const day of intervalDays){
-      const dayStr = day.toISODate();
-      const dayInMST = toTimeZone(day, TIME_ZONE);
-      const dayOfWeek = dayInMST.weekday % 7; // Luxon: 1=Mon, ..., 7=Sun
-      const weeklyAvail = serviceAvailMap.get(dayOfWeek);
-      if (!weeklyAvail || !weeklyAvail.is_available || unavailableDatesForService.has(dayStr)) {
-        availabilityResult[dayStr] = {
-          available: false,
-          dropOffSlots: [],
-          pickupSlots: []
-        };
-        continue;
-      }
-      let dropOffStartUTC = DateTime.fromISO(`${dayStr}T${weeklyAvail.delivery_start_time}`, {
-        zone: TIME_ZONE
-      }).toUTC();
-      const dropOffEndUTC = DateTime.fromISO(`${dayStr}T${weeklyAvail.delivery_end_time}`, {
-        zone: TIME_ZONE
-      }).toUTC();
-      if (dayInMST.hasSame(nowInMST, "day")) {
-        const oneHourFromNowUTC = nowInMST.plus({
-          hours: 1
-        }).toUTC();
-        if (dropOffStartUTC < oneHourFromNowUTC) dropOffStartUTC = oneHourFromNowUTC;
-      }
-      const dropOffSlots = dropOffEndUTC < dropOffStartUTC ? [] : generateTimeSlots(dropOffStartUTC, dropOffEndUTC);
-      const pickupStartUTC = DateTime.fromISO(`${dayStr}T${weeklyAvail.pickup_start_time}`, {
-        zone: TIME_ZONE
-      }).toUTC();
-      const pickupEndUTC = DateTime.fromISO(`${dayStr}T${weeklyAvail.pickup_end_time}`, {
-        zone: TIME_ZONE
-      }).toUTC();
-      const pickupSlots = generateTimeSlots(pickupStartUTC, pickupEndUTC);
-      availabilityResult[dayStr] = {
-        available: true,
-        dropOffSlots,
-        pickupSlots
-      };
+    // Fetch service availability rules
+    const { data: availRules, error: availError } = await supabase.from("service_availability").select("day_of_week, window_start_time, window_end_time, is_available, slot_interval_minutes").eq("service_id", serviceId).eq("is_available", true);
+    if (availError) {
+      console.error("❌ Service availability fetch error:", availError);
     }
-    let bookings = [];
-    if (fetchBookings) {
-      const { data: bookingData, error: bookingError } = await supabase.from("bookings").select("*, customers!inner(name)").gte("drop_off_date", sDate.startOf("month").toISODate()).lte("pickup_date", eDate.endOf("month").toISODate());
-      if (bookingError) throw bookingError;
-      bookings = bookingData;
+    // Fetch unavailable dates (global + service-specific)
+    const { data: unavailable, error: unavailError } = await supabase.from("unavailable_dates").select("date").or(`service_id.eq.${serviceId},service_id.is.null`).gte("date", startDate).lte("date", endDate);
+    if (unavailError) {
+      console.error("❌ Unavailable dates fetch error:", unavailError);
     }
-    return new Response(JSON.stringify({
-      availability: availabilityResult,
-      bookings
-    }), {
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      },
-      status: 200
+    // Fetch existing bookings
+    const { data: bookings, error: bookingsError } = await supabase.from("bookings").select("plan->>id as service_id, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot").gte("drop_off_date", startDate).lte("pickup_date", endDate);
+    if (bookingsError) {
+      console.error("❌ Bookings fetch error:", bookingsError);
+      return new Response(JSON.stringify({
+        error: "Error fetching bookings"
+      }), {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+    console.log("✅ Bookings:", bookings);
+    // Build availability per day
+    const days = eachDayOfInterval({
+      start: parseISO(startDate),
+      end: parseISO(endDate)
     });
-  } catch (error) {
-    console.error("Get availability error:", error);
+    const availability = [];
+    const disabledDates = [];
+    for (const day of days){
+      const dayStr = formatISO(day, {
+        representation: "date"
+      });
+      const dowJs = day.getDay(); // 0=Sun ... 6=Sat
+      let available = true;
+      let reason;
+      let dropOffSlots = [];
+      let pickupSlots = [];
+      // Check if globally or service-specific unavailable
+      if (unavailable?.some((u)=>u.date === dayStr)) {
+        available = false;
+        reason = "Marked unavailable";
+        disabledDates.push(dayStr);
+      } else {
+        // Find availability rule for this weekday
+        const rule = availRules?.find((r)=>r.day_of_week === dowJs);
+        if (!rule) {
+          available = false;
+          reason = "No availability rule for this day";
+          disabledDates.push(dayStr);
+        } else if (!rule.slot_interval_minutes) {
+          // No slots to generate
+          available = false;
+          reason = "No slots defined for this day";
+          disabledDates.push(dayStr);
+        } else {
+          // Generate slots based on slot_interval_minutes
+          let slot = parseISO(`${dayStr}T${rule.window_start_time}`);
+          const end = parseISO(`${dayStr}T${rule.window_end_time}`);
+          const interval = rule.slot_interval_minutes;
+          while(slot <= end){
+            const timeStr = formatISO(slot, {
+              representation: "time"
+            }).slice(0, 8);
+            dropOffSlots.push(timeStr);
+            pickupSlots.push(timeStr);
+            slot = addMinutes(slot, interval);
+          }
+          // Remove already booked slots
+          const dayBookings = bookings.filter((b)=>{
+            console.log(`🔥 b.service_id:  ${b.service_id} serviceId: ${serviceId}`);
+            if (b.service_id !== String(serviceId)) return false;
+            const drop = parseISO(b.drop_off_date);
+            const pickup = parseISO(b.pickup_date);
+            if (serviceId === 2) {
+              // For service 2, block all days between drop-off and pickup
+              return day >= drop && day <= pickup;
+            } else {
+              // For other services, only block if booking is on this date
+              return dayStr === b.drop_off_date || dayStr === b.pickup_date;
+            }
+          });
+          // Block specific booked slots based on drop_off_time_slot and pickup_time_slot
+          let bookedTimes = [];
+          for (const b of dayBookings){
+            if (b.drop_off_time_slot && b.pickup_time_slot) {
+              // Both drop-off and pickup times exist, block the window
+              const start = parseISO(`${dayStr}T${b.drop_off_time_slot}`);
+              const end = parseISO(`${dayStr}T${b.pickup_time_slot}`);
+              let blockSlot = start;
+              while(blockSlot <= end){
+                const timeStr = formatISO(blockSlot, {
+                  representation: "time"
+                }).slice(0, 8);
+                bookedTimes.push(timeStr);
+                blockSlot = addMinutes(blockSlot, rule.slot_interval_minutes);
+              }
+              console.log(`⛔ Blocking slots for booking on ${dayStr}:`, bookedTimes);
+            } else {
+              // Only one time defined, block that specific slot
+              if (b.drop_off_time_slot) bookedTimes.push(b.drop_off_time_slot);
+              if (b.pickup_time_slot) bookedTimes.push(b.pickup_time_slot);
+              console.log(`⛔ Blocking individual slots on ${dayStr}:`, bookedTimes);
+            }
+          }
+          dropOffSlots = dropOffSlots.filter((s)=>!bookedTimes.includes(s));
+          pickupSlots = pickupSlots.filter((s)=>!bookedTimes.includes(s));
+          if (dropOffSlots.length === 0 && pickupSlots.length === 0) {
+            available = false;
+            reason = "Already booked";
+            disabledDates.push(dayStr);
+          }
+        }
+      }
+      availability.push({
+        date: dayStr,
+        available,
+        reason,
+        drop_off_times: dropOffSlots.map((t)=>t.slice(0, 5)),
+        pickup_times: pickupSlots.map((t)=>t.slice(0, 5)),
+        usesWindows: true
+      });
+    }
+    console.log("✅ Final availability:", availability);
     return new Response(JSON.stringify({
-      error: error.message
+      availability,
+      disabledDates
     }), {
       headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      },
-      status: 500
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  } catch (err) {
+    console.error("❌ Unexpected error:", err);
+    return new Response(JSON.stringify({
+      error: "Unexpected error",
+      details: String(err)
+    }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
     });
   }
 });

@@ -1,118 +1,130 @@
 import { corsHeaders } from "./cors.ts";
 import { Stripe } from "npm:stripe@15.8.0";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from 'npm:@supabase/supabase-js@2';
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY"), {
   apiVersion: "2024-06-20"
 });
-const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-// --- Helper ---
+const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
 const handleCheckoutCompleted = async (session)=>{
-  const bookingId = session?.metadata?.booking_id || session?.client_reference_id;
-  const checkoutSessionId = session?.id;
-  const paymentIntentId = session?.payment_intent;
-  const stripeCustomerId = session?.customer;
-  if (!bookingId || !checkoutSessionId) {
-    console.error(`Webhook: Missing booking_id or session_id. booking_id=${bookingId} session_id=${checkoutSessionId}`);
-    return;
+  const bookingId = session.metadata?.booking_id || session.client_reference_id;
+  const checkoutSessionId = session.id;
+  const paymentIntentId = session.payment_intent;
+  const stripeCustomerId = session.customer;
+  if (!bookingId) {
+    console.error(`Webhook Error: Missing booking_id in metadata or client_reference_id on session ${checkoutSessionId}`);
+    return new Response("Missing booking_id", {
+      status: 400
+    });
   }
   try {
-    // Get charge id if possible
+    const { data: existingBooking, error: fetchError } = await supabase.from('bookings').select(`*`).eq('id', bookingId).single();
+    if (fetchError) {
+      console.error(`Webhook: Could not fetch booking ${bookingId}. Error: ${fetchError.message}`);
+      return new Response(`Could not fetch booking: ${fetchError.message}`, {
+        status: 500
+      });
+    }
+    if (existingBooking.status !== 'pending_payment') {
+      console.log(`Webhook: Booking ${bookingId} already processed. Current status: ${existingBooking.status}. Skipping.`);
+      return new Response("Booking already processed", {
+        status: 200
+      });
+    }
     let chargeId = null;
-    if (typeof paymentIntentId === "string") {
-      const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+    if (typeof paymentIntentId === 'string') {
+      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
         expand: [
-          "latest_charge"
+          'latest_charge'
         ]
       });
-      if (pi?.latest_charge) {
-        chargeId = typeof pi.latest_charge === "string" ? pi.latest_charge : pi.latest_charge.id;
+      if (paymentIntent.latest_charge) {
+        chargeId = typeof paymentIntent.latest_charge === 'string' ? paymentIntent.latest_charge : paymentIntent.latest_charge.id;
       }
     }
-    // Link Stripe Customer → our customers row (via booking)
-    if (stripeCustomerId) {
-      const { data: bookingRow, error: bookingErr } = await supabase.from("bookings").select("customer_id").eq("id", bookingId).single();
-      if (!bookingErr && bookingRow?.customer_id) {
-        await supabase.from("customers").update({
-          stripe_customer_id: String(stripeCustomerId)
-        }).eq("id", bookingRow.customer_id);
-      }
-    }
-    // Set booking status
-    const { error: updateBookingErr } = await supabase.from("bookings").update({
-      status: "awaiting_processing"
-    }).eq("id", bookingId);
-    if (updateBookingErr) {
-      console.error(`Webhook: Failed to update booking ${bookingId}`, updateBookingErr);
-    }
-    // Upsert Stripe IDs
-    const { error: upsertErr } = await supabase.from("stripe_payment_info").upsert({
+    const { error: paymentInfoError } = await supabase.from('stripe_payment_info').upsert({
       booking_id: bookingId,
+      stripe_customer_id: typeof stripeCustomerId === 'string' ? stripeCustomerId : null,
+      stripe_payment_intent_id: typeof paymentIntentId === 'string' ? paymentIntentId : null,
       stripe_checkout_session_id: checkoutSessionId,
-      stripe_customer_id: stripeCustomerId ? String(stripeCustomerId) : null,
-      stripe_payment_intent_id: paymentIntentId ? String(paymentIntentId) : null,
       stripe_charge_id: chargeId
     }, {
-      onConflict: "booking_id"
+      onConflict: 'booking_id'
     });
-    if (upsertErr) {
-      console.error(`Webhook: Failed to upsert stripe_payment_info for booking ${bookingId}`, upsertErr);
-    } else {
-      console.log(`Webhook: Stored Stripe IDs for booking ${bookingId} (session ${checkoutSessionId})`);
+    if (paymentInfoError) throw paymentInfoError;
+    const { error: accountSetupError } = await supabase.functions.invoke('handle-booking-account-creation', {
+      body: {
+        customerId: existingBooking.customer_id
+      }
+    });
+    if (accountSetupError) {
+      console.error(`Webhook: Failed to setup account for customer ${existingBooking.customer_id}. Error: ${accountSetupError.message}`);
     }
-  } catch (err) {
-    console.error(`Webhook: Error processing checkout.session.completed for booking ${bookingId}:`, err);
+    let finalStatus = 'Confirmed';
+    if (existingBooking.was_verification_skipped) {
+      finalStatus = 'pending_verification';
+    }
+    const { data: updatedBooking, error: updateError } = await supabase.from('bookings').update({
+      status: finalStatus
+    }).eq('id', bookingId).select(`*, customers!inner(*)`).single();
+    if (updateError) throw updateError;
+    const addons = updatedBooking.addons || {};
+    if (addons.equipment && addons.equipment.length > 0) {
+      const equipmentToInsert = addons.equipment.map((item)=>({
+          booking_id: bookingId,
+          equipment_id: item.dbId,
+          quantity: item.quantity
+        })).filter((item)=>item.equipment_id);
+      if (equipmentToInsert.length > 0) {
+        const { error: insertError } = await supabase.from('booking_equipment').insert(equipmentToInsert);
+        if (insertError) {
+          console.error(`Webhook: Failed to insert booking_equipment for booking ${bookingId}`, insertError);
+        }
+      }
+    }
+    await supabase.functions.invoke('send-booking-confirmation', {
+      body: {
+        booking: updatedBooking
+      }
+    });
+    console.log(`Webhook: Successfully processed checkout for booking ${bookingId}.`);
+  } catch (error) {
+    console.error(`Webhook: Critical error processing booking ${bookingId}:`, error);
+    const { error: updateError } = await supabase.from('bookings').update({
+      status: 'pending_review',
+      notes: `Webhook failed: ${error.message}`
+    }).eq('id', bookingId);
+    if (updateError) {
+      console.error(`Webhook: FAILED TO FLAG BOOKING ${bookingId} AS PENDING REVIEW AFTER ERROR.`);
+    }
+    return new Response(`Webhook error: ${error.message}`, {
+      status: 500
+    });
   }
 };
-// --- Handler ---
 Deno.serve(async (req)=>{
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", {
-      status: 405
-    });
-  }
   const signature = req.headers.get("Stripe-Signature");
-  if (!signature) {
-    return new Response("Missing Stripe-Signature header", {
-      status: 400
-    });
-  }
-  let body;
-  try {
-    body = await req.text(); // RAW body required
-  } catch  {
-    return new Response("Invalid body", {
-      status: 400
-    });
-  }
+  const body = await req.text();
   let event;
   try {
     event = await stripe.webhooks.constructEventAsync(body, signature, Deno.env.get("STRIPE_WEBHOOK_SIGNING_SECRET"));
   } catch (err) {
-    console.error("Signature verification failed:", err?.message);
-    return new Response("Bad signature", {
+    console.error(`Webhook signature verification failed: ${err.message}`);
+    return new Response(err.message, {
       status: 400
     });
   }
-  try {
-    switch(event.type){
-      case "checkout.session.completed":
-      case "checkout.session.async_payment_succeeded":
-        await handleCheckoutCompleted(event.data.object);
-        break;
-      default:
-        break;
-    }
-  } catch (err) {
-    console.error("Webhook handler error:", err);
-  // still return 200 to prevent retries unless it's a real failure
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const response = await handleCheckoutCompleted(session);
+    if (response) return response;
   }
   return new Response(JSON.stringify({
     received: true
   }), {
-    status: 200,
     headers: {
       ...corsHeaders,
       "Content-Type": "application/json"
-    }
+    },
+    status: 200
   });
 });
