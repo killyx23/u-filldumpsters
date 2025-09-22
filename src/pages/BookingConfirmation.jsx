@@ -135,6 +135,7 @@ function BookingConfirmation() {
         const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
         const fullAddress = `${street}, ${city}, ${state} ${zip}`;
         const distanceInfo = addons?.distanceInfo;
+        const isDelivery = addons?.isDelivery;
         const isPendingVerification = bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
          const formatTime = (timeString) => {
             if (!timeString) return 'N/A';
@@ -186,7 +187,7 @@ function BookingConfirmation() {
                   <p className="text-white"><strong>Your Phone Number:</strong> <span className="font-mono bg-black/30 p-1 rounded">{phone}</span></p>
                 </div>
                 
-                {plan.id === 2 && !isPendingVerification && (
+                {plan.id === 2 && !isDelivery && !isPendingVerification && (
                   <div className="bg-blue-900/30 border border-blue-500/50 p-6 rounded-lg mb-8 text-left">
                     <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Truck className="mr-3 h-6 w-6"/>Important Pickup Information</h3>
                     <p className="text-blue-200"><strong>Pickup Location:</strong> 227 W. Casi Way, Saratoga Springs, UT 84045.</p>
@@ -199,9 +200,9 @@ function BookingConfirmation() {
                   <ConfirmationLine icon={<User className="h-6 w-6" />} label="Name" value={name} />
                    <ConfirmationLine icon={<Mail className="h-6 w-6" />} label="Email" value={email} />
                   <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
-                   {plan.id !== 2 && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
-                  <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
-                  <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
+                   {(plan.id === 1 || isDelivery) && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
+                  <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name + (isDelivery ? ' with Delivery' : '')} />
+                  <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? (isDelivery ? "Delivery" : "Pickup") : "Drop-off"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
                    <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Verification' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
                    {distanceInfo?.fee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.fee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
                   <div className="flex items-center py-3">

@@ -1,62 +1,81 @@
 import React from 'react';
-    import { Button } from '@/components/ui/button';
-    import { Label } from '@/components/ui/label';
-    import { Textarea } from '@/components/ui/textarea';
-    import { Check, MessageSquare } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
-    const SummaryLine = ({ label, value, isSubItem = false }) => (
-        <div className={`flex justify-between items-center ${isSubItem ? 'pl-4' : ''}`}>
-            <p className={isSubItem ? 'text-blue-200' : 'text-white'}>{label}</p>
-            <p className="font-mono text-green-300">${value.toFixed(2)}</p>
+export const OrderSummary = ({ basePrice, addonsData, totalPrice, setAddonsData, handleBookingSubmit, plan, equipmentMeta, addonPrices, deliveryService }) => {
+    
+    const isDelivery = plan.id === 2 && deliveryService;
+    
+    return (
+        <div className="bg-white/5 p-6 rounded-lg space-y-4 flex flex-col">
+            <h3 className="text-2xl font-bold text-yellow-400">Order Summary</h3>
+            <div className="flex-grow space-y-3 text-sm">
+                <div className="flex justify-between">
+                    <span className="text-blue-200">Base Price:</span>
+                    <span className="text-white font-semibold">${basePrice.toFixed(2)}</span>
+                </div>
+                {addonsData.distanceInfo?.fee > 0 && (
+                    <div className="flex justify-between">
+                        <span className="text-blue-200">Extended Delivery Fee:</span>
+                        <span className="text-white font-semibold">${addonsData.distanceInfo.fee.toFixed(2)}</span>
+                    </div>
+                )}
+                {addonsData.insurance === 'accept' && plan.id !== 1 && (
+                    <div className="flex justify-between">
+                        <span className="text-blue-200">Rental Insurance:</span>
+                        <span className="text-white font-semibold">${addonPrices.insurance.toFixed(2)}</span>
+                    </div>
+                )}
+                {(plan.id === 1 || isDelivery) && addonsData.drivewayProtection === 'accept' && (
+                    <div className="flex justify-between">
+                        <span className="text-blue-200">Driveway Protection:</span>
+                        <span className="text-white font-semibold">${addonPrices.drivewayProtection.toFixed(2)}</span>
+                    </div>
+                )}
+                {addonsData.equipment.length > 0 && (
+                    <div className="pt-2 border-t border-white/10">
+                        <p className="text-blue-200 mb-1">Equipment:</p>
+                        {addonsData.equipment.map(item => {
+                            const equipmentInfo = equipmentMeta.find(e => e.id === item.id);
+                            if (!equipmentInfo) return null;
+                            return (
+                                <div key={item.id} className="flex justify-between">
+                                    <span className="text-blue-200 pl-2">{equipmentInfo.label} x{item.quantity}</span>
+                                    <span className="text-white font-semibold">${(equipmentInfo.price * item.quantity).toFixed(2)}</span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+            
+            <div className="border-t border-white/20 pt-4">
+                <div className="flex justify-between items-baseline">
+                    <span className="text-white text-lg font-bold">Total:</span>
+                    <span className="text-green-400 text-3xl font-bold">${totalPrice.toFixed(2)}</span>
+                </div>
+                <p className="text-xs text-blue-200 text-right">(plus tax)</p>
+            </div>
+            
+            <div>
+                <label htmlFor="notes" className="text-sm font-semibold text-white mb-2 block">Special Instructions / Notes</label>
+                <Textarea 
+                    id="notes" 
+                    placeholder="e.g., Placement instructions, gate codes..." 
+                    className="bg-white/10 border-white/30"
+                    value={addonsData.notes}
+                    onChange={(e) => setAddonsData(prev => ({...prev, notes: e.target.value}))}
+                />
+            </div>
+            
+            <Button
+                onClick={handleBookingSubmit}
+                className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-black disabled:opacity-50"
+            >
+                Continue to Agreement
+                <ArrowRight className="ml-2" />
+            </Button>
         </div>
     );
-
-    export const OrderSummary = ({ basePrice, addonsData, totalPrice, setAddonsData, handleBookingSubmit, plan, equipmentMeta, addonPrices }) => {
-        const isDumpLoader = plan.id === 2;
-        const notesLabel = isDumpLoader ? "Questions" : "Special Instructions";
-        const notesPlaceholder = isDumpLoader 
-            ? "Any questions or things that you wanted us to know?" 
-            : "Any special instructions for delivery or pickup? (e.g., gate code, specific placement)";
-
-        return (
-            <div className="bg-white/5 p-6 rounded-lg flex flex-col">
-                <h3 className="text-2xl font-bold text-yellow-400 mb-4">Your Order Summary</h3>
-                <div className="space-y-2 text-white flex-grow">
-                    <SummaryLine label="Base Price" value={basePrice} />
-                    {addonsData.distanceInfo?.fee > 0 && <SummaryLine label={`Extended Delivery (${addonsData.distanceInfo.miles.toFixed(1)} miles)`} value={addonsData.distanceInfo.fee} />}
-                    {addonsData.insurance === 'accept' && <SummaryLine label="Rental Insurance" value={addonPrices.insurance} />}
-                    {plan.id !== 2 && addonsData.drivewayProtection === 'accept' && <SummaryLine label="Driveway Protection" value={addonPrices.drivewayProtection} />}
-                    {addonsData.equipment.length > 0 && <p className="font-semibold pt-2">Equipment:</p>}
-                    {addonsData.equipment.map(item => {
-                        const equipmentInfo = equipmentMeta.find(e => e.id === item.id);
-                        return (
-                            <SummaryLine key={item.id} label={`${equipmentInfo.label} (x${item.quantity})`} value={equipmentInfo.price * item.quantity} isSubItem />
-                        );
-                    })}
-                </div>
-                <div className="border-t border-white/20 pt-4 mt-4">
-                    <p className="text-white text-lg font-semibold">Final Total:</p>
-                    <div className="flex items-baseline">
-                        <p className="text-5xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
-                        <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
-                    </div>
-                </div>
-                <div className="mt-6">
-                    <Label htmlFor="customer-notes" className="flex items-center text-lg font-semibold text-white mb-2">
-                        <MessageSquare className="h-5 w-5 mr-2 text-yellow-400" />
-                        {notesLabel}
-                    </Label>
-                    <Textarea 
-                        id="customer-notes"
-                        value={addonsData.notes || ''}
-                        onChange={(e) => setAddonsData(prev => ({ ...prev, notes: e.target.value }))}
-                        placeholder={notesPlaceholder}
-                        className="bg-white/10 min-h-[100px]"
-                    />
-                </div>
-                <Button onClick={handleBookingSubmit} className="w-full mt-6 py-3 text-lg font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white">
-                    <Check className="mr-2" /> Complete Booking
-                </Button>
-            </div>
-        );
-    };
+};
