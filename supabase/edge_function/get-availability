@@ -1,171 +1,191 @@
 import { corsHeaders } from "./cors.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
-import { eachDayOfInterval, formatISO, parseISO, addHours } from "npm:date-fns";
-
-const supabase = createClient(
-  Deno.env.get("SUPABASE_URL"),
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { eachDayOfInterval, format, parse, isBefore, isSameDay, addHours, isValid, startOfDay, getDay, addMinutes, set, parseISO, max } from 'npm:date-fns';
+import { toZonedTime } from 'npm:date-fns-tz';
+// Helper function to create authenticated supabase client
+const supabase = createClient(Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") // ✅ use service key here
 );
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+const TIME_ZONE = 'America/Denver';
+const generateTimeSlots = (startStr, endStr, intervalMinutes, date, now, unavailableSlots = new Set())=>{
+  if (!startStr || !endStr) return [];
+  let startTime = parse(startStr, 'HH:mm:ss', date);
+  const endTime = parse(endStr, 'HH:mm:ss', date);
+  if (isSameDay(date, now)) {
+    const minStartTime = addHours(now, 2);
+    startTime = max([
+      startTime,
+      minStartTime
+    ]);
   }
-
+  const minutes = startTime.getMinutes();
+  const roundedMinutes = Math.ceil(minutes / intervalMinutes) * intervalMinutes;
+  let currentTime = set(startTime, {
+    minutes: roundedMinutes,
+    seconds: 0,
+    milliseconds: 0
+  });
+  const slots = [];
+  while(isBefore(currentTime, endTime)){
+    const slotEnd = addMinutes(currentTime, intervalMinutes);
+    if (isBefore(slotEnd, addMinutes(endTime, 1))) {
+      const slotString = `${format(currentTime, 'HH:mm:ss')}-${format(slotEnd, 'HH:mm:ss')}`;
+      if (!unavailableSlots.has(slotString)) {
+        slots.push({
+          value: slotString,
+          label: `${format(currentTime, 'h:mm a')} - ${format(slotEnd, 'h:mm a')}`
+        });
+      }
+    }
+    currentTime = addMinutes(currentTime, intervalMinutes);
+  }
+  return slots;
+};
+Deno.serve(async (req)=>{
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: corsHeaders
+    });
+  }
   try {
-    const { serviceId, startDate, endDate } = await req.json();
-    console.log("📥 Request payload:", { serviceId, startDate, endDate });
-
-    if (!serviceId || !startDate || !endDate) {
-      return new Response(
-        JSON.stringify({ error: "Missing required parameters" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
-    }
-
-    // Fetch service config
-    const { data: service, error: serviceError } = await supabase
-      .from("services")
-      .select("id, name")
-      .eq("id", serviceId)
-      .single();
-
-    if (serviceError || !service) {
-      console.error("❌ Service fetch error:", serviceError);
-      return new Response(
-        JSON.stringify({ error: "Service not found" }),
-        { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
-    }
-
-    // Fetch service availability rules
-    const { data: availRules, error: availError } = await supabase
-      .from("service_availability")
-      .select("day_of_week, window_start_time, window_end_time, is_available")
-      .eq("service_id", serviceId)
-      .eq("is_available", true);
-
-    if (availError) {
-      console.error("❌ Service availability fetch error:", availError);
-    }
-
-    // Fetch unavailable dates (global + service-specific)
-    const { data: unavailable, error: unavailError } = await supabase
-      .from("unavailable_dates")
-      .select("date")
-      .or(`service_id.eq.${serviceId},service_id.is.null`)
-      .gte("date", startDate)
-      .lte("date", endDate);
-
-    if (unavailError) {
-      console.error("❌ Unavailable dates fetch error:", unavailError);
-    }
-
-    // Fetch existing bookings
-    const { data: bookings, error: bookingsError } = await supabase
-      .from("bookings")
-      .select("plan->>id as service_id, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot")
-      .gte("drop_off_date", startDate)
-      .lte("pickup_date", endDate);
-
-    if (bookingsError) {
-      console.error("❌ Bookings fetch error:", bookingsError);
-      return new Response(
-        JSON.stringify({ error: "Error fetching bookings" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
-    }
-
-    console.log("📊 Bookings:", bookings);
-
-    // Build availability per day
-    const days = eachDayOfInterval({ start: parseISO(startDate), end: parseISO(endDate) });
-    const availability = [];
-    const disabledDates = [];
-
-    for (const day of days) {
-      const dayStr = formatISO(day, { representation: "date" });
-      const dowJs = day.getDay(); // 0=Sun ... 6=Sat
-      let available = true;
-      let reason;
-      let dropOffSlots: string[] = [];
-      let pickupSlots: string[] = [];
-
-      // Check if globally or service-specific unavailable
-      if (unavailable?.some((u) => u.date === dayStr)) {
-        available = false;
-        reason = "Marked unavailable";
-        disabledDates.push(dayStr);
-      } else {
-        // Find availability rule for this weekday
-        const rule = availRules?.find((r) => r.day_of_week === dowJs);
-        if (!rule) {
-          available = false;
-          reason = "No availability rule for this day";
-          disabledDates.push(dayStr);
-        } else {
-          // Generate 1-hour slots
-          let slot = parseISO(`${dayStr}T${rule.window_start_time}`);
-          const end = parseISO(`${dayStr}T${rule.window_end_time}`);
-          while (slot <= end) {
-            const timeStr = formatISO(slot, { representation: "time" }).slice(0, 8);
-            dropOffSlots.push(timeStr);
-            pickupSlots.push(timeStr);
-            slot = addHours(slot, 1);
-          }
-
-          // Remove already booked slots
-          const dayBookings = bookings.filter((b) => {
-            if (b.service_id !== String(serviceId)) return false;
-
-            const drop = parseISO(b.drop_off_date);
-            const pickup = parseISO(b.pickup_date);
-
-            if (serviceId === 2) {
-              // For service 2, block all days between drop-off and pickup
-              return day >= drop && day <= pickup;
-            } else {
-              // For other services, only block exact drop-off or pickup dates
-              return dayStr === b.drop_off_date || dayStr === b.pickup_date;
-            }
-          });
-
-          const bookedTimes = [
-            ...dayBookings.map((b) => b.drop_off_time_slot),
-            ...dayBookings.map((b) => b.pickup_time_slot),
-          ].filter(Boolean);
-
-          dropOffSlots = dropOffSlots.filter((s) => !bookedTimes.includes(s));
-          pickupSlots = pickupSlots.filter((s) => !bookedTimes.includes(s));
-
-          if (dropOffSlots.length === 0 && pickupSlots.length === 0) {
-            available = false;
-            reason = "Already booked";
-            disabledDates.push(dayStr);
-          }
+    const { serviceId, startDate, endDate, isDelivery } = await req.json();
+    console.log("from serviceId from req ", serviceId);
+    const numericServiceId = Number(serviceId);
+    const effectiveServiceId = numericServiceId === 2 && isDelivery ? 3 : numericServiceId;
+    if (!effectiveServiceId) throw new Error("Service ID is required.");
+    if (!startDate || !endDate) throw new Error("Start and end date are required.");
+    const sDate = parseISO(startDate);
+    const eDate = parseISO(endDate);
+    if (!isValid(sDate) || !isValid(eDate)) throw new Error("Invalid date format.");
+    console.log(`here is the serviceId ${effectiveServiceId}`);
+    const [serviceRes, weeklyAvailRes, dateSpecificAvailRes, allBookingsRes, globalUnavailableDatesRes, inventoryItemsRes, inventoryRulesRes] = await Promise.all([
+      supabase.from('services').select('service_type, id').eq('id', effectiveServiceId).maybeSingle(),
+      supabase.from('service_availability').select('*'),
+      supabase.from('date_specific_availability').select('*').gte('date', startDate).lte('date', endDate),
+      supabase.from('bookings').select('id, drop_off_date, pickup_date, status, drop_off_time_slot, pickup_time_slot, assigned_inventory_items, plan').in('status', [
+        'Confirmed',
+        'Delivered',
+        'flagged',
+        'waiting_to_be_returned',
+        'pending_verification',
+        'pending_review'
+      ]),
+      supabase.from('unavailable_dates').select('date').is('service_id', null),
+      supabase.from('inventory_items').select('*'),
+      supabase.from('inventory_rules').select('*')
+    ]);
+    if (serviceRes.error) throw new Error(`Service fetch failed: ${serviceRes.error.message}`);
+    console.log("Supabase raw serviceRes:", JSON.stringify(serviceRes, null, 2));
+    if (!serviceRes.data) throw new Error(`Service with ID ${effectiveServiceId} not found.`);
+    const { service_type } = serviceRes.data;
+    const weeklyRules = weeklyAvailRes.data;
+    const dateSpecificRules = dateSpecificAvailRes.data;
+    const allBookings = allBookingsRes.data;
+    const inventoryItems = inventoryItemsRes.data;
+    const inventoryRules = inventoryRulesRes.data;
+    const globalUnavailableDatesSet = new Set((globalUnavailableDatesRes.data || []).map((d)=>d.date));
+    const getRequiredInventory = (sId)=>inventoryRules.filter((r)=>r.service_id === sId);
+    const availabilityResult = {};
+    const intervalDays = eachDayOfInterval({
+      start: sDate,
+      end: eDate
+    });
+    const nowInMST = toZonedTime(new Date(), TIME_ZONE);
+    console.log("dateSpecificRules", dateSpecificRules);
+    for (const day of intervalDays){
+      const dayStr = format(day, 'yyyy-MM-dd');
+      availabilityResult[dayStr] = {
+        available: false,
+        deliverySlots: [],
+        pickupSlots: [],
+        returnSlots: []
+      };
+      console.log("day in interval", day);
+      if (isBefore(day, startOfDay(nowInMST))) continue;
+      const dayOfWeek = getDay(day);
+      const dateRule = dateSpecificRules.find((r)=>r.date === dayStr && r.service_id === effectiveServiceId);
+      const weeklyRule = weeklyRules.find((r)=>r.day_of_week === dayOfWeek && r.service_id === effectiveServiceId);
+      const rule = {
+        ...weeklyRule,
+        ...dateRule
+      };
+      // ✅ FORCE unavailable if date-specific says false
+      console.log("date rule", dateRule);
+      if (dateRule && dateRule.is_available === false || globalUnavailableDatesSet.has(dayStr)) {
+        console.log("I found date rule that is unavaiable", dateRule);
+        availabilityResult[dayStr] = {
+          available: false,
+          deliverySlots: [],
+          pickupSlots: [],
+          returnSlots: []
+        };
+        continue;
+      }
+      const requiredInventory = getRequiredInventory(effectiveServiceId);
+      let hasSufficientInventory = true;
+      for (const req of requiredInventory){
+        const item = inventoryItems.find((i)=>i.id === req.inventory_item_id);
+        if (!item) {
+          hasSufficientInventory = false;
+          break;
+        }
+        const bookingsUsingItem = allBookings.filter((b)=>{
+          const bookingStart = startOfDay(parseISO(b.drop_off_date));
+          const bookingEnd = startOfDay(parseISO(b.pickup_date));
+          const currentServiceIsDelivery = [
+            1,
+            3
+          ].includes(effectiveServiceId);
+          if (currentServiceIsDelivery) return isSameDay(day, bookingStart) || isSameDay(day, bookingEnd);
+          return isValid(bookingStart) && isValid(bookingEnd) && isBefore(day, bookingEnd) && !isBefore(day, bookingStart);
+        });
+        const countUsed = bookingsUsingItem.length;
+        if (item.total_quantity - countUsed < req.quantity_required) {
+          hasSufficientInventory = false;
+          break;
         }
       }
-
-      availability.push({
-        date: dayStr,
-        available,
-        reason,
-        drop_off_times: dropOffSlots.map((t) => t.slice(0, 5)),
-        pickup_times: pickupSlots.map((t) => t.slice(0, 5)),
-        usesWindows: true,
-      });
+      if (!hasSufficientInventory) continue;
+      let deliverySlots = [];
+      let pickupSlots = [];
+      let returnSlots = [];
+      const interval = service_type === 'hourly' ? 60 : 120;
+      const rockMulchInterval = effectiveServiceId === 3 ? 60 : interval;
+      if (service_type === 'window') {
+        deliverySlots = generateTimeSlots(rule.delivery_start_time, rule.delivery_end_time, effectiveServiceId === 4 ? rockMulchInterval : 120, day, nowInMST);
+        pickupSlots = generateTimeSlots(rule.pickup_start_time, rule.pickup_end_time, 120, day, nowInMST);
+      } else if (service_type === 'hourly') {
+        pickupSlots = generateTimeSlots(rule.hourly_start_time, rule.hourly_end_time, 60, day, nowInMST);
+        returnSlots = generateTimeSlots(rule.return_start_time, rule.return_end_time, 60, day, nowInMST);
+      }
+      const isAvailable = deliverySlots.length > 0 || pickupSlots.length > 0;
+      if (isAvailable) {
+        availabilityResult[dayStr] = {
+          available: true,
+          deliverySlots,
+          pickupSlots,
+          returnSlots
+        };
+      }
     }
-
-    console.log("✅ Final availability:", availability);
-
-    return new Response(JSON.stringify({ availability, disabledDates }), {
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+    return new Response(JSON.stringify({
+      availability: availabilityResult
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 200
     });
-  } catch (err) {
-    console.error("❌ Unexpected error:", err);
-    return new Response(
-      JSON.stringify({ error: "Unexpected error", details: String(err) }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
+  } catch (error) {
+    console.error("[get-availability] CRITICAL ERROR:", error.message, error.stack);
+    return new Response(JSON.stringify({
+      error: `An unexpected error occurred: ${error.message}`
+    }), {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      },
+      status: 500
+    });
   }
 });
