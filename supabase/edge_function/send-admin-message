@@ -1,0 +1,76 @@
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { corsHeaders } from './cors.ts';
+Deno.serve(async (req)=>{
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', {
+      headers: corsHeaders
+    });
+  }
+  try {
+    const { customer_id, content, thread_id, parent_note_id, booking_id } = await req.json();
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      throw new Error("Missing Authorization header");
+    }
+    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'), {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser();
+    if (userError) throw userError;
+    // Verify user is an admin
+    const { data: adminData, error: adminError } = await supabaseAdmin.rpc('is_admin');
+    if (adminError) throw adminError;
+    if (!adminData) {
+      return new Response(JSON.stringify({
+        error: 'Unauthorized: Not an admin'
+      }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        },
+        status: 401
+      });
+    }
+    const { data: note, error } = await supabaseAdmin.from('customer_notes').insert({
+      customer_id,
+      content,
+      thread_id,
+      parent_note_id,
+      booking_id,
+      author_id: user.id,
+      author_type: 'admin',
+      source: 'Admin Reply',
+      is_read: false
+    }).select().single();
+    if (error) {
+      throw error;
+    }
+    return new Response(JSON.stringify({
+      note
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 200
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      error: error.message
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      },
+      status: 500
+    });
+  }
+});

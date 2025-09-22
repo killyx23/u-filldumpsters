@@ -16,16 +16,22 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                 name: dayName,
                 day_of_week: index,
                 is_available: existing?.is_available || false,
-                day_start_time: existing?.day_start_time || null,
-                day_end_time: existing?.day_end_time || null,
-                time_windows: existing?.time_windows || (service.service_type === 'window' ? [] : null),
+                delivery_start_time: existing?.delivery_start_time,
+                delivery_end_time: existing?.delivery_end_time,
+                pickup_start_time: existing?.pickup_start_time,
+                pickup_end_time: existing?.pickup_end_time,
+                return_start_time: existing?.return_start_time,
+                return_end_time: existing?.return_end_time,
+                hourly_start_time: existing?.hourly_start_time,
+                hourly_end_time: existing?.hourly_end_time,
             };
         });
         setWeeklyAvailability(initialAvailability);
+        setHasChanges(false);
     }, [service, availability]);
 
     const handleDayUpdate = (updatedDay) => {
-        setWeeklyAvailability(prev => prev.map(day => day.day_of_week === updatedDay.day_of_week ? updatedDay : day));
+        setWeeklyAvailability(prev => prev.map(day => day.day_of_week === updatedDay.day_of_week ? { ...day, ...updatedDay } : day));
         setHasChanges(true);
     };
 
@@ -34,9 +40,15 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
             service_id: service.id,
             day_of_week: day.day_of_week,
             is_available: day.is_available,
-            day_start_time: service.service_type === 'fullday' ? day.day_start_time : null,
-            day_end_time: service.service_type === 'fullday' ? day.day_end_time : null,
-            time_windows: service.service_type === 'window' ? day.time_windows : null,
+            time_type: service.service_type,
+            delivery_start_time: day.delivery_start_time,
+            delivery_end_time: day.delivery_end_time,
+            pickup_start_time: day.pickup_start_time,
+            pickup_end_time: day.pickup_end_time,
+            return_start_time: day.return_start_time,
+            return_end_time: day.return_end_time,
+            hourly_start_time: day.hourly_start_time,
+            hourly_end_time: day.hourly_end_time,
         }));
         onSaveChanges(payload);
         setHasChanges(false);
@@ -59,6 +71,7 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                         dayIndex={index}
                         onUpdate={handleDayUpdate}
                         serviceType={service.service_type}
+                        timeConfig={service.time_config}
                     />
                 ))}
             </div>
