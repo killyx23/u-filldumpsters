@@ -3,10 +3,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
-    import { Loader2, ArrowLeft, User, Clock, DollarSign, UserCheck, ShieldAlert, MessageSquare } from 'lucide-react';
+    import { Loader2, ArrowLeft, User, Clock, DollarSign, UserCheck, ShieldAlert, MessageSquare, Bell } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { CustomerProfile } from './CustomerProfile';
-    import { CustomerNotes } from './CustomerNotes';
+    import { CommunicationLog } from './CommunicationLog';
     import { ActiveRentals } from './ActiveRentals';
     import { BookingHistory } from './BookingHistory';
     import { CompletedBookings } from './CompletedBookings';
@@ -74,6 +74,56 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         }, [fetchCustomerDetails]);
 
         useEffect(() => {
+            if (!id) return;
+
+            const subscriptions = [];
+
+            const notesChannel = supabase.channel(`customer-notes-${id}`)
+                .on('postgres_changes', { 
+                    event: 'INSERT', 
+                    schema: 'public', 
+                    table: 'customer_notes', 
+                    filter: `customer_id=eq.${id}` 
+                }, 
+                (payload) => {
+                    const newNote = payload.new;
+                    setNotes(currentNotes => {
+                         if (currentNotes.some(note => note.id === newNote.id)) {
+                            return currentNotes;
+                         }
+                         return [newNote, ...currentNotes];
+                    });
+                    
+                    if (newNote.author_type === 'customer') {
+                        toast({
+                            title: "New Customer Message",
+                            description: `You have a new message from ${customer?.name || 'a customer'}.`,
+                            action: <Bell className="h-5 w-5 text-yellow-400" />,
+                        });
+                    }
+                })
+                .subscribe();
+            subscriptions.push(notesChannel);
+
+            const bookingsChannel = supabase.channel(`customer-bookings-${id}`)
+                .on('postgres_changes', { 
+                    event: '*', 
+                    schema: 'public', 
+                    table: 'bookings', 
+                    filter: `customer_id=eq.${id}` 
+                },
+                (payload) => {
+                    fetchCustomerDetails();
+                })
+                .subscribe();
+            subscriptions.push(bookingsChannel);
+
+            return () => {
+                subscriptions.forEach(sub => supabase.removeChannel(sub));
+            };
+        }, [id, customer?.name, fetchCustomerDetails]);
+
+        useEffect(() => {
             const tab = searchParams.get('tab');
             if (tab) {
                 setActiveTab(tab);
@@ -127,7 +177,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full mt-8">
                     <TabsList className="grid w-full grid-cols-5 bg-white/10 text-white mb-6">
                         <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile & Notes</TabsTrigger>
-                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Notes</TabsTrigger>
+                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Communication</TabsTrigger>
                         <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
                         <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                         <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
@@ -144,7 +194,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                     </TabsContent>
                      <TabsContent value="notes">
                         <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CustomerNotes customer={customer} notes={notes} setNotes={setNotes} onUpdate={fetchCustomerDetails} loading={loading} />
+                           <CommunicationLog customer={customer} notes={notes} setNotes={setNotes} onUpdate={fetchCustomerDetails} loading={loading} />
                         </div>
                     </TabsContent>
                      <TabsContent value="verification">

@@ -53,8 +53,9 @@ const extractVariants = (variants) => {
 			price_in_cents,
 			sale_price_in_cents,
 			currency,
-			price_in_cents_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
-			sale_price_in_cents_formatted: formatCurrency(sale_price_in_cents, v?.prices?.[0]?.currency),
+			currency_info: v?.prices?.[0]?.currency,
+			price_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
+			sale_price_formatted: formatCurrency(sale_price_in_cents, v?.prices?.[0]?.currency),
 			manage_inventory: v?.manage_inventory || false, // track stock only if this flag is true
 			weight: v?.weight || null,
 			options: extractVariantOptions(v?.options),
@@ -141,7 +142,10 @@ const getProductPrice = (product) => {
  * @property {number} price_in_cents - Price in cents in smallest currency unit (e.g., cents for USD)
  * @property {number|null} sale_price_in_cents - Discounted price in cents in smallest currency unit, if applicable
  * @property {string} currency - Currency code (e.g., "USD", "EUR")
- * @property {boolean} manage_inventory - Whether inventory is managed for product and/or variant. When true, stock should be tracked
+ * @property {Object} currency_info - Currency information object from prices array
+ * @property {string} price_formatted - Formatted price string (e.g., "$10.99")
+ * @property {string|null} sale_price_formatted - Formatted sale price string, null if no sale
+ * @property {boolean} manage_inventory - Whether inventory is managed for this variant. When true, stock should be tracked
  * @property {number|null} weight - Product weight in specified units
  * @property {Array<{id: string, option_id: string, variant_id: string, value: string}>} options - Variant-specific options
  * @property {number|null} inventory_quantity - Current inventory quantity for this variant. Track only if manage_inventory=true

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote, Key, Edit, X, History, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
+import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote, Key, Edit, X, History, AlertTriangle, CheckCircle, ArrowRight, Car, Route } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EditInput } from '@/components/admin/EditInput';
 import { Textarea } from '@/components/ui/textarea';
@@ -33,10 +33,33 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
     const [editedCustomer, setEditedCustomer] = useState(customer);
     const [isSaving, setIsSaving] = useState(false);
     const [verificationResult, setVerificationResult] = useState(null);
+    const [travelInfo, setTravelInfo] = useState({ eta: null, distance: null, loading: true });
 
     useEffect(() => {
         setEditedCustomer(customer);
+        if (customer && customer.street && customer.city && customer.state && customer.zip) {
+            const fetchTravelInfo = async () => {
+                setTravelInfo({ eta: null, distance: null, loading: true });
+                const fullAddress = `${customer.street}, ${customer.city}, ${customer.state} ${customer.zip}`;
+                try {
+                    const { data, error } = await supabase.functions.invoke('get-eta', {
+                        body: { destination: fullAddress },
+                    });
+
+                    if (error) throw error;
+
+                    setTravelInfo({ eta: data.eta, distance: data.distance, loading: false });
+                } catch (error) {
+                    console.error("Failed to fetch ETA:", error);
+                    setTravelInfo({ eta: 'N/A', distance: 'N/A', loading: false });
+                }
+            };
+            fetchTravelInfo();
+        } else {
+            setTravelInfo({ eta: 'N/A', distance: 'N/A', loading: false });
+        }
     }, [customer]);
+
 
     const handleInputChange = (field, value) => {
         setEditedCustomer(prev => ({ ...prev, [field]: value }));
@@ -163,6 +186,17 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                             <InfoRow icon={<Mail />} label="Email" value={editedCustomer.email} href={`mailto:${editedCustomer.email}`} />
                             <InfoRow icon={<Phone />} label="Phone" value={editedCustomer.phone} href={`tel:${editedCustomer.phone}`} />
                             <InfoRow icon={<Home />} label="Address" value={`${editedCustomer.street}, ${editedCustomer.city}, ${editedCustomer.state} ${editedCustomer.zip}`} />
+                             {travelInfo.loading ? (
+                                <div className="flex items-center py-2 border-b border-white/10">
+                                    <Loader2 className="mr-3 h-5 w-5 animate-spin" />
+                                    <span className="text-blue-200">Calculating travel time...</span>
+                                </div>
+                            ) : (
+                                <>
+                                    <InfoRow icon={<Car />} label="Est. Travel Time" value={`${travelInfo.eta} (one-way)`} />
+                                    <InfoRow icon={<Route />} label="Distance" value={`${travelInfo.distance} (one-way)`} />
+                                </>
+                            )}
                             <InfoRow icon={<Hash />} label="Stripe Customer ID" value={editedCustomer.stripe_customer_id || "Not Available"} />
                             <InfoRow icon={<Hash />} label="Last Payment Intent ID" value={editedCustomer.stripe_payment_intent_id || "Not Available"} />
                             <InfoRow icon={<Hash />} label="Last Charge ID" value={editedCustomer.stripe_charge_id || "Not Available"} />

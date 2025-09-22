@@ -1,156 +1,146 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { PlanCard } from '@/components/PlanCard';
-import { BookingForm } from '@/components/BookingForm';
-import { AddonsForm } from '@/components/AddonsForm';
-import { UserAgreement } from '@/components/UserAgreement';
 import { supabase } from '@/lib/customSupabaseClient';
-import { toast } from '@/components/ui/use-toast';
-import { Loader2 } from 'lucide-react';
-import { dumpsterPlans as staticPlans } from '@/data/plans';
+import { Loader2, CheckCircle } from 'lucide-react';
+import { eachDayOfInterval, formatISO, startOfDay, addDays } from 'date-fns';
 
-const BookingStep = ({ children, onBack }) => {
-    return (
-        <motion.div
-            initial={{ opacity: 0, x: 300 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -300 }}
-            transition={{ duration: 0.5, ease: 'easeInOut' }}
-            className="w-full"
-        >
-            {children}
-        </motion.div>
-    );
-};
-
-export const Plans = ({ onBookingSubmit }) => {
-    const [step, setStep] = useState(0);
-    const [selectedPlan, setSelectedPlan] = useState(null);
-    const [bookingData, setBookingData] = useState({ name: '', email: '', phone: '', street: '', city: 'Saratoga Springs', state: 'UT', zip: '', dropOffDate: null, pickupDate: null, dropOffTimeSlot: '', pickupTimeSlot: '' });
-    const [showAgreement, setShowAgreement] = useState(false);
-    const [agreementAccepted, setAgreementAccepted] = useState(false);
-    const [serviceAvailability, setServiceAvailability] = useState([]);
+export const Plans = ({ plans, onSelectPlan }) => {
+    const [availability, setAvailability] = useState({});
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const fetchAvailability = async () => {
-            setLoading(true);
-            const { data, error } = await supabase.from('service_availability').select('*');
-            if (error) {
-                toast({ title: 'Error fetching service availability.', description: error.message, variant: 'destructive' });
-            } else {
-                setServiceAvailability(data || []);
+        const fetchAllAvailability = async () => {
+            const startDate = formatISO(startOfDay(new Date()), { representation: 'date' });
+            const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
+            
+            const availabilityPromises = plans.map(plan => 
+                supabase.functions.invoke('get-availability', {
+                    body: {
+                        serviceId: plan.id,
+                        startDate,
+                        endDate,
+                        isDelivery: plan.id === 2 // Check both self-pickup and delivery for plan 2
+                    }
+                })
+            );
+            
+            const deliveryForPlan2Promise = supabase.functions.invoke('get-availability', {
+                body: { serviceId: 2, startDate, endDate, isDelivery: true }
+            });
+
+            try {
+                const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
+                const newAvailability = {};
+
+                results.slice(0, plans.length).forEach((result, index) => {
+                    const planId = plans[index].id;
+                    if (result.data?.availability) {
+                        const isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
+                        newAvailability[planId] = isAnyDayAvailable;
+                    } else {
+                        newAvailability[planId] = false;
+                    }
+                });
+                
+                // Special handling for plan 2 delivery
+                const deliveryResult = results[results.length - 1];
+                if (deliveryResult.data?.availability) {
+                    const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
+                    // If either self-service OR delivery is available, we consider plan 2 available.
+                    // The "Temporarily unavailable" will only show if BOTH are unavailable.
+                     newAvailability[2] = newAvailability[2] || isDeliveryAvailable;
+                }
+
+                setAvailability(newAvailability);
+            } catch (error) {
+                console.error("Error fetching availability for plans:", error);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         };
-        fetchAvailability();
-    }, []);
 
-    const servicesTemporarilyUnavailable = useMemo(() => {
-        const availabilityByService = serviceAvailability.reduce((acc, curr) => {
-            if (!acc[curr.service_id]) {
-                acc[curr.service_id] = [];
-            }
-            acc[curr.service_id].push(curr);
-            return acc;
-        }, {});
+        fetchAllAvailability();
+    }, [plans]);
 
-        const unavailableServices = new Set();
-        Object.keys(availabilityByService).forEach(serviceId => {
-            const rules = availabilityByService[serviceId];
-            const isAlwaysClosed = rules.length >= 7 && rules.every(day => !day.is_available);
-            if (isAlwaysClosed) {
-                unavailableServices.add(Number(serviceId));
-            }
-        });
-        return unavailableServices;
-    }, [serviceAvailability]);
-
-    const handleSelectPlan = (plan) => {
-        setSelectedPlan(plan);
-        setStep(1);
+    const planHighlights = {
+        1: { text: 'Our Most Popular Service', delay: 0.2 },
+        2: { text: 'Incredible Value', delay: 0.1 },
+        3: { text: 'Save Money and Time', delay: 0 },
     };
 
-    const handleFormBack = () => setStep(0);
-    const handleAddonsBack = () => setStep(1);
+    const plansWithHighlights = plans.map((plan) => ({
+        ...plan,
+        highlight: planHighlights[plan.id]
+    }));
+    
+    if (loading) {
+      return (
+        <div className="flex justify-center items-center h-96">
+            <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
+        </div>
+      );
+    }
 
-    const handleFormSubmit = (price, addressSkipped, distanceInfo) => {
-        setBookingData(prev => ({ ...prev, price, addons: { ...prev.addons, addressVerificationSkipped: addressSkipped, distanceInfo } }));
-        setStep(2);
-    };
-
-    const handleAddonsSubmit = (finalData) => {
-        setBookingData(prev => ({ ...prev, ...finalData }));
-        onBookingSubmit({ ...bookingData, ...finalData });
-    };
-
-    const handleShowAgreement = () => setShowAgreement(true);
-    const handleAcceptAgreement = () => {
-        setAgreementAccepted(true);
-        setShowAgreement(false);
-    };
-    const handleDeclineAgreement = () => {
-        setAgreementAccepted(false);
-        setShowAgreement(false);
-    };
+    const valueProps = [
+        "Simple and Fast Online Scheduling",
+        "Up-Front and Competitive Pricing",
+        "Professional Service"
+    ];
 
     return (
-        <section id="booking" className="py-20 relative">
-            <AnimatePresence mode="wait">
-                {step === 0 && (
-                    <motion.div
-                        key="step1"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                    >
-                        <div className="text-center mb-12">
-                            <h2 className="text-5xl font-extrabold text-white">Choose Your Rental Plan</h2>
-                            <p className="text-lg text-blue-200 mt-4 max-w-2xl mx-auto">Select the perfect option for your project needs. All plans come with our guarantee of timely service and support.</p>
+        <section className="py-20 px-4">
+            <div className="container mx-auto">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6 }}
+                    className="text-center mb-12"
+                >
+                    <h2 className="text-4xl lg:text-5xl font-extrabold text-white mb-4 tracking-tight" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>Choose Your Service</h2>
+                    <p className="text-xl text-blue-200 max-w-2xl mx-auto">Select the perfect solution for your project, backed by reliable service.</p>
+                </motion.div>
+
+                <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.2 }}
+                    className="flex flex-wrap justify-center items-center gap-x-8 gap-y-4 mb-24"
+                >
+                    {valueProps.map((prop, index) => (
+                        <div key={index} className="flex items-center text-lg text-green-300">
+                            <CheckCircle className="h-6 w-6 mr-2 text-green-400" />
+                            <span className="font-semibold">{prop}</span>
                         </div>
-                        {loading ? (
-                            <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 text-yellow-400 animate-spin" /></div>
-                        ) : (
-                            <div className="container mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 px-4">
-                                {staticPlans.map(plan => (
-                                    <PlanCard 
-                                        key={plan.id} 
-                                        plan={plan} 
-                                        onSelect={handleSelectPlan}
-                                        isTemporarilyUnavailable={servicesTemporarilyUnavailable.has(plan.id)}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                    </motion.div>
-                )}
-                {step === 1 && selectedPlan && (
-                    <BookingStep key="step2" onBack={handleFormBack}>
-                        <BookingForm
-                            plan={selectedPlan}
-                            bookingData={bookingData}
-                            setBookingData={setBookingData}
-                            onSubmit={handleFormSubmit}
-                            onBack={handleFormBack}
-                            onShowAgreement={handleShowAgreement}
-                            agreementAccepted={agreementAccepted}
-                        />
-                    </BookingStep>
-                )}
-                {step === 2 && selectedPlan && (
-                    <BookingStep key="step3" onBack={handleAddonsBack}>
-                        <AddonsForm
-                            plan={selectedPlan}
-                            bookingData={bookingData}
-                            onBack={handleAddonsBack}
-                            onSubmit={handleAddonsSubmit}
-                        />
-                    </BookingStep>
-                )}
-            </AnimatePresence>
-            {showAgreement && (
-                <UserAgreement onAccept={handleAcceptAgreement} onDecline={handleDeclineAgreement} />
-            )}
+                    ))}
+                </motion.div>
+
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-16">
+                    {plansWithHighlights.map((plan) => {
+                         const isTemporarilyUnavailable = availability[plan.id] === false;
+                         return (
+                            <PlanCard
+                                key={plan.id}
+                                plan={plan}
+                                onSelect={onSelectPlan}
+                                isTemporarilyUnavailable={isTemporarilyUnavailable}
+                            />
+                         );
+                    })}
+                </div>
+
+                <motion.div
+                    initial={{ opacity: 0, y: 50 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.5 }}
+                    className="text-center mt-20 max-w-3xl mx-auto"
+                >
+                    <h3 className="text-2xl font-bold text-yellow-400 mb-3">U-Fill Dumpsters LLC</h3>
+                    <p className="text-lg text-blue-200 leading-relaxed">
+                        Your trusted partner for waste management solutions. We're committed to providing fast, reliable, and affordable services to help you get the job done right.
+                    </p>
+                </motion.div>
+            </div>
         </section>
     );
 };

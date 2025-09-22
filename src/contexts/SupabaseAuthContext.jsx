@@ -27,15 +27,21 @@ export const AuthProvider = ({ children }) => {
     }
 
     if (initialSession) {
+      // This call validates the JWT on the server
       const { data: { user: authedUser }, error } = await supabase.auth.getUser();
+      
+      // If getUser fails, the token is invalid (e.g., user deleted)
       if (error) {
-        console.error("Invalid session detected, signing out.", error);
-        await supabase.auth.signOut();
+        console.warn("Invalid session detected, signing out.", error.message);
+        // Force sign out and clear local state
+        await supabase.auth.signOut(); 
         handleSession(null);
       } else {
+        // If user is valid, set the session
         handleSession({ ...initialSession, user: authedUser });
       }
     } else {
+      // No session found
       handleSession(null);
     }
   }, [handleSession]);
@@ -46,7 +52,16 @@ export const AuthProvider = ({ children }) => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        handleSession(session);
+        // When auth state changes, we re-validate.
+        // This handles sign-ins, sign-outs, and token refreshes.
+        if (_event === 'SIGNED_IN') {
+            handleSession(session);
+        } else if (_event === 'SIGNED_OUT') {
+            handleSession(null);
+        } else if (_event === 'TOKEN_REFRESHED' || _event === 'INITIAL_SESSION') {
+            // For token refreshes or initial load, re-validate the user
+            getSessionAndValidate();
+        }
       }
     );
 
@@ -132,15 +147,13 @@ export const AuthProvider = ({ children }) => {
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      toast({
-        variant: "destructive",
-        title: "Sign out Failed",
-        description: error.message || "Something went wrong",
-      });
+      // Even if server-side signout fails due to an invalid token,
+      // we clear the client-side state.
+      console.warn("Server-side sign out failed, clearing client state regardless.", error.message);
     }
-
+    handleSession(null); // Ensure client state is always cleared
     return { error };
-  }, [toast]);
+  }, [toast, handleSession]);
 
   const value = useMemo(() => ({
     user,

@@ -12,6 +12,10 @@ import { supabase } from '@/lib/customSupabaseClient';
 
 const formatTime = (timeString) => {
     if (!timeString) return 'N/A';
+    // Handle delivery service time windows
+    if (timeString === '06:00') return '6:00 AM - 8:00 AM';
+    if (timeString === '22:00') return '10:00 PM - 11:30 PM';
+    
     try {
         const [hour, minute] = timeString.split(':');
         const date = new Date(0);
@@ -61,6 +65,8 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
         setIsExtending(false);
         setShowExtendModal(false);
     };
+
+    const isDeliveryService = booking.plan.id === 2 && booking.addons?.distanceInfo?.deliveryService;
     
     return (
         <>
@@ -96,9 +102,11 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 <DetailItem label="Phone" value={booking.phone} />
                 <DetailItem label="Address" value={`${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`} />
                 <DetailItem label="Service" value={booking.plan.name} />
-                <DetailItem label="Drop-off" value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
+                {isDeliveryService && <DetailItem label="Service Type" value="Delivery Service" />}
+                <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
                 <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
                 <DetailItem label="Total" value={`$${booking.total_price.toFixed(2)}`} />
+                 {isDeliveryService && booking.addons.distanceInfo.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
                 <DetailItem label="Stripe Payment ID" value={booking.stripe_payment_intent_id || 'N/A'} />
                 {booking.delivered_at && <DetailItem label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}
                 {booking.picked_up_at && <DetailItem label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
