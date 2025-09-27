@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud, Edit, Save } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud, Edit, Save, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -176,7 +176,7 @@ const ImageUploader = ({ customer, onUpdate }) => {
 };
 
 
-export const CustomerVerification = ({ customer, verificationBookings, onUpdate }) => {
+export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
     const [plate, setPlate] = useState(customer.license_plate || '');
@@ -235,6 +235,40 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
             toast({ title: "Download Failed", description: error.message || "Could not download the image.", variant: "destructive" });
         }
     };
+
+    const getVerificationCardStyles = (status) => {
+        switch (status) {
+            case 'pending_review':
+                return {
+                    container: "bg-red-900/30 border-red-500",
+                    title: "text-red-300 font-bold",
+                    icon: <MessageSquare className="mr-2 h-4 w-4"/>,
+                    titleText: "Change Request for Booking #"
+                };
+            default: // pending_verification
+                return {
+                    container: "bg-orange-900/30 border-orange-500",
+                    title: "text-orange-300 font-bold",
+                    icon: <FileText className="mr-2 h-4 w-4"/>,
+                    titleText: "New Booking Verification #"
+                };
+        }
+    };
+
+    const verificationNotes = useMemo(() => {
+        const noteMap = {};
+        if (notes) {
+            for (const note of notes) {
+                if (note.booking_id && note.source === 'Change Request') {
+                    if (!noteMap[note.booking_id]) {
+                        noteMap[note.booking_id] = [];
+                    }
+                    noteMap[note.booking_id].push(note.content);
+                }
+            }
+        }
+        return noteMap;
+    }, [notes]);
     
     return (
         <>
@@ -290,21 +324,27 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
             <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><ShieldAlert className="mr-3 h-6 w-6"/>Pending Verifications</h3>
                  <div className="space-y-4">
-                    {verificationBookings.length > 0 ? verificationBookings.map(booking => (
-                        <div key={booking.id} className="bg-orange-900/30 border border-orange-500 p-4 rounded-lg">
-                            <p className="font-bold text-orange-300">Booking #{booking.id} requires review.</p>
-                            {booking.verification_notes && (
-                                <div className="mt-2">
-                                     <p className="font-semibold text-blue-200 flex items-center"><FileText className="mr-2 h-4 w-4"/>Customer Note:</p>
-                                     <p className="text-orange-200 italic bg-black/20 p-2 rounded-md">"{booking.verification_notes}"</p>
+                    {verificationBookings.length > 0 ? verificationBookings.map(booking => {
+                        const styles = getVerificationCardStyles(booking.status);
+                        const requestNotes = verificationNotes[booking.id] || [];
+                        return (
+                            <div key={booking.id} className={`${styles.container} p-4 rounded-lg`}>
+                                <p className={styles.title}>{styles.titleText}{booking.id}</p>
+                                {requestNotes.length > 0 && (
+                                    <div className="mt-2">
+                                         <p className="font-semibold text-blue-200 flex items-center">{styles.icon}Customer Note:</p>
+                                         {requestNotes.map((note, i) => (
+                                            <p key={i} className="text-orange-200 italic bg-black/20 p-2 rounded-md mt-1">"{note}"</p>
+                                         ))}
+                                    </div>
+                                )}
+                                <div className="flex justify-end space-x-2 mt-4">
+                                    <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
+                                    <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking.id)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
                                 </div>
-                            )}
-                            <div className="flex justify-end space-x-2 mt-4">
-                                <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
-                                <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking.id)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
                             </div>
-                        </div>
-                    )) : (
+                        )
+                    }) : (
                         <p className="text-center text-blue-200 py-8">No bookings are pending verification.</p>
                     )}
                 </div>

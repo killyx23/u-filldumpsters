@@ -1,11 +1,12 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquare, Settings, Users, Package } from 'lucide-react';
+import { MessageSquare, Settings, Users, Package, Tag } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BookingsManager } from '@/components/admin/BookingsManager';
 import { AvailabilityManager } from '@/components/admin/AvailabilityManager';
 import { CustomersManager } from '@/components/admin/CustomersManager';
 import { EquipmentManager } from '@/components/admin/EquipmentManager';
+import { PricingManager } from '@/components/admin/PricingManager';
 
 const AdminDashboard = () => {
     return (
@@ -18,10 +19,11 @@ const AdminDashboard = () => {
             <h1 className="text-4xl font-bold mb-8 text-yellow-400">Admin Dashboard</h1>
             
             <Tabs defaultValue="bookings" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 bg-white/10 text-white mb-4">
+                <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 bg-white/10 text-white mb-4">
                     <TabsTrigger value="bookings"><MessageSquare className="mr-2 h-4 w-4" />Bookings</TabsTrigger>
                     <TabsTrigger value="customers"><Users className="mr-2 h-4 w-4" />Customers</TabsTrigger>
                     <TabsTrigger value="equipment"><Package className="mr-2 h-4 w-4" />Equipment</TabsTrigger>
+                    <TabsTrigger value="pricing"><Tag className="mr-2 h-4 w-4" />Pricing & Coupons</TabsTrigger>
                     <TabsTrigger value="availability"><Settings className="mr-2 h-4 w-4" />Availability</TabsTrigger>
                 </TabsList>
                 <TabsContent value="bookings">
@@ -32,6 +34,9 @@ const AdminDashboard = () => {
                 </TabsContent>
                 <TabsContent value="equipment">
                     <EquipmentManager />
+                </TabsContent>
+                <TabsContent value="pricing">
+                    <PricingManager />
                 </TabsContent>
                 <TabsContent value="availability">
                     <AvailabilityManager />

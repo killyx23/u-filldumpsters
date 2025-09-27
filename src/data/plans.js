@@ -15,7 +15,10 @@ export const dumpsterPlans = [{
   size: "Trailer",
   price: 150,
   priceUnit: "/full day",
-  description: "Top-end dump loader with wireless remote, power tarp cover, and hydraulic jack for ease of use. You pick up & return (8AM - 10PM).",
+  homepagePrice: 150,
+  homepagePriceUnit: "/Same Day Rental",
+  homepageDescription: "New 2025 Top of the Line Dump Loader Trailer. It comes with a wireless remote, a power tarp cover, and a hydraulic jack for ease of use. We offer Same-Day or Multiple-Day rentals.",
+  description: "Top-end dump loader with wireless remote, power tarp cover, and hydraulic jack for ease of use. We offer same-day or multiple-day rentals. Pick up starts for our same-day rental at 8 AM, but it must be returned by 10 PM that day. (Pick up location is in South Saratoga Springs.) The Towing vehicle is required to fit: A Ball Hitch Size of (2-5/16\").",
   features: ["Up to 5 tons capacity", "You pick up & return", "Great for junk removal", "Wireless remote control"],
   dimensions: "Dimensions: 16' L x 7' W x 4' H",
   bestFor: "Landscaping, DIY projects, junk removal"

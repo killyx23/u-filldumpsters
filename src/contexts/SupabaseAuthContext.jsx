@@ -17,6 +17,11 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
+  const signOutAndClear = useCallback(async () => {
+    await supabase.auth.signOut();
+    handleSession(null);
+  }, [handleSession]);
+
   const getSessionAndValidate = useCallback(async () => {
     const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
     
@@ -28,17 +33,22 @@ export const AuthProvider = ({ children }) => {
 
     if (initialSession) {
       const { data: { user: authedUser }, error } = await supabase.auth.getUser();
+      
       if (error) {
-        console.error("Invalid session detected, signing out.", error);
-        await supabase.auth.signOut();
-        handleSession(null);
+        const isInvalidSessionError = error.message.includes('user_not_found') || error.message.includes('session_not_found');
+        if (isInvalidSessionError) {
+          console.warn("Invalid session detected, signing out.", error.message);
+          await signOutAndClear();
+        } else {
+          handleSession(null);
+        }
       } else {
         handleSession({ ...initialSession, user: authedUser });
       }
     } else {
       handleSession(null);
     }
-  }, [handleSession]);
+  }, [handleSession, signOutAndClear]);
 
   useEffect(() => {
     setLoading(true);
@@ -46,7 +56,13 @@ export const AuthProvider = ({ children }) => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
-        handleSession(session);
+        if (_event === 'SIGNED_IN') {
+            handleSession(session);
+        } else if (_event === 'SIGNED_OUT') {
+            handleSession(null);
+        } else if (_event === 'TOKEN_REFRESHED' || _event === 'INITIAL_SESSION') {
+            getSessionAndValidate();
+        }
       }
     );
 
@@ -91,31 +107,40 @@ export const AuthProvider = ({ children }) => {
   }, [toast]);
   
   const customerPortalLogin = useCallback(async (customerId, phone) => {
-      const { data, error } = await supabase.functions.invoke('customer-portal-login', {
+      const { data, error: functionError } = await supabase.functions.invoke('customer-portal-login', {
         body: { customerId, phone },
       });
 
-      if (error || (data && data.error)) {
-        const errorMessage = (data && data.error) || error.message || 'An unexpected error occurred.';
-        toast({
-          variant: "destructive",
-          title: "Login Failed",
-          description: errorMessage,
-        });
+      if (functionError) {
+        let errorMessage = "Login failed. Please try again.";
+        try {
+          const contextError = await functionError.context.json();
+          if (contextError.error) {
+            errorMessage = contextError.error;
+          }
+        } catch (e) {
+          // Ignore if context is not valid JSON
+        }
+        toast({ variant: "destructive", title: "Login Failed", description: errorMessage });
         return { error: errorMessage };
       }
-      
-      if (data.session) {
-        const { error: sessionError } = await supabase.auth.setSession(data.session);
-        if(sessionError) {
-          toast({ variant: "destructive", title: "Login Failed", description: "Could not establish a session." });
-        } else {
-          toast({ title: "Login Successful", description: "Redirecting to your portal..." });
+
+      if (data && data.session) {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+        });
+        if (sessionError) {
+          toast({ variant: "destructive", title: "Login Failed", description: "Could not establish a secure session." });
+          return { error: sessionError };
         }
+        toast({ title: "Login Successful", description: "Redirecting to your portal..." });
+        return { data };
       } else {
-         toast({ variant: "destructive", title: "Login Failed", description: "Could not establish a session." });
+        const errorMessage = (data && data.error) || "An unknown error occurred during login.";
+        toast({ variant: "destructive", title: "Login Failed", description: errorMessage });
+        return { error: errorMessage };
       }
-      return { data };
   }, [toast]);
 
 
@@ -123,15 +148,18 @@ export const AuthProvider = ({ children }) => {
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      toast({
-        variant: "destructive",
-        title: "Sign out Failed",
-        description: error.message || "Something went wrong",
-      });
+      const isInvalidSessionError = error.message.includes('user_not_found') || error.message.includes('session_not_found');
+      if (!isInvalidSessionError) {
+        toast({
+          variant: "destructive",
+          title: "Sign out Failed",
+          description: error.message || "Something went wrong",
+        });
+      }
     }
-
+    handleSession(null);
     return { error };
-  }, [toast]);
+  }, [toast, handleSession]);
 
   const value = useMemo(() => ({
     user,

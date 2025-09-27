@@ -3,10 +3,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
-    import { Loader2, ArrowLeft, User, Clock, DollarSign, UserCheck, ShieldAlert, MessageSquare } from 'lucide-react';
+    import { Loader2, ArrowLeft, User, Clock, DollarSign, UserCheck, ShieldAlert, MessageSquare, Bell } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { CustomerProfile } from './CustomerProfile';
-    import { CustomerNotes } from './CustomerNotes';
+    import { CommunicationLog } from './CommunicationLog';
     import { ActiveRentals } from './ActiveRentals';
     import { BookingHistory } from './BookingHistory';
     import { CompletedBookings } from './CompletedBookings';
@@ -26,11 +26,11 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const [loading, setLoading] = useState(true);
         const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
         const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
-        const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'rentals');
+        const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
 
 
-        const fetchCustomerDetails = useCallback(async () => {
-            setLoading(true);
+        const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
+            if (isInitialLoad) setLoading(true);
             try {
                 const customerPromise = supabase.from('customers').select('*').eq('id', id).single();
                 const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', id).order('created_at', { ascending: false });
@@ -65,13 +65,63 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                  setEquipment([]);
                  setNotes([]);
             } finally {
-                setLoading(false);
+                if (isInitialLoad) setLoading(false);
             }
         }, [id]);
 
         useEffect(() => {
             fetchCustomerDetails();
         }, [fetchCustomerDetails]);
+
+        useEffect(() => {
+            if (!id) return;
+
+            const subscriptions = [];
+
+            const notesChannel = supabase.channel(`customer-notes-${id}`)
+                .on('postgres_changes', { 
+                    event: 'INSERT', 
+                    schema: 'public', 
+                    table: 'customer_notes', 
+                    filter: `customer_id=eq.${id}` 
+                }, 
+                (payload) => {
+                    const newNote = payload.new;
+                    setNotes(currentNotes => {
+                         if (currentNotes.some(note => note.id === newNote.id)) {
+                            return currentNotes;
+                         }
+                         return [newNote, ...currentNotes];
+                    });
+                    
+                    if (newNote.author_type === 'customer') {
+                        toast({
+                            title: "New Customer Message",
+                            description: `You have a new message from ${customer?.name || 'a customer'}.`,
+                            action: <Bell className="h-5 w-5 text-yellow-400" />,
+                        });
+                    }
+                })
+                .subscribe();
+            subscriptions.push(notesChannel);
+
+            const bookingsChannel = supabase.channel(`customer-bookings-${id}`)
+                .on('postgres_changes', { 
+                    event: '*', 
+                    schema: 'public', 
+                    table: 'bookings', 
+                    filter: `customer_id=eq.${id}` 
+                },
+                (payload) => {
+                    fetchCustomerDetails(false); // Use false to prevent loading spinner on updates
+                })
+                .subscribe();
+            subscriptions.push(bookingsChannel);
+
+            return () => {
+                subscriptions.forEach(sub => supabase.removeChannel(sub));
+            };
+        }, [id, customer?.name, fetchCustomerDetails]);
 
         useEffect(() => {
             const tab = searchParams.get('tab');
@@ -126,32 +176,13 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full mt-8">
                     <TabsList className="grid w-full grid-cols-5 bg-white/10 text-white mb-6">
-                        <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
-                        <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
-                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Notes</TabsTrigger>
-                        <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
                         <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile & Notes</TabsTrigger>
+                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Communication</TabsTrigger>
+                        <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
+                        <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
+                        <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
                     </TabsList>
-                    <TabsContent value="rentals">
-                        <div className="space-y-8">
-                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={fetchCustomerDetails} />
-                            <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
-                        </div>
-                    </TabsContent>
-                    <TabsContent value="verification">
-                        <div className="space-y-8">
-                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} onUpdate={fetchCustomerDetails} />
-                        </div>
-                    </TabsContent>
-                     <TabsContent value="notes">
-                        <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CustomerNotes customer={customer} notes={notes} setCustomer={setCustomer} setNotes={setNotes} />
-                        </div>
-                    </TabsContent>
-                    <TabsContent value="history">
-                        <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} />
-                    </TabsContent>
-                    <TabsContent value="profile">
+                     <TabsContent value="profile">
                          <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                            <CustomerProfile 
                                 customer={customer} 
@@ -160,6 +191,25 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                                 onHistoryClick={() => setIsHistoryDialogOpen(true)}
                             />
                         </div>
+                    </TabsContent>
+                     <TabsContent value="notes">
+                        <div className="bg-white/5 p-6 rounded-lg shadow-lg">
+                           <CommunicationLog customer={customer} notes={notes} onUpdate={() => fetchCustomerDetails(false)} loading={loading} />
+                        </div>
+                    </TabsContent>
+                     <TabsContent value="verification">
+                        <div className="space-y-8">
+                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} notes={notes} onUpdate={() => fetchCustomerDetails(false)} />
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="rentals">
+                        <div className="space-y-8">
+                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={() => fetchCustomerDetails(false)} />
+                            <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
+                        </div>
+                    </TabsContent>
+                    <TabsContent value="history">
+                        <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} />
                     </TabsContent>
                 </Tabs>
                 

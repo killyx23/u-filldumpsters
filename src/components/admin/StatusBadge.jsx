@@ -6,7 +6,7 @@ export const StatusBadge = ({ status }) => {
     const statusStyles = {
         'pending_payment': 'bg-red-500/20 text-red-300',
         'pending_verification': 'bg-orange-500/20 text-orange-300',
-        'pending_review': 'bg-orange-500/20 text-orange-300',
+        'pending_review': 'bg-red-500/20 text-red-300',
         'Confirmed': 'bg-yellow-500/20 text-yellow-300',
         'Delivered': 'bg-cyan-500/20 text-cyan-300',
         'Completed': 'bg-green-500/20 text-green-300',
@@ -18,7 +18,7 @@ export const StatusBadge = ({ status }) => {
     const statusText = {
         'pending_payment': 'Payment Pending',
         'pending_verification': 'Pending Verification',
-        'pending_review': 'Pending Review',
+        'pending_review': 'Change Request',
         'Confirmed': 'Delivery Ready',
         'Delivered': 'Delivered / Rented',
         'waiting_to_be_returned': 'Waiting for Return',

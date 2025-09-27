@@ -1,15 +1,14 @@
 import React from 'react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { Key } from 'lucide-react';
 
 const formatTime = (timeString) => {
     if (!timeString) return 'N/A';
-    try {
-        const date = new Date(`1970-01-01T${timeString}`);
-        return format(date, 'h:mm a');
-    } catch (e) {
-        return 'N/A';
-    }
+    const [hours, minutes] = timeString.split(':');
+    const date = new Date();
+    date.setHours(parseInt(hours, 10));
+    date.setMinutes(parseInt(minutes, 10));
+    return isValid(date) ? format(date, 'h:mm a') : 'N/A';
 };
 
 const addonPrices = {
@@ -30,10 +29,11 @@ const equipmentMeta = [
 
 
 export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
-    if (!booking || !booking.customers) return null;
+    if (!booking || !booking.customers || !booking.plan) return null;
 
     const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped } = booking;
     const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
+    const isDelivery = addons?.isDelivery;
 
     const fullAddress = `${street}, ${city}, ${state} ${zip}`;
 
@@ -56,7 +56,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     <div>
                         <h3 className="font-bold text-lg mb-2">Billed To:</h3>
                         <p>{name}</p>
-                        <p>{plan.id !== 2 ? fullAddress : "N/A (Trailer Rental)"}</p>
+                        <p>{(plan.id === 1 || isDelivery) ? fullAddress : "N/A (Self-Service Trailer Rental)"}</p>
                         <p>{email}</p>
                         <p>{phone}</p>
                     </div>
@@ -79,7 +79,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     <p><strong>Phone Number:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{phone}</span></p>
                 </section>
 
-                {plan.id === 2 && !isCancelledAndRefunded && !isPendingReview && (
+                {plan.id === 2 && !isDelivery && !isCancelledAndRefunded && !isPendingReview && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
                         <div className="text-sm text-gray-700 space-y-2">
@@ -102,15 +102,15 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <tbody>
                             <tr className="border-b">
                                 <td className="py-2">
-                                    <p className="font-semibold">{plan.name}</p>
+                                    <p className="font-semibold">{plan.name}{isDelivery ? ' with Delivery' : ''}</p>
                                     <p className="text-sm text-gray-600">
-                                        {plan.id === 2 ? "Pickup" : "Drop-off"}: {format(parseISO(drop_off_date), 'MMM d, yyyy')} at {formatTime(drop_off_time_slot)}
+                                        {plan.id === 2 ? (isDelivery ? "Delivery" : "Pickup") : "Drop-off"}: {format(parseISO(drop_off_date), 'MMM d, yyyy')} at {formatTime(drop_off_time_slot)}
                                     </p>
                                     <p className="text-sm text-gray-600">
                                         {plan.id === 2 ? "Return" : "Pickup"}: {format(parseISO(pickup_date), 'MMM d, yyyy')} by {formatTime(pickup_time_slot)}
                                     </p>
                                 </td>
-                                <td className="text-right py-2 align-top">${booking.plan.price.toFixed(2)}</td>
+                                <td className="text-right py-2 align-top">${(booking.plan?.price || 0).toFixed(2)}</td>
                             </tr>
                             {addons.distanceInfo?.fee > 0 && (
                                 <tr className="border-b"><td className="py-2 pl-4">{`Extended Delivery Fee (${addons.distanceInfo.miles.toFixed(1)} miles)`}</td><td className="text-right py-2">${addons.distanceInfo.fee.toFixed(2)}</td></tr>
@@ -118,7 +118,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             {addons.insurance === 'accept' && (
                                 <tr className="border-b"><td className="py-2 pl-4">Rental Insurance</td><td className="text-right py-2">${addonPrices.insurance.toFixed(2)}</td></tr>
                             )}
-                            {plan.id !== 2 && addons.drivewayProtection === 'accept' && (
+                            {(plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept' && (
                                 <tr className="border-b"><td className="py-2 pl-4">Driveway Protection</td><td className="text-right py-2">${addonPrices.drivewayProtection.toFixed(2)}</td></tr>
                             )}
                             {addons.equipment && addons.equipment.map(item => {
@@ -136,21 +136,21 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             {!isCancelledAndRefunded ? (
                                 <tr>
                                     <td className="text-right font-bold py-3" colSpan="1">Grand Total:</td>
-                                    <td className="text-right font-bold py-3">${total_price.toFixed(2)}</td>
+                                    <td className="text-right font-bold py-3">${(total_price || 0).toFixed(2)}</td>
                                 </tr>
                             ) : (
                                 <>
                                     <tr>
                                         <td className="text-right font-bold pt-3" colSpan="1">Original Total:</td>
-                                        <td className="text-right font-bold pt-3">${total_price.toFixed(2)}</td>
+                                        <td className="text-right font-bold pt-3">${(total_price || 0).toFixed(2)}</td>
                                     </tr>
                                     <tr>
                                         <td className="text-right font-bold" colSpan="1">Cancellation Fee:</td>
-                                        <td className="text-right font-bold text-red-600">- ${(total_price - refund_details.amount).toFixed(2)}</td>
+                                        <td className="text-right font-bold text-red-600">- ${((total_price || 0) - (refund_details.amount || 0)).toFixed(2)}</td>
                                     </tr>
                                     <tr>
                                         <td className="text-right font-bold py-3 border-t" colSpan="1">Amount Refunded:</td>
-                                        <td className="text-right font-bold py-3 border-t text-green-600">${refund_details.amount.toFixed(2)}</td>
+                                        <td className="text-right font-bold py-3 border-t text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
                                     </tr>
                                 </>
                             )}
@@ -173,7 +173,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 {addons.insurance === 'decline' && (
                     <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>
                 )}
-                {plan.id !== 2 && addons.drivewayProtection === 'decline' && (
+                {(plan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && (
                     <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>
                 )}
                 {addons.addressVerificationSkipped && (
