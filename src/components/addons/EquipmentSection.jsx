@@ -1,11 +1,15 @@
 import React from 'react';
-    import { Loader2, PackagePlus } from 'lucide-react';
+    import { Loader2 } from 'lucide-react';
     import { AddonSection } from './AddonSection';
     import { EquipmentItem } from './EquipmentItem';
 
-    export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, equipmentInventory, loadingInventory, equipmentMeta }) => {
+    export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, equipmentInventory, loadingInventory, equipmentMeta, title, icon }) => {
+        if (equipmentMeta.length === 0) {
+            return null;
+        }
+
         return (
-            <AddonSection icon={<PackagePlus />} title="Rent Additional Equipment">
+            <AddonSection icon={icon} title={title}>
                 {loadingInventory ? <div className="flex justify-center"><Loader2 className="h-8 w-8 animate-spin text-yellow-400" /></div> :
                 <div className="space-y-3">
                     {equipmentMeta.map(item => {

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+    import React, { useState } from 'react';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
@@ -48,7 +49,7 @@ import React, { useState } from 'react';
                 if (booking.status === 'waiting_to_be_returned' && !booking.returned_at) {
                     return <Button onClick={() => handleUpdate({ returned_at: new Date().toISOString() })}><ArrowUpCircle className="mr-2 h-4 w-4" /> Mark as Returned</Button>;
                 }
-            } else { // 16yd Dumpster
+            } else { // 16yd Dumpster or Material Delivery
                 if (booking.status === 'Confirmed' && !booking.delivered_at) {
                     return <Button onClick={() => handleUpdate({ delivered_at: new Date().toISOString(), status: 'Delivered' })}><Truck className="mr-2 h-4 w-4" /> Mark as Delivered</Button>;
                 }
@@ -141,10 +142,15 @@ import React, { useState } from 'react';
     };
 
     const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
-        const [checklist, setChecklist] = useState({
-            ...equipment.reduce((acc, item) => ({ ...acc, [item.equipment.name]: true }), {}),
-            dump_loader_clean: true,
-            no_damage: true,
+        const [checklist, setChecklist] = useState(() => {
+            const initialState = {
+                dump_loader_clean: false,
+                no_damage: false,
+            };
+            equipment.forEach(item => {
+                initialState[item.equipment.name] = false;
+            });
+            return initialState;
         });
         const [damagePhotos, setDamagePhotos] = useState(booking.damage_photos || []);
         const [isUploading, setIsUploading] = useState(false);
@@ -167,11 +173,11 @@ import React, { useState } from 'react';
             const equipmentToReturn = [];
 
             equipment.forEach(item => {
-                if (checklist[item.equipment.name] === false) {
+                if (checklist[item.equipment.name] === true) {
+                    equipmentToReturn.push({id: item.id, returned_at: new Date().toISOString()});
+                } else {
                     returnIssues[item.equipment.name] = { status: 'not_returned' };
                     finalStatus = 'flagged';
-                } else {
-                    equipmentToReturn.push({id: item.id, returned_at: new Date().toISOString()});
                 }
             });
             
@@ -257,7 +263,7 @@ import React, { useState } from 'react';
                         <Checkbox id={id} checked={isChecked} onCheckedChange={(c) => handleCheckChange(id, c)} />
                         <label htmlFor={id} className="ml-3 text-base">{label}</label>
                     </div>
-                    {!isChecked && (
+                    {!isChecked && feeType && (
                         <Button size="sm" variant="destructive" onClick={() => handleChargeClick(feeType, itemDetails)}>
                             <AlertTriangle className="mr-2 h-4 w-4" /> Charge Fee
                         </Button>
@@ -383,3 +389,4 @@ import React, { useState } from 'react';
             </div>
         );
     };
+  

@@ -1,62 +1,169 @@
-import React from 'react';
-    import { Button } from '@/components/ui/button';
-    import { Label } from '@/components/ui/label';
-    import { Textarea } from '@/components/ui/textarea';
-    import { Check, MessageSquare } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Loader2, Tag, CheckCircle, XCircle } from 'lucide-react';
+import { supabase } from '@/lib/customSupabaseClient';
+import { toast } from '@/components/ui/use-toast';
 
-    const SummaryLine = ({ label, value, isSubItem = false }) => (
-        <div className={`flex justify-between items-center ${isSubItem ? 'pl-4' : ''}`}>
-            <p className={isSubItem ? 'text-blue-200' : 'text-white'}>{label}</p>
-            <p className="font-mono text-green-300">${value.toFixed(2)}</p>
+const equipmentMeta = [
+  { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
+  { id: 'handTruck', label: 'Hand Truck', price: 15 },
+  { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
+];
+
+export const OrderSummary = ({ plan, addons, onProceed, isProcessing, onCouponApply }) => {
+  const [couponCode, setCouponCode] = useState('');
+  const [coupon, setCoupon] = useState(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
+  const calculateTotal = () => {
+    let total = plan.price;
+    if (addons.insurance === 'accept') total += 25;
+    if (addons.drivewayProtection === 'accept' && plan.id !== 2) total += 20;
+    
+    addons.equipment.forEach(item => {
+      const meta = equipmentMeta.find(e => e.id === item.id);
+      if (meta) {
+        total += meta.price * item.quantity;
+      }
+    });
+
+    if (addons.distanceInfo && addons.distanceInfo.totalFee) {
+      total += addons.distanceInfo.totalFee;
+    }
+
+    if (coupon && coupon.isValid) {
+      if (coupon.discountType === 'fixed') {
+        total = Math.max(0, total - coupon.discountValue);
+      } else if (coupon.discountType === 'percentage') {
+        total *= (1 - coupon.discountValue / 100);
+      }
+    }
+
+    return total;
+  };
+
+  const total = calculateTotal();
+
+  const handleApplyCoupon = async () => {
+    if (!couponCode) return;
+    setCouponLoading(true);
+    setCouponError('');
+    setCoupon(null);
+
+    const { data, error } = await supabase.rpc('validate_coupon', {
+      coupon_code: couponCode.toUpperCase(),
+      service_id_arg: plan.id
+    });
+
+    if (error || (data && !data.isValid)) {
+      const message = (data && data.error) || error?.message || 'An unknown error occurred.';
+      setCouponError(message);
+      toast({ title: 'Invalid Coupon', description: message, variant: 'destructive' });
+      setCoupon(null);
+    } else if (data && data.isValid) {
+      setCoupon(data);
+      toast({ title: 'Coupon Applied!', description: `Your coupon "${data.code}" has been applied.` });
+      onCouponApply(data);
+    }
+    setCouponLoading(false);
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 sticky top-24"
+    >
+      <h3 className="text-2xl font-bold text-yellow-400 mb-6">Order Summary</h3>
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <span className="text-blue-200">{plan.name}</span>
+          <span className="font-semibold text-white">${plan.price.toFixed(2)}</span>
         </div>
-    );
-
-    export const OrderSummary = ({ basePrice, addonsData, totalPrice, setAddonsData, handleBookingSubmit, plan, equipmentMeta, addonPrices }) => {
-        const isDumpLoader = plan.id === 2;
-        const notesLabel = isDumpLoader ? "Questions" : "Special Instructions";
-        const notesPlaceholder = isDumpLoader 
-            ? "Any questions or things that you wanted us to know?" 
-            : "Any special instructions for delivery or pickup? (e.g., gate code, specific placement)";
-
-        return (
-            <div className="bg-white/5 p-6 rounded-lg flex flex-col">
-                <h3 className="text-2xl font-bold text-yellow-400 mb-4">Your Order Summary</h3>
-                <div className="space-y-2 text-white flex-grow">
-                    <SummaryLine label="Base Price" value={basePrice} />
-                    {addonsData.distanceInfo?.fee > 0 && <SummaryLine label={`Extended Delivery (${addonsData.distanceInfo.miles.toFixed(1)} miles)`} value={addonsData.distanceInfo.fee} />}
-                    {addonsData.insurance === 'accept' && <SummaryLine label="Rental Insurance" value={addonPrices.insurance} />}
-                    {plan.id !== 2 && addonsData.drivewayProtection === 'accept' && <SummaryLine label="Driveway Protection" value={addonPrices.drivewayProtection} />}
-                    {addonsData.equipment.length > 0 && <p className="font-semibold pt-2">Equipment:</p>}
-                    {addonsData.equipment.map(item => {
-                        const equipmentInfo = equipmentMeta.find(e => e.id === item.id);
-                        return (
-                            <SummaryLine key={item.id} label={`${equipmentInfo.label} (x${item.quantity})`} value={equipmentInfo.price * item.quantity} isSubItem />
-                        );
-                    })}
-                </div>
-                <div className="border-t border-white/20 pt-4 mt-4">
-                    <p className="text-white text-lg font-semibold">Final Total:</p>
-                    <div className="flex items-baseline">
-                        <p className="text-5xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
-                        <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
-                    </div>
-                </div>
-                <div className="mt-6">
-                    <Label htmlFor="customer-notes" className="flex items-center text-lg font-semibold text-white mb-2">
-                        <MessageSquare className="h-5 w-5 mr-2 text-yellow-400" />
-                        {notesLabel}
-                    </Label>
-                    <Textarea 
-                        id="customer-notes"
-                        value={addonsData.notes || ''}
-                        onChange={(e) => setAddonsData(prev => ({ ...prev, notes: e.target.value }))}
-                        placeholder={notesPlaceholder}
-                        className="bg-white/10 min-h-[100px]"
-                    />
-                </div>
-                <Button onClick={handleBookingSubmit} className="w-full mt-6 py-3 text-lg font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white">
-                    <Check className="mr-2" /> Complete Booking
-                </Button>
+        {addons.insurance === 'accept' && (
+          <div className="flex justify-between items-center">
+            <span className="text-blue-200">Damage Insurance</span>
+            <span className="font-semibold text-white">$25.00</span>
+          </div>
+        )}
+        {addons.drivewayProtection === 'accept' && plan.id !== 2 && (
+          <div className="flex justify-between items-center">
+            <span className="text-blue-200">Driveway Protection</span>
+            <span className="font-semibold text-white">$20.00</span>
+          </div>
+        )}
+        {addons.equipment.length > 0 && (
+          <div>
+            <p className="text-blue-200 mb-2">Equipment:</p>
+            <ul className="space-y-1 pl-4">
+              {addons.equipment.map(item => {
+                const meta = equipmentMeta.find(e => e.id === item.id);
+                return (
+                  <li key={item.id} className="flex justify-between text-sm">
+                    <span>{meta.label} x{item.quantity}</span>
+                    <span>${(meta.price * item.quantity).toFixed(2)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+        {addons.distanceInfo && addons.distanceInfo.totalFee > 0 && (
+          <div className="flex justify-between items-center">
+            <span className="text-blue-200">Delivery Fee</span>
+            <span className="font-semibold text-white">${addons.distanceInfo.totalFee.toFixed(2)}</span>
+          </div>
+        )}
+        
+        <div className="border-t border-white/20 pt-4">
+          <div className="flex items-end gap-2">
+            <div className="flex-grow">
+              <label htmlFor="coupon" className="text-sm text-blue-200">Have a coupon?</label>
+              <input 
+                id="coupon"
+                type="text"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+                placeholder="Enter code"
+                className="w-full h-10 rounded-md border border-white/30 bg-white/10 px-3 py-2 text-sm text-white placeholder:text-blue-200/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+              />
             </div>
-        );
-    };
+            <Button onClick={handleApplyCoupon} disabled={couponLoading || !couponCode}>
+              {couponLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
+            </Button>
+          </div>
+          {couponError && <p className="text-red-400 text-sm mt-2 flex items-center"><XCircle className="mr-1 h-4 w-4"/> {couponError}</p>}
+          {coupon && coupon.isValid && (
+            <div className="text-green-400 text-sm mt-2 flex items-center">
+              <CheckCircle className="mr-1 h-4 w-4"/> 
+              Coupon "{coupon.code}" applied!
+            </div>
+          )}
+        </div>
+
+        <div className="border-t-2 border-yellow-400 pt-4 mt-4">
+          <div className="flex justify-between items-center text-xl">
+            <span className="font-bold text-white">Total</span>
+            <span className="font-bold text-yellow-400">${total.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+      <Button
+        onClick={onProceed}
+        className="w-full mt-8 text-lg"
+        size="lg"
+        disabled={isProcessing}
+      >
+        {isProcessing ? (
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+        ) : (
+          <Tag className="mr-2 h-5 w-5" />
+        )}
+        {isProcessing ? 'Processing...' : 'Proceed to Checkout'}
+      </Button>
+    </motion.div>
+  );
+};

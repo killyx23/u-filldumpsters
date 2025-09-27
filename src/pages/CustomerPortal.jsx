@@ -1,35 +1,133 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, LogOut, FileText, Image as ImageIcon, MessageSquare, Send, UploadCloud, Download } from 'lucide-react';
+import { Loader2, LogOut, FileText, Image as ImageIcon, MessageSquare, Send, UploadCloud, Download, Calendar, Info, BookOpen, Reply, Bell, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isSameDay, differenceInHours } from 'date-fns';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { useNavigate } from 'react-router-dom';
+import BackButton from '@/components/BackButton';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 
-const Section = ({ title, icon, children }) => (
+const Section = ({ title, icon, children, className = '' }) => (
     <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20"
+        className={`bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 ${className}`}
     >
         <h2 className="flex items-center text-2xl font-bold text-yellow-400 mb-4">{icon}{title}</h2>
         <div className="space-y-4">{children}</div>
     </motion.div>
 );
 
-const BookingCard = ({ booking, customer }) => {
+const CancelRescheduleDialog = ({ booking, isOpen, onOpenChange, onUpdate }) => {
+    const [step, setStep] = useState(1);
+    const [reason, setReason] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const isWithin24Hours = useMemo(() => {
+        if (!booking) return false;
+        return differenceInHours(parseISO(booking.drop_off_date), new Date()) < 24;
+    }, [booking]);
+
+    const resetAndClose = () => {
+        setStep(1);
+        setReason('');
+        setIsSubmitting(false);
+        onOpenChange(false);
+    };
+
+    const handleSubmit = async () => {
+        if (!reason.trim()) {
+            toast({ title: 'Reason required', description: 'Please explain why you are requesting this change.', variant: 'destructive'});
+            return;
+        }
+        setIsSubmitting(true);
+        try {
+            const { error } = await supabase.functions.invoke('request-booking-change', {
+                body: { bookingId: booking.id, reason },
+            });
+            if (error) throw error;
+            toast({ title: 'Request Submitted', description: 'Your request has been sent for review. We will contact you shortly.' });
+            onUpdate();
+            resetAndClose();
+        } catch(e) {
+            toast({ title: 'Submission Failed', description: e.message, variant: 'destructive'});
+            setIsSubmitting(false);
+        }
+    };
+    
+    return (
+        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+            <DialogContent className="bg-gray-900 border-yellow-400 text-white">
+                {step === 1 && (
+                    <>
+                        <DialogHeader>
+                            <DialogTitle>Cancellation & Rescheduling Policy</DialogTitle>
+                            <DialogDescription>Please review our policy before proceeding.</DialogDescription>
+                        </DialogHeader>
+                        <div className="py-4 space-y-4 text-blue-100">
+                             <p>We understand that plans can change. You can request to cancel or reschedule your booking here. Please note that all requests are subject to review and availability.</p>
+                             {isWithin24Hours && (
+                                <p className="font-bold text-red-400 p-3 bg-red-900/50 rounded-lg">
+                                    Your appointment is less than 24 hours away. A cancellation or rescheduling fee may apply according to our terms of service.
+                                </p>
+                             )}
+                             <p>By continuing, you acknowledge that rescheduling your service for a different date or time is <span className="font-bold">not guaranteed</span> and is based on our current availability. Your original spot may be lost.</p>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={resetAndClose}>Go Back</Button>
+                            <Button onClick={() => setStep(2)}>Continue</Button>
+                        </DialogFooter>
+                    </>
+                )}
+                {step === 2 && (
+                    <>
+                        <DialogHeader>
+                            <DialogTitle>Reason for Change Request</DialogTitle>
+                            <DialogDescription>Please let us know why you are canceling or rescheduling.</DialogDescription>
+                        </DialogHeader>
+                         <div className="py-4 space-y-4">
+                             <Textarea
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value)}
+                                placeholder="e.g., 'Project is delayed, need to move to next week' or 'I need to cancel this booking entirely.'"
+                                rows={5}
+                            />
+                            <p className="text-sm font-bold text-orange-400 p-3 bg-orange-900/50 rounded-lg">
+                                Upon submission, your booking will be placed on hold and flagged for review. This may delay your original service date and time while we process your request.
+                            </p>
+                         </div>
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => setStep(1)}>Back to Policy</Button>
+                            <Button onClick={handleSubmit} disabled={isSubmitting || !reason.trim()}>
+                                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                Submit Request
+                            </Button>
+                        </DialogFooter>
+                    </>
+                )}
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+const BookingCard = ({ booking, customer, onAddNoteClick, onCancelClick }) => {
     const receiptRef = useRef();
     const handlePrint = useReactToPrint({
         content: () => receiptRef.current,
         documentTitle: `U-Fill-Receipt-${booking.id}`,
     });
+
+    const isActive = !['Completed', 'Cancelled', 'pending_review'].includes(booking.status);
 
     return (
         <div className="bg-white/5 p-4 rounded-lg">
@@ -43,12 +141,37 @@ const BookingCard = ({ booking, customer }) => {
                 </div>
                 <StatusBadge status={booking.status} />
             </div>
-            <div className="text-right mt-2">
-                <Button size="sm" variant="outline" onClick={handlePrint}>View/Print Receipt</Button>
+            <div className="flex justify-end space-x-2 mt-2">
+                <Button size="sm" variant="outline" onClick={handlePrint}>Receipt</Button>
+                {isActive && (
+                    <>
+                        <Button size="sm" variant="destructive" onClick={() => onCancelClick(booking)}>Cancel/Reschedule</Button>
+                        <Button size="sm" onClick={() => onAddNoteClick(booking)}>Add Note</Button>
+                    </>
+                )}
             </div>
         </div>
     );
 };
+
+const NoteBubble = ({ note }) => {
+    const isAdmin = note.author_type === 'admin';
+    return (
+        <div className={`flex w-full ${isAdmin ? 'justify-start' : 'justify-end'}`}>
+            <div className={`p-3 rounded-lg max-w-md ${isAdmin ? 'bg-gray-700/50' : 'bg-blue-900/50'}`}>
+                <div className="flex justify-between items-center mb-1">
+                    <p className="font-bold text-sm text-blue-200 flex items-center">
+                        {isAdmin ? <Reply className="mr-2 h-4 w-4" /> : <BookOpen className="mr-2 h-4 w-4" />}
+                        {isAdmin ? 'Scheduling' : note.source}
+                    </p>
+                    <p className="text-xs text-gray-400">{format(parseISO(note.created_at), 'Pp')}</p>
+                </div>
+                <p className="text-white whitespace-pre-wrap">{note.content}</p>
+            </div>
+        </div>
+    );
+};
+
 
 export default function CustomerPortal() {
     const { user, signOut, loading: authLoading } = useAuth();
@@ -59,21 +182,25 @@ export default function CustomerPortal() {
     const [isSubmittingNote, setIsSubmittingNote] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef(null);
+    const [showNoteModal, setShowNoteModal] = useState(false);
+    const [selectedBookingForNote, setSelectedBookingForNote] = useState(null);
+    const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
+    const communicationSectionRef = useRef(null);
 
-    const fetchData = useCallback(async () => {
+    const fetchData = useCallback(async (isInitialLoad = true) => {
         if (!user || user.user_metadata?.is_admin) {
-             setLoading(false);
+             if (isInitialLoad) setLoading(false);
              return;
         };
 
         const customerDbId = user.user_metadata?.customer_db_id;
         if (!customerDbId) {
             toast({ title: "Portal Error", description: "Could not link to customer record.", variant: "destructive" });
-            setLoading(false);
+            if (isInitialLoad) setLoading(false);
             return;
         }
 
-        setLoading(true);
+        if (isInitialLoad) setLoading(true);
         try {
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
                 body: { customerId: customerDbId }
@@ -82,45 +209,126 @@ export default function CustomerPortal() {
             if (error) throw new Error(error.message);
             if (data.error) throw new Error(data.error);
 
+            const { data: notesData, error: notesError } = await supabase
+                .from('customer_notes')
+                .select('*')
+                .eq('customer_id', customerDbId)
+                .order('created_at', { ascending: false });
+
+            if (notesError) throw notesError;
+
             setCustomerData({
                 ...data.customer,
                 bookings: data.bookings || [],
-                notes: data.notes || [],
+                notes: notesData || [],
             });
 
         } catch (error) {
             toast({ title: "Error loading portal data", description: error.message, variant: "destructive" });
         } finally {
-            setLoading(false);
+            if (isInitialLoad) setLoading(false);
         }
     }, [user]);
 
     useEffect(() => {
         if (!authLoading) {
             if (user && !user.user_metadata?.is_admin) {
-                fetchData();
+                const customerDbId = user.user_metadata?.customer_db_id;
+                if(customerDbId && !user.user_metadata?.customer_user_id_synced) {
+                    supabase.from('customers').update({ user_id: user.id }).eq('id', customerDbId).then(({error}) => {
+                        if(!error) {
+                             supabase.auth.updateUser({ data: { ...user.user_metadata, customer_user_id_synced: true } });
+                        }
+                        fetchData();
+                    });
+                } else {
+                    fetchData();
+                }
             } else if (!user) {
                 toast({ title: "Access Denied", description: "Please sign in to view your portal.", variant: "destructive" });
                 navigate('/login');
             }
         }
     }, [user, authLoading, fetchData, navigate]);
+    
+     useEffect(() => {
+        if (!user || !customerData) return;
+
+        const channel = supabase.channel(`customer-portal-${customerData.id}`)
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'customer_notes',
+                filter: `customer_id=eq.${customerData.id}`
+            },
+            (payload) => {
+                const newNote = payload.new;
+                setCustomerData(currentData => {
+                    if (!currentData) return null;
+                    const existingNotes = currentData.notes || [];
+                    if (existingNotes.some(note => note.id === newNote.id)) {
+                        return currentData;
+                    }
+                    return {
+                        ...currentData,
+                        notes: [newNote, ...existingNotes]
+                    };
+                });
+                
+                if (newNote.author_type === 'admin') {
+                    toast({
+                        title: "You have a new message!",
+                        description: "A new message from Scheduling has arrived.",
+                        action: <Bell className="h-5 w-5 text-yellow-400" />,
+                    });
+                    communicationSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }
+            })
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'bookings',
+                filter: `customer_id=eq.${customerData.id}`
+            }, (payload) => {
+                fetchData(false);
+            }).subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user, customerData, fetchData]);
+
+    const handleAddNoteClick = (booking) => {
+        setSelectedBookingForNote(booking);
+        setShowNoteModal(true);
+    };
+
+    const handleCancelClick = (booking) => {
+        setSelectedBookingForCancel(booking);
+    };
 
     const handleAddNote = async () => {
-        if (!newNote.trim()) return;
+        if (!newNote.trim() || !selectedBookingForNote) return;
         setIsSubmittingNote(true);
 
-        const { error } = await supabase.from('customer_notes').insert({
+        const { data, error } = await supabase.from('customer_notes').insert({
             customer_id: customerData.id,
+            booking_id: selectedBookingForNote.id,
             source: 'Customer Portal',
-            content: newNote
-        });
+            content: newNote,
+            author_id: user.id,
+            author_type: 'customer'
+        }).select().single();
+
         if (error) {
             toast({ title: "Error saving note", description: error.message, variant: "destructive" });
         } else {
+            if (data && !data.thread_id) {
+                await supabase.from('customer_notes').update({ thread_id: data.id }).eq('id', data.id);
+            }
             toast({ title: "Note added successfully!" });
             setNewNote('');
-            fetchData();
+            setShowNoteModal(false);
         }
         setIsSubmittingNote(false);
     };
@@ -149,7 +357,7 @@ export default function CustomerPortal() {
                 toast({ title: "DB Update Failed", description: dbError.message, variant: "destructive" });
             } else {
                 toast({ title: "Photo uploaded!" });
-                fetchData();
+                fetchData(false);
             }
         }
         setIsUploading(false);
@@ -171,6 +379,22 @@ export default function CustomerPortal() {
             toast({ title: "Download Failed", description: error.message, variant: "destructive" });
         }
     };
+    
+    const calendarEvents = customerData?.bookings.map(booking => {
+        const isPast = isSameDay(parseISO(booking.pickup_date), new Date()) || new Date() > parseISO(booking.pickup_date);
+        return {
+            title: booking.plan.name,
+            start: booking.drop_off_date,
+            end: format(new Date(booking.pickup_date + 'T00:00:00Z'), 'yyyy-MM-dd'),
+            allDay: true,
+            backgroundColor: isPast ? '#4b5563' : '#1d4ed8',
+            borderColor: isPast ? '#4b5563' : '#1d4ed8'
+        };
+    }) || [];
+
+    const sortedNotes = useMemo(() => {
+        return customerData?.notes?.sort((a,b) => new Date(a.created_at) - new Date(b.created_at)) || [];
+    }, [customerData?.notes]);
 
     if (loading || authLoading) {
         return <div className="flex justify-center items-center h-screen"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
@@ -181,71 +405,103 @@ export default function CustomerPortal() {
     }
 
     return (
-        <div className="container mx-auto py-12 px-4">
-            <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
+        <div className="container mx-auto py-12 px-4 relative">
+             <BackButton className="absolute top-4 left-4 z-20" />
+            <div className="flex flex-wrap justify-between items-center mb-8 gap-4 pt-12 md:pt-0">
                 <div>
                     <h1 className="text-3xl md:text-4xl font-bold text-white">Welcome, {customerData.name}</h1>
                     <p className="text-blue-200">Customer ID: {customerData.customer_id_text}</p>
                 </div>
                 <Button onClick={signOut} variant="destructive"><LogOut className="mr-2 h-4 w-4" /> Sign Out</Button>
             </div>
+             <Dialog open={showNoteModal} onOpenChange={setShowNoteModal}>
+                <DialogContent className="bg-gray-900 text-white border-yellow-400">
+                    <DialogHeader>
+                        <DialogTitle>Add a Note</DialogTitle>
+                        <DialogDescription>
+                            Your note will be added to booking #{selectedBookingForNote?.id} for our team to review.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <Textarea
+                            value={newNote}
+                            onChange={(e) => setNewNote(e.target.value)}
+                            placeholder="Type your message, question, or special instructions here..."
+                            rows={5}
+                        />
+                    </div>
+                    <DialogFooter>
+                        <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+                        <Button onClick={handleAddNote} disabled={isSubmittingNote || !newNote.trim()}>
+                            {isSubmittingNote ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Send className="h-4 w-4 mr-2" />}
+                            Submit Note
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
-            <div className="grid lg:grid-cols-2 gap-8">
-                <div className="space-y-8">
-                    <Section title="My Bookings" icon={<FileText className="mr-3 h-6 w-6" />}>
+            {selectedBookingForCancel && (
+                <CancelRescheduleDialog 
+                    booking={selectedBookingForCancel} 
+                    isOpen={!!selectedBookingForCancel} 
+                    onOpenChange={() => setSelectedBookingForCancel(null)}
+                    onUpdate={() => fetchData(false)}
+                />
+            )}
+
+            <div className="grid lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-8">
+                     <Section title="My Calendar" icon={<Calendar className="mr-3 h-6 w-6" />} className="calendar-container-customer">
+                        <FullCalendar
+                            plugins={[dayGridPlugin]}
+                            initialView="dayGridMonth"
+                            events={calendarEvents}
+                            height="auto"
+                            headerToolbar={{
+                                left: 'prev,next',
+                                center: 'title',
+                                right: 'today'
+                            }}
+                        />
+                    </Section>
+                    <Section title="Booking History" icon={<FileText className="mr-3 h-6 w-6" />}>
                         {customerData.bookings?.length > 0 ? (
-                            customerData.bookings.map(booking => <BookingCard key={booking.id} booking={booking} customer={customerData} />)
+                            customerData.bookings.map(booking => <BookingCard key={booking.id} booking={booking} customer={customerData} onAddNoteClick={handleAddNoteClick} onCancelClick={handleCancelClick} />)
                         ) : (
                             <p className="text-center text-blue-200 py-4">You have no bookings.</p>
                         )}
                     </Section>
-                    
-                    <Section title="My Notes" icon={<MessageSquare className="mr-3 h-6 w-6" />}>
-                        <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
-                           {customerData.notes?.length > 0 ? customerData.notes.map(note => (
-                                <div key={note.id} className={`p-3 rounded-lg ${note.source === 'Customer Portal' ? 'bg-blue-900/50' : 'bg-gray-700/50'}`}>
-                                    <p className="font-bold text-sm text-blue-200">{note.source}</p>
-                                    <p className="text-white whitespace-pre-wrap">{note.content}</p>
-                                    <p className="text-xs text-gray-400 text-right">{format(parseISO(note.created_at), 'Pp')}</p>
-                                </div>
-                            )) : <p className="text-center text-blue-200 py-4">No notes found.</p>}
-                        </div>
+                </div>
+                
+                <div className="space-y-8">
+                     <Section title="My Files" icon={<ImageIcon className="mr-3 h-6 w-6" />}>
+                        <p className="text-blue-200 text-sm">These are the files you've uploaded for verification. You can upload new files if requested by our team.</p>
+                         <div className="grid grid-cols-2 gap-4">
+                            {customerData.license_image_urls && customerData.license_image_urls.length > 0 ? (
+                               customerData.license_image_urls.map((img, i) => (
+                                    <div key={i} className="relative group aspect-video">
+                                         <img  className="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src={img.url} />
+                                         <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                            <Button size="sm" onClick={() => handleDownload(img.path, img.name)}><Download className="h-4 w-4 mr-2"/> Download</Button>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : <p className="col-span-2 text-center text-blue-200 py-8">No files uploaded.</p>}
+                         </div>
                          <div className="border-t border-white/20 pt-4">
-                            <Textarea
-                                value={newNote}
-                                onChange={(e) => setNewNote(e.target.value)}
-                                placeholder="Add a new note for our team..."
-                            />
-                            <Button onClick={handleAddNote} disabled={isSubmittingNote || !newNote.trim()} className="mt-2">
-                                {isSubmittingNote ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Send className="h-4 w-4 mr-2" />}
-                                Add Note
-                            </Button>
+                             <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                                 <UploadCloud className="mr-2 h-4 w-4" /> 
+                                 {isUploading ? <Loader2 className="h-4 w-4 animate-spin"/> : 'Upload New File'}
+                             </Button>
+                             <Input ref={fileInputRef} type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*"/>
+                         </div>
+                    </Section>
+                     <Section title="Communication" icon={<MessageSquare className="mr-3 h-6 w-6" />} ref={communicationSectionRef}>
+                        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 flex flex-col">
+                           {sortedNotes.length > 0 ? sortedNotes.map(note => <NoteBubble key={note.id} note={note} />) : <p className="text-center text-blue-200 py-4">No messages found.</p>}
                         </div>
                     </Section>
                 </div>
-                
-                <Section title="My Files" icon={<ImageIcon className="mr-3 h-6 w-6" />}>
-                    <p className="text-blue-200">These are the files you've uploaded for verification.</p>
-                     <div className="grid grid-cols-2 gap-4">
-                        {customerData.license_image_urls && customerData.license_image_urls.length > 0 ? (
-                           customerData.license_image_urls.map((img, i) => (
-                                <div key={i} className="relative group aspect-video">
-                                     <img  className="rounded-lg object-cover w-full h-full" alt={`Uploaded file ${i+1}`} src={img.url} />
-                                     <div className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
-                                        <Button size="sm" onClick={() => handleDownload(img.path, img.name)}><Download className="h-4 w-4 mr-2"/> Download</Button>
-                                    </div>
-                                </div>
-                            ))
-                        ) : <p className="col-span-2 text-center text-blue-200 py-8">No files uploaded.</p>}
-                     </div>
-                     <div className="border-t border-white/20 pt-4">
-                         <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-                             <UploadCloud className="mr-2 h-4 w-4" /> 
-                             {isUploading ? <Loader2 className="h-4 w-4 animate-spin"/> : 'Upload New File'}
-                         </Button>
-                         <Input ref={fileInputRef} type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*"/>
-                     </div>
-                </Section>
             </div>
         </div>
     );
