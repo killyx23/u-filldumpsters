@@ -1,109 +1,92 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { BookOpen, Clock, Loader2, CheckCircle, MessageSquare, Send, Reply, PlusCircle } from 'lucide-react';
+import { MessageSquare, Loader2, Send, Paperclip, Smile, FileText, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { format, parseISO } from 'date-fns';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from '@/components/ui/textarea';
+import { format, parseISO, isToday, isYesterday } from 'date-fns';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import EmojiPicker from 'emoji-picker-react';
 
-const NoteBubble = ({ note, onReply }) => {
-    const isAdmin = note.author_type === 'admin';
+const AttachmentPreview = ({ note }) => {
+    if (!note.attachment_url) return null;
+
+    const isImage = /\.(jpg|jpeg|png|gif)$/i.test(note.attachment_name);
+
+    if (isImage) {
+        return (
+            <a href={note.attachment_url} target="_blank" rel="noopener noreferrer" className="mt-2 block">
+                <img-replace src={note.attachment_url} alt={note.attachment_name} className="max-w-xs rounded-lg" />
+            </a>
+        );
+    }
+
     return (
-        <div className={`flex items-start gap-3 ${isAdmin ? 'flex-row-reverse' : ''}`}>
-            <div className={`p-4 rounded-lg max-w-lg ${isAdmin ? 'bg-blue-800' : 'bg-gray-700'}`}>
-                <div className="flex justify-between items-center mb-2">
-                    <p className="font-semibold text-sm text-blue-200 flex items-center">
-                        <BookOpen className="mr-2 h-4 w-4" />
-                        {note.source}
-                    </p>
-                    <p className="text-xs text-gray-400">{format(parseISO(note.created_at), 'Pp')}</p>
-                </div>
-                <p className="text-white whitespace-pre-wrap">{note.content}</p>
-                {note.booking_id && <p className="text-xs text-gray-500 mt-2">Booking #{note.booking_id}</p>}
-                {!isAdmin && (
-                    <div className="text-right mt-2">
-                        <Button size="sm" variant="ghost" className="text-yellow-400 hover:text-yellow-300" onClick={() => onReply(note)}>
-                            <Reply className="mr-2 h-4 w-4" /> Reply
-                        </Button>
-                    </div>
-                )}
+        <a href={note.attachment_url} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center gap-2 p-2 bg-black/20 rounded-lg hover:bg-black/40 transition-colors">
+            <FileText className="h-6 w-6 text-yellow-400" />
+            <span className="text-sm font-medium truncate">{note.attachment_name}</span>
+        </a>
+    );
+};
+
+const ChatBubble = ({ note, isFirstInGroup }) => {
+    const isAdmin = note.author_type === 'admin';
+    const bubbleClasses = isAdmin
+        ? 'bg-blue-600 text-white rounded-br-none'
+        : 'bg-gray-700 text-white rounded-bl-none';
+    const marginClass = isFirstInGroup ? 'mt-4' : 'mt-1';
+
+    return (
+        <div className={`flex items-end gap-2 ${isAdmin ? 'justify-end' : 'justify-start'} ${marginClass}`}>
+            <div className={`p-3 rounded-lg max-w-md md:max-w-lg ${bubbleClasses}`}>
+                <p className="font-semibold text-sm text-blue-200">{note.source}</p>
+                {note.content && <p className="text-sm whitespace-pre-wrap mt-1">{note.content}</p>}
+                <AttachmentPreview note={note} />
+                <p className="text-xs mt-1 text-right opacity-70">{format(parseISO(note.created_at), 'p')}</p>
             </div>
         </div>
     );
 };
 
-const ReplyDialog = ({ isOpen, onOpenChange, onSend, targetNote, customer }) => {
-    const [message, setMessage] = useState('');
-    const [isSending, setIsSending] = useState(false);
-
-    const handleSend = async () => {
-        setIsSending(true);
-        await onSend(message);
-        setIsSending(false);
-        setMessage('');
-        onOpenChange(false);
+const DateSeparator = ({ date }) => {
+    const formatDate = (d) => {
+        const parsedDate = parseISO(d);
+        if (isToday(parsedDate)) return 'Today';
+        if (isYesterday(parsedDate)) return 'Yesterday';
+        return format(parsedDate, 'MMMM d, yyyy');
     };
 
-    const title = targetNote ? 'Reply to Customer' : 'Start New Conversation';
-    const description = targetNote 
-        ? `Replying to note from ${format(parseISO(targetNote.created_at), 'PPP')}.`
-        : `Sending a new message to ${customer.name}.`;
-
     return (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="bg-gray-900 border-yellow-400 text-white">
-                <DialogHeader>
-                    <DialogTitle>{title}</DialogTitle>
-                    <DialogDescription>{description}</DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                    <Textarea
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        placeholder="Type your message here..."
-                        rows={5}
-                    />
-                </div>
-                <DialogFooter>
-                    <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
-                    <Button onClick={handleSend} disabled={isSending || !message.trim()}>
-                        {isSending ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Send className="h-4 w-4 mr-2" />}
-                        Send Message
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                <div className="w-full border-t border-gray-600" />
+            </div>
+            <div className="relative flex justify-center">
+                <span className="bg-gray-800 px-2 text-sm text-gray-400">{formatDate(date)}</span>
+            </div>
+        </div>
     );
 };
 
-export const CommunicationLog = ({ customer, notes, onUpdate, loading }) => {
-    const [replyTarget, setReplyTarget] = useState(null);
-    const [isReplyDialogOpen, setIsReplyDialogOpen] = useState(false);
-    
-    const conversationThreads = useMemo(() => {
-        if (!notes) return [];
-        const threads = {};
-        notes.forEach(note => {
-            const threadId = note.thread_id || note.id;
-            if (!threads[threadId]) {
-                threads[threadId] = [];
-            }
-            threads[threadId].push(note);
-        });
-        // Sort notes within each thread by creation date
-        Object.values(threads).forEach(thread => thread.sort((a,b) => new Date(a.created_at) - new Date(b.created_at)));
+export const CommunicationLog = ({ customer, initialNotes, onUpdate }) => {
+    const [notes, setNotes] = useState(initialNotes);
+    const [message, setMessage] = useState('');
+    const [isSending, setIsSending] = useState(false);
+    const chatContainerRef = useRef(null);
+    const fileInputRef = useRef(null);
 
-        // Sort threads by the date of the last note in the thread
-        return Object.values(threads).sort((a, b) => {
-            const lastNoteA = new Date(a[a.length - 1].created_at);
-            const lastNoteB = new Date(b[b.length - 1].created_at);
-            return lastNoteB - lastNoteA;
-        });
+    useEffect(() => {
+        setNotes(initialNotes);
+    }, [initialNotes]);
+
+    useEffect(() => {
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
     }, [notes]);
 
-    const markAllAsRead = async () => {
-        const unreadNoteIds = notes.filter(n => !n.is_read && n.author_type !== 'admin').map(n => n.id);
+    const markNotesAsRead = useCallback(async () => {
+        const unreadNoteIds = notes.filter(n => !n.is_read && n.author_type === 'customer').map(n => n.id);
         if (unreadNoteIds.length === 0) return;
 
         const { error } = await supabase
@@ -111,87 +94,161 @@ export const CommunicationLog = ({ customer, notes, onUpdate, loading }) => {
             .update({ is_read: true })
             .in('id', unreadNoteIds);
         
-        if (error) {
-            toast({ title: 'Failed to mark notes as read', description: error.message, variant: 'destructive' });
-        } else {
-            toast({ title: 'All notes marked as read!' });
+        if (!error) {
             onUpdate();
         }
-    };
-    
-    const handleReply = (note) => {
-        setReplyTarget(note);
-        setIsReplyDialogOpen(true);
-    };
+    }, [notes, onUpdate]);
 
-    const handleNewMessage = () => {
-        setReplyTarget(null);
-        setIsReplyDialogOpen(true);
-    };
+    useEffect(() => {
+        const hasUnread = notes.some(n => !n.is_read && n.author_type === 'customer');
+        if (hasUnread) {
+            const timer = setTimeout(() => {
+                markNotesAsRead();
+            }, 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [notes, markNotesAsRead]);
 
-    const handleSendMessage = async (message) => {
+    const handleSendMessage = async (attachment = null) => {
+        if (!message.trim() && !attachment) return;
+        setIsSending(true);
+
         const payload = {
             customer_id: customer.id,
-            content: message,
-            thread_id: replyTarget ? replyTarget.thread_id : null,
-            parent_note_id: replyTarget ? replyTarget.id : null,
-            booking_id: replyTarget ? replyTarget.booking_id : null,
+            content: message.trim(),
+            attachment_url: attachment?.url || null,
+            attachment_name: attachment?.name || null,
         };
+
         try {
-            const { data, error } = await supabase.functions.invoke('send-admin-message', {
+            const { error } = await supabase.functions.invoke('send-admin-message', {
                 body: payload
             });
             if (error) throw error;
-            if (data.error) throw new Error(data.error);
 
-            toast({ title: 'Message Sent!' });
-            onUpdate();
-        } catch(error) {
+            setMessage('');
+        } catch (error) {
             toast({ title: 'Failed to send message', description: error.message, variant: 'destructive' });
+        } finally {
+            setIsSending(false);
         }
     };
-    
-    const hasUnreadNotes = notes.some(n => !n.is_read && n.author_type !== 'admin');
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setIsSending(true);
+        const filePath = `chat-attachments/${customer.id}/${Date.now()}-${file.name}`;
+        
+        try {
+            const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+            
+            await handleSendMessage({ url: publicUrl, name: file.name });
+
+        } catch (error) {
+            toast({ title: "Attachment Failed", description: error.message, variant: "destructive" });
+        } finally {
+            setIsSending(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleTextareaKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSendMessage();
+        }
+    };
+
+    const onEmojiClick = (emojiObject) => {
+        setMessage(prevMessage => prevMessage + emojiObject.emoji);
+    };
+
+    const groupedNotes = useMemo(() => {
+        const groups = [];
+        let lastDate = null;
+        let lastAuthor = null;
+        
+        [...notes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).forEach(note => {
+            const noteDate = format(parseISO(note.created_at), 'yyyy-MM-dd');
+            if (noteDate !== lastDate) {
+                groups.push({ type: 'date', date: noteDate });
+                lastDate = noteDate;
+                lastAuthor = null; 
+            }
+
+            const isFirstInGroup = note.author_type !== lastAuthor;
+            groups.push({ type: 'note', note, isFirstInGroup });
+            lastAuthor = note.author_type;
+        });
+        return groups;
+    }, [notes]);
 
     return (
-        <div>
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="flex items-center text-xl font-bold text-yellow-400"><MessageSquare className="mr-2 h-5 w-5"/>Communication Log</h3>
-                <div className="flex gap-2">
-                    {hasUnreadNotes && (
-                        <Button size="sm" onClick={markAllAsRead} variant="outline" className="text-yellow-400 border-yellow-400 hover:bg-yellow-400 hover:text-black">
-                           <CheckCircle className="mr-2 h-4 w-4"/> Mark All as Read
-                        </Button>
-                    )}
-                    <Button size="sm" onClick={handleNewMessage}>
-                        <PlusCircle className="mr-2 h-4 w-4"/> New Message
-                    </Button>
-                </div>
+        <div className="flex flex-col h-[75vh] bg-gray-800 rounded-lg shadow-2xl">
+            <header className="p-4 border-b border-gray-700">
+                <h3 className="flex items-center text-lg font-bold text-yellow-400">
+                    <MessageSquare className="mr-2 h-5 w-5" />
+                    Chat with {customer.name}
+                </h3>
+            </header>
+
+            <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto">
+                {groupedNotes.map((group, index) => {
+                    if (group.type === 'date') {
+                        return <DateSeparator key={`date-${index}`} date={group.date} />;
+                    }
+                    return (
+                        <ChatBubble
+                            key={group.note.id}
+                            note={group.note}
+                            isFirstInGroup={group.isFirstInGroup}
+                        />
+                    );
+                })}
             </div>
-            {loading ? (
-                <div className="flex justify-center items-center h-48">
-                    <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
+
+            <footer className="p-4 border-t border-gray-700 bg-gray-900/50 rounded-b-lg">
+                <div className="relative">
+                    <Textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyDown={handleTextareaKeyDown}
+                        placeholder="Type a message... (Shift+Enter for new line)"
+                        className="bg-gray-700 border-gray-600 text-white rounded-lg pr-28 resize-none"
+                        rows={1}
+                        onInput={(e) => {
+                            e.target.style.height = 'auto';
+                            e.target.style.height = `${e.target.scrollHeight}px`;
+                        }}
+                    />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button size="icon" variant="ghost" className="text-gray-400 hover:text-white">
+                                    <Smile className="h-5 w-5" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 border-0 bg-transparent">
+                                <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" />
+                            </PopoverContent>
+                        </Popover>
+                        <Button size="icon" variant="ghost" className="text-gray-400 hover:text-white" onClick={() => fileInputRef.current?.click()}>
+                            <Paperclip className="h-5 w-5" />
+                        </Button>
+                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                        <Button size="icon" onClick={() => handleSendMessage()} disabled={isSending || (!message.trim() && !fileInputRef.current?.files?.length)}>
+                            {isSending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                        </Button>
+                    </div>
                 </div>
-            ) : (
-                <div className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
-                    {conversationThreads.length > 0 ? (
-                        conversationThreads.map((thread, index) => (
-                            <div key={index} className="p-4 bg-black/20 rounded-lg space-y-4">
-                                {thread.map(note => <NoteBubble key={note.id} note={note} onReply={handleReply} />)}
-                            </div>
-                        ))
-                    ) : (
-                        <p className="text-center text-blue-200 py-16">No notes or correspondence history for this customer.</p>
-                    )}
-                </div>
-            )}
-            <ReplyDialog 
-                isOpen={isReplyDialogOpen} 
-                onOpenChange={setIsReplyDialogOpen}
-                onSend={handleSendMessage}
-                targetNote={replyTarget}
-                customer={customer}
-            />
+            </footer>
         </div>
     );
 };

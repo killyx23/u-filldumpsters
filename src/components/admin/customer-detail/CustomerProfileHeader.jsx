@@ -30,7 +30,7 @@ export const CustomerProfileHeader = ({ customer, bookingsCount }) => {
                                 </span>
                             </TooltipTrigger>
                             <TooltipContent className="bg-gray-900 border-orange-500 text-white">
-                                <p>Address verification was skipped by this customer.</p>
+                                <p>Address verification was skipped by this customer on at least one booking.</p>
                             </TooltipContent>
                         </Tooltip>
                     )}
@@ -42,7 +42,7 @@ export const CustomerProfileHeader = ({ customer, bookingsCount }) => {
                                 </span>
                             </TooltipTrigger>
                             <TooltipContent className="bg-gray-900 border-red-500 text-white">
-                                <p>This customer has incomplete verification info (license/plate).</p>
+                                <p>This customer has incomplete verification info (license/plate) on at least one booking.</p>
                             </TooltipContent>
                         </Tooltip>
                     )}
