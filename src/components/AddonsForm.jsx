@@ -17,7 +17,7 @@ const addonPrices = {
   insurance: 15,
   drivewayProtection: 10,
   equipment: {
-    wheelbarrow: 20,
+    wheelbarrow: 10,
     handTruck: 15,
     gloves: 5,
   },
@@ -36,6 +36,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const fetchInventory = useCallback(async () => {
     setLoadingInventory(true);
@@ -52,13 +53,14 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     fetchInventory();
   }, [fetchInventory]);
 
-  useEffect(() => {
-    if (!addonsData) return;
+  const calculateTotal = useCallback(() => {
+    if (!addonsData || !plan) return 0;
     let newTotal = basePrice;
-    if (plan.id !== 1 && addonsData.insurance === 'accept') {
+    
+    if (addonsData.insurance === 'accept') {
       newTotal += addonPrices.insurance;
     }
-    if (addonsData.drivewayProtection === 'accept') {
+    if (addonsData.drivewayProtection === 'accept' && (plan.id === 1 || (plan.id === 2 && deliveryService))) {
       newTotal += addonPrices.drivewayProtection;
     }
     addonsData.equipment.forEach(item => {
@@ -67,11 +69,29 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         newTotal += equipmentInfo.price * item.quantity;
       }
     });
-    if (addonsData.distanceInfo?.fee > 0) {
-        newTotal += addonsData.distanceInfo.fee;
+    
+    if (addonsData.coupon && addonsData.coupon.isValid) {
+      if (addonsData.coupon.discountType === 'fixed') {
+        newTotal = Math.max(0, newTotal - addonsData.coupon.discountValue);
+      } else if (addonsData.coupon.discountType === 'percentage') {
+        let subtotalForPercentage = basePrice;
+         if (addonsData.insurance === 'accept') subtotalForPercentage += addonPrices.insurance;
+         if (addonsData.drivewayProtection === 'accept' && (plan.id === 1 || (plan.id === 2 && deliveryService))) subtotalForPercentage += addonPrices.drivewayProtection;
+         addonsData.equipment.forEach(item => {
+            const equipmentInfo = equipmentMeta.find(e => e.id === item.id);
+            if (equipmentInfo) subtotalForPercentage += equipmentInfo.price * item.quantity;
+         });
+        const discount = subtotalForPercentage * (addonsData.coupon.discountValue / 100);
+        newTotal = subtotalForPercentage - discount;
+      }
     }
-    setTotalPrice(newTotal);
-  }, [addonsData, basePrice, plan.id]);
+
+    return newTotal;
+  }, [addonsData, plan, basePrice, deliveryService]);
+
+  useEffect(() => {
+    setTotalPrice(calculateTotal());
+  }, [addonsData, calculateTotal]);
 
   const handleInsuranceChange = (value) => {
     if (value === 'decline') {
@@ -117,9 +137,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     });
   };
   
-  const handleBookingSubmit = () => {
+  const handleProceed = () => {
+    setIsProcessing(true);
     if (plan.id === 2 && !deliveryService) {
       setShowVerificationDialog(true);
+      setIsProcessing(false);
     } else {
       onSubmit(totalPrice, null, addonsData);
     }
@@ -127,12 +149,17 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
   const handleVerifiedSubmit = (verificationData) => {
     setShowVerificationDialog(false);
-    const finalAddons = { ...addonsData, verificationSkipped: verificationData.verificationSkipped };
-    onSubmit(totalPrice, verificationData, finalAddons);
+    const finalAddons = { ...addonsData, ...verificationData };
+    const finalTotal = calculateTotal();
+    onSubmit(finalTotal, verificationData, finalAddons);
+  };
+  
+  const handleCouponApply = (coupon) => {
+    setAddonsData(prev => ({ ...prev, coupon }));
   };
 
-  if (!addonsData) {
-    return null; // or a loading indicator
+  if (!addonsData || !plan) {
+    return null;
   }
   
   const rentalEquipment = equipmentMeta.filter(item => item.type === 'rental');
@@ -150,65 +177,58 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         transition={{ duration: 0.5 }}
         className="container mx-auto py-16 px-4"
       >
-        <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 relative">
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center">
-              <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20 hidden sm:inline-flex">
-                <ArrowLeft />
-              </Button>
-              <h2 className="text-3xl font-bold text-white">Add-ons & Protection</h2>
-            </div>
-             {(plan.id === 1 || plan.id === 3 || (plan.id === 2 && deliveryService)) && (
-                <div className="flex items-center space-x-2">
-                    <Button onClick={onBack} variant="outline" className="text-white border-white/30 hover:bg-white/10 hover:text-white">Back</Button>
-                    <Button asChild variant="outline" className="text-white border-white/30 hover:bg-white/10 hover:text-white">
-                      <Link to="/contact">Contact</Link>
-                    </Button>
+        <div className="max-w-6xl mx-auto relative">
+          <div className="grid lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center">
+                  <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20 hidden sm:inline-flex">
+                    <ArrowLeft />
+                  </Button>
+                  <h2 className="text-3xl font-bold text-white">Add-ons & Protection</h2>
                 </div>
-            )}
-          </div>
+              </div>
 
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="space-y-6">
-              <ProtectionSection 
-                addonsData={addonsData}
-                handleInsuranceChange={handleInsuranceChange}
-                handleDrivewayProtectionChange={handleDrivewayProtectionChange}
-                plan={plan}
-                addonPrices={addonPrices}
-                isDelivery={deliveryService && plan.id === 2}
-              />
-              <EquipmentSection 
-                addonsData={addonsData}
-                handleEquipmentQuantityChange={handleEquipmentQuantityChange}
-                equipmentInventory={equipmentInventory}
-                loadingInventory={loadingInventory}
-                equipmentMeta={rentalEquipment}
-                title="Rent Additional Equipment"
-                icon={<PackagePlus />}
-              />
-              <EquipmentSection 
-                addonsData={addonsData}
-                handleEquipmentQuantityChange={handleEquipmentQuantityChange}
-                equipmentInventory={equipmentInventory}
-                loadingInventory={loadingInventory}
-                equipmentMeta={purchaseItems}
-                title="Items for Purchase"
-                icon={<ShoppingCart />}
-              />
+              <div className="space-y-8">
+                <ProtectionSection 
+                  addonsData={addonsData}
+                  handleInsuranceChange={handleInsuranceChange}
+                  handleDrivewayProtectionChange={handleDrivewayProtectionChange}
+                  plan={plan}
+                  addonPrices={addonPrices}
+                  isDelivery={deliveryService && plan.id === 2}
+                />
+                <EquipmentSection 
+                  addonsData={addonsData}
+                  handleEquipmentQuantityChange={handleEquipmentQuantityChange}
+                  equipmentInventory={equipmentInventory}
+                  loadingInventory={loadingInventory}
+                  equipmentMeta={rentalEquipment}
+                  title="Rent Additional Equipment"
+                  icon={<PackagePlus />}
+                />
+                <EquipmentSection 
+                  addonsData={addonsData}
+                  handleEquipmentQuantityChange={handleEquipmentQuantityChange}
+                  equipmentInventory={equipmentInventory}
+                  loadingInventory={loadingInventory}
+                  equipmentMeta={purchaseItems}
+                  title="Items for Purchase"
+                  icon={<ShoppingCart />}
+                />
+              </div>
             </div>
 
-            <OrderSummary
-                basePrice={basePrice}
-                addonsData={addonsData}
-                totalPrice={totalPrice}
-                setAddonsData={setAddonsData}
-                handleBookingSubmit={handleBookingSubmit}
-                plan={plan}
-                equipmentMeta={equipmentMeta}
-                addonPrices={addonPrices}
-                deliveryService={deliveryService}
-            />
+            <div className="lg:col-span-1">
+              <OrderSummary
+                  plan={{...plan, price: basePrice}}
+                  addons={addonsData}
+                  onProceed={handleProceed}
+                  isProcessing={isProcessing}
+                  onCouponApply={handleCouponApply}
+                  deliveryService={deliveryService}
+              />
+            </div>
           </div>
         </div>
       </motion.div>
@@ -234,7 +254,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
 const DeclineWarningDialog = ({ open, onOpenChange, onConfirm, title, description }) => (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent className="bg-gray-900 border-yellow-400 text-white">
             <DialogHeader>
                 <DialogTitle className="flex items-center text-yellow-400 text-2xl">
                     <ArrowLeft className="mr-3 h-8 w-8" />

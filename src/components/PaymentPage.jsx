@@ -6,25 +6,19 @@ import { useStripe } from '@stripe/react-stripe-js';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+
 const addonPrices = {
   insurance: 15,
   drivewayProtection: 10,
-  equipment: {
-    wheelbarrow: 20,
-    handTruck: 15,
-    gloves: 5
-  }
 };
-const equipmentList = [{
-  id: 'wheelbarrow',
-  label: 'Wheelbarrow'
-}, {
-  id: 'handTruck',
-  label: 'Hand Truck'
-}, {
-  id: 'gloves',
-  label: 'Working Gloves (Pair)'
-}];
+const equipmentList = [
+  { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
+  { id: 'handTruck', label: 'Hand Truck', price: 15 },
+  { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 }
+];
+
 export const PaymentPage = ({
   totalPrice,
   bookingData,
@@ -36,11 +30,12 @@ export const PaymentPage = ({
 }) => {
   const stripe = useStripe();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
   const isDelivery = plan.id === 2 && deliveryService;
   const currentPlan = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : plan;
 
   const handlePayment = async () => {
-    if (!stripe || isProcessing) {
+    if (!stripe || isProcessing || !isConfirmed) {
       return;
     }
     if (!bookingId) {
@@ -104,16 +99,16 @@ export const PaymentPage = ({
       setIsProcessing(false);
     }
   };
+
   const formatTime = timeString => {
-    if (!timeString) return '';
-    try {
-      const date = new Date(`1970-01-01T${timeString}`);
-      if (!isValid(date)) return "Invalid Time";
-      return format(date, 'h:mm a');
-    } catch (e) {
-      return "Invalid Time";
-    }
+    if (!timeString) return 'N/A';
+    const [hours, minutes] = timeString.split(':');
+    const date = new Date();
+    date.setHours(parseInt(hours, 10));
+    date.setMinutes(parseInt(minutes, 10));
+    return isValid(date) ? format(date, 'h:mm a') : 'N/A';
   };
+
   const formatDate = date => {
     if (!date) return 'N/A';
     try {
@@ -124,6 +119,7 @@ export const PaymentPage = ({
       return "Invalid Date";
     }
   };
+
   return <motion.div initial={{
     opacity: 0,
     x: 100
@@ -141,7 +137,7 @@ export const PaymentPage = ({
           <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20">
             <ArrowLeft />
           </Button>
-          <h2 className="text-3xl font-bold text-white">Step 3: Secure Payment</h2>
+          <h2 className="text-3xl font-bold text-white">Step 5: Secure Payment</h2>
         </div>
 
         <div className="bg-white/5 p-6 rounded-lg mb-8">
@@ -161,7 +157,7 @@ export const PaymentPage = ({
                 <ul className="list-disc list-inside pl-4 text-blue-200">
                   {addonsData.equipment.map(item => {
                 const equipmentDetails = equipmentList.find(e => e.id === item.id);
-                const equipmentPrice = addonPrices.equipment[item.id];
+                const equipmentPrice = equipmentDetails?.price;
                 const quantityText = item.quantity > 1 ? ` x ${item.quantity}` : '';
                 return <li key={item.id}>
                         {equipmentDetails?.label}{quantityText} - ${equipmentPrice ? (equipmentPrice * item.quantity).toFixed(2) : '0.00'}
@@ -183,8 +179,15 @@ export const PaymentPage = ({
         </div>
 
         <div className="text-center">
+          <div className="flex items-center space-x-2 mb-6 bg-white/5 p-4 rounded-lg justify-center">
+            <Checkbox id="confirm-details" checked={isConfirmed} onCheckedChange={setIsConfirmed} />
+            <Label htmlFor="confirm-details" className="text-sm text-blue-200 leading-snug cursor-pointer">
+              I have thoroughly reviewed all the information above and confirm it is correct.
+            </Label>
+          </div>
+
           <p className="text-blue-200 mb-4">You will be redirected to Stripe for secure payment processing.</p>
-          <Button onClick={handlePayment} disabled={isProcessing || !stripe} className="w-full py-4 text-xl font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white disabled:opacity-50">
+          <Button onClick={handlePayment} disabled={isProcessing || !stripe || !isConfirmed} className="w-full py-4 text-xl font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white disabled:opacity-50 disabled:cursor-not-allowed">
             {isProcessing ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <CreditCard className="mr-3" />}
             {isProcessing ? `Processing...` : `Pay $${totalPrice.toFixed(2)} with Card (plus tax)`}
           </Button>
