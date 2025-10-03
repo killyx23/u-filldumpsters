@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Loader2 } from 'lucide-react';
 
 const AdminRouteGuard = ({ children }) => {
-  const { user, loading, session } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -15,9 +15,7 @@ const AdminRouteGuard = ({ children }) => {
     );
   }
 
-  const isAdmin = user?.user_metadata?.is_admin === true;
-
-  if (!session || !user || !isAdmin) {
+  if (!user || !isAdmin) {
     return <Navigate to="/admin/login" state={{ from: location }} replace />;
   }
 

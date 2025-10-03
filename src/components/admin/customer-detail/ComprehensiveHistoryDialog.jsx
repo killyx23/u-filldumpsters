@@ -45,6 +45,7 @@ export const ComprehensiveHistoryDialog = ({ isOpen, onOpenChange, customer, boo
     if (!customer) return null;
 
     const totalSpent = bookings.reduce((acc, b) => {
+        if (b.status === 'Cancelled') return acc;
         const bookingTotal = b.total_price || 0;
         const feesTotal = b.fees ? Object.values(b.fees).reduce((feeAcc, fee) => feeAcc + (fee.amount || 0), 0) : 0;
         return acc + bookingTotal + feesTotal;
@@ -92,8 +93,8 @@ export const ComprehensiveHistoryDialog = ({ isOpen, onOpenChange, customer, boo
                                     )) : 'None provided'}
                                 </div>
                             }/>
-                            <DetailItem icon={<AlertTriangle className={!customer.unverified_address ? "text-green-400" : "text-orange-400"} />} label="Address Verified" value={!customer.unverified_address ? 'Yes' : 'No (Flagged)'} />
-                            <DetailItem icon={<AlertTriangle className={!customer.has_incomplete_verification ? "text-green-400" : "text-red-400"} />} label="Vehicle Info Complete" value={!customer.has_incomplete_verification ? 'Yes' : 'No (Flagged)'} />
+                            <DetailItem icon={<AlertTriangle className={!customer.unverified_address ? "text-green-400" : "text-orange-400"} />} label="Address Verified" value={!customer.unverified_address ? 'Yes (Globally)' : 'No (Flagged on at least one booking)'} />
+                            <DetailItem icon={<AlertTriangle className={!customer.has_incomplete_verification ? "text-green-400" : "text-red-400"} />} label="Vehicle Info Complete" value={!customer.has_incomplete_verification ? 'Yes (Globally)' : 'No (Flagged on at least one booking)'} />
                         </Section>
 
                         <Section title="Stripe Payment IDs" icon={<Hash className="mr-2 h-5 w-5" />}>

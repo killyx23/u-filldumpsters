@@ -6,7 +6,7 @@ import { StatusBadge } from '@/components/admin/StatusBadge';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Button } from '@/components/ui/button';
-import { Eye, Printer, Send, DollarSign, Loader2 } from 'lucide-react';
+import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle } from 'lucide-react';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -42,6 +42,18 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
         setIsSending(null);
     };
 
+    const getPendingReason = () => {
+        if (booking.status !== 'pending_review' && booking.status !== 'pending_verification') return null;
+        if (booking.reschedule_history && booking.reschedule_history.length > 0) {
+            return 'Reschedule Request';
+        }
+        if (booking.was_verification_skipped) {
+            return 'Initial Verification';
+        }
+        return 'Manual Review';
+    };
+    const pendingReason = getPendingReason();
+
     return (
         <div className="bg-white/10 p-4 rounded-md">
             <div className="hidden">
@@ -50,6 +62,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
             <div className="flex justify-between items-start">
                 <div>
                     <p className="font-bold text-lg text-white">{booking.plan.name}</p>
+                    <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked: {format(parseISO(booking.created_at), 'Pp')}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
                     <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {paymentInfo?.stripe_charge_id || 'N/A'}</p>
                 </div>
@@ -58,6 +71,12 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
                     <p className="font-bold text-lg text-green-400 mt-1">${booking.total_price.toFixed(2)}</p>
                 </div>
             </div>
+            {pendingReason && (
+                <div className="mt-2 p-2 bg-orange-900/50 border border-orange-500/50 rounded-md text-sm text-orange-300 flex items-center">
+                    <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
+                    Pending Reason: <span className="font-semibold ml-1">{pendingReason}</span>
+                </div>
+            )}
             <div className="flex justify-end space-x-2 mt-3">
                 <Button size="sm" variant="secondary" onClick={() => onReceiptSelect({ ...booking, customers: customer })}><Eye className="mr-2 h-4 w-4" /> View Details</Button>
                 <Button size="sm" variant="outline" onClick={handlePrint}><Printer className="mr-2 h-4 w-4" /> Print</Button>
@@ -71,7 +90,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
 
 export const BookingHistory = ({ bookings, customer, onReceiptSelect }) => {
     return (
-        <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History & Receipts">
+        <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History">
             <div className="space-y-4">
                 {bookings.length > 0 ? bookings.map(booking => (
                     <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect}/>
