@@ -1,22 +1,22 @@
-import React, { useState } from 'react';
-        import { AnimatePresence } from 'framer-motion';
-        import { loadStripe } from '@stripe/stripe-js';
-        import { Elements } from '@stripe/react-stripe-js';
+import React, { useState, useEffect } from 'react';
+    import { AnimatePresence } from 'framer-motion';
+    import { loadStripe } from '@stripe/stripe-js';
+    import { Elements } from '@stripe/react-stripe-js';
     
-        import { dumpsterPlans } from '@/data/plans';
-        import { supabase } from '@/lib/customSupabaseClient';
-        import { toast } from '@/components/ui/use-toast';
+    import { supabase } from '@/lib/customSupabaseClient';
+    import { toast } from '@/components/ui/use-toast';
     
-        import { Plans } from '@/components/Plans';
-        import { KeyFeatures } from '@/components/KeyFeatures';
-        import { BookingForm } from '@/components/BookingForm';
-        import { AddonsForm } from '@/components/AddonsForm';
-        import { PaymentPage } from '@/components/PaymentPage';
-        import { UserAgreement } from '@/components/UserAgreement';
-        import { ComprehensiveAgreement } from '@/components/ComprehensiveAgreement';
-        import { cn } from '@/lib/utils';
-        
-        
+    import { Plans } from '@/components/Plans';
+    import { KeyFeatures } from '@/components/KeyFeatures';
+    import { BookingForm } from '@/components/BookingForm';
+    import { AddonsForm } from '@/components/AddonsForm';
+    import { PaymentPage } from '@/components/PaymentPage';
+    import { UserAgreement } from '@/components/UserAgreement';
+    import { ComprehensiveAgreement } from '@/components/ComprehensiveAgreement';
+    import { cn } from '@/lib/utils';
+    import { ReviewsCarousel } from '@/components/ReviewsCarousel';
+    
+    
     const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBBbSQ9zxPaxMaBaizd1gteqQkA1heNW84b4V08gttanJuCj4Q77pr00FWtGRp28");
     
         const initialBookingData = {
@@ -61,6 +61,7 @@ import React, { useState } from 'react';
     
         export default function BookingJourney() {
           const [step, setStep] = useState(0);
+          const [plans, setPlans] = useState([]);
           const [selectedPlan, setSelectedPlan] = useState(null);
           const [bookingData, setBookingData] = useState(initialBookingData);
           const [addonsData, setAddonsData] = useState(null);
@@ -69,6 +70,22 @@ import React, { useState } from 'react';
           const [agreementAccepted, setAgreementAccepted] = useState(false);
           const [bookingId, setBookingId] = useState(null);
           const [deliveryService, setDeliveryService] = useState(false);
+    
+          useEffect(() => {
+            const fetchPlans = async () => {
+                const { data, error } = await supabase
+                    .from('services')
+                    .select('*')
+                    .in('id', [1, 2, 3]) // Explicitly fetch only the 3 core services for the homepage
+                    .order('id');
+                if (error) {
+                    toast({ title: "Could not load services", variant: "destructive" });
+                } else {
+                    setPlans(data);
+                }
+            };
+            fetchPlans();
+          }, []);
           
           const handlePlanSelect = (plan) => {
             setSelectedPlan(plan);
@@ -85,6 +102,7 @@ import React, { useState } from 'react';
               verificationSkipped: false,
               distanceInfo: null,
               deliveryFee: 0,
+              coupon: null,
             });
             setStep(1);
           };
@@ -101,7 +119,7 @@ import React, { useState } from 'react';
             // This now just moves to the agreement step
             setStep(3);
           };
-
+    
           const handleAgreementSign = async () => {
              const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
             const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
@@ -183,8 +201,9 @@ import React, { useState } from 'react';
               case 0:
                 return (
                   <>
-                    <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />
+                    <Plans plans={plans} onSelectPlan={handlePlanSelect} />
                     <KeyFeatures />
+                    <ReviewsCarousel />
                   </>
                 );
               case 1:
@@ -239,8 +258,9 @@ import React, { useState } from 'react';
               default:
                 return (
                   <>
-                    <Plans plans={dumpsterPlans} onSelectPlan={handlePlanSelect} />
+                    <Plans plans={plans} onSelectPlan={handlePlanSelect} />
                     <KeyFeatures />
+                    <ReviewsCarousel />
                   </>
                 );
             }

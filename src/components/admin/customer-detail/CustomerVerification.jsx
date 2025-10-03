@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud, Edit, Save, MessageSquare } from 'lucide-react';
@@ -52,7 +52,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
                 ...booking, 
                 customers: customer, 
                 status: 'Cancelled', 
-                refund_details: { amount: parseFloat(refundAmount), reason }
+                refund_details: { amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString() }
             };
             
             await supabase.functions.invoke('send-booking-confirmation', {
@@ -75,7 +75,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <div className="hidden">
-                 <PrintableReceipt ref={receiptRef} booking={{...booking, customers: customer, refund_details: {amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString()}}} />
+                 <PrintableReceipt ref={receiptRef} booking={{...booking, customers: customer, status: 'Cancelled', refund_details: {amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString()}}} />
             </div>
             <DialogContent className="bg-gray-900 border-red-500 text-white">
                 <DialogHeader>
@@ -176,7 +176,7 @@ const ImageUploader = ({ customer, onUpdate }) => {
 };
 
 
-export const CustomerVerification = ({ customer, verificationBookings, onUpdate }) => {
+export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
     const [plate, setPlate] = useState(customer.license_plate || '');
@@ -199,16 +199,20 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
         setIsSavingPlate(false);
     };
     
-    const handleApprove = async (bookingId) => {
+    const handleApprove = async (booking) => {
         const { error } = await supabase
             .from('bookings')
             .update({ status: 'Confirmed', verification_notes: 'Admin approved verification.', is_manually_verified: true })
-            .eq('id', bookingId);
+            .eq('id', booking.id);
             
         if (error) {
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
-            toast({ title: "Booking Approved", description: `The booking is now confirmed and ready for delivery.` });
+            const updatedBookingForEmail = { ...booking, customers: customer, status: 'Confirmed' };
+            await supabase.functions.invoke('send-booking-confirmation', {
+                body: { booking: updatedBookingForEmail, customMessage: `Your booking #${booking.id} has been approved and is now confirmed.` }
+            });
+            toast({ title: "Booking Approved", description: `The booking is now confirmed and the customer has been notified.` });
             onUpdate();
         }
     };
@@ -240,8 +244,8 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
         switch (status) {
             case 'pending_review':
                 return {
-                    container: "bg-red-900/30 border-red-500",
-                    title: "text-red-300 font-bold",
+                    container: "bg-orange-900/30 border-orange-500",
+                    title: "text-orange-300 font-bold",
                     icon: <MessageSquare className="mr-2 h-4 w-4"/>,
                     titleText: "Change Request for Booking #"
                 };
@@ -253,7 +257,22 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
                     titleText: "New Booking Verification #"
                 };
         }
-    }
+    };
+
+    const verificationNotes = useMemo(() => {
+        const noteMap = {};
+        if (notes) {
+            for (const note of notes) {
+                if (note.booking_id && (note.source === 'Change Request' || note.source === 'Verification Skip Reason')) {
+                    if (!noteMap[note.booking_id]) {
+                        noteMap[note.booking_id] = [];
+                    }
+                    noteMap[note.booking_id].push({content: note.content, source: note.source});
+                }
+            }
+        }
+        return noteMap;
+    }, [notes]);
     
     return (
         <>
@@ -311,18 +330,23 @@ export const CustomerVerification = ({ customer, verificationBookings, onUpdate 
                  <div className="space-y-4">
                     {verificationBookings.length > 0 ? verificationBookings.map(booking => {
                         const styles = getVerificationCardStyles(booking.status);
+                        const requestNotes = verificationNotes[booking.id] || [];
                         return (
                             <div key={booking.id} className={`${styles.container} p-4 rounded-lg`}>
                                 <p className={styles.title}>{styles.titleText}{booking.id}</p>
-                                {booking.verification_notes && (
+                                {requestNotes.length > 0 && (
                                     <div className="mt-2">
-                                         <p className="font-semibold text-blue-200 flex items-center">{styles.icon}Customer Note:</p>
-                                         <p className="text-orange-200 italic bg-black/20 p-2 rounded-md">"{booking.verification_notes}"</p>
+                                         {requestNotes.map((note, i) => (
+                                            <div key={i} className="mt-1">
+                                                <p className="font-semibold text-blue-200 flex items-center">{styles.icon}{note.source}:</p>
+                                                <p className="text-orange-200 italic bg-black/20 p-2 rounded-md mt-1">"{note.content}"</p>
+                                            </div>
+                                         ))}
                                     </div>
                                 )}
                                 <div className="flex justify-end space-x-2 mt-4">
                                     <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
-                                    <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking.id)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
+                                    <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
                                 </div>
                             </div>
                         )

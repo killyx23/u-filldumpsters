@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Routes, Route, Outlet, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -16,6 +17,7 @@ import AdminLogin from '@/pages/AdminLogin';
 import AdminRouteGuard from '@/components/AdminRouteGuard';
 import CustomerPortal from '@/pages/CustomerPortal';
 import CustomerLogin from '@/pages/CustomerLogin';
+import ReviewsPage from '@/pages/ReviewsPage';
 
 const AdminLayout = () => (
   <AdminRouteGuard>
@@ -32,7 +34,7 @@ function App() {
     <AuthProvider>
       <TooltipProvider>
         <Helmet>
-          <title>Premium Dumpster Rentals - Fast, Reliable Waste Solutions</title>
+          <title>U-Fill Dumpsters LLC - Fast, Reliable Waste Solutions</title>
           <meta name="description" content="Professional dumpster rental services with same-day delivery. Choose from our rental options for your home or business projects. Book online today!" />
         </Helmet>
 
@@ -58,6 +60,7 @@ function App() {
                   <Route path="/confirmation" element={<BookingConfirmation />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/faq" element={<FaqPage />} />
+                  <Route path="/reviews" element={<ReviewsPage />} />
               </Routes>
           </main>
 

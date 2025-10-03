@@ -35,39 +35,37 @@ export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDri
 
     return (
         <>
-            {plan.id !== 1 && (
-                <AddonSection
-                    title="Rental Insurance"
-                    icon={<Shield />}
-                    tooltipContent={insuranceTooltip}
-                >
-                    <p className="text-sm text-blue-200 mb-4">
-                        For just ${addonPrices.insurance.toFixed(2)}, get peace of mind. Declining means you accept full responsibility for any damage to the rental unit during your rental period.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                        <Button
-                            onClick={() => handleInsuranceChange('accept')}
-                            variant={addonsData.insurance === 'accept' ? 'default' : 'outline'}
-                            className={cn(
-                                "h-12 text-lg",
-                                addonsData.insurance === 'accept' ? 'bg-yellow-400 text-black hover:bg-yellow-500 border-yellow-400' : 'border-white/30 text-white hover:bg-white/10'
-                            )}
-                        >
-                            Accept (+${addonPrices.insurance.toFixed(2)})
-                        </Button>
-                        <Button
-                            onClick={() => handleInsuranceChange('decline')}
-                            variant={addonsData.insurance === 'decline' ? 'destructive' : 'outline'}
-                            className={cn(
-                                "h-12 text-lg",
-                                addonsData.insurance === 'decline' ? '' : 'border-white/30 text-white hover:bg-white/10'
-                            )}
-                        >
-                            Decline
-                        </Button>
-                    </div>
-                </AddonSection>
-            )}
+            <AddonSection
+                title="Rental Insurance"
+                icon={<Shield />}
+                tooltipContent={insuranceTooltip}
+            >
+                <p className="text-sm text-blue-200 mb-4">
+                    For just ${addonPrices.insurance.toFixed(2)}, get peace of mind. Declining means you accept full responsibility for any damage to the rental unit during your rental period.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                    <Button
+                        onClick={() => handleInsuranceChange('accept')}
+                        variant={addonsData.insurance === 'accept' ? 'default' : 'outline'}
+                        className={cn(
+                            "h-12 text-lg",
+                            addonsData.insurance === 'accept' ? 'bg-yellow-400 text-black hover:bg-yellow-500 border-yellow-400' : 'border-white/30 text-white hover:bg-white/10'
+                        )}
+                    >
+                        Accept (+${addonPrices.insurance.toFixed(2)})
+                    </Button>
+                    <Button
+                        onClick={() => handleInsuranceChange('decline')}
+                        variant={addonsData.insurance === 'decline' ? 'destructive' : 'outline'}
+                        className={cn(
+                            "h-12 text-lg",
+                            addonsData.insurance === 'decline' ? '' : 'border-white/30 text-white hover:bg-white/10'
+                        )}
+                    >
+                        Decline
+                    </Button>
+                </div>
+            </AddonSection>
 
             {(plan.id === 1 || isDelivery) && (
                 <AddonSection

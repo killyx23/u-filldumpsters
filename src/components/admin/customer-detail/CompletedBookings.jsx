@@ -1,7 +1,7 @@
 import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip, XCircle, Calendar } from 'lucide-react';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -24,7 +24,7 @@ export const CompletedBookings = ({ bookings, equipment }) => {
     if (!bookings || bookings.length === 0) return null;
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 mt-8">
             <h3 className="text-2xl font-bold text-yellow-400">Completed & Cancelled Rentals</h3>
             {bookings.map(booking => {
                  const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
@@ -37,7 +37,7 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h4 className="text-xl font-bold text-white">{booking.plan.name}</h4>
-                                <p className="text-sm text-blue-200">Booked on {format(parseISO(booking.created_at), 'PPP')}</p>
+                                <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
                             </div>
                             <StatusBadge status={booking.status} />
                         </div>

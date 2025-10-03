@@ -6,11 +6,12 @@ export const StatusBadge = ({ status }) => {
     const statusStyles = {
         'pending_payment': 'bg-red-500/20 text-red-300',
         'pending_verification': 'bg-orange-500/20 text-orange-300',
-        'pending_review': 'bg-red-500/20 text-red-300',
+        'pending_review': 'bg-orange-500/20 text-orange-300',
         'Confirmed': 'bg-yellow-500/20 text-yellow-300',
+        'Rescheduled': 'bg-blue-500/20 text-blue-300',
         'Delivered': 'bg-cyan-500/20 text-cyan-300',
         'Completed': 'bg-green-500/20 text-green-300',
-        'flagged': 'bg-orange-500/20 text-orange-300',
+        'flagged': 'bg-red-500/20 text-red-300',
         'waiting_to_be_returned': 'bg-purple-500/20 text-purple-300',
         'Cancelled': 'bg-gray-500/20 text-gray-300',
     };
@@ -18,12 +19,13 @@ export const StatusBadge = ({ status }) => {
     const statusText = {
         'pending_payment': 'Payment Pending',
         'pending_verification': 'Pending Verification',
-        'pending_review': 'Change Request',
+        'pending_review': 'Pending Review',
         'Confirmed': 'Delivery Ready',
+        'Rescheduled': 'Rescheduled',
         'Delivered': 'Delivered / Rented',
         'waiting_to_be_returned': 'Waiting for Return',
         'Completed': 'Completed',
-        'flagged': 'Flagged',
+        'flagged': 'Flagged for Follow-up',
         'Cancelled': 'Cancelled',
     };
 

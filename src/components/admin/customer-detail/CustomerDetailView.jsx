@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
-    import { Loader2, ArrowLeft, User, Clock, DollarSign, UserCheck, ShieldAlert, MessageSquare, Bell } from 'lucide-react';
+    import { Loader2, ArrowLeft, User, Clock, DollarSign, ShieldAlert, MessageSquare, Bell } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { CustomerProfile } from './CustomerProfile';
     import { CommunicationLog } from './CommunicationLog';
@@ -27,14 +27,15 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
         const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
         const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
+        const [hasUnreadNotes, setHasUnreadNotes] = useState(false);
 
 
-        const fetchCustomerDetails = useCallback(async () => {
-            setLoading(true);
+        const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
+            if (isInitialLoad) setLoading(true);
             try {
                 const customerPromise = supabase.from('customers').select('*').eq('id', id).single();
                 const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', id).order('created_at', { ascending: false });
-                const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', id).order('created_at', { ascending: false });
+                const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', id).order('created_at', { ascending: true });
 
                 const [{ data: customerData, error: customerError }, { data: bookingsData, error: bookingsError }, { data: notesData, error: notesError }] = await Promise.all([customerPromise, bookingsPromise, notesPromise]);
                 
@@ -57,6 +58,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 setBookings(bookingsData || []);
                 setEquipment(equipmentData || []);
                 setNotes(notesData || []);
+                setHasUnreadNotes(notesData.some(n => !n.is_read && n.author_type === 'customer'));
 
             } catch(error) {
                  toast({ title: "Failed to load customer details", description: error.message, variant: "destructive" });
@@ -65,7 +67,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                  setEquipment([]);
                  setNotes([]);
             } finally {
-                setLoading(false);
+                if (isInitialLoad) setLoading(false);
             }
         }, [id]);
 
@@ -76,25 +78,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         useEffect(() => {
             if (!id) return;
 
-            const subscriptions = [];
-
             const notesChannel = supabase.channel(`customer-notes-${id}`)
-                .on('postgres_changes', { 
-                    event: 'INSERT', 
-                    schema: 'public', 
-                    table: 'customer_notes', 
-                    filter: `customer_id=eq.${id}` 
-                }, 
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'customer_notes', filter: `customer_id=eq.${id}` }, 
                 (payload) => {
-                    const newNote = payload.new;
-                    setNotes(currentNotes => {
-                         if (currentNotes.some(note => note.id === newNote.id)) {
-                            return currentNotes;
-                         }
-                         return [newNote, ...currentNotes];
-                    });
-                    
-                    if (newNote.author_type === 'customer') {
+                    setNotes(currentNotes => [...currentNotes, payload.new]);
+                    if (payload.new.author_type === 'customer') {
+                        setHasUnreadNotes(true);
                         toast({
                             title: "New Customer Message",
                             description: `You have a new message from ${customer?.name || 'a customer'}.`,
@@ -103,23 +92,24 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                     }
                 })
                 .subscribe();
-            subscriptions.push(notesChannel);
 
             const bookingsChannel = supabase.channel(`customer-bookings-${id}`)
-                .on('postgres_changes', { 
-                    event: '*', 
-                    schema: 'public', 
-                    table: 'bookings', 
-                    filter: `customer_id=eq.${id}` 
-                },
-                (payload) => {
-                    fetchCustomerDetails();
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `customer_id=eq.${id}` }, () => fetchCustomerDetails(false))
+                .subscribe();
+            
+            const customerChannel = supabase.channel(`customer-profile-${id}`)
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers', filter: `id=eq.${id}` }, (payload) => {
+                    if (payload.new.id.toString() === id) {
+                        setCustomer(c => ({ ...c, ...payload.new }));
+                        setHasUnreadNotes(payload.new.has_unread_notes);
+                    }
                 })
                 .subscribe();
-            subscriptions.push(bookingsChannel);
 
             return () => {
-                subscriptions.forEach(sub => supabase.removeChannel(sub));
+                supabase.removeChannel(notesChannel);
+                supabase.removeChannel(bookingsChannel);
+                supabase.removeChannel(customerChannel);
             };
         }, [id, customer?.name, fetchCustomerDetails]);
 
@@ -133,6 +123,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
         const handleTabChange = (value) => {
             setActiveTab(value);
             setSearchParams({ tab: value });
+            if (value === 'notes') {
+                setHasUnreadNotes(false);
+            }
         };
 
 
@@ -175,9 +168,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                 <CustomerProfileHeader customer={customer} bookingsCount={bookings.length} />
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full mt-8">
-                    <TabsList className="grid w-full grid-cols-5 bg-white/10 text-white mb-6">
-                        <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile & Notes</TabsTrigger>
-                        <TabsTrigger value="notes"><MessageSquare className="mr-2 h-4 w-4" />Communication</TabsTrigger>
+                    <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 bg-white/10 text-white mb-6">
+                        <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile</TabsTrigger>
+                        <TabsTrigger value="notes" className="relative">
+                            <MessageSquare className="mr-2 h-4 w-4" />Chat
+                            {hasUnreadNotes && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-red-500 border-2 border-gray-800" />}
+                        </TabsTrigger>
                         <TabsTrigger value="verification"><ShieldAlert className="mr-2 h-4 w-4" />Verification</TabsTrigger>
                         <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                         <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
@@ -187,29 +183,27 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
                            <CustomerProfile 
                                 customer={customer} 
                                 setCustomer={setCustomer} 
-                                onUpdate={fetchCustomerDetails} 
+                                onUpdate={() => fetchCustomerDetails(false)} 
                                 onHistoryClick={() => setIsHistoryDialogOpen(true)}
                             />
                         </div>
                     </TabsContent>
                      <TabsContent value="notes">
-                        <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                           <CommunicationLog customer={customer} notes={notes} setNotes={setNotes} onUpdate={fetchCustomerDetails} loading={loading} />
-                        </div>
+                        <CommunicationLog customer={customer} initialNotes={notes} onUpdate={() => fetchCustomerDetails(false)} />
                     </TabsContent>
                      <TabsContent value="verification">
                         <div className="space-y-8">
-                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} onUpdate={fetchCustomerDetails} />
+                             <CustomerVerification customer={customer} verificationBookings={verificationBookings} notes={notes} onUpdate={() => fetchCustomerDetails(false)} />
                         </div>
                     </TabsContent>
                     <TabsContent value="rentals">
                         <div className="space-y-8">
-                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={fetchCustomerDetails} />
-                            <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
+                            <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={() => fetchCustomerDetails(false)} />
                         </div>
                     </TabsContent>
                     <TabsContent value="history">
                         <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} />
+                        <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
                     </TabsContent>
                 </Tabs>
                 

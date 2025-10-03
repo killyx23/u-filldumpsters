@@ -2,7 +2,7 @@ import React from 'react';
 import { format, parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key } from 'lucide-react';
+import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag } from 'lucide-react';
 
 const DetailRow = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -15,16 +15,23 @@ const DetailRow = ({ icon, label, value, className = '' }) => (
 );
 
 const equipmentMeta = [
-  { id: 'wheelbarrow', label: 'Wheelbarrow' },
-  { id: 'handTruck', label: 'Hand Truck' },
-  { id: 'gloves', label: 'Working Gloves (Pair)' },
+  { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
+  { id: 'handTruck', label: 'Hand Truck', price: 15 },
+  { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
 ];
+
+const addonPrices = {
+  insurance: 25,
+  drivewayProtection: 20,
+};
 
 export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
     if (!booking) return null;
 
     const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
     const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
+    const coupon = addons?.coupon;
+    const isDelivery = addons?.isDelivery;
 
     const formatTime = (timeString) => {
         if (!timeString) return 'N/A';
@@ -35,6 +42,27 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
             return 'N/A';
         }
     };
+
+    let subtotal = plan.price || 0;
+    if (addons.insurance === 'accept') subtotal += addonPrices.insurance;
+    if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
+    if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
+    addons.equipment?.forEach(item => {
+        const meta = equipmentMeta.find(e => e.id === item.id);
+        if (meta) subtotal += meta.price * item.quantity;
+    });
+
+    const getDiscountAmount = () => {
+        if (coupon && coupon.isValid) {
+            if (coupon.discountType === 'fixed') {
+                return Math.min(subtotal, coupon.discountValue);
+            } else if (coupon.discountType === 'percentage') {
+                return subtotal * (coupon.discountValue / 100);
+            }
+        }
+        return 0;
+    };
+    const discountAmount = getDiscountAmount();
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -70,7 +98,7 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                     <section>
                         <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
                         <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? 'Accepted' : 'Declined'} />
-                        {plan.id !== 2 && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'} />}
+                        {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'} />}
                         {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                         
                         {addons.equipment && addons.equipment.length > 0 && (
@@ -100,13 +128,19 @@ export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }
                                 <DetailRow key={key} icon={<AlertTriangle />} label={`Issue: ${key}`} value={value.status.replace(/_/g, ' ')} className="capitalize" />
                             ))}
                             {fees && Object.entries(fees).map(([key, value]) => (
-                                <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`${parseFloat(value.amount).toFixed(2)}`} />
+                                <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`$${parseFloat(value.amount).toFixed(2)}`} />
                             ))}
                         </section>
                     )}
 
                     <div className="border-t-2 border-yellow-400 pt-4 mt-4">
-                        <DetailRow icon={<DollarSign />} label="Grand Total Paid" value={`${total_price.toFixed(2)}`} className="text-xl font-bold" />
+                        {discountAmount > 0 && (
+                            <>
+                                <DetailRow icon={<DollarSign />} label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
+                                <DetailRow icon={<Tag />} label={`Coupon (${coupon.code})`} value={`- $${discountAmount.toFixed(2)}`} className="text-green-400" />
+                            </>
+                        )}
+                        <DetailRow icon={<DollarSign />} label="Grand Total Paid" value={`$${total_price.toFixed(2)}`} className="text-xl font-bold" />
                     </div>
                 </div>
                 <DialogFooter>

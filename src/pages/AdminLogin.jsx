@@ -14,7 +14,7 @@ const AdminLogin = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCreateAdmin, setShowCreateAdmin] = useState(true);
-  const { signIn, user, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -27,27 +27,32 @@ const AdminLogin = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await signIn(email, password);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    
     if (error) {
+      toast({
+        variant: "destructive",
+        title: "Login Failed",
+        description: error.message,
+      });
       setLoading(false);
       return;
     }
 
-    setTimeout(async () => {
-        const { data: { user: updatedUser } } = await supabase.auth.getUser();
-        if (updatedUser && updatedUser.user_metadata?.is_admin) {
-            toast({ title: "Login Successful", description: "Redirecting to dashboard..." });
-            navigate('/admin');
-        } else {
-            toast({
-                variant: "destructive",
-                title: "Access Denied",
-                description: "You do not have administrative privileges.",
-            });
-            await signOut(); 
-        }
+    // The onAuthStateChange listener in AuthContext will handle navigation
+    // But we add a check here for non-admin users trying to log in
+    const { data: { user: loggedInUser } } = await supabase.auth.getUser();
+    if (loggedInUser && !loggedInUser.user_metadata?.is_admin) {
+        toast({
+            variant: "destructive",
+            title: "Access Denied",
+            description: "You do not have administrative privileges.",
+        });
+        await signOut();
         setLoading(false);
-    }, 500);
+    } else {
+        toast({ title: "Login Successful", description: "Redirecting to dashboard..." });
+    }
   };
 
   const handleCreateFirstAdmin = async () => {
