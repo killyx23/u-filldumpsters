@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-    import { Link, useSearchParams } from 'react-router-dom';
+    import { Link, useSearchParams, useNavigate } from 'react-router-dom';
     import { motion } from 'framer-motion';
     import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer, Truck, Key, Tag } from 'lucide-react';
     import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
     
     function BookingConfirmation() {
       const [searchParams] = useSearchParams();
+      const navigate = useNavigate();
       const sessionId = searchParams.get('session_id');
       const [booking, setBooking] = useState(null);
       const [status, setStatus] = useState('loading');
@@ -35,6 +36,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
         if (!sessionId) {
           setStatus('error');
           toast({ title: "Missing Payment Session", description: "Cannot find booking confirmation details.", variant: "destructive" });
+          navigate('/');
           return;
         }
     
@@ -43,11 +45,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
           
           if (sessionStatusError || sessionStatus?.payment_status !== 'paid') {
               if (attempt < 8) {
-                  console.log(`Attempt ${attempt}: Payment not yet confirmed for session ${sessionId}. Retrying...`);
-                  setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 1500 * attempt);
+                  setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 2000 * attempt);
                   return;
               } else {
-                  throw new Error("Payment could not be confirmed with Stripe.");
+                  throw new Error("Payment could not be confirmed with Stripe. Please contact support.");
               }
           }
     
@@ -56,10 +57,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
           });
           
           if (bookingError || (bookingData && bookingData.error)) {
-            const errorMessage = (bookingData && bookingData.error) || bookingError.message;
+            const errorMessage = (bookingData && bookingData.error) || bookingError?.message || "Unknown error";
             if (errorMessage.includes('Payment info not found') && attempt < 12) {
-              console.log(`Attempt ${attempt}: Payment confirmed, but booking data not yet available for session ${sessionId}. Retrying...`);
-              setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 1500 * attempt);
+              setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 2000 * attempt);
             } else {
               throw new Error(errorMessage);
             }
@@ -67,24 +67,28 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
             setBooking(bookingData.booking);
             setStatus('success');
           } else {
-            throw new Error("Invalid response format from server.");
+             if (attempt < 15) {
+                setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 2500 * attempt);
+             } else {
+                throw new Error("Booking data is not yet available. Please check your email for confirmation.");
+             }
           }
         } catch (err) {
           console.error("Error fetching booking details:", err);
           setStatus('error');
           toast({
             title: "Could Not Load Confirmation",
-            description: "There was a problem loading your booking details. Please check your email or contact support.",
+            description: err.message || "There was a problem loading your booking details. Please check your email or contact support.",
             variant: "destructive",
             duration: 30000
           });
         }
-      }, []);
+      }, [navigate]);
     
       useEffect(() => {
         const timer = setTimeout(() => {
           fetchBookingDetails(sessionId);
-        }, 1000);
+        }, 2000);
         
         return () => clearTimeout(timer);
       }, [sessionId, fetchBookingDetails]);

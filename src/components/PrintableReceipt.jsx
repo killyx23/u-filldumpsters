@@ -1,6 +1,6 @@
 import React from 'react';
     import { format, parseISO, isValid } from 'date-fns';
-    import { Key, Repeat } from 'lucide-react';
+    import { Key, Repeat, FileSignature, Clock, ShieldCheck } from 'lucide-react';
 
     const formatTime = (timeString) => {
         if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) return 'N/A';
@@ -13,8 +13,8 @@ import React from 'react';
     };
 
     const addonPrices = {
-      insurance: 15,
-      drivewayProtection: 10,
+      insurance: 20,
+      drivewayProtection: 15,
     };
 
     const equipmentMeta = [
@@ -22,6 +22,33 @@ import React from 'react';
       { id: 'handTruck', label: 'Hand Truck', price: 15 },
       { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
     ];
+
+    const AgreementText = ({ booking }) => (
+        <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
+            <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
+            <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
+            
+            <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
+                <p><strong>Liability for Equipment:</strong> Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.</p>
+                <p className="mt-1"><strong>Prohibited Materials:</strong> Customer agrees not to place any hazardous materials (including paints, chemicals, oils, tires, batteries) in the equipment. Fees and penalties apply for violations.</p>
+                <p className="mt-1"><strong>Property Damage:</strong> Customer assumes all risk of damage to their property (driveways, lawns, etc.) from equipment placement. U-Fill Dumpsters LLC is not liable for such damages.</p>
+            </div>
+
+            <div className="flex items-center justify-between text-sm mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center">
+                    <ShieldCheck className="h-6 w-6 text-green-600 mr-3" />
+                    <div>
+                        <p className="font-bold text-green-800">Electronically Signed & Agreed</p>
+                        <p className="text-xs text-green-700">by {booking?.name}</p>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
+                    <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
+                </div>
+            </div>
+        </div>
+    );
 
 
     export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
@@ -49,19 +76,10 @@ import React from 'react';
             return 'Pending Manual Review';
         };
         const pendingReason = getPendingReason();
+        
+        const deliveryCharge = isDelivery ? 30 : 0;
+        const baseServicePrice = (plan.base_price || 0) - deliveryCharge;
 
-        const getDiscountAmount = (subtotal) => {
-            if (coupon && coupon.isValid) {
-                if (coupon.discountType === 'fixed') {
-                    return Math.min(subtotal, coupon.discountValue);
-                } else if (coupon.discountType === 'percentage') {
-                    return subtotal * (coupon.discountValue / 100);
-                }
-            }
-            return 0;
-        };
-
-        let servicePrice = plan.base_price || 0;
         let addonsTotal = 0;
         if (addons.insurance === 'accept') addonsTotal += addonPrices.insurance;
         if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') addonsTotal += addonPrices.drivewayProtection;
@@ -71,13 +89,20 @@ import React from 'react';
             if (meta) addonsTotal += meta.price * item.quantity;
         });
 
-        const discountAmount = getDiscountAmount(total_price + (coupon?.discountType === 'fixed' ? coupon.discountValue : 0));
-        
-        if (total_price && (plan.base_price || plan.base_price === 0)) {
-            servicePrice = total_price - addonsTotal + discountAmount;
-        }
+        const subtotal = baseServicePrice + deliveryCharge + addonsTotal;
 
-        const subtotal = servicePrice + addonsTotal;
+        const getDiscountAmount = () => {
+            if (coupon && coupon.isValid) {
+                if (coupon.discountType === 'fixed') {
+                    return coupon.discountValue;
+                } else if (coupon.discountType === 'percentage') {
+                    return subtotal * (coupon.discountValue / 100);
+                }
+            }
+            return 0;
+        };
+        
+        const discountAmount = getDiscountAmount();
 
         return (
             <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -146,7 +171,7 @@ import React from 'react';
                             <tbody>
                                 <tr className="border-b">
                                     <td className="py-2">
-                                        <p className="font-semibold">{plan.name}{isDelivery ? ' with Delivery' : ''}</p>
+                                        <p className="font-semibold">{plan.name}</p>
                                         {reschedule_history && reschedule_history.length > 0 && (
                                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                                 <p className="font-bold">Original Dates:</p>
@@ -161,8 +186,11 @@ import React from 'react';
                                             {plan.id === 2 ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} by ${formatTime(pickup_time_slot)}`}
                                         </p>
                                     </td>
-                                    <td className="text-right py-2 align-top">${servicePrice.toFixed(2)}</td>
+                                    <td className="text-right py-2 align-top">${baseServicePrice.toFixed(2)}</td>
                                 </tr>
+                                {deliveryCharge > 0 && (
+                                    <tr className="border-b"><td className="py-2 pl-4">Delivery Charge</td><td className="text-right py-2">${deliveryCharge.toFixed(2)}</td></tr>
+                                )}
                                 {addons.distanceInfo?.totalFee > 0 && (
                                     <tr className="border-b"><td className="py-2 pl-4">{`Extended Delivery Fee (${addons.distanceInfo.miles.toFixed(1)} miles)`}</td><td className="text-right py-2">${addons.distanceInfo.totalFee.toFixed(2)}</td></tr>
                                 )}
@@ -228,8 +256,8 @@ import React from 'react';
                     )}
                 </div>
                 
-                <footer className="text-xs text-gray-500 pt-4 mt-6 border-t" style={{ pageBreakInside: 'avoid' }}>
-                    <h3 className="font-bold text-sm mb-2">Disclaimers & Acknowledgements</h3>
+                <footer className="text-xs text-gray-500 pt-4 mt-6" style={{ pageBreakInside: 'avoid' }}>
+                    <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
                     {was_verification_skipped && (
                         <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver's license and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>
                     )}
@@ -242,7 +270,8 @@ import React from 'react';
                     {addons.addressVerificationSkipped && (
                          <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>
                     )}
-                     <p className="text-center mt-4">Thank you for your business! | U-Fill Dumpsters</p>
+                     <AgreementText booking={booking} />
+                     <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
                 </footer>
             </div>
         );

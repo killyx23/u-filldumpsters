@@ -9,10 +9,11 @@ import { Label } from '@/components/ui/label';
 export const EquipmentManager = () => {
     const [equipment, setEquipment] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [savingStates, setSavingStates] = useState({});
 
     const fetchEquipment = useCallback(async () => {
         setLoading(true);
-        const { data, error } = await supabase.from('equipment').select('*').order('name');
+        const { data, error } = await supabase.from('equipment').select('*').order('id');
         if (error) {
             toast({ title: "Failed to load equipment", description: error.message, variant: "destructive" });
         } else {
@@ -26,10 +27,13 @@ export const EquipmentManager = () => {
     }, [fetchEquipment]);
 
     const handleQuantityChange = (id, newQuantity) => {
-        setEquipment(prev => prev.map(item => item.id === id ? { ...item, total_quantity: newQuantity } : item));
+        const quantity = parseInt(newQuantity, 10);
+        if (isNaN(quantity)) return;
+        setEquipment(prev => prev.map(item => item.id === id ? { ...item, total_quantity: quantity } : item));
     };
 
     const handleSave = async (item) => {
+        setSavingStates(prev => ({ ...prev, [item.id]: true }));
         const { error } = await supabase
             .from('equipment')
             .update({ total_quantity: item.total_quantity })
@@ -39,8 +43,8 @@ export const EquipmentManager = () => {
             toast({ title: `Failed to save ${item.name}`, description: error.message, variant: 'destructive' });
         } else {
             toast({ title: `${item.name} updated successfully!` });
-            fetchEquipment();
         }
+        setSavingStates(prev => ({ ...prev, [item.id]: false }));
     };
 
     if (loading) {
@@ -65,10 +69,13 @@ export const EquipmentManager = () => {
                                 id={`quantity-${item.id}`}
                                 type="number" 
                                 value={item.total_quantity} 
-                                onChange={(e) => handleQuantityChange(item.id, parseInt(e.target.value, 10))}
+                                onChange={(e) => handleQuantityChange(item.id, e.target.value)}
                                 className="w-24 bg-white/10"
                             />
-                            <Button onClick={() => handleSave(item)} size="sm"><Save className="mr-2 h-4 w-4" /> Save</Button>
+                            <Button onClick={() => handleSave(item)} size="sm" disabled={savingStates[item.id]}>
+                                {savingStates[item.id] ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                Save
+                            </Button>
                         </div>
                     </div>
                 ))}
