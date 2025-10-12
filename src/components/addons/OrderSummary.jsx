@@ -6,8 +6,8 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 
 const addonPrices = {
-  insurance: 15,
-  drivewayProtection: 10,
+  insurance: 20,
+  drivewayProtection: 15,
 };
 
 const equipmentMeta = [

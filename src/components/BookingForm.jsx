@@ -149,26 +149,31 @@ export const BookingForm = ({
     const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
     const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
 
-    const dropOffAvail = dropOffDateStr && availability[dropOffDateStr];
-    const pickupAvail = pickupDateStr && availability[pickupDateStr];
+    const dropOffAvail = dropOffDateStr ? availability[dropOffDateStr] : null;
+    const pickupAvail = pickupDateStr ? availability[pickupDateStr] : null;
 
-    const slotsForPlan = (avail) => {
-      if (!avail) return [];
-      if (plan.id === 1 || isDelivery || plan.id === 3) return avail.deliverySlots || [];
-      if (plan.id === 2 && !isDelivery) return avail.pickupSlots || [];
-      return [];
-    };
+    let dropOffSlots = [];
+    let pickupSlots = [];
 
-    const pickupSlotsForPlan = (avail) => {
-      if (!avail) return [];
-      if (plan.id === 1 || isDelivery || plan.id === 3) return avail.pickupSlots || [];
-      if (plan.id === 2 && !isDelivery) return avail.returnSlots || [];
-      return [];
-    };
+    if (dropOffAvail) {
+        if (plan.id === 1 || plan.id === 3 || isDelivery) {
+            dropOffSlots = dropOffAvail.deliverySlots || [];
+        } else if (plan.id === 2 && !isDelivery) {
+            dropOffSlots = dropOffAvail.pickupSlots || [];
+        }
+    }
+
+    if (pickupAvail) {
+        if (plan.id === 1 || plan.id === 3 || isDelivery) {
+            pickupSlots = pickupAvail.pickupSlots || [];
+        } else if (plan.id === 2 && !isDelivery) {
+            pickupSlots = pickupAvail.returnSlots || [];
+        }
+    }
 
     return {
-      dropOff: slotsForPlan(dropOffAvail),
-      pickup: pickupSlotsForPlan(pickupAvail),
+      dropOff: dropOffSlots,
+      pickup: pickupSlots,
     };
   }, [bookingData.dropOffDate, bookingData.pickupDate, availability, plan.id, isDelivery]);
 

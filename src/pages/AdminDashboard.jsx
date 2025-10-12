@@ -9,7 +9,7 @@ import { AvailabilityManager } from '@/components/admin/AvailabilityManager';
 import { EquipmentManager } from '@/components/admin/EquipmentManager';
 import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
 import { ReviewsManager } from '@/components/admin/ReviewsManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell } from 'lucide-react';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, MessageSquare } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { startOfMonth, endOfMonth, formatISO } from 'date-fns';
@@ -19,8 +19,9 @@ const AdminDashboard = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "action-items");
-    const [actionItemCount, setActionItemCount] = useState(0);
+    
     const [bookings, setBookings] = useState([]);
+    const [customersWithUnreadNotes, setCustomersWithUnreadNotes] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const fetchDashboardData = useCallback(async () => {
@@ -29,30 +30,24 @@ const AdminDashboard = () => {
             const monthStart = formatISO(startOfMonth(new Date()), { representation: 'date' });
             const monthEnd = formatISO(endOfMonth(new Date()), { representation: 'date' });
 
-            const { data: bookingsData, error: bookingsError } = await supabase
+            const bookingsPromise = supabase
                 .from('bookings')
                 .select('*, customers!inner(*)')
                 .gte('drop_off_date', monthStart)
                 .lte('drop_off_date', monthEnd);
 
-            if (bookingsError) throw bookingsError;
-            setBookings(bookingsData || []);
-
-            const { count: flaggedCount, error: flaggedError } = await supabase
-                .from('bookings')
-                .select('id', { count: 'exact', head: true })
-                .in('status', ['pending_verification', 'pending_review', 'flagged']);
-
-            if (flaggedError) throw flaggedError;
-
-            const { count: notesCount, error: notesError } = await supabase
+            const unreadNotesPromise = supabase
                 .from('customers')
-                .select('id', { count: 'exact', head: true })
+                .select('*')
                 .eq('has_unread_notes', true);
-            
-            if (notesError) throw notesError;
 
-            setActionItemCount((flaggedCount || 0) + (notesCount || 0));
+            const [{ data: bookingsData, error: bookingsError }, { data: unreadNotesData, error: unreadNotesError }] = await Promise.all([bookingsPromise, unreadNotesPromise]);
+
+            if (bookingsError) throw bookingsError;
+            if (unreadNotesError) throw unreadNotesError;
+
+            setBookings(bookingsData || []);
+            setCustomersWithUnreadNotes(unreadNotesData || []);
 
         } catch (error) {
             toast({
@@ -115,6 +110,8 @@ const AdminDashboard = () => {
         setSearchParams({ tab: value });
     };
 
+    const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged'].includes(b.status)).length) + customersWithUnreadNotes.length;
+
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
             <div className="container mx-auto">
@@ -152,7 +149,7 @@ const AdminDashboard = () => {
                         <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>
                     ) : (
                         <>
-                            <TabsContent value="action-items"><ActionItemsManager bookings={bookings} setActiveTab={setActiveTab} /></TabsContent>
+                            <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
                             <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>

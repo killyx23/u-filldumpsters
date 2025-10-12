@@ -263,7 +263,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         const noteMap = {};
         if (notes) {
             for (const note of notes) {
-                if (note.booking_id && (note.source === 'Change Request' || note.source === 'Verification Skip Reason')) {
+                if (note.booking_id && (note.source === 'Change Request' || note.source === 'Verification Skip Reason' || note.source === 'Booking Special Instructions')) {
                     if (!noteMap[note.booking_id]) {
                         noteMap[note.booking_id] = [];
                     }
@@ -335,7 +335,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                             <div key={booking.id} className={`${styles.container} p-4 rounded-lg`}>
                                 <p className={styles.title}>{styles.titleText}{booking.id}</p>
                                 {requestNotes.length > 0 && (
-                                    <div className="mt-2">
+                                    <div className="mt-2 space-y-2">
                                          {requestNotes.map((note, i) => (
                                             <div key={i} className="mt-1">
                                                 <p className="font-semibold text-blue-200 flex items-center">{styles.icon}{note.source}:</p>

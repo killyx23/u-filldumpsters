@@ -2,3 +2,4 @@ node_modules
 # Supabase temporary folder
 supabase/.temp/
 supabase/.env
+ *:Zone.Identifier
