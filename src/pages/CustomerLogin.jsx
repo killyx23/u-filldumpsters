@@ -1,214 +1,157 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { Mail, Loader2, ShieldCheck, KeyRound, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogIn, Mail } from 'lucide-react';
+import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import { useToast } from '@/components/ui/use-toast';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 
 const CustomerLogin = () => {
   const [customerId, setCustomerId] = useState('');
   const [phone, setPhone] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, loading: authLoading, setManualSession } = useAuth();
-  const navigate = useNavigate();
-  const { toast } = useToast();
+  const [loading, setLoading] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
-  const [showForgotDialog, setShowForgotDialog] = useState(false);
-  const [recoveryEmail, setRecoveryEmail] = useState('');
-  const [isSendingRecovery, setIsSendingRecovery] = useState(false);
-
-  useEffect(() => {
-    if (!authLoading && user && !user.user_metadata?.is_admin) {
-      navigate('/portal');
+  const handlePhoneChange = (e) => {
+    const input = e.target.value.replace(/\D/g, '');
+    let formattedPhone = '';
+    if (input.length > 0) {
+      formattedPhone = `(${input.substring(0, 3)}`;
     }
-  }, [user, authLoading, navigate]);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (isSubmitting || !customerId || !phone) return;
-    setIsSubmitting(true);
-    
-    try {
-        const { data, error } = await supabase.functions.invoke('customer-portal-login', {
-            body: { customerId, phone },
-        });
-
-        if (error) throw error;
-        
-        const responseData = data;
-        if (responseData.error) throw new Error(responseData.error);
-
-        if (responseData.session) {
-            await setManualSession({
-              access_token: responseData.session.access_token,
-              refresh_token: responseData.session.refresh_token,
-            });
-            toast({ title: "Login Successful", description: "Redirecting to your portal..." });
-            navigate('/portal');
-        } else {
-            throw new Error("An unknown error occurred during sign-in.");
-        }
-    } catch (error) {
-        let errorMessage = "An unknown error occurred.";
-        if (error instanceof Error) {
-            errorMessage = error.message;
-        } else if (typeof error === 'string') {
-            errorMessage = error;
-        }
-        
-        toast({
-            variant: "destructive",
-            title: "Login Failed",
-            description: errorMessage,
-        });
-    } finally {
-        setIsSubmitting(false);
+    if (input.length > 3) {
+      formattedPhone += `) ${input.substring(3, 6)}`;
     }
+    if (input.length > 6) {
+      formattedPhone += `-${input.substring(6, 10)}`;
+    }
+    setPhone(formattedPhone);
   };
 
-  const handleRecovery = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (isSendingRecovery || !recoveryEmail) return;
-    setIsSendingRecovery(true);
+    setLoading(true);
+
+    const rawPhone = phone.replace(/\D/g, '');
+    if (rawPhone.length !== 10) {
+      toast({
+        title: 'Invalid Phone Number',
+        description: 'Please enter a valid 10-digit phone number.',
+        variant: 'destructive',
+      });
+      setLoading(false);
+      return;
+    }
 
     try {
-      const { error } = await supabase.functions.invoke('send-customer-id', {
-        body: { email: recoveryEmail },
+      const { data, error } = await supabase.functions.invoke('customer-portal-login', {
+        body: JSON.stringify({ customerId, phone: rawPhone }),
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(error.message);
+      }
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
 
+      setEmailSent(true);
       toast({
-        title: "Recovery Email Sent",
-        description: "If an account with that email exists, your Customer ID has been sent.",
+        title: 'Login Link Sent!',
+        description: 'Check your email for a secure link to access your portal.',
       });
-      setShowForgotDialog(false);
-      setRecoveryEmail('');
     } catch (error) {
+      console.error('Login error:', error);
       toast({
-        variant: "destructive",
-        title: "Recovery Failed",
-        description: error.message || "An error occurred. Please try again.",
+        title: 'Login Failed',
+        description: error.message || 'An unexpected error occurred. Please try again.',
+        variant: 'destructive',
       });
     } finally {
-      setIsSendingRecovery(false);
+      setLoading(false);
     }
   };
 
   return (
     <>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex items-center justify-center min-h-[calc(100vh-200px)]"
-      >
-        <div className="w-full max-w-md p-8 space-y-8 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20">
-          <div className="text-center">
-            <h1 className="text-3xl font-bold text-yellow-400">Customer Portal Login</h1>
-            <p className="mt-2 text-blue-200">Access your booking history and details.</p>
-          </div>
-          <form className="space-y-6" onSubmit={handleLogin}>
-            <div className="space-y-2">
-              <Label htmlFor="customerId" className="text-white">Customer ID</Label>
-              <Input
-                id="customerId"
-                name="customerId"
-                type="text"
-                required
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                placeholder="e.g., CID-123456"
-              />
-               <p className="text-xs text-blue-300 pt-1">You can find your Customer ID on your booking confirmation email or receipt.</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone" className="text-white">Phone Number</Label>
-              <Input
-                id="phone"
-                name="phone"
-                type="tel"
-                autoComplete="tel"
-                required
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="(555) 555-5555"
-              />
-            </div>
-            <div className="text-right">
-              <Button
-                type="button"
-                variant="link"
-                className="p-0 h-auto text-yellow-400 hover:text-yellow-300"
-                onClick={() => setShowForgotDialog(true)}
-              >
-                Forgot your Customer ID?
-              </Button>
-            </div>
-            <div>
-              <Button type="submit" disabled={isSubmitting || authLoading} className="w-full py-3 text-lg font-semibold">
-                {isSubmitting || authLoading ? (
-                  <Loader2 className="mr-2 h-6 w-6 animate-spin" />
-                ) : (
-                  <LogIn className="mr-2 h-5 w-5" />
-                )}
-                Sign In
-              </Button>
-            </div>
-          </form>
-        </div>
-      </motion.div>
-
-      <Dialog open={showForgotDialog} onOpenChange={setShowForgotDialog}>
-        <DialogContent className="sm:max-w-[425px] bg-gray-800 border-gray-700 text-white">
-          <DialogHeader>
-            <DialogTitle>Recover Customer ID</DialogTitle>
-            <DialogDescription>
-              Enter the email address associated with your booking. If it matches our records, we'll send you your Customer ID.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleRecovery}>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="recovery-email" className="text-right">
-                  Email
-                </Label>
-                <Input
-                  id="recovery-email"
-                  type="email"
-                  value={recoveryEmail}
-                  onChange={(e) => setRecoveryEmail(e.target.value)}
-                  className="col-span-3"
-                  placeholder="you@example.com"
-                  required
-                />
+      <Helmet>
+        <title>Customer Portal Login - U-Fill Dumpsters</title>
+        <meta name="description" content="Access your U-Fill Dumpsters customer portal to manage your bookings and view your history." />
+      </Helmet>
+      <div className="min-h-[calc(100vh-200px)] flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-md"
+        >
+          {!emailSent ? (
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+              <div className="text-center mb-8">
+                <ShieldCheck className="mx-auto h-16 w-16 text-yellow-400 mb-4" />
+                <h1 className="text-3xl font-bold text-white">Customer Portal</h1>
+                <p className="text-gray-300 mt-2">Enter your details to receive a secure login link.</p>
               </div>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="customer-id" className="text-gray-200 flex items-center"><KeyRound className="w-4 h-4 mr-2" />Customer ID</Label>
+                  <Input
+                    id="customer-id"
+                    type="text"
+                    placeholder="e.g., CID-123456"
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    required
+                    className="bg-white/10 border-white/20 placeholder:text-gray-400"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone" className="text-gray-200 flex items-center"><Phone className="w-4 h-4 mr-2" />Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="(555) 555-5555"
+                    value={phone}
+                    onChange={handlePhoneChange}
+                    required
+                    className="bg-white/10 border-white/20 placeholder:text-gray-400"
+                  />
+                </div>
+                <Button type="submit" className="w-full bg-yellow-400 text-black hover:bg-yellow-500 font-bold text-lg py-6" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Get Login Link'
+                  )}
+                </Button>
+              </form>
             </div>
-            <DialogFooter>
-              <Button type="submit" disabled={isSendingRecovery}>
-                {isSendingRecovery ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Mail className="mr-2 h-4 w-4" />
-                )}
-                Send Recovery Email
+          ) : (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20 text-center"
+            >
+              <Mail className="mx-auto h-20 w-20 text-green-400 mb-6" />
+              <h2 className="text-3xl font-bold text-white">Check Your Inbox!</h2>
+              <p className="text-gray-300 mt-4 text-lg">
+                A secure, one-time login link has been sent to the email address associated with your account.
+              </p>
+              <p className="text-gray-400 mt-4">
+                Please click the link in the email to access your portal. The link will expire in 24 hours.
+              </p>
+              <Button onClick={() => setEmailSent(false)} className="mt-8 bg-yellow-400 text-black hover:bg-yellow-500 font-bold">
+                Request a New Link
               </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+            </motion.div>
+          )}
+        </motion.div>
+      </div>
     </>
   );
 };

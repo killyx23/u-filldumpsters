@@ -5,74 +5,110 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertTriangle, ClipboardSignature as Signature, ArrowLeft, ArrowRight } from 'lucide-react';
+import { AlertTriangle, ClipboardSignature as Signature, ArrowLeft } from 'lucide-react';
 
-const AgreementText = ({ isDelivery }) => (
+const AgreementText = () => (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
-        <p>This Rental Agreement ("Agreement") is made and entered into by and between U-Fill Dumpsters LLC ("Company") and the customer ("Customer") executing this agreement. This document constitutes a legally binding contract governing the rental of equipment and/or services provided by the Company.</p>
+        <h2 className="text-xl text-center font-bold text-yellow-300">RENTAL AGREEMENT</h2>
+        <p>This Rental Agreement ("Agreement") is made effective as of the date of Customer's electronic or written acceptance, by and between <strong>U-Fill Dumpsters LLC</strong> ("Company"), a Utah limited liability company, and the individual or entity identified as the customer on the booking ("Customer"). Company contact: [Company Address placeholder], (801) 810-8832, support@u-filldumpsters.com.</p>
 
-        <h3 className="text-yellow-300">Section 1: General Terms & Conditions</h3>
-        <p>By proceeding with this booking, the Customer acknowledges they have read, understood, and agree to be bound by all terms, conditions, and policies outlined herein. This Agreement applies to all services offered, including but not limited to 16-Yard Dumpster Rentals, Dump Loader Trailer Rentals, and Material Deliveries.</p>
+        <h3 className="text-lg text-yellow-300">Definitions</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>"Equipment"</strong> means dumpsters, dump-loader trailers, delivery vehicles, or other rental units provided by Company.</li>
+            <li><strong>"Rental Period"</strong> means the period beginning on the delivery date/time and ending when Company retrieves the Equipment, as scheduled or extended in writing.</li>
+            <li><strong>"Fill Line"</strong> means the manufacturer's or Company's marked maximum fill height.</li>
+            <li><strong>"Dry Run"</strong> means a scheduled delivery or pickup attempt that cannot be completed due to Customer's fault or access issues.</li>
+            <li><strong>"Prohibited Materials"</strong> means hazardous materials and other items listed in Section 5.</li>
+        </ul>
 
-        <h3 className="text-yellow-300">Section 2: Service-Specific Terms</h3>
+        <h3 className="text-lg text-yellow-300">Acceptance of Terms</h3>
+        <p>By booking, paying, or taking possession of Equipment, Customer acknowledges they have read, understand, and agree to be bound by this Agreement and any applicable addenda. This Agreement governs all rentals, bookings, and related services.</p>
+
+        <h3 className="text-lg text-yellow-300">Rental, Delivery & Pickup</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>Rental Period:</strong> Begins on delivery and ends on scheduled pickup. Extensions must be requested at least 24 hours before scheduled pickup and are subject to availability and applicable extension fees (Extension fee: $75).</li>
+            <li><strong>Delivery & Pickup Windows:</strong> Standard delivery and pickup windows will be provided at booking. Timed deliveries or after-hours requests may incur additional fees.</li>
+            <li><strong>Placement & Access:</strong> Customer must provide a safe, stable placement site on private property unless street/curb placement with required permits has been agreed. The site must be clear of overhead obstructions and able to support the weight of Equipment and vehicles. Customer is responsible for obtaining any permits for public/street placement and for compliance with local ordinances.</li>
+            <li><strong>Dry Run:</strong> If the Company cannot complete delivery or pickup due to the Customer's fault (blocked access, parked vehicles, locked gates, unsafe conditions, lack of permits), the Customer will be charged a Dry Run fee equal to 50% of the original service cost and any additional charges incurred by the Company.</li>
+        </ul>
+
+        <h3 className="text-lg text-yellow-300">Fees, Payment & Taxes</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>Payment:</strong> Full payment, including taxes and any applicable deposits or add-on fees, is due at booking to secure the reservation unless otherwise agreed in writing. Customer authorizes Company to charge the payment method on file for all charges, fees, damages, and fines incurred under this Agreement.</li>
+            <li><strong>Base Rates & Inclusions:</strong> Base rental price includes one delivery and one pickup. Disposal is billed separately at $45.00 per ton based on the actual post-disposal scale weight; disposal charges are calculated after disposal and charged to the Customer’s payment method on file. The Customer authorizes Company to bill for any disposal charges, overweight fees, and other applicable fees incurred under this Agreement.</li>
+            <li><strong>Overweight & Overage Charges:</strong> Overweight charges for dumpsters are $100 per ton over the allowed 2.5 tons. Dump Loader Trailer overage rate: 4.5 tons. Customer is responsible for any overweight citations or penalties imposed by authorities.</li>
+            <li><strong>Municipal Dump Fees & Special Item Fees:</strong> Customer is responsible for municipal dump fees at cost: $150 plus $45/ton. Special-item disposal fees (mattresses, electronics, appliances, TVs, appliances with refrigerant unless certified removal provided, etc.) apply (typical range $20–$50 per item or actual disposal cost).</li>
+            <li><strong>Cleaning Fee:</strong> If the Equipment is returned or left in a dirty condition requiring cleaning by the Company, a cleaning fee of $20 will apply.</li>
+            <li><strong>Cancellation & Refunds:</strong> Cancellations more than 24 hours before scheduled delivery: 10% cancellation fee of the order total retained; balance refunded. Cancellations 24 hours or less before scheduled delivery: Up to 50% of the order total charged, plus a 10% cancellation fee of the order total retained. No-shows or refusal of equipment at delivery may result in full rental charges. Refunds are processed within one to two business days. Then the customer should see their refund in their account within 5–10 business days (rarely up to 30 days). Customer may request their ARN (Acquirer Reference Number) number through the customer portal, where the ARN number will be provided to them within one to two business days upon request.</li>
+            <li><strong>Charge Authorization:</strong> Customer authorizes Company to charge Customer’s payment method on file for any of the dump disposal fees, unpaid balance, fees, damages, fines, collection costs, and attorneys’ fees incurred under this Agreement.</li>
+        </ul>
+
+        <h3 className="text-lg text-yellow-300">Weight Limits, Loading & Prohibited Materials</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>Weight Limits:</strong> 16-yard dumpsters may dispose of up to 2.5 tons (5,000 lbs. limit). Dump Loader Trailers have a 5-ton limit; dirt/soil loads must not exceed halfway up trailer walls. Overweight loads will be subject to immediate additional charges and possible refusal of pickup until corrected.</li>
+            <li><strong>Loading & Fill Line:</strong> Do not exceed the Fill Line. Do not place materials that may fall or blow out during transport. Do not obstruct the Company's access to lift points.</li>
+            <li><strong>Prohibited Materials:</strong> Customer shall not place hazardous materials including paints, solvents, chemicals, asbestos, oils, liquids, pesticides, medical or biological waste, radioactive materials, explosives, compressed gas cylinders, PCB-containing items, tires (unless pre-approved), batteries, appliances containing refrigerant/Freon (unless refrigerant has been professionally removed and documented), large concrete chunks or boulders exceeding reasonable size, contaminated soils, or any other regulated hazardous waste. If prohibited materials are discovered, Company may (a) terminate the rental, (b) require remediation at Customer’s expense, (c) charge decontamination and special handling fees, and (d) report to authorities as required by law.</li>
+            <li><strong>Special Handling Fees:</strong> Items requiring special handling or disposal (mattresses, electronics, appliances, asbestos materials, large concrete) will incur additional fees based on type and weight.</li>
+        </ul>
+
+        <h3 className="text-lg text-yellow-300">Customer Responsibilities & Representations</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>Permits & Compliance:</strong> Customer is responsible for obtaining and paying for any permits, licenses, or approvals required by local authorities for placement or use of Equipment on public property.</li>
+            <li><strong>Site Condition:</strong> Customer represents that the placement site is stable and capable of supporting Equipment and delivery vehicles and that no underground utilities, sprinkler systems, or other obstructions are present unless disclosed.</li>
+            <li><strong>Supervision & Use:</strong> Customer is responsible for supervising the use of Equipment and ensuring compliance with this Agreement by Customer’s agents, contractors, and invitees.</li>
+            <li><strong>Photos & Inspection:</strong> The Company may photograph Equipment at delivery and pickup for records. The customer is encouraged to document the site and property condition prior to delivery.</li>
+        </ul>
+
+        <h3 className="text-lg text-yellow-300">Damage, Loss, Insurance & Liability</h3>
+        <ul className="list-disc list-inside space-y-2">
+            <li><strong>Assumption of Risk:</strong> Customer assumes all risk of loss, theft, damage, or injury associated with the Equipment during the Rental Period, except to the extent caused by Company’s gross negligence or willful misconduct.</li>
+            <li><strong>Damage Charges:</strong> Customer is responsible for repair or replacement costs for any damage to Equipment beyond normal wear and tear. The company may charge the Customer’s payment method for such costs plus administrative fees.</li>
+            <li><strong>Optional Add-Ons:</strong> Driveway Protection is available for $15; Rental Insurance is available for $20. If Customer declines either optional add-on, Customer accepts responsibility for potential driveway/property damage and Equipment damage or loss as described in this Agreement.</li>
+            <li><strong>Insurance:</strong> Customer should maintain appropriate liability and property insurance covering Customer’s activities and property during the Rental Period. The company’s insurance covers only the Company’s operations.</li>
+            <li><strong>Indemnification:</strong> To the fullest extent permitted by law, Customer shall indemnify, defend, and hold harmless Company and its owners, officers, agents, and employees from all claims, liabilities, losses, damages, costs, and expenses (including attorneys’ fees and court costs) arising from Customer’s use, possession, placement, loading, or maintenance of Equipment, except to the extent caused by Company’s gross negligence or willful misconduct.</li>
+        </ul>
         
-        <h4 className="text-white">A. 16-Yard Dumpster Rental</h4>
+        <h3 className="text-lg text-yellow-300">Limitation of Liability</h3>
+        <p>Except for liability arising from the Company’s gross negligence or willful misconduct, the Company’s total liability under this Agreement shall not exceed the amount paid by the Customer for the specific rental giving rise to the claim. Company shall not be liable for consequential, incidental, special, punitive, or indirect damages.</p>
+
+        <h3 className="text-lg text-yellow-300">Remedies, Collections & Attorney Fees</h3>
+        <p>The company may retain deposits, charge the Customer’s payment method on file, and pursue legal remedies for unpaid charges, damages, fines, or recovery costs. Customer shall pay all reasonable collection costs, including attorneys’ fees and court costs, if Company enforces this Agreement.</p>
+
+        <h3 className="text-lg text-yellow-300">Environmental & Legal Compliance</h3>
         <ul className="list-disc list-inside space-y-2">
-            <li><strong>Rental Period:</strong> The rental period begins on the delivery date and concludes on the scheduled pickup date. Extensions must be requested at least 24 hours in advance and are subject to availability and additional daily fees ($50/day unless a weekly special is applied).</li>
-            <li><strong>Pricing:</strong> The base price includes one-time delivery, pickup, and disposal of up to 2.5 tons of debris. A weekly special rate of $500 for 7 days is available.</li>
-            <li><strong>Placement & Access:</strong> The Customer must provide a safe, clear, and accessible location on private property (e.g., driveway). The location must be on solid ground, free from overhead obstructions, and capable of withstanding the weight of the dumpster and delivery truck. Any placement on public streets is the sole responsibility of the Customer, who must obtain all necessary permits and assumes all liability for fines or violations. If our driver cannot access the location for delivery or pickup due to obstructions (e.g., parked cars, locked gates), a "Dry Run" fee of $125 will be charged.</li>
+            <li><strong>Disposal & Environmental Laws:</strong> Customer warrants that materials placed in Equipment are not regulated hazardous wastes and will comply with federal, state, and local laws. Customer will reimburse Company for any fines, cleanup, or disposal costs arising from improper disposal by Customer.</li>
+            <li><strong>Right to Inspect & Reject:</strong> Company reserves the right to inspect contents, reject, or remove prohibited items. The company may require the Customer to remove offending materials prior to pickup.</li>
         </ul>
 
-        {!isDelivery && (
-            <>
-                <h4 className="text-white">B. Dump Loader Trailer Rental (Self-Service)</h4>
-                <ul className="list-disc list-inside space-y-2">
-                    <li><strong>Rental Period:</strong> Pickup is available from 8:00 AM on the scheduled start date. The trailer must be returned by 10:00 PM on the scheduled end date to the specified pickup/return location, which will be provided upon successful booking and payment. Late returns will incur a full additional day's rental charge.</li>
-                    <li><strong>Customer Responsibility & Towing:</strong> The Customer affirms they possess a capable towing vehicle equipped with a 2-5/16" ball hitch and the necessary skills to operate the equipment safely. The Customer assumes all liability for the trailer from the moment of pickup until its return, including any and all damages to tires, hydraulics, tarp, and structure.</li>
-                    <li><strong>Cleaning:</strong> The trailer must be returned completely swept out and free of all debris. A minimum cleaning fee of $20 will be charged if the unit is returned dirty.</li>
-                </ul>
-            </>
-        )}
+        <h3 className="text-lg text-yellow-300">Permits, Fines & Towing</h3>
+        <p>Customer is responsible for securing permits for placement on public property and for any fines, towing, impound, or other charges resulting from noncompliance. The company may charge retrieval and administrative fees if the Equipment is towed or impounded.</p>
 
-        {isDelivery && (
-            <>
-                <h4 className="text-white">C. Dump Loader Trailer (Delivery Service)</h4>
-                <ul className="list-disc list-inside space-y-2">
-                    <li><strong>Service Scope:</strong> This service is for drop-off and pickup of the Dump Loader Trailer only. Drop-off is scheduled between 6:00 AM - 8:00 AM, and pickup is scheduled between 10:00 PM - 11:30 PM.</li>
-                    <li><strong>Placement:</strong> This service is for curbside/street placement. The Customer is solely responsible for checking and complying with all local city ordinances regarding street placement. U-Fill Dumpsters LLC is not liable for any fines, fees, or towing charges.</li>
-                    <li><strong>Liability & Fees:</strong> The Customer is liable for the equipment while in their possession. The service includes a flat delivery fee plus a mileage charge. The Customer is responsible for all dump fees ($45.00/ton, 2.5-ton maximum). A "Dry Run" fee will apply if the location is obstructed.</li>
-                </ul>
-            </>
-        )}
+        <h3 className="text-lg text-yellow-300">Termination</h3>
+        <p>The Company may terminate this Agreement and remove Equipment immediately if Customer breaches any material term, creates hazardous conditions, or uses Equipment for unlawful purposes. Termination does not relieve Customer of payment obligations for services performed or damages incurred.</p>
 
-        <h3 className="text-yellow-300">Section 3: Prohibited Materials & Weight Limits</h3>
+        <h3 className="text-lg text-yellow-300">Dispute Resolution & Governing Law</h3>
+        <p>This Agreement is governed by the laws of the State of Utah. Customer and Company consent to the exclusive jurisdiction and venue of the state and federal courts located in Utah County, Utah. Parties may alternatively elect binding arbitration under the American Arbitration Association rules; arbitration shall be held in Utah County, Utah, if both parties agree in writing.</p>
+
+        <h3 className="text-lg text-yellow-300">Notices</h3>
+        <p>All notices shall be in writing and delivered to the addresses provided at booking or to the Company at support@u-filldumpsters.com, (801) 810-8832. Notices by email are effective upon transmission; mailed notices are effective upon receipt.</p>
+
+        <h3 className="text-lg text-yellow-300">Electronic Signatures & Acknowledgments</h3>
+        <p>Customer’s electronic acceptance, clicking “I Agree,” or providing a written/electronic signature constitutes a binding signature. Customer affirms they are at least 18 years old and have the authority to enter into this Agreement on behalf of any entity they represent.</p>
+
+        <h3 className="text-lg text-yellow-300">Miscellaneous</h3>
         <ul className="list-disc list-inside space-y-2">
-            <li><strong>Weight Limits:</strong> Dumpsters are limited to 2.5 tons. Overweight loads will be charged an overage fee of $100 per ton. Dump Loader Trailers are limited to 5 tons, but materials like dirt and soil must not exceed halfway up the trailer walls. The Customer is responsible for all overweight citations.</li>
-            <li><strong>Prohibited Materials:</strong> The following are strictly prohibited in all rentals: hazardous materials (paint, chemicals, asbestos, solvents, liquids), tires, batteries, appliances containing Freon, large boulders, and concrete chunks.</li>
-            <li><strong>Special Handling Fees:</strong> Items such as mattresses and TVs will incur a separate disposal fee of $20 to $50 per item. The dumpster must not be filled above the marked "fill line." Overfilling will result in removal of items and/or a dry run fee if unsafe to transport.</li>
+            <li><strong>Entire Agreement:</strong> This Agreement, including any addenda or attachments, constitutes the entire agreement and supersedes prior agreements.</li>
+            <li><strong>Severability:</strong> If any provision is invalid or unenforceable, the remainder remains in effect.</li>
+            <li><strong>Waiver:</strong> Failure to enforce any provision is not a waiver of future enforcement.</li>
+            <li><strong>Assignment:</strong> Customer may not assign this Agreement without the Company’s prior written consent. The company may assign or subcontract obligations.</li>
+            <li><strong>Amendment:</strong> Any amendment must be in writing and signed by both parties.</li>
         </ul>
-
-        <h3 className="text-yellow-300">Section 4: Fees, Payments, and Cancellations</h3>
-        <ul className="list-disc list-inside space-y-2">
-            <li><strong>Payment:</strong> Full payment is due at the time of booking to secure the reservation. All prices are plus applicable taxes.</li>
-            <li><strong>Cancellation Policy:</strong> Cancellations made more than 24 hours before the scheduled service date will receive a full refund. Cancellations made within 24 hours are subject to a 50% cancellation fee.</li>
-            <li><strong>Additional Fees:</strong> The Customer agrees to pay all applicable fees, including but not limited to: overweight charges, prohibited item fees, late fees, dry run fees ($125), cleaning fees, and charges for any damage to the equipment.</li>
-        </ul>
-
-        <h3 className="text-yellow-300">Section 5: Liability, Damage, and Waivers</h3>
-        <ul className="list-disc list-inside space-y-2">
-            <li><strong>Assumption of Risk:</strong> The Customer assumes all risks and liability for the equipment during the rental period. This includes responsibility for any injury, property damage, or claims arising from the use, placement, or presence of the equipment.</li>
-            <li><strong>Damage to Property (Driveways, etc.):</strong> The Company is not responsible for any damage to the Customer's property, including driveways, sidewalks, lawns, or underground utilities, resulting from the weight of the equipment or delivery truck. The Customer warrants that the placement location is sufficient to bear the weight.</li>
-            <li><strong>Driveway Protection Waiver:</strong> If the Customer declines the optional Driveway Protection service, they explicitly acknowledge and agree that the Company is not liable for any potential damage, including but not limited to cracks, scratches, or stains, to the driveway or surrounding area.</li>
-            <li><strong>Rental Insurance Waiver:</strong> If the Customer declines the optional Rental Insurance, they acknowledge and agree they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period, and will be billed for the full cost of repairs or replacement.</li>
-            <li><strong>Indemnification:</strong> The Customer agrees to indemnify, defend, and hold harmless U-Fill Dumpsters LLC, its owners, employees, and agents from any and all claims, damages, losses, and expenses, including attorney's fees, arising out of or resulting from the rental.</li>
-        </ul>
-
-        <p className="font-bold pt-4">By providing an electronic signature below, the Customer affirms they are of legal age, have the authority to enter into this agreement, and have read, understood, and voluntarily agree to all the terms and conditions set forth in this entire document.</p>
+        
+        <p className="font-bold pt-4">By clicking "I Agree," or by providing a written/electronic signature below, Customer acknowledges they have read, understand, and agree to this Agreement and any selected addenda.</p>
     </div>
 );
 
-export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isDelivery }) => {
+export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData }) => {
     const [signature, setSignature] = useState('');
     const [agreed, setAgreed] = useState(false);
     const [error, setError] = useState('');
@@ -99,19 +135,17 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isDelive
             className="container mx-auto py-16 px-4"
         >
             <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center">
-                        <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20">
-                            <ArrowLeft />
-                        </Button>
-                        <h2 className="text-3xl font-bold text-white">Rental Agreement & Signature</h2>
-                    </div>
+                <div className="flex items-center mb-6">
+                    <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20">
+                        <ArrowLeft />
+                    </Button>
+                    <h2 className="text-3xl font-bold text-white">Rental Agreement & Signature</h2>
                 </div>
 
-                <p className="text-blue-200 mb-4">Please read the following agreement carefully. Your electronic signature is required to proceed to payment.</p>
+                <p className="text-blue-200 mb-4">Please read the following agreement carefully. Your electronic signature is required to proceed.</p>
 
                 <ScrollArea className="h-[40vh] w-full rounded-md border border-white/30 bg-black/20 p-4 mb-6">
-                    <AgreementText isDelivery={isDelivery} />
+                    <AgreementText />
                 </ScrollArea>
 
                 <div className="space-y-4">
@@ -156,7 +190,6 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isDelive
                         className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         Agree & Proceed to Payment
-                        <ArrowRight className="ml-2" />
                     </Button>
                 </div>
             </div>
