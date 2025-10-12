@@ -10,8 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
 const addonPrices = {
-  insurance: 15,
-  drivewayProtection: 10,
+  insurance: 20,
+  drivewayProtection: 15,
 };
 const equipmentList = [
   { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },

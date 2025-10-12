@@ -89,9 +89,12 @@ export function getPopupHTMLTemplate(saveLabel, cancelLabel) {
 export const EDIT_MODE_STYLES = `
   #root[data-edit-mode-enabled="true"] [data-edit-id] {
     cursor: pointer; 
-    outline: 1px dashed #357DF9; 
+    outline: 2px dashed #357DF9; 
     outline-offset: 2px;
     min-height: 1em;
+  }
+  #root[data-edit-mode-enabled="true"] img[data-edit-id] {
+    outline-offset: -2px;
   }
   #root[data-edit-mode-enabled="true"] {
     cursor: pointer;

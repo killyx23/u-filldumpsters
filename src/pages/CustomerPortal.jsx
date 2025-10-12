@@ -1,5 +1,4 @@
-
-    import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
     import { supabase } from '@/lib/customSupabaseClient';
     import { useAuth } from '@/contexts/SupabaseAuthContext';
     import { useNavigate } from 'react-router-dom';
@@ -440,8 +439,8 @@
                     toast({ title: "Image Upload Failed", description: uploadError.message, variant: "destructive" });
                     return null;
                 }
-                const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-                uploadedImageUrls.push(publicUrl);
+                const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+                uploadedImageUrls.push(data.publicUrl);
             }
             return uploadedImageUrls;
         };
@@ -776,9 +775,9 @@
                 const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
                 if (uploadError) throw uploadError;
 
-                const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
+                const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
                 
-                await handleSendMessage({ url: publicUrl, name: file.name });
+                await handleSendMessage({ url: data.publicUrl, name: file.name });
 
             } catch (error) {
                 toast({ title: "Attachment Failed", description: error.message, variant: "destructive" });
@@ -963,7 +962,6 @@
 
             const customerDbId = user.user_metadata?.customer_db_id;
             if (!customerDbId) {
-                toast({ title: "Error", description: "Could not find associated customer record.", variant: "destructive" });
                 if (isInitialLoad) setLoading(false);
                 return;
             }
@@ -994,7 +992,7 @@
             if (!authLoading) {
                 if (user && session) {
                     fetchData();
-                } else if (!user) {
+                } else {
                     navigate('/login');
                 }
             }
@@ -1214,4 +1212,3 @@
             </div>
         );
     }
-  

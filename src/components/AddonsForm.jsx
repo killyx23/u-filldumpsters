@@ -14,8 +14,8 @@ import { AddonSection } from './addons/AddonSection';
 import { EquipmentItem } from './addons/EquipmentItem';
 
 const addonPrices = {
-  insurance: 15,
-  drivewayProtection: 10,
+  insurance: 20,
+  drivewayProtection: 15,
   equipment: {
     wheelbarrow: 10,
     handTruck: 15,
@@ -238,7 +238,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         onOpenChange={setShowInsuranceDeclineWarning}
         onConfirm={confirmDeclineInsurance}
         title="Confirm Your Choice"
-        description="By declining rental insurance, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period."
+        description="By declining rental insurance, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
       />
 
       <DeclineWarningDialog 
