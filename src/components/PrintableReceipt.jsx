@@ -1,12 +1,23 @@
 import React from 'react';
-    import { format, parseISO, isValid } from 'date-fns';
-    import { Key, Repeat, FileSignature, Clock, ShieldCheck } from 'lucide-react';
+    import { format, parseISO, isValid, differenceInDays, addHours } from 'date-fns';
+    import { Key, Repeat, FileSignature, Clock, ShieldCheck, AlertTriangle } from 'lucide-react';
 
-    const formatTime = (timeString) => {
+    const formatTime = (timeString, isWindow = false, isSelfService = false) => {
         if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) return 'N/A';
         try {
             const date = parseISO(`1970-01-01T${timeString}`);
-            return isValid(date) ? format(date, 'h:mm a') : 'N/A';
+            if (!isValid(date)) return 'N/A';
+
+            if (isSelfService) {
+                if (timeString.startsWith('08:00')) return `after ${format(date, 'h:mm a')}`;
+                if (timeString.startsWith('22:00')) return `by ${format(date, 'h:mm a')}`;
+            }
+
+            if (isWindow) {
+                const endTime = addHours(date, 2);
+                return `between ${format(date, 'h:mm a')} - ${format(endTime, 'h:mm a')}`;
+            }
+            return format(date, 'h:mm a');
         } catch (e) {
             return 'N/A';
         }
@@ -54,10 +65,15 @@ import React from 'react';
     export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         if (!booking || !booking.customers || !booking.plan) return null;
 
-        const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history } = booking;
+        const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues } = booking;
         const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
-        const isDelivery = addons?.isDelivery;
+        const isDelivery = addons?.deliveryService;
         const coupon = addons?.coupon;
+        
+        const currentPlan = addons?.plan || plan;
+        const serviceName = currentPlan.name;
+        const isSelfServiceTrailer = currentPlan.service_type === 'hourly' && !isDelivery;
+        const isWindowService = currentPlan.service_type === 'window' || currentPlan.service_type === 'material_delivery';
 
         const fullAddress = `${street}, ${city}, ${state} ${zip}`;
 
@@ -77,19 +93,31 @@ import React from 'react';
         };
         const pendingReason = getPendingReason();
         
-        const deliveryCharge = isDelivery ? 30 : 0;
-        const baseServicePrice = (plan.base_price || 0) - deliveryCharge;
+        const dropOff = parseISO(drop_off_date);
+        const pickup = parseISO(pickup_date);
+        const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
+
+        let baseServicePrice = currentPlan.base_price || 0;
+        if (currentPlan.id === 1 && duration === 7) {
+            baseServicePrice = 500;
+        } else if (currentPlan.id === 1) {
+            baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
+        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+            baseServicePrice = (currentPlan.base_price || 0) * duration;
+        }
+
+        const deliveryCharge = isDelivery ? (addons.distanceInfo?.deliveryFee || 0) : 0;
+        const mileageFee = isDelivery ? (addons.distanceInfo?.mileageFee || 0) : 0;
 
         let addonsTotal = 0;
         if (addons.insurance === 'accept') addonsTotal += addonPrices.insurance;
-        if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') addonsTotal += addonPrices.drivewayProtection;
-        if (addons.distanceInfo?.totalFee > 0) addonsTotal += addons.distanceInfo.totalFee;
+        if ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') addonsTotal += addonPrices.drivewayProtection;
         addons.equipment?.forEach(item => {
             const meta = equipmentMeta.find(e => e.id === item.id);
             if (meta) addonsTotal += meta.price * item.quantity;
         });
 
-        const subtotal = baseServicePrice + deliveryCharge + addonsTotal;
+        const subtotal = baseServicePrice + deliveryCharge + mileageFee + addonsTotal;
 
         const getDiscountAmount = () => {
             if (coupon && coupon.isValid) {
@@ -103,6 +131,8 @@ import React from 'react';
         };
         
         const discountAmount = getDiscountAmount();
+        
+        const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
 
         return (
             <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -120,7 +150,7 @@ import React from 'react';
                         <div>
                             <h3 className="font-bold text-lg mb-2">Billed To:</h3>
                             <p>{name}</p>
-                            <p>{(plan.id === 1 || isDelivery) ? fullAddress : "N/A (Self-Service Trailer Rental)"}</p>
+                            <p>{(currentPlan.id === 1 || isDelivery) ? fullAddress : "N/A (Self-Service Trailer Rental)"}</p>
                             <p>{email}</p>
                             <p>{phone}</p>
                         </div>
@@ -144,7 +174,7 @@ import React from 'react';
                         <p><strong>Phone Number:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{phone}</span></p>
                     </section>
 
-                    {plan.id === 2 && !isDelivery && !isCancelledAndRefunded && (
+                    {isSelfServiceTrailer && !isCancelledAndRefunded && (
                         <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                             <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
                             {isPendingReview ? (
@@ -171,41 +201,45 @@ import React from 'react';
                             <tbody>
                                 <tr className="border-b">
                                     <td className="py-2">
-                                        <p className="font-semibold">{plan.name}</p>
+                                        <p className="font-semibold">{serviceName}</p>
                                         {reschedule_history && reschedule_history.length > 0 && (
                                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                                 <p className="font-bold">Original Dates:</p>
-                                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} at {formatTime(reschedule_history[0].from_drop_off_time)}</p>
-                                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} by {formatTime(reschedule_history[0].from_pickup_time)}</p>
+                                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_drop_off_time, isWindowService, isSelfServiceTrailer)}</p>
+                                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_pickup_time, isWindowService, isSelfServiceTrailer)}</p>
                                             </div>
                                         )}
                                         <p className="text-sm text-gray-600 mt-1">
-                                            {plan.id === 2 ? (isDelivery ? "Delivery" : "Pickup") : "Drop-off"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} at ${formatTime(drop_off_time_slot)}`}
+                                            {isWindowService ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTime(drop_off_time_slot, isWindowService, isSelfServiceTrailer)}`}
                                         </p>
-                                        <p className="text-sm text-gray-600">
-                                            {plan.id === 2 ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} by ${formatTime(pickup_time_slot)}`}
-                                        </p>
+                                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">
+                                            {isSelfServiceTrailer ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTime(pickup_time_slot, isWindowService, isSelfServiceTrailer)}`}
+                                        </p>}
                                     </td>
                                     <td className="text-right py-2 align-top">${baseServicePrice.toFixed(2)}</td>
                                 </tr>
                                 {deliveryCharge > 0 && (
-                                    <tr className="border-b"><td className="py-2 pl-4">Delivery Charge</td><td className="text-right py-2">${deliveryCharge.toFixed(2)}</td></tr>
+                                    <tr className="border-b"><td className="py-2 pl-4">Delivery & Pickup Fee</td><td className="text-right py-2">${deliveryCharge.toFixed(2)}</td></tr>
                                 )}
-                                {addons.distanceInfo?.totalFee > 0 && (
-                                    <tr className="border-b"><td className="py-2 pl-4">{`Extended Delivery Fee (${addons.distanceInfo.miles.toFixed(1)} miles)`}</td><td className="text-right py-2">${addons.distanceInfo.totalFee.toFixed(2)}</td></tr>
+                                {mileageFee > 0 && (
+                                    <tr className="border-b"><td className="py-2 pl-4">{`Mileage Fee (${(addons.distanceInfo?.roundTripMiles || 0).toFixed(1)} miles)`}</td><td className="text-right py-2">${mileageFee.toFixed(2)}</td></tr>
                                 )}
                                 {addons.insurance === 'accept' && (
                                     <tr className="border-b"><td className="py-2 pl-4">Rental Insurance</td><td className="text-right py-2">${addonPrices.insurance.toFixed(2)}</td></tr>
                                 )}
-                                {(plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept' && (
+                                {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept' && (
                                     <tr className="border-b"><td className="py-2 pl-4">Driveway Protection</td><td className="text-right py-2">${addonPrices.drivewayProtection.toFixed(2)}</td></tr>
                                 )}
                                 {addons.equipment && addons.equipment.map(item => {
                                     const meta = equipmentMeta.find(e => e.id === item.id);
                                     if (!meta) return null;
+                                    const issue = return_issues ? return_issues[meta.label] : null;
                                     return (
                                         <tr key={item.id} className="border-b">
-                                            <td className="py-2 pl-4">{meta.label} (x{item.quantity})</td>
+                                            <td className="py-2 pl-4">
+                                                {meta.label} (x{item.quantity})
+                                                {issue && <span className="text-red-600 font-bold ml-2">({issue.status.replace(/_/g, ' ')})</span>}
+                                            </td>
                                             <td className="text-right py-2">${(meta.price * item.quantity).toFixed(2)}</td>
                                         </tr>
                                     )
@@ -247,6 +281,18 @@ import React from 'react';
                                 )}
                             </tfoot>
                         </table>
+                        {hasReturnIssues && (
+                            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                                <h4 className="font-bold text-lg mb-2 text-red-800 flex items-center">
+                                    <AlertTriangle className="mr-2 h-5 w-5"/> Post-Rental Issues
+                                </h4>
+                                <ul className="list-disc list-inside text-red-700">
+                                    {Object.entries(return_issues).map(([key, value]) => (
+                                        <li key={key} className="capitalize">{key.replace(/_/g, ' ')}: {value.status.replace(/_/g, ' ')}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </section>
                     {addons.notes && (
                         <section className="mt-6" style={{ pageBreakInside: 'avoid' }}>
@@ -264,7 +310,7 @@ import React from 'react';
                     {addons.insurance === 'decline' && (
                         <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>
                     )}
-                    {(plan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && (
+                    {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && (
                         <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>
                     )}
                     {addons.addressVerificationSkipped && (

@@ -54,8 +54,8 @@ import React, { useState } from 'react';
         const currentStyle = cardStyles[plan.id] || cardStyles[3];
     
         const displayDescription = plan.homepage_description || plan.description;
-        const displayPrice = plan.homepage_price !== null ? plan.homepage_price : plan.base_price;
-        const displayPriceUnit = plan.homepage_price_unit || plan.price_unit;
+        const displayPrice = plan.base_price;
+        const displayPriceUnit = plan.price_unit;
     
         const features = plan.features ? (typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features) : [];
     

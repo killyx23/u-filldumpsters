@@ -72,9 +72,8 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [dialogContent, setDialogContent] = useState({ title: '', items: [] });
 
-    const pendingPayments = bookings ? bookings.filter(b => b.status === 'pending_payment').map(b => ({ ...b, type: 'payment' })) : [];
     const flaggedForFollowUp = bookings ? bookings.filter(b => b.status === 'flagged').map(b => ({ ...b, type: 'flagged' })) : [];
-    const pendingVerification = bookings ? bookings.filter(b => b.status === 'pending_verification' || b.status === 'pending_review').map(b => ({ ...b, type: 'verification' })) : [];
+    const pendingVerification = bookings ? bookings.filter(b => ['pending_verification', 'pending_review', 'pending_payment'].includes(b.status)).map(b => ({ ...b, type: 'verification' })) : [];
     const unreadNotesItems = customersWithUnreadNotes ? customersWithUnreadNotes.map(c => ({ ...c, type: 'unread_notes' })) : [];
 
     const handleCardClick = (title, items) => {
@@ -103,7 +102,7 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
                 items={dialogContent.items}
                 onNavigate={handleNavigate}
             />
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
                 <ActionItemCard 
                     title="Pending Verification" 
                     icon={<ShieldAlert className="h-6 w-6 text-orange-400" />} 
@@ -124,13 +123,6 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
                     items={flaggedForFollowUp} 
                     onCardClick={handleCardClick}
                     emptyText="No bookings are flagged."
-                />
-                <ActionItemCard 
-                    title="Pending Payments" 
-                    icon={<DollarSign className="h-6 w-6 text-yellow-400" />} 
-                    items={pendingPayments} 
-                    onCardClick={handleCardClick}
-                    emptyText="No payments are pending." 
                 />
             </div>
         </>

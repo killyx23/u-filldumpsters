@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
     import { motion } from 'framer-motion';
     import { CheckCircle, Home, Calendar, Mail, DollarSign, User, Phone, MapPin, Clock, Loader2, AlertTriangle, XCircle, Printer, Truck, Key, Tag } from 'lucide-react';
     import { Button } from '@/components/ui/button';
-    import { format, parseISO, isValid } from 'date-fns';
+    import { format, parseISO, isValid, addHours } from 'date-fns';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
     import { useReactToPrint } from 'react-to-print';
@@ -66,6 +66,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
           } else if (bookingData.booking) {
             setBooking(bookingData.booking);
             setStatus('success');
+            // Trigger email sending
+            supabase.functions.invoke('send-booking-confirmation', { body: { bookingId: bookingData.booking.id } })
+              .catch(err => console.error("Failed to send confirmation email on page load:", err));
+
           } else {
              if (attempt < 15) {
                 setTimeout(() => fetchBookingDetails(sessionId, attempt + 1), 2500 * attempt);
@@ -132,21 +136,38 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
               );
             }
     
-            const { plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, status: bookingStatus, customers } = booking;
+            const { plan: originalPlan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, status: bookingStatus, customers } = booking;
+            const plan = addons?.plan || originalPlan;
             const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
             const fullAddress = `${street}, ${city}, ${state} ${zip}`;
             const distanceInfo = addons?.distanceInfo;
-            const isDelivery = addons?.isDelivery;
+            const isDelivery = addons?.deliveryService;
+            const isSelfServiceTrailer = plan.id === 2 && !isDelivery;
+            const isWindowService = plan.id === 1 || isDelivery || plan.id === 3;
             const isPendingVerification = bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
             const coupon = addons?.coupon;
+            const customerPortalLink = `/login?cid=${encodeURIComponent(customer_id_text)}&phone=${encodeURIComponent(phone)}`;
 
-             const formatTime = (timeString) => {
-                if (!timeString) return 'N/A';
-                const [hours, minutes] = timeString.split(':');
-                const date = new Date();
-                date.setHours(parseInt(hours, 10));
-                date.setMinutes(parseInt(minutes, 10));
-                return isValid(date) ? format(date, 'h:mm a') : 'N/A';
+
+             const formatTime = (timeString, isWindow = false, isSelfService = false) => {
+                if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) return 'N/A';
+                try {
+                    const date = parseISO(`1970-01-01T${timeString}`);
+                    if (!isValid(date)) return 'N/A';
+
+                    if (isSelfService) {
+                        if (timeString.startsWith('08:00')) return `after ${format(date, 'h:mm a')}`;
+                        if (timeString.startsWith('22:00')) return `by ${format(date, 'h:mm a')}`;
+                    }
+
+                    if (isWindow) {
+                        const endTime = addHours(date, 2);
+                        return `between ${format(date, 'h:mm a')} - ${format(endTime, 'h:mm a')}`;
+                    }
+                    return format(date, 'h:mm a');
+                } catch (e) {
+                    return 'N/A';
+                }
             };
 
             const getDiscountAmount = () => {
@@ -154,13 +175,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
                     if (coupon.discountType === 'fixed') {
                         return coupon.discountValue;
                     } else if (coupon.discountType === 'percentage') {
-                        const subtotal = total_price / (1 - (coupon.discountValue / 100));
+                        const subtotal = (total_price || 0) / (1 - (coupon.discountValue / 100));
                         return subtotal * (coupon.discountValue / 100);
                     }
                 }
                 return 0;
             };
             const discountAmount = getDiscountAmount();
+            
+            const totalFee = distanceInfo?.totalFee ?? 0;
     
             return (
               <>
@@ -197,7 +220,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
           
                     <div className="bg-yellow-900/30 border border-yellow-500/50 p-6 rounded-lg mb-8 text-left">
                       <h3 className="flex items-center text-xl font-bold text-yellow-300 mb-3"><Key className="mr-3 h-6 w-6"/>Your Customer Portal Login</h3>
-                      <p className="text-yellow-200">Use the following credentials to access your <Link to="/login" className="font-bold underline hover:text-white">Customer Portal</Link> to view your booking status, add notes, or upload files.</p>
+                      <p className="text-yellow-200">Use the following credentials to access your <Link to={customerPortalLink} className="font-bold underline hover:text-white">Customer Portal</Link> to view your booking status, add notes, or upload files.</p>
                       <p className="text-white mt-2"><strong>Your Customer ID:</strong> <span className="font-mono bg-black/30 p-1 rounded">{customer_id_text}</span></p>
                       <p className="text-white"><strong>Your Phone Number:</strong> <span className="font-mono bg-black/30 p-1 rounded">{phone}</span></p>
                     </div>
@@ -216,17 +239,18 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
                        <ConfirmationLine icon={<Mail className="h-6 w-6" />} label="Email" value={email} />
                       <ConfirmationLine icon={<Phone className="h-6 w-6" />} label="Phone" value={phone} />
                        {(plan.id === 1 || isDelivery) && <ConfirmationLine icon={<MapPin className="h-6 w-6" />} label="Delivery Address" value={fullAddress} />}
-                      <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name + (isDelivery ? ' with Delivery' : '')} />
-                      <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? (isDelivery ? "Delivery" : "Pickup") : "Drop-off"} value={isPendingVerification ? 'Pending Review' : `${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} isPending={isPendingVerification} />
-                       <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Review' : `${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} isPending={isPendingVerification} />
-                       {distanceInfo?.totalFee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${distanceInfo.totalFee.toFixed(2)} (${distanceInfo.miles.toFixed(1)} miles)`} isFee={true} />}
-                       {discountAmount > 0 && <ConfirmationLine icon={<Tag className="h-6 w-6"/>} label={`Coupon Discount (${coupon.code})`} value={`- $${discountAmount.toFixed(2)}`} isDiscount={true} />}
+                      <ConfirmationLine icon={<Calendar className="h-6 w-6" />} label="Service" value={plan.name} />
+                      <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? (isDelivery ? "Delivery" : "Pickup") : "Drop-off"} value={isPendingVerification ? 'Pending Review' : `${format(parseISO(drop_off_date), 'PPP')} - ${formatTime(drop_off_time_slot, isWindowService, isSelfServiceTrailer)}`} isPending={isPendingVerification} />
+                       {plan.id !== 3 && <ConfirmationLine icon={<Clock className="h-6 w-6" />} label={plan.id === 2 ? "Return" : "Pickup"} value={isPendingVerification ? 'Pending Review' : `${format(parseISO(pickup_date), 'PPP')} - ${formatTime(pickup_time_slot, isWindowService, isSelfServiceTrailer)}`} isPending={isPendingVerification} />}
+                       {isDelivery && distanceInfo && totalFee > 0 && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Trailer Delivery Fee" value={`$${totalFee.toFixed(2)} (${(distanceInfo.roundTripMiles || 0).toFixed(1)} miles)`} isFee={true} />}
+                       {addons?.fee > 0 && !isDelivery && <ConfirmationLine icon={<Truck className="h-6 w-6"/>} label="Extended Delivery Fee" value={`$${(addons.fee || 0).toFixed(2)}`} isFee={true} />}
+                       {discountAmount > 0 && <ConfirmationLine icon={<Tag className="h-6 w-6"/>} label={`Coupon Discount (${coupon.code})`} value={`- ${discountAmount.toFixed(2)}`} isDiscount={true} />}
                       <div className="flex items-center py-3">
                         <div className="text-yellow-400 mr-4 flex-shrink-0"><DollarSign className="h-6 w-6" /></div>
                         <div>
                           <p className="font-semibold text-blue-100">Total Amount Paid</p>
                           <div className="flex items-baseline">
-                            <p className="break-words text-white">${total_price.toFixed(2)}</p>
+                            <p className="break-words text-white">${(total_price || 0).toFixed(2)}</p>
                             <span className="text-sm text-blue-200 ml-2">(plus taxes)</span>
                           </div>
                         </div>

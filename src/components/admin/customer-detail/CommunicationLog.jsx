@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { MessageSquare, Loader2, Send, Paperclip, Smile, FileText, Image as ImageIcon } from 'lucide-react';
+import { MessageSquare, Loader2, Send, Paperclip, Smile, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { format, parseISO, isToday, isYesterday } from 'date-fns';
@@ -16,7 +16,7 @@ const AttachmentPreview = ({ note }) => {
     if (isImage) {
         return (
             <a href={note.attachment_url} target="_blank" rel="noopener noreferrer" className="mt-2 block">
-                <img-replace src={note.attachment_url} alt={note.attachment_name} className="max-w-xs rounded-lg" />
+                <img src={note.attachment_url} alt={note.attachment_name} className="max-w-xs rounded-lg" />
             </a>
         );
     }
@@ -29,17 +29,18 @@ const AttachmentPreview = ({ note }) => {
     );
 };
 
-const ChatBubble = ({ note, isFirstInGroup }) => {
+const ChatBubble = ({ note, customerName }) => {
     const isAdmin = note.author_type === 'admin';
     const bubbleClasses = isAdmin
-        ? 'bg-blue-600 text-white rounded-br-none'
-        : 'bg-gray-700 text-white rounded-bl-none';
-    const marginClass = isFirstInGroup ? 'mt-4' : 'mt-1';
+        ? 'bg-blue-600 text-white self-end rounded-lg rounded-br-none'
+        : 'bg-gray-700 text-white self-start rounded-lg rounded-bl-none';
+    
+    const sourceText = isAdmin ? 'Scheduling' : customerName;
 
     return (
-        <div className={`flex items-end gap-2 ${isAdmin ? 'justify-end' : 'justify-start'} ${marginClass}`}>
-            <div className={`p-3 rounded-lg max-w-md md:max-w-lg ${bubbleClasses}`}>
-                <p className="font-semibold text-sm text-blue-200">{note.source}</p>
+        <div className={`flex flex-col gap-1 w-full my-1`}>
+            <div className={`p-3 max-w-md md:max-w-lg ${bubbleClasses}`}>
+                <p className="font-semibold text-sm text-yellow-300">{sourceText}</p>
                 {note.content && <p className="text-sm whitespace-pre-wrap mt-1">{note.content}</p>}
                 <AttachmentPreview note={note} />
                 <p className="text-xs mt-1 text-right opacity-70">{format(parseISO(note.created_at), 'p')}</p>
@@ -68,46 +69,17 @@ const DateSeparator = ({ date }) => {
     );
 };
 
-export const CommunicationLog = ({ customer, initialNotes, onUpdate }) => {
-    const [notes, setNotes] = useState(initialNotes);
+export const CommunicationLog = ({ customer, initialNotes, onMessageSent }) => {
     const [message, setMessage] = useState('');
     const [isSending, setIsSending] = useState(false);
     const chatContainerRef = useRef(null);
     const fileInputRef = useRef(null);
 
     useEffect(() => {
-        setNotes(initialNotes);
-    }, [initialNotes]);
-
-    useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [notes]);
-
-    const markNotesAsRead = useCallback(async () => {
-        const unreadNoteIds = notes.filter(n => !n.is_read && n.author_type === 'customer').map(n => n.id);
-        if (unreadNoteIds.length === 0) return;
-
-        const { error } = await supabase
-            .from('customer_notes')
-            .update({ is_read: true })
-            .in('id', unreadNoteIds);
-        
-        if (!error) {
-            onUpdate();
-        }
-    }, [notes, onUpdate]);
-
-    useEffect(() => {
-        const hasUnread = notes.some(n => !n.is_read && n.author_type === 'customer');
-        if (hasUnread) {
-            const timer = setTimeout(() => {
-                markNotesAsRead();
-            }, 2000);
-            return () => clearTimeout(timer);
-        }
-    }, [notes, markNotesAsRead]);
+    }, [initialNotes]);
 
     const handleSendMessage = async (attachment = null) => {
         if (!message.trim() && !attachment) return;
@@ -121,12 +93,20 @@ export const CommunicationLog = ({ customer, initialNotes, onUpdate }) => {
         };
 
         try {
-            const { error } = await supabase.functions.invoke('send-admin-message', {
+            const { data: newMessage, error } = await supabase.functions.invoke('send-admin-message', {
                 body: payload
             });
-            if (error) throw error;
-
+            
+            if (error) {
+                const errorContext = await error.context.json();
+                throw new Error(errorContext.error || 'The function returned an error.');
+            }
+            
+            if(onMessageSent) {
+                onMessageSent(newMessage);
+            }
             setMessage('');
+
         } catch (error) {
             toast({ title: 'Failed to send message', description: error.message, variant: 'destructive' });
         } finally {
@@ -173,22 +153,17 @@ export const CommunicationLog = ({ customer, initialNotes, onUpdate }) => {
     const groupedNotes = useMemo(() => {
         const groups = [];
         let lastDate = null;
-        let lastAuthor = null;
         
-        [...notes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).forEach(note => {
+        [...initialNotes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).forEach(note => {
             const noteDate = format(parseISO(note.created_at), 'yyyy-MM-dd');
             if (noteDate !== lastDate) {
                 groups.push({ type: 'date', date: noteDate });
                 lastDate = noteDate;
-                lastAuthor = null; 
             }
-
-            const isFirstInGroup = note.author_type !== lastAuthor;
-            groups.push({ type: 'note', note, isFirstInGroup });
-            lastAuthor = note.author_type;
+            groups.push({ type: 'note', note });
         });
         return groups;
-    }, [notes]);
+    }, [initialNotes]);
 
     return (
         <div className="flex flex-col h-[75vh] bg-gray-800 rounded-lg shadow-2xl">
@@ -208,7 +183,7 @@ export const CommunicationLog = ({ customer, initialNotes, onUpdate }) => {
                         <ChatBubble
                             key={group.note.id}
                             note={group.note}
-                            isFirstInGroup={group.isFirstInGroup}
+                            customerName={customer.name}
                         />
                     );
                 })}

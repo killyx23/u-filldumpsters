@@ -4,6 +4,12 @@ export default function iframeRouteRestorationPlugin() {
     apply: 'serve',
     transformIndexHtml() {
       const script = `
+      const ALLOWED_PARENT_ORIGINS = [
+          "https://horizons.hostinger.com",
+          "https://horizons.hostinger.dev",
+          "https://horizons-frontend-local.hostinger.dev",
+      ];
+
         // Check to see if the page is in an iframe
         if (window.self !== window.top) {
           const STORAGE_KEY = 'horizons-iframe-saved-route';
@@ -69,8 +75,38 @@ export default function iframeRouteRestorationPlugin() {
             save();
           };
 
+          const getParentOrigin = () => {
+              if (
+                  window.location.ancestorOrigins &&
+                  window.location.ancestorOrigins.length > 0
+              ) {
+                  return window.location.ancestorOrigins[0];
+              }
+
+              if (document.referrer) {
+                  try {
+                      return new URL(document.referrer).origin;
+                  } catch (e) {
+                      console.warn("Invalid referrer URL:", document.referrer);
+                  }
+              }
+
+              return null;
+          };
+
           window.addEventListener('popstate', save);
           window.addEventListener('hashchange', save);
+          window.addEventListener("message", function (event) {
+              const parentOrigin = getParentOrigin();
+
+              if (event.data?.type === "redirect-home" && parentOrigin && ALLOWED_PARENT_ORIGINS.includes(parentOrigin)) {
+                const saved = sessionStorage.getItem(STORAGE_KEY);
+
+                if(saved && saved !== '/') {
+                  replaceHistoryState('/')
+                }
+              }
+          });
 
           restore();
         }

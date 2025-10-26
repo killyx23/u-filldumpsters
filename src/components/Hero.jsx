@@ -27,13 +27,14 @@ export const Hero = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from('services')
-        .select('name, homepage_price, homepage_price_unit, homepage_description')
+        .select('name, base_price, price_unit, homepage_description')
+        .in('id', [1, 2, 3, 4])
         .order('id');
       
       if (error) {
         console.error('Error fetching services:', error);
       } else {
-        setServices(data);
+        setServices(data.filter(s => [1,2].includes(s.id))); // Only show dumpster and delivery
       }
       setLoading(false);
     };
@@ -72,8 +73,8 @@ export const Hero = () => {
               <ServiceCard
                 key={service.name}
                 name={service.name}
-                price={service.homepage_price}
-                unit={service.homepage_price_unit}
+                price={service.base_price}
+                unit={service.price_unit}
                 description={service.homepage_description}
                 delay={0.4 + index * 0.2}
               />

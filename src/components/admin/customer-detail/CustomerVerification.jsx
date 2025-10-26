@@ -175,9 +175,82 @@ const ImageUploader = ({ customer, onUpdate }) => {
     );
 };
 
+const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
+    const [stripeCustomerId, setStripeCustomerId] = useState('');
+    const [stripePaymentIntentId, setStripePaymentIntentId] = useState('');
+    const [stripeChargeId, setStripeChargeId] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const { data: paymentInfo, error: paymentInfoError } = await supabase
+                .from('stripe_payment_info')
+                .insert({
+                    booking_id: booking.id,
+                    stripe_customer_id: stripeCustomerId,
+                    stripe_payment_intent_id: stripePaymentIntentId,
+                    stripe_charge_id: stripeChargeId,
+                })
+                .select()
+                .single();
+
+            if (paymentInfoError) throw paymentInfoError;
+
+            const { error: bookingUpdateError } = await supabase
+                .from('bookings')
+                .update({ status: 'Confirmed' })
+                .eq('id', booking.id);
+
+            if (bookingUpdateError) throw bookingUpdateError;
+
+            toast({ title: "Success", description: "Stripe IDs updated and booking confirmed." });
+            onUpdate();
+            onOpenChange(false);
+        } catch (error) {
+            toast({ title: "Save Failed", description: error.message, variant: "destructive" });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="bg-gray-900 border-yellow-400 text-white">
+                <DialogHeader>
+                    <DialogTitle>Update Stripe IDs for Booking #{booking.id}</DialogTitle>
+                    <DialogDescription>Manually link this booking to a Stripe payment.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                    <div>
+                        <Label htmlFor="stripe-customer-id">Stripe Customer ID</Label>
+                        <Input id="stripe-customer-id" value={stripeCustomerId} onChange={(e) => setStripeCustomerId(e.target.value)} placeholder="cus_..." className="bg-white/20" />
+                    </div>
+                    <div>
+                        <Label htmlFor="stripe-pi-id">Stripe Payment Intent ID</Label>
+                        <Input id="stripe-pi-id" value={stripePaymentIntentId} onChange={(e) => setStripePaymentIntentId(e.target.value)} placeholder="pi_..." className="bg-white/20" />
+                    </div>
+                    <div>
+                        <Label htmlFor="stripe-charge-id">Stripe Charge ID</Label>
+                        <Input id="stripe-charge-id" value={stripeChargeId} onChange={(e) => setStripeChargeId(e.target.value)} placeholder="ch_..." className="bg-white/20" />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="destructive" onClick={() => onOpenChange(false)}>Cancel</Button>
+                    <Button className="bg-green-600 hover:bg-green-700" onClick={handleSave} disabled={isSaving}>
+                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Continue
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 
 export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
+    const [selectedBookingForStripe, setSelectedBookingForStripe] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
     const [plate, setPlate] = useState(customer.license_plate || '');
     const [isSavingPlate, setIsSavingPlate] = useState(false);
@@ -249,6 +322,13 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     icon: <MessageSquare className="mr-2 h-4 w-4"/>,
                     titleText: "Change Request for Booking #"
                 };
+            case 'pending_payment':
+                 return {
+                    container: "bg-red-900/30 border-red-500",
+                    title: "text-red-300 font-bold",
+                    icon: <DollarSign className="mr-2 h-4 w-4"/>,
+                    titleText: "Payment Pending for Booking #"
+                };
             default: // pending_verification
                 return {
                     container: "bg-orange-900/30 border-orange-500",
@@ -277,6 +357,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     return (
         <>
         <RefundDialog booking={selectedBookingForRefund} customer={customer} open={!!selectedBookingForRefund} onOpenChange={() => setSelectedBookingForRefund(null)} onUpdate={onUpdate} />
+        {selectedBookingForStripe && <StripeIdDialog booking={selectedBookingForStripe} open={!!selectedBookingForStripe} onOpenChange={() => setSelectedBookingForStripe(null)} onUpdate={onUpdate} />}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><Car className="mr-3 h-6 w-6"/>Vehicle & License Details</h3>
@@ -345,8 +426,17 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                     </div>
                                 )}
                                 <div className="flex justify-end space-x-2 mt-4">
-                                    <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
-                                    <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
+                                    {booking.status === 'pending_payment' ? (
+                                        <>
+                                            <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}>Cancel</Button>
+                                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => setSelectedBookingForStripe(booking)}>Update Stripe IDs</Button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
+                                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         )
