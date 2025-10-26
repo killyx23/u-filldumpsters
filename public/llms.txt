@@ -1,5 +1,7 @@
 ## Pages
 - [- Our Store](/productdetail): No description available
 - [Contact Us - U-Fill Dumpsters](/contact): Get in touch with U-Fill Dumpsters for any questions about our services, bookings, or support. We
+- [Customer Portal Login - U-Fill Dumpsters](/customerlogin): Access your U-Fill Dumpsters customer portal to manage your bookings and view your history.
 - [Customer Reviews - U-Fill Dumpsters](/reviews): Read honest reviews from our satisfied customers. See why we
+- [Downloading Your Receipt - U-Fill Dumpsters](/receipt): Your U-Fill Dumpsters receipt is being downloaded.
 - [FAQ - U-Fill Dumpsters](/faq): Find answers to frequently asked questions about our dumpster rental services, pricing, allowed materials, and booking process.
