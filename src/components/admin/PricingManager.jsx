@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
     import { supabase } from '@/lib/customSupabaseClient';
     import { toast } from '@/components/ui/use-toast';
-    import { Loader2, Save, Tag, Plus, Edit, Trash2 } from 'lucide-react';
+    import { Loader2, Save, Plus, Edit } from 'lucide-react';
     import { Button } from '@/components/ui/button';
     import { Input } from '@/components/ui/input';
     import { Label } from '@/components/ui/label';
@@ -11,15 +11,15 @@ import React, { useState, useEffect, useCallback } from 'react';
     
     const ServicePricingCard = ({ service, onSave }) => {
         const [isSaving, setIsSaving] = useState(false);
-        const [price, setPrice] = useState(service.base_price || 0);
+        const [price, setPrice] = useState(service.base_price?.toString() || '');
         const [unit, setUnit] = useState(service.price_unit || '/day');
         const [deliveryFee, setDeliveryFee] = useState(service.features?.find(f => f.name === 'Delivery Fee')?.value || 0);
     
         const isDeliveryService = service.id === 4;
     
         useEffect(() => {
-            setPrice(service.base_price);
-            setUnit(service.price_unit);
+            setPrice(service.base_price?.toString() || '');
+            setUnit(service.price_unit || '/day');
             if (isDeliveryService) {
                 setDeliveryFee(service.features?.find(f => f.name === 'Delivery Fee')?.value || 0);
             }
@@ -27,16 +27,38 @@ import React, { useState, useEffect, useCallback } from 'react';
     
         const handleSave = async () => {
             setIsSaving(true);
-            let updatedFeatures = service.features ? JSON.parse(JSON.stringify(service.features)) : [];
+
+            const numPrice = parseFloat(price);
+            if (isNaN(numPrice)) {
+                toast({ title: "Invalid Price", description: "Please enter a valid number for base price.", variant: "destructive" });
+                setIsSaving(false);
+                return;
+            }
+
+            const updatePayload = {
+                base_price: numPrice,
+                price_unit: unit
+            };
+
             if (isDeliveryService) {
+                let updatedFeatures = service.features ? JSON.parse(JSON.stringify(service.features)) : [];
+                const numDeliveryFee = parseFloat(deliveryFee);
+                 if (isNaN(numDeliveryFee)) {
+                     toast({ title: "Invalid Fee", description: "Please enter a valid number for delivery fee.", variant: "destructive" });
+                     setIsSaving(false);
+                     return;
+                }
+
                 const feeIndex = updatedFeatures.findIndex(f => f.name === 'Delivery Fee');
                 if (feeIndex > -1) {
-                    updatedFeatures[feeIndex].value = parseFloat(deliveryFee);
+                    updatedFeatures[feeIndex].value = numDeliveryFee;
                 } else {
-                    updatedFeatures.push({ name: 'Delivery Fee', value: parseFloat(deliveryFee) });
+                    updatedFeatures.push({ name: 'Delivery Fee', value: numDeliveryFee });
                 }
+                updatePayload.features = updatedFeatures;
             }
-            await onSave(service.id, { base_price: parseFloat(price), price_unit: unit, features: updatedFeatures });
+            
+            await onSave(service.id, updatePayload);
             setIsSaving(false);
         };
     
@@ -198,7 +220,7 @@ import React, { useState, useEffect, useCallback } from 'react';
             if (servicesRes.error) {
                 toast({ title: "Failed to load services", variant: "destructive", description: servicesRes.error.message });
             } else {
-                const serviceData = servicesRes.data;
+                const serviceData = servicesRes.data || [];
                 const hasDeliveryService = serviceData.some(s => s.id === 4);
                 if (!hasDeliveryService) {
                     const { data: newService, error: newServiceError } = await supabase.from('services').select('*').eq('id', 4).single();
@@ -213,7 +235,7 @@ import React, { useState, useEffect, useCallback } from 'react';
             if (couponsRes.error) {
                 toast({ title: "Failed to load coupons", variant: "destructive", description: couponsRes.error.message });
             } else {
-                setCoupons(couponsRes.data);
+                setCoupons(couponsRes.data || []);
             }
     
             setLoading(false);

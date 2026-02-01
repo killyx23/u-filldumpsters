@@ -1,5 +1,4 @@
-
-    import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
     import { useParams, Link, useSearchParams } from 'react-router-dom';
     import { motion } from 'framer-motion';
     import { supabase } from '@/lib/customSupabaseClient';
@@ -244,4 +243,3 @@
             </motion.div>
         );
     };
-  
