@@ -103,11 +103,11 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
       };
 
       const handleAgreementSign = async () => {
-         const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
+        const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
         const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
-
+      
         const wasVerificationSkipped = addonsData.verificationSkipped;
-
+      
         const pendingBookingPayload = {
           name: bookingData.name,
           email: bookingData.email,
@@ -128,53 +128,51 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
           was_verification_skipped: wasVerificationSkipped,
           verification_notes: addonsData.verificationNotes || null,
         };
-        
+      
         try {
           const { data, error } = await supabase
-            .from('bookings')
-            .insert(pendingBookingPayload)
-            .select('id, customer_id')
-            .single();
-
+            .rpc('create_pending_booking', { payload: pendingBookingPayload });
+      
           if (error) throw error;
-          
-          if(addonsData.licenseImageUrls?.length > 0) {
-              const { error: customerUpdateError } = await supabase
-                .from('customers')
-                .update({
-                  license_plate: addonsData.licensePlate,
-                  license_image_urls: addonsData.licenseImageUrls
-                })
-                .eq('id', data.customer_id);
-
-              if (customerUpdateError) {
-                  console.warn("Could not update customer with license info, but proceeding:", customerUpdateError);
-              }
+      
+  
+          if (addonsData.licenseImageUrls?.length > 0) {
+            const { error: customerUpdateError } = await supabase
+              .from('customers')
+              .update({
+                license_plate: addonsData.licensePlate,
+                license_image_urls: addonsData.licenseImageUrls
+              })
+              .eq('id', data.customer_id);
+      
+            if (customerUpdateError) {
+              console.warn("Could not update customer with license info, but proceeding:", customerUpdateError);
+            }
           }
-
+      
           if (addonsData.equipment.length > 0) {
             const equipmentToDecrement = addonsData.equipment.map(item => ({
               equipment_id: item.dbId,
               quantity: item.quantity
             }));
-
+      
             const { error: decrementError } = await supabase.rpc('decrement_equipment_quantities', {
               items_to_decrement: equipmentToDecrement
             });
-
+      
             if (decrementError) {
-                console.error("Failed to decrement equipment quantities, but proceeding with booking:", decrementError);
-                toast({
-                    title: "Inventory Warning",
-                    description: "Could not update equipment inventory. Please check manually.",
-                    variant: "destructive"
-                });
+              console.error("Failed to decrement equipment quantities, but proceeding with booking:", decrementError);
+              toast({
+                title: "Inventory Warning",
+                description: "Could not update equipment inventory. Please check manually.",
+                variant: "destructive"
+              });
             }
           }
-          
+      
           setBookingId(data.id);
           setStep(4);
-
+      
         } catch (error) {
           toast({
             title: "Booking Error",
@@ -184,7 +182,7 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
           });
           console.error("Error creating pending booking:", error);
         }
-      }
+      };
 
       const handleBack = () => {
         if (step > 0) {

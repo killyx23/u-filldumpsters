@@ -72,9 +72,23 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [dialogContent, setDialogContent] = useState({ title: '', items: [] });
 
+    // Log the bookings prop to check if it's passed correctly
+    console.log('Bookings:', bookings);
+
+    // Log the status of each booking to verify they match expected status values
+    bookings?.forEach(b => console.log('Booking status:', b.status));
+
+    // Filter for flagged bookings
     const flaggedForFollowUp = bookings ? bookings.filter(b => b.status === 'flagged').map(b => ({ ...b, type: 'flagged' })) : [];
+    console.log('Flagged for Follow Up:', flaggedForFollowUp);
+
+    // Filter for pending verification
     const pendingVerification = bookings ? bookings.filter(b => ['pending_verification', 'pending_review', 'pending_payment'].includes(b.status)).map(b => ({ ...b, type: 'verification' })) : [];
+    console.log('Pending Verification:', pendingVerification);  // Log the filtered array here
+
+    // Filter for unread notes items
     const unreadNotesItems = customersWithUnreadNotes ? customersWithUnreadNotes.map(c => ({ ...c, type: 'unread_notes' })) : [];
+    console.log('Unread Notes Items:', unreadNotesItems);
 
     const handleCardClick = (title, items) => {
         setDialogContent({ title, items });
