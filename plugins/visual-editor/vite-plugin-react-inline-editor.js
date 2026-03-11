@@ -12,7 +12,7 @@ import {
 	VITE_PROJECT_ROOT
 } from '../utils/ast-utils.js';
 
-const EDITABLE_HTML_TAGS = ["a", "Button", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
+const EDITABLE_JSX_TAGS = ["a", "Link", "button", "Button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
 
 function parseEditId(editId) {
 	const parts = editId.split(':');
@@ -32,7 +32,7 @@ function parseEditId(editId) {
 	return { filePath, line, column };
 }
 
-function checkTagNameEditable(openingElementNode, editableTagsList) {
+function checkTagNameEditable(openingElementNode, editableTagsList = EDITABLE_JSX_TAGS) {
 	if (!openingElementNode || !openingElementNode.name) return false;
 	const nameNode = openingElementNode.name;
 
@@ -127,7 +127,7 @@ export default function inlineEditPlugin() {
 							}
 
 							// Condition 1: Is the current element tag type editable?
-							const isCurrentElementEditable = checkTagNameEditable(openingNode, EDITABLE_HTML_TAGS);
+							const isCurrentElementEditable = checkTagNameEditable(openingNode, EDITABLE_JSX_TAGS);
 							if (!isCurrentElementEditable) {
 								return;
 							}
@@ -166,7 +166,7 @@ export default function inlineEditPlugin() {
 							if (!shouldBeDisabledDueToChildren && t.isJSXElement(elementNode) && elementNode.children) {
 								const hasEditableJsxChild = elementNode.children.some(child => {
 									if (t.isJSXElement(child)) {
-										return checkTagNameEditable(child.openingElement, EDITABLE_HTML_TAGS);
+										return checkTagNameEditable(child.openingElement, EDITABLE_JSX_TAGS);
 									}
 
 									return false;
@@ -188,17 +188,35 @@ export default function inlineEditPlugin() {
 								return;
 							}
 
-							// Condition 3: Parent is non-editable if AT LEAST ONE child JSXElement is a non-editable type.
+							// Condition 3: Parent is non-editable if it has non-editable, non-icon JSX children.
 							if (t.isJSXElement(elementNode) && elementNode.children && elementNode.children.length > 0) {
+								let hasTextContent = false;
 								let hasNonEditableJsxChild = false;
+								let hasNonSelfClosingChild = false;
+
 								for (const child of elementNode.children) {
-									if (t.isJSXElement(child)) {
-										if (!checkTagNameEditable(child.openingElement, EDITABLE_HTML_TAGS)) {
+									if (t.isJSXText(child)) {
+										if (child.value.trim().length > 0) hasTextContent = true;
+										continue;
+									}
+								if (t.isJSXElement(child)) {
+									const childNode = child.openingElement;
+									if (childNode.selfClosing) {
+										const childName = childNode.name?.name || '';
+										if (!/^[A-Z]/.test(childName) && !checkTagNameEditable(childNode, EDITABLE_JSX_TAGS)) {
 											hasNonEditableJsxChild = true;
-											break;
 										}
+										continue;
+									}
+									hasNonSelfClosingChild = true;
+									if (!checkTagNameEditable(childNode, EDITABLE_JSX_TAGS)) {
+										hasNonEditableJsxChild = true;
 									}
 								}
+								}
+
+								if (!hasTextContent && !hasNonSelfClosingChild) return;
+
 								if (hasNonEditableJsxChild) {
 									const disabledAttribute = t.jsxAttribute(
 										t.jsxIdentifier('data-edit-disabled'),
@@ -221,7 +239,7 @@ export default function inlineEditPlugin() {
 									break;
 								}
 
-								if (checkTagNameEditable(ancestorJsxElementPath.node.openingElement, EDITABLE_HTML_TAGS)) {
+								if (checkTagNameEditable(ancestorJsxElementPath.node.openingElement, EDITABLE_JSX_TAGS)) {
 									return;
 								}
 								currentAncestorCandidatePath = ancestorJsxElementPath.parentPath;
@@ -269,15 +287,15 @@ export default function inlineEditPlugin() {
 						const { editId, newFullText } = JSON.parse(body);
 
 						if (!editId || typeof newFullText === 'undefined') {
-							res.writeHead(400, { 'Content-Type': 'application/json' });
+								res.writeHead(400, { 'Content-Type': 'application/json' });
 							return res.end(JSON.stringify({ error: 'Missing editId or newFullText' }));
-						}
+							}
 
-						const parsedId = parseEditId(editId);
-						if (!parsedId) {
-							res.writeHead(400, { 'Content-Type': 'application/json' });
-							return res.end(JSON.stringify({ error: 'Invalid editId format (filePath:line:column)' }));
-						}
+							const parsedId = parseEditId(editId);
+							if (!parsedId) {
+								res.writeHead(400, { 'Content-Type': 'application/json' });
+								return res.end(JSON.stringify({ error: 'Invalid editId format (filePath:line:column)' }));
+							}
 
 						const { filePath, line, column } = parsedId;
 
@@ -327,11 +345,26 @@ export default function inlineEditPlugin() {
 							if (parentElementNode && t.isJSXElement(parentElementNode)) {
 								beforeCode = generateCode(parentElementNode);
 
-								parentElementNode.children = [];
-								if (newFullText && newFullText.trim() !== '') {
-									const newTextNode = t.jsxText(newFullText);
-									parentElementNode.children.push(newTextNode);
+								let textReplaced = false;
+								parentElementNode.children = parentElementNode.children.reduce((acc, child) => {
+									if (t.isJSXText(child)) {
+										if (!textReplaced && child.value.trim().length > 0 && newFullText && newFullText.trim() !== '') {
+											const leading = child.value.match(/^(\s*)/)[0];
+											const trailing = child.value.match(/(\s*)$/)[0];
+											acc.push(t.jsxText(leading + newFullText.trim() + trailing));
+											textReplaced = true;
+										} else {
+											acc.push(child);
+										}
+										return acc;
+									}
+									acc.push(child);
+									return acc;
+								}, []);
+								if (!textReplaced && newFullText && newFullText.trim() !== '') {
+									parentElementNode.children.push(t.jsxText(newFullText));
 								}
+
 								modified = true;
 								afterCode = generateCode(parentElementNode);
 							}
