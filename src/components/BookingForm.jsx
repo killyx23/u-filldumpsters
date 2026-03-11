@@ -84,27 +84,24 @@ export const BookingForm = ({
   const [totalPrice, setTotalPrice] = useState(0);
 
   const isDelivery = plan.id === 2 && deliveryService;
-  
+
   const currentPlan = useMemo(() => {
-      if (loadingPlans) return null;
-      if (isDelivery) {
-          // Try to find specific delivery plan, fallback to base plan
-          return allPlans.find(p => p.id === 4) || allPlans.find(p => p.id === plan.id) || null;
-      }
-      return allPlans.find(p => p.id === plan.id) || null;
+    if (loadingPlans) return null;
+    if (isDelivery) {
+      return allPlans.find(p => p.id === 4) || allPlans.find(p => p.id === plan.id) || null;
+    }
+    return allPlans.find(p => p.id === plan.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
   const deliveryFeeInfo = useMemo(() => {
     if (!isDelivery || !currentPlan) return null;
-    
-    // If currentPlan is 2 (fallback) or 4, we look for fee. Plan 4 usually has it.
-    // If Plan 4 not found and we are using Plan 2, we might need to look up Plan 4 features from somewhere else or hardcode
+
     const feePlan = allPlans.find(p => p.id === 4) || currentPlan;
-    
+
     const deliveryFeeValue = feePlan.features?.find(f => f.name === 'Delivery Fee')?.value ?? 0;
     const mileageFee = distanceInfo?.mileageFee ?? 0;
     const roundTripMiles = distanceInfo?.roundTripMiles ?? 0;
-  
+
     return {
       deliveryFee: deliveryFeeValue,
       mileageFee: mileageFee,
@@ -116,17 +113,17 @@ export const BookingForm = ({
   const serviceIdForAvailability = currentPlan?.id || plan.id;
 
   useEffect(() => {
-      const fetchPlans = async () => {
-          setLoadingPlans(true);
-          const { data, error } = await supabase.from('services').select('*');
-          if (!error && data) {
-              setAllPlans(data);
-          } else {
-              toast({ title: "Error fetching service details", description: error?.message, variant: "destructive" });
-          }
-          setLoadingPlans(false);
-      };
-      fetchPlans();
+    const fetchPlans = async () => {
+      setLoadingPlans(true);
+      const { data, error } = await supabase.from('services').select('*');
+      if (!error && data) {
+        setAllPlans(data);
+      } else {
+        toast({ title: "Error fetching service details", description: error?.message, variant: "destructive" });
+      }
+      setLoadingPlans(false);
+    };
+    fetchPlans();
   }, []);
 
   useEffect(() => {
@@ -141,7 +138,6 @@ export const BookingForm = ({
     const endDate = formatISO(endOfMonth(month), { representation: 'date' });
 
     try {
-      // We pass isDelivery so the backend knows to return delivery/pickup slots vs pickup/return slots if relevant
       const { data, error } = await supabase.functions.invoke('get-availability', {
         body: { serviceId: serviceIdForAvailability, startDate, endDate, isDelivery }
       });
@@ -189,58 +185,49 @@ export const BookingForm = ({
     let dropOffSlots = [];
     let pickupSlots = [];
 
-    // Helper to correctly select slots based on plan type and delivery status
     const getSlots = (avail, isStart) => {
-        if (!avail) return [];
-        
-        const serviceType = currentPlan.service_type;
-        const id = currentPlan.id;
-        
-        // Logic for Plan 2 (Dump Loader Trailer)
-        if (id === 2) {
-            if (isDelivery) {
-                // If Delivery Service: Start = Drop Off (deliverySlots), End = We Pickup (pickupSlots)
-                // Note: If currentPlan is Plan 4, this block might not be hit if ID is 4, see below
-                return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-            } else {
-                // If Self Pickup: Start = Customer Pickup (pickupSlots), End = Customer Return (returnSlots)
-                return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
-            }
-        }
+      if (!avail) return [];
 
-        // Logic for Plan 4 (Delivery Service wrapper if it exists separately)
-        if (id === 4) {
-             return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-        }
+      const serviceType = currentPlan.service_type;
+      const id = currentPlan.id;
 
-        // Logic for other services
-        if (serviceType === 'window' || serviceType === 'material_delivery') {
-            return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-        } 
-        
-        if (serviceType === 'hourly') {
-            return isStart ? (avail.hourlySlots || []) : (avail.returnSlots || []);
+      if (id === 2) {
+        if (isDelivery) {
+          return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
+        } else {
+          return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
         }
-        
-        // Fallback for any other Daily Rental types
-        if (serviceType === 'daily_rental') {
-             if (isDelivery) {
-                return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-             } else {
-                return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
-             }
-        }
+      }
 
-        // Default fallback
+      if (id === 4) {
         return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
+      }
+
+      if (serviceType === 'window' || serviceType === 'material_delivery') {
+        return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
+      }
+
+      if (serviceType === 'hourly') {
+        return isStart ? (avail.hourlySlots || []) : (avail.returnSlots || []);
+      }
+
+      if (serviceType === 'daily_rental') {
+        if (isDelivery) {
+          return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
+        } else {
+          return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
+        }
+      }
+
+      return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
     };
 
     if (dropOffAvail) {
-        dropOffSlots = getSlots(dropOffAvail, true);
+      dropOffSlots = getSlots(dropOffAvail, true);
     }
 
     if (pickupAvail) {
-        pickupSlots = getSlots(pickupAvail, false);
+      pickupSlots = getSlots(pickupAvail, false);
     }
 
     return {
@@ -275,6 +262,8 @@ export const BookingForm = ({
     }
   };
 
+  // CHANGED: now calls verify-address-and-distance with strictVerify: false
+  // and reads data.distanceInfo instead of data directly
   const calculateAddressBasedFee = useCallback(async () => {
     if (!isDelivery) {
       setDistanceInfo(null);
@@ -290,11 +279,11 @@ export const BookingForm = ({
 
     setCalculatingFee(true);
     try {
-      const { data, error } = await supabase.functions.invoke('get-distance-and-calculate-fee', {
-        body: { address: fullAddress }
+      const { data, error } = await supabase.functions.invoke('verify-address-and-distance', {
+        body: { address: fullAddress, strictVerify: false }
       });
       if (error) throw error;
-      setDistanceInfo(data);
+      setDistanceInfo(data.distanceInfo);
     } catch (error) {
       toast({ title: "Could not calculate delivery fee", description: error.message, variant: "destructive", duration: 30000 });
       setDistanceInfo(null);
@@ -306,7 +295,7 @@ export const BookingForm = ({
   useEffect(() => {
     const handler = setTimeout(() => {
       calculateAddressBasedFee();
-    }, 1000); // Debounce
+    }, 1000);
     return () => clearTimeout(handler);
   }, [calculateAddressBasedFee]);
 
@@ -324,18 +313,18 @@ export const BookingForm = ({
 
       if (isValid(dropOff) && isValid(pickup) && !isBefore(pickup, dropOff)) {
         const dayDiff = differenceInDays(pickup, dropOff) + 1;
-        
-        if (currentPlan.id === 1) { // 16-yard dumpster
+
+        if (currentPlan.id === 1) {
           if (dayDiff === 7) {
             price = 500;
           } else {
             const extraDays = Math.max(0, dayDiff - 1);
             price = parseFloat(currentPlan.base_price) + (extraDays * 50);
           }
-        } else if (currentPlan.id === 2 || currentPlan.id === 4) { // Dump Loader Trailer (with or without delivery)
+        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
           price = parseFloat(currentPlan.base_price) * dayDiff;
         } else {
-           price = parseFloat(currentPlan.base_price); // For other services like Material Delivery
+          price = parseFloat(currentPlan.base_price);
         }
       }
     }
@@ -343,7 +332,7 @@ export const BookingForm = ({
     if (deliveryFeeInfo?.totalFee > 0) {
       price += deliveryFeeInfo.totalFee;
     }
-    
+
     setTotalPrice(price);
   }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, deliveryFeeInfo]);
 
@@ -354,9 +343,9 @@ export const BookingForm = ({
   const isFormValid = useMemo(() => {
     if (!currentPlan) return false;
     const baseValid = agreementAccepted && bookingData.name && bookingData.email && bookingData.phone && bookingData.street && bookingData.city && bookingData.state && bookingData.zip && bookingData.dropOffDate && bookingData.dropOffTimeSlot;
-    
+
     if (currentPlan.id === 3) {
-        return baseValid;
+      return baseValid;
     }
 
     const pickupValid = bookingData.pickupDate && bookingData.pickupTimeSlot;
@@ -391,6 +380,7 @@ export const BookingForm = ({
     }
   };
 
+  // CHANGED: removed serviceType, added strictVerify: true
   const handleFormSubmit = async e => {
     e.preventDefault();
     if (!validatePhoneNumber() || !currentPlan) return;
@@ -403,13 +393,10 @@ export const BookingForm = ({
     setIsVerifying(true);
     const fullAddress = `${bookingData.street}, ${bookingData.city}, ${bookingData.state} ${bookingData.zip}`;
     try {
-      const {
-        data,
-        error
-      } = await supabase.functions.invoke('verify-address-and-distance', {
+      const { data, error } = await supabase.functions.invoke('verify-address-and-distance', {
         body: {
           address: fullAddress,
-          serviceType: currentPlan.id
+          strictVerify: true
         }
       });
       if (error) {
@@ -433,7 +420,7 @@ export const BookingForm = ({
       toast({ title: 'Verification Error', description: err.message, variant: 'destructive', duration: 30000 });
       setIsVerifying(false);
     } finally {
-        setIsVerifying(false);
+      setIsVerifying(false);
     }
   };
 
@@ -441,18 +428,18 @@ export const BookingForm = ({
     setShowDistanceFeeDialog(false);
     proceedToNextStep(false);
   };
-  
+
   const handleProceedWithRisk = () => {
     setAddressWarning(null);
     proceedToNextStep(true);
   };
-  
+
   const handleEmailConfirmed = () => {
     setShowEmailConfirmDialog(false);
     const finalDistanceInfo = { deliveryService: isDelivery, ...distanceInfo, ...deliveryFeeInfo };
     onSubmit(totalPrice, !!addressWarning, finalDistanceInfo, { deliveryService: isDelivery, plan: currentPlan });
   };
-  
+
   const isDropOffLoading = loadingAvailability && (!bookingData.dropOffDate || !availability[format(bookingData.dropOffDate, 'yyyy-MM-dd')]);
   const isPickupLoading = loadingAvailability && (!bookingData.pickupDate || !availability[format(bookingData.pickupDate, 'yyyy-MM-dd')]);
 
@@ -536,7 +523,7 @@ export const BookingForm = ({
     </motion.div>
     <Dialog open={!!addressWarning} onOpenChange={() => setAddressWarning(null)}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-red-400 text-2xl"><AlertTriangle className="mr-3 h-8 w-8" />Address Verification Failed</DialogTitle></DialogHeader><DialogDescription className="my-4 text-base">{addressWarning} Please review your address details to ensure they are correct.</DialogDescription><div className="bg-red-900/30 border border-red-500/50 p-4 rounded-md text-sm"><p className="font-bold text-red-300">Disclaimer and Assumption of Risk</p><p className="text-red-200 mt-2">By proceeding with an unverified or potentially incorrect address, you acknowledge and agree that this may result in significant delays or the cancellation of your delivery. You hereby assume all risks and associated costs, including but not to limited to non-refundable fees, that may arise from providing an inaccurate or unserviceable address.</p></div><DialogFooter className="gap-2 sm:justify-between mt-4"><Button onClick={() => setAddressWarning(null)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">Review Address</Button><Button onClick={handleProceedWithRisk} variant="destructive">I Understand & Continue</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={!!phoneWarning} onOpenChange={() => setPhoneWarning(null)}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-red-400 text-2xl"><AlertTriangle className="mr-3 h-8 w-8" />Invalid Phone Number</DialogTitle></DialogHeader><DialogDescription className="my-4 text-base">{phoneWarning}</DialogDescription><DialogFooter><Button onClick={() => setPhoneWarning(null)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">OK</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={showDistanceFeeDialog} onOpenChange={setShowDistanceFeeDialog}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-yellow-400 text-2xl"><Truck className="mr-3 h-8 w-8" />Extended Delivery Service</DialogTitle></DialogHeader><div className="my-4 text-base"><p className="text-blue-200">We're happy to extend our service to your location! To help cover the additional travel, a one-time extended delivery fee will be applied to your order.</p>{distanceInfo?.miles && distanceInfo?.fee !== undefined ? (<div className="my-4 p-4 bg-white/10 rounded-lg text-center"><p className="text-sm text-blue-200">Distance from our location:</p><p className="text-2xl font-bold text-white">{distanceInfo.miles.toFixed(1)} miles</p><p className="text-sm text-blue-200 mt-2">Surcharge:</p><p className="text-2xl font-bold text-green-400">${distanceInfo.fee.toFixed(2)}</p><p className="text-xs text-gray-400">($0.80 per mile over 30 miles)</p></div>) : (<div className="flex justify-center p-4"><Loader2 className="h-8 w-8 animate-spin"/></div>)}<p className="text-blue-200">This fee allows us to serve a wider community. Please click below to accept and continue with your booking.</p></div><DialogFooter><Button onClick={handleAcceptDistanceFee} className="bg-yellow-500 text-black hover:bg-yellow-600">Accept & Continue</Button></DialogFooter></DialogContent></Dialog>
+    <Dialog open={showDistanceFeeDialog} onOpenChange={setShowDistanceFeeDialog}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-yellow-400 text-2xl"><Truck className="mr-3 h-8 w-8" />Extended Delivery Service</DialogTitle></DialogHeader><div className="my-4 text-base"><p className="text-blue-200">We're happy to extend our service to your location! To help cover the additional travel, a one-time extended delivery fee will be applied to your order.</p>{distanceInfo?.miles && distanceInfo?.fee !== undefined ? (<div className="my-4 p-4 bg-white/10 rounded-lg text-center"><p className="text-sm text-blue-200">Distance from our location:</p><p className="text-2xl font-bold text-white">{distanceInfo.miles.toFixed(1)} miles</p><p className="text-sm text-blue-200 mt-2">Surcharge:</p><p className="text-2xl font-bold text-green-400">${distanceInfo.fee.toFixed(2)}</p><p className="text-xs text-gray-400">($0.80 per mile over 30 miles)</p></div>) : (<div className="flex justify-center p-4"><Loader2 className="h-8 w-8 animate-spin" /></div>)}<p className="text-blue-200">This fee allows us to serve a wider community. Please click below to accept and continue with your booking.</p></div><DialogFooter><Button onClick={handleAcceptDistanceFee} className="bg-yellow-500 text-black hover:bg-yellow-600">Accept & Continue</Button></DialogFooter></DialogContent></Dialog>
     <Dialog open={showEmailConfirmDialog} onOpenChange={setShowEmailConfirmDialog}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-yellow-400 text-2xl"><ShieldCheck className="mr-3 h-8 w-8" />Please Confirm Your Email</DialogTitle></DialogHeader><div className="my-4 text-base"><p className="text-blue-200">Please take a moment to verify that your email address is correct before proceeding:</p><p className="font-bold text-white text-lg my-3 text-center bg-white/10 p-3 rounded-md">{bookingData.email}</p><div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-md text-sm mt-4"><p className="font-bold text-blue-300 mb-2">Important Information Disclaimer</p><p className="text-blue-200">Your booking confirmation, which contains critical rental details, will be sent to this email address. This includes the precise pickup location for the trailer, access codes for the security lock, and essential instructions regarding proper equipment usage and safety protocols. An incorrect email address will result in you not receiving this vital information. By confirming, you acknowledge the accuracy of this email for receiving all official correspondence related to your rental.</p></div></div><DialogFooter className="gap-2 sm:justify-end"><Button onClick={() => setShowEmailConfirmDialog(false)} variant="outline" className="border-white/50 text-white hover:bg-white/20 hover:text-white">Edit Email</Button><Button onClick={handleEmailConfirmed} className="bg-yellow-500 text-black hover:bg-yellow-600">Email is Correct, Continue</Button></DialogFooter></DialogContent></Dialog>
   </>;
 };
