@@ -67,6 +67,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
             setBooking(bookingData.booking);
             setStatus('success');
             // Trigger email sending
+            console.log('Invoking email with bookingId:', bookingData.booking.id);
             supabase.functions.invoke('send-booking-confirmation', { body: { bookingId: bookingData.booking.id } })
               .catch(err => console.error("Failed to send confirmation email on page load:", err));
 

@@ -106,7 +106,7 @@ const stripePromise = loadStripe("pk_test_51RqqSuEtrZrskUBvkxDA2WoWo0ceA2cHyFQBB
         const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
         const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
       
-        const wasVerificationSkipped = addonsData.verificationSkipped;
+        const wasVerificationSkipped = addonsData.verificationSkipped || addonsData.addressVerificationSkipped;
       
         const pendingBookingPayload = {
           name: bookingData.name,
