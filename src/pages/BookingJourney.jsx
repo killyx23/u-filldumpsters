@@ -106,7 +106,7 @@ const stripePromise = loadStripe("REDACTED_STRIPE_PUBLISHABLE_KEY");
         const dropOffDate = bookingData.dropOffDate ? new Date(bookingData.dropOffDate) : new Date();
         const pickupDate = bookingData.pickupDate ? new Date(bookingData.pickupDate) : new Date();
       
-        const wasVerificationSkipped = addonsData.verificationSkipped;
+        const wasVerificationSkipped = addonsData.verificationSkipped || addonsData.addressVerificationSkipped;
       
         const pendingBookingPayload = {
           name: bookingData.name,
