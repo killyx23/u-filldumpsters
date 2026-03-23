@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { AlertTriangle, ClipboardSignature as Signature, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ClipboardSignature as Signature, ArrowLeft, Loader2, ArrowRight } from 'lucide-react';
 
 const AgreementText = () => (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
@@ -108,23 +109,41 @@ const AgreementText = () => (
     </div>
 );
 
-export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData }) => {
+export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProcessing }) => {
     const [signature, setSignature] = useState('');
-    const [agreed, setAgreed] = useState(false);
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [error, setError] = useState('');
 
+    const expectedName = `${bookingData.firstName || ''} ${bookingData.lastName || ''}`.trim();
+
+    // Debugging logs to verify state changes
+    useEffect(() => {
+        console.log('[Agreement Debug] Signature:', signature);
+        console.log('[Agreement Debug] Agreed to Terms:', agreedToTerms);
+        console.log('[Agreement Debug] Expected Name:', expectedName);
+    }, [signature, agreedToTerms, expectedName]);
+
     const handleSubmit = () => {
-        if (signature.trim().toLowerCase() !== bookingData.name.trim().toLowerCase()) {
-            setError('Signature must exactly match the name on the booking.');
+        const trimmedSignature = signature.trim();
+        
+        if (trimmedSignature.toLowerCase() !== expectedName.toLowerCase()) {
+            setError(`Signature must exactly match the name on the booking: ${expectedName}`);
             return;
         }
-        if (!agreed) {
+        
+        if (!agreedToTerms) {
             setError('You must check the box to agree to the terms.');
             return;
         }
+
         setError('');
+        console.log('[Agreement] Validation passed, proceeding to accept.');
         onAccept();
     };
+
+    // Button disabled state logic as requested: 
+    // Disabled only if signature is empty (after trim) OR checkbox not checked
+    const isButtonDisabled = !signature.trim() || !agreedToTerms || isProcessing;
 
     return (
         <motion.div
@@ -154,42 +173,63 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData }) => {
                             <Signature className="mr-2 h-5 w-5 text-yellow-400"/>
                             E-Signature
                         </Label>
-                        <p className="text-sm text-blue-200 mb-2">Please type your full name as it appears on the booking: <strong className="text-yellow-300">{bookingData.name}</strong></p>
+                        <p className="text-sm text-blue-200 mb-2">Please type your full name as it appears on the booking: <strong className="text-yellow-300">{expectedName}</strong></p>
                         <Input 
                             id="signature"
                             type="text"
                             placeholder="Type your full name here"
                             value={signature}
-                            onChange={(e) => setSignature(e.target.value)}
-                            className="bg-white/10 border-white/30 text-white placeholder-blue-200"
+                            onChange={(e) => {
+                                setSignature(e.target.value);
+                                if (error) setError(''); // Clear error on change
+                            }}
+                            className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400"
                         />
                     </div>
 
                     <div className="flex items-center space-x-3 pt-2">
                         <Checkbox 
                             id="terms-agree" 
-                            checked={agreed}
-                            onCheckedChange={setAgreed}
-                            className="border-white/50 data-[state=checked]:bg-yellow-400"
+                            checked={agreedToTerms}
+                            onCheckedChange={(checked) => {
+                                setAgreedToTerms(checked);
+                                if (error) setError(''); // Clear error on change
+                            }}
+                            className="border-white/50 data-[state=checked]:bg-yellow-400 h-6 w-6"
                         />
-                        <Label htmlFor="terms-agree" className="text-sm text-white">
+                        <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
                             I have read, understood, and agree to be bound by the entire Rental Agreement.
                         </Label>
                     </div>
 
                     {error && (
-                        <div className="flex items-center text-red-400 text-sm bg-red-900/50 p-3 rounded-md">
-                            <AlertTriangle className="h-4 w-4 mr-2" />
+                        <motion.div 
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="flex items-center text-red-400 text-sm bg-red-900/50 p-3 rounded-md border border-red-500/30"
+                        >
+                            <AlertTriangle className="h-4 w-4 mr-2 shrink-0" />
                             {error}
-                        </div>
+                        </motion.div>
                     )}
 
                     <Button 
                         onClick={handleSubmit} 
-                        disabled={!agreed || !signature}
-                        className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isButtonDisabled}
+                        className={`w-full py-6 text-xl font-bold transition-all duration-300 transform active:scale-[0.98] ${
+                            isButtonDisabled 
+                            ? 'bg-white/10 text-white/30 cursor-not-allowed border border-white/10' 
+                            : 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-xl shadow-green-900/40 border border-green-400/30'
+                        }`}
                     >
-                        Agree & Proceed to Payment
+                        {isProcessing ? (
+                            <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+                        ) : null}
+                        {isProcessing ? 'Processing...' : (
+                            <div className="flex items-center justify-center">
+                                Agree & Continue <ArrowRight className="ml-2 h-6 w-6" />
+                            </div>
+                        )}
                     </Button>
                 </div>
             </div>

@@ -1,3 +1,4 @@
+
 import React from 'react';
     import { format, parseISO, isValid, differenceInDays, addHours } from 'date-fns';
     import { Key, Repeat, FileSignature, Clock, ShieldCheck, AlertTriangle } from 'lucide-react';
@@ -34,39 +35,45 @@ import React from 'react';
       { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
     ];
 
-    const AgreementText = ({ booking }) => (
-        <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
-            <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
-            <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
-            
-            <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
-                <p><strong>Liability for Equipment:</strong> Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.</p>
-                <p className="mt-1"><strong>Prohibited Materials:</strong> Customer agrees not to place any hazardous materials (including paints, chemicals, oils, tires, batteries) in the equipment. Fees and penalties apply for violations.</p>
-                <p className="mt-1"><strong>Property Damage:</strong> Customer assumes all risk of damage to their property (driveways, lawns, etc.) from equipment placement. U-Fill Dumpsters LLC is not liable for such damages.</p>
-            </div>
+    const AgreementText = ({ booking }) => {
+        const displayName = (booking?.first_name && booking?.last_name) 
+            ? `${booking.first_name} ${booking.last_name}` 
+            : booking?.name;
 
-            <div className="flex items-center justify-between text-sm mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center">
-                    <ShieldCheck className="h-6 w-6 text-green-600 mr-3" />
-                    <div>
-                        <p className="font-bold text-green-800">Electronically Signed & Agreed</p>
-                        <p className="text-xs text-green-700">by {booking?.name}</p>
+        return (
+            <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
+                <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
+                <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
+                
+                <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
+                    <p><strong>Liability for Equipment:</strong> Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.</p>
+                    <p className="mt-1"><strong>Prohibited Materials:</strong> Customer agrees not to place any hazardous materials (including paints, chemicals, oils, tires, batteries) in the equipment. Fees and penalties apply for violations.</p>
+                    <p className="mt-1"><strong>Property Damage:</strong> Customer assumes all risk of damage to their property (driveways, lawns, etc.) from equipment placement. U-Fill Dumpsters LLC is not liable for such damages.</p>
+                </div>
+
+                <div className="flex items-center justify-between text-sm mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center">
+                        <ShieldCheck className="h-6 w-6 text-green-600 mr-3" />
+                        <div>
+                            <p className="font-bold text-green-800">Electronically Signed & Agreed</p>
+                            <p className="text-xs text-green-700">by {displayName}</p>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
+                        <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
                     </div>
                 </div>
-                <div className="text-right">
-                    <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
-                    <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
-                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
 
     export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         if (!booking || !booking.customers || !booking.plan) return null;
 
         const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues } = booking;
-        const { name, email, phone, street, city, state, zip, customer_id_text } = customers;
+        const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
         const isDelivery = addons?.deliveryService;
         const coupon = addons?.coupon;
         
@@ -75,7 +82,8 @@ import React from 'react';
         const isSelfServiceTrailer = currentPlan.service_type === 'hourly' && !isDelivery;
         const isWindowService = currentPlan.service_type === 'window' || currentPlan.service_type === 'material_delivery';
 
-        const fullAddress = `${street}, ${city}, ${state} ${zip}`;
+        const displayName = (first_name && last_name) ? `${first_name} ${last_name}` : name;
+        const fullAddress = street && city ? `${street}, ${city}, ${state} ${zip}` : "N/A";
 
         const isCancelledAndRefunded = bookingStatus === 'Cancelled' && refund_details;
         const isPendingReview = bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
@@ -107,7 +115,7 @@ import React from 'react';
         }
 
         const deliveryCharge = isDelivery ? (addons.distanceInfo?.deliveryFee || 0) : 0;
-        const mileageFee = isDelivery ? (addons.distanceInfo?.mileageFee || 0) : 0;
+        const mileageFee = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
         let addonsTotal = 0;
         if (addons.insurance === 'accept') addonsTotal += addonPrices.insurance;
@@ -133,6 +141,7 @@ import React from 'react';
         const discountAmount = getDiscountAmount();
         
         const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
+        const freeMiles = currentPlan.id === 1 ? 30 : 0;
 
         return (
             <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -149,8 +158,8 @@ import React from 'react';
                     <section className="grid grid-cols-2 gap-8 my-6">
                         <div>
                             <h3 className="font-bold text-lg mb-2">Billed To:</h3>
-                            <p>{name}</p>
-                            <p>{(currentPlan.id === 1 || isDelivery) ? fullAddress : "N/A (Self-Service Trailer Rental)"}</p>
+                            <p>{displayName}</p>
+                            <p>{fullAddress}</p>
                             <p>{email}</p>
                             <p>{phone}</p>
                         </div>
@@ -222,7 +231,7 @@ import React from 'react';
                                     <tr className="border-b"><td className="py-2 pl-4">Delivery & Pickup Fee</td><td className="text-right py-2">${deliveryCharge.toFixed(2)}</td></tr>
                                 )}
                                 {mileageFee > 0 && (
-                                    <tr className="border-b"><td className="py-2 pl-4">{`Mileage Fee (${(addons.distanceInfo?.roundTripMiles || 0).toFixed(1)} miles)`}</td><td className="text-right py-2">${mileageFee.toFixed(2)}</td></tr>
+                                    <tr className="border-b"><td className="py-2 pl-4">{`Mileage Fee (${(addons.distanceInfo?.miles || addons.distanceInfo?.roundTripMiles || addons.deliveryDistance || 0).toFixed(1)} miles total${freeMiles > 0 ? `, ${freeMiles} free` : ''})`}</td><td className="text-right py-2">${mileageFee.toFixed(2)}</td></tr>
                                 )}
                                 {addons.insurance === 'accept' && (
                                     <tr className="border-b"><td className="py-2 pl-4">Rental Insurance</td><td className="text-right py-2">${addonPrices.insurance.toFixed(2)}</td></tr>

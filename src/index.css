@@ -1,3 +1,4 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -134,4 +135,85 @@
 }
 .animate-ping-slow-outer {
     animation: ping-slow-outer 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Custom Scrollbar for Modal and Lists */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* Distance calculation specific styles */
+.distance-loading {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.error-message {
+  transition: all 0.3s ease;
+}
+
+.retry-btn {
+  transition: all 0.2s ease;
+}
+
+.retry-btn:hover {
+  transform: translateY(-1px);
+}
+
+.retry-btn:active {
+  transform: translateY(1px);
+}
+
+.summary-container .summary-item {
+  transition: all 0.2s ease;
+}
+
+.summary-container .summary-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 0.25rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  margin-left: -0.25rem;
+  margin-right: -0.25rem;
+}
+
+.interactive-hover {
+  transition: all 0.2s ease-in-out;
+}
+
+.interactive-hover:hover {
+  transform: translateY(-1px);
+}
+
+.interactive-hover:active {
+  transform: translateY(1px);
+}
+
+/* Layering utilities for fixed layout components */
+.z-tooltip {
+  z-index: 9999 !important;
+  position: relative;
+}
+
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+}
+
+.z-panel {
+  z-index: 40 !important;
+  position: relative;
 }

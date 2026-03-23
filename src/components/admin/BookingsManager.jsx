@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Truck, ArrowUpCircle, User, Sun, Cloud, CloudRain, Snowflake, Bell } from 'lucide-react';
+import { Loader2, Truck, ArrowUpCircle, User, Sun, Cloud, CloudRain, Snowflake, Bell, ShieldAlert } from 'lucide-react';
 import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth, startOfMonth, isSameMonth } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import FullCalendar from '@fullcalendar/react';
@@ -23,6 +23,9 @@ const DailyTaskCard = ({ title, icon, bookings, onBookingClick }) => (
                         <div className="flex items-center">
                             <User className="h-4 w-4 mr-2 text-blue-300" />
                             <p className="font-bold text-white truncate">{booking.customers.name}</p>
+                            {booking.addons?.verificationFailed && (
+                                <ShieldAlert className="h-4 w-4 ml-2 text-orange-400" title="Address verification failed" />
+                            )}
                         </div>
                         <StatusBadge status={booking.status} />
                     </div>
@@ -176,7 +179,8 @@ export const BookingsManager = ({ initialBookings }) => {
             backgroundColor: getEventColor(booking),
             borderColor: getEventColor(booking),
             extendedProps: {
-                customerId: booking.customer_id
+                customerId: booking.customer_id,
+                verificationFailed: booking.addons?.verificationFailed === true
             }
         }));
 
@@ -209,8 +213,11 @@ export const BookingsManager = ({ initialBookings }) => {
                         </div>
                         <div className="fc-daygrid-day-events-custom">
                             {dayEvents.slice(0, 2).map(event => (
-                                <div key={event.id} className="fc-event-custom" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
+                                <div key={event.id} className="fc-event-custom flex items-center justify-between" style={{ backgroundColor: event.backgroundColor }}>
+                                    <span className="truncate">{event.title}</span>
+                                    {event.extendedProps.verificationFailed && (
+                                        <ShieldAlert className="h-3 w-3 ml-1 flex-shrink-0 text-orange-300" />
+                                    )}
                                 </div>
                             ))}
                             {dayEvents.length > 2 && (
@@ -224,8 +231,11 @@ export const BookingsManager = ({ initialBookings }) => {
                         <div className="font-bold text-lg mb-2">{format(dayRenderInfo.date, 'PPP')}</div>
                         <div className="space-y-2 max-h-60 overflow-y-auto">
                             {dayEvents.map(event => (
-                                <div key={event.id} className="p-2 rounded-md" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
+                                <div key={event.id} className="p-2 rounded-md flex items-center justify-between" style={{ backgroundColor: event.backgroundColor }}>
+                                    <span>{event.title}</span>
+                                    {event.extendedProps.verificationFailed && (
+                                        <ShieldAlert className="h-4 w-4 ml-2 text-orange-300" title="Address verification failed" />
+                                    )}
                                 </div>
                             ))}
                         </div>

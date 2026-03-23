@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, LogOut, User, Calendar, Star, MessageSquare, Truck, Edit, Save, X, Send, Paperclip, Home, Mail, Phone, Key, AlertTriangle, Info, CheckCircle, XCircle, Smile, FileText, Upload, ShieldCheck, DollarSign, Bell } from 'lucide-react';
+import { Loader2, LogOut, User, Calendar, Star, MessageSquare, Truck, Edit, Save, X, Send, Paperclip, Home, Mail, Phone, Key, AlertTriangle, Info, CheckCircle, XCircle, Smile, FileText, Upload, ShieldCheck, DollarSign, Bell, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +25,7 @@ import { generateTimeSlotOptions } from '@/components/admin/availability/time-he
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import EmojiPicker from 'emoji-picker-react';
 import { VerificationManager } from '@/components/customer-portal/VerificationManager';
+import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
 
 const RescheduleDialog = ({ booking, isOpen, onOpenChange, onUpdate }) => {
     const [step, setStep] = useState(1);
@@ -665,8 +667,15 @@ const MyCalendar = ({ bookings }) => {
 const ProfileSection = ({ customer, onUpdate }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [addressAutocompleteUsed, setAddressAutocompleteUsed] = useState(true);
+    
+    // Safely extract first/last name if null by splitting 'name' field
+    const displayFirstName = customer.first_name || (customer.name ? customer.name.split(' ')[0] : '');
+    const displayLastName = customer.last_name || (customer.name ? customer.name.substring(customer.name.indexOf(' ') + 1) : '');
+
     const [formData, setFormData] = useState({
-        name: customer.name,
+        first_name: displayFirstName,
+        last_name: displayLastName,
         email: customer.email,
         phone: customer.phone,
         street: customer.street,
@@ -678,13 +687,48 @@ const ProfileSection = ({ customer, onUpdate }) => {
     const handleInputChange = (e) => {
         const { id, value } = e.target;
         setFormData(prev => ({ ...prev, [id]: value }));
+        if (['street', 'city', 'state', 'zip'].includes(id)) {
+            setAddressAutocompleteUsed(false);
+        }
+    };
+
+    const handleAddressSelect = (addressDetails) => {
+        setFormData(prev => ({
+            ...prev,
+            street: addressDetails.street || prev.street,
+            city: addressDetails.city || prev.city,
+            state: addressDetails.state || prev.state,
+            zip: addressDetails.zip || prev.zip
+        }));
+        setAddressAutocompleteUsed(true);
+        toast({ title: "Address Populated", description: "Address details updated from Google Maps." });
     };
 
     const handleSave = async () => {
+        if (!formData.first_name || !formData.last_name) {
+            toast({ title: 'Missing Name', description: 'Please provide both first and last name.', variant: 'destructive' });
+            return;
+        }
+
+        if (!formData.street || !formData.city || !formData.state || !formData.zip) {
+            toast({ title: 'Missing Address', description: 'Please fill out all address fields.', variant: 'destructive' });
+            return;
+        }
+
+        if (!addressAutocompleteUsed) {
+            toast({ title: 'Address Not Verified', description: 'Please select an address from the suggestions to verify it.', variant: 'destructive' });
+            return;
+        }
+
         setIsSaving(true);
+        const computedFullName = `${formData.first_name} ${formData.last_name}`.trim();
         const { error } = await supabase
             .from('customers')
-            .update({ ...formData })
+            .update({ 
+                ...formData, 
+                name: computedFullName,
+                unverified_address: false 
+            })
             .eq('id', customer.id);
 
         if (error) {
@@ -693,6 +737,7 @@ const ProfileSection = ({ customer, onUpdate }) => {
             toast({ title: "Profile Updated!" });
             onUpdate();
             setIsEditing(false);
+            setAddressAutocompleteUsed(true);
         }
         setIsSaving(false);
     };
@@ -702,10 +747,10 @@ const ProfileSection = ({ customer, onUpdate }) => {
             <div className="flex-shrink-0 h-5 w-5 text-blue-200 mt-1">{icon}</div>
             <div>
                 <p className="text-sm font-semibold text-blue-300">{label}</p>
-                {isEditing && ['name', 'phone', 'street', 'city', 'state', 'zip'].includes(id) ? (
-                    <Input id={id} value={value} onChange={handleInputChange} className="bg-white/20 text-base" />
+                {isEditing && ['first_name', 'last_name', 'phone', 'city', 'state', 'zip'].includes(id) ? (
+                    <Input id={id} value={value} onChange={handleInputChange} className="bg-white/20 text-base mt-1" />
                 ) : (
-                    <div className="text-base text-white break-all">{value}</div>
+                    <div className="text-base text-white break-all mt-1">{value}</div>
                 )}
             </div>
         </div>
@@ -721,20 +766,55 @@ const ProfileSection = ({ customer, onUpdate }) => {
                 {isEditing ? (
                     <div className="flex gap-2">
                         <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Save
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setIsEditing(false)}><X className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => { setIsEditing(false); setAddressAutocompleteUsed(true); }}><X className="h-4 w-4" /></Button>
                     </div>
                 ) : (
                     <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}><Edit className="mr-2 h-4 w-4" /> Edit</Button>
                 )}
             </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <DetailItem icon={<User />} label="Name" value={formData.name} id="name" />
+                <DetailItem icon={<User />} label="First Name" value={formData.first_name} id="first_name" />
+                <DetailItem icon={<User />} label="Last Name" value={formData.last_name} id="last_name" />
                 <DetailItem icon={<Mail />} label="Email" value={formData.email} id="email" />
                 <DetailItem icon={<Phone />} label="Phone" value={formData.phone} id="phone" />
                 <DetailItem icon={<Key />} label="Customer ID" value={customer.customer_id_text} id="customer_id_text" />
-                <DetailItem icon={<Home />} label="Address" value={`${formData.street}, ${formData.city}, ${formData.state} ${formData.zip}`} id="street" />
+                
+                <div className="md:col-span-2">
+                    {isEditing ? (
+                        <div className="space-y-4 bg-black/20 p-4 rounded-lg border border-white/10">
+                            <Label className="text-yellow-400 font-semibold flex items-center mb-2">
+                                <MapPin className="w-4 h-4 mr-2"/> Address Verification
+                            </Label>
+                            <GooglePlacesAutocomplete 
+                                value={formData.street} 
+                                onChange={(val) => handleInputChange({ target: { id: 'street', value: val }})} 
+                                onAddressSelect={handleAddressSelect} 
+                                placeholder="Search for address..." 
+                                required 
+                            />
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <DetailItem icon={<MapPin />} label="City" value={formData.city} id="city" />
+                                <DetailItem icon={<MapPin />} label="State" value={formData.state} id="state" />
+                                <DetailItem icon={<MapPin />} label="ZIP" value={formData.zip} id="zip" />
+                            </div>
+                        </div>
+                    ) : (
+                         <div className="flex items-start space-x-3">
+                            <div className="flex-shrink-0 h-5 w-5 text-blue-200 mt-1"><Home /></div>
+                            <div>
+                                <p className="text-sm font-semibold text-blue-300">Address</p>
+                                <div className="text-base text-white break-all mt-1">{`${formData.street}, ${formData.city}, ${formData.state} ${formData.zip}`}</div>
+                                {customer.unverified_address ? (
+                                    <span className="flex items-center text-xs text-orange-400 mt-1"><AlertTriangle className="w-3 h-3 mr-1"/> Unverified Address</span>
+                                ) : (
+                                    <span className="flex items-center text-xs text-green-400 mt-1"><CheckCircle className="w-3 h-3 mr-1"/> Verified</span>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
             </CardContent>
         </Card>
     );
@@ -1085,11 +1165,13 @@ export default function CustomerPortal() {
     const toReview = sortedBookings.filter(b => b && (b.status === 'Completed' || b.status === 'flagged') && (!b.reviews || b.reviews.length === 0));
     const existingReviews = sortedBookings.filter(b => b && b.reviews && b.reviews.length > 0).flatMap(b => b.reviews.map(review => ({ ...review, booking: b })));
     const awaitingCompletion = sortedBookings.filter(b => b && isFuture(parseISO(b.pickup_date)) && b.status !== 'Completed' && b.status !== 'Cancelled');
+    
+    const displayFirstName = customerData.first_name || (customerData.name ? customerData.name.split(' ')[0] : 'Valued Customer');
 
     return (
         <div className="container mx-auto py-16 px-4">
             <div className="flex justify-between items-center mb-8">
-                <h1 className="text-4xl font-bold text-white">Welcome, {customerData.name}</h1>
+                <h1 className="text-4xl font-bold text-white">Welcome, {displayFirstName}</h1>
                 <Button onClick={handleSignOut} variant="outline"><LogOut className="mr-2 h-4 w-4" /> Sign Out</Button>
             </div>
 
