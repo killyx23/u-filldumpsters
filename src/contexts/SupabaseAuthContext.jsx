@@ -1,108 +1,132 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
-    import { supabase } from '@/lib/customSupabaseClient';
-    import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/lib/customSupabaseClient';
+import { useToast } from '@/hooks/use-toast';
 
-    const AuthContext = createContext(undefined);
+const AuthContext = createContext(undefined);
 
-    export const AuthProvider = ({ children }) => {
-      const navigate = useNavigate();
-      const [user, setUser] = useState(null);
-      const [session, setSession] = useState(null);
-      const [loading, setLoading] = useState(true);
-      const [isAdmin, setIsAdmin] = useState(false);
+export const AuthProvider = ({ children }) => {
+  const { toast } = useToast();
 
-      const handleSession = useCallback(async (currentSession) => {
-        setSession(currentSession);
-        const currentUser = currentSession?.user ?? null;
-        
-        if (currentUser) {
-          setUser(currentUser);
-          const isAdminStatus = currentUser.user_metadata?.is_admin || false;
-          setIsAdmin(isAdminStatus);
+  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-          if (!currentUser.user_metadata?.customer_db_id) {
-            const { data: customer, error } = await supabase
-              .from('customers')
-              .select('id')
-              .eq('user_id', currentUser.id)
-              .single();
+  const handleSession = useCallback(async (session) => {
+    console.log("[AuthContext] Handling session update:", session ? "Session found" : "No session");
+    setSession(session);
+    setUser(session?.user ?? null);
+    
+    // Check if the user has the is_admin flag in their metadata
+    const adminStatus = session?.user?.user_metadata?.is_admin === true;
+    setIsAdmin(adminStatus);
+    
+    setLoading(false);
+  }, []);
 
-            if (customer && !error) {
-              const { data: { user: updatedUser }, error: updateUserError } = await supabase.auth.updateUser({
-                data: { ...currentUser.user_metadata, customer_db_id: customer.id }
-              });
-              if (updateUserError) {
-                console.error("Failed to update user metadata:", updateUserError);
-              } else if (updatedUser) {
-                setUser(updatedUser);
-              }
-            }
-          }
-        } else {
-          setUser(null);
-          setIsAdmin(false);
-        }
-        setLoading(false);
-      }, []);
+  useEffect(() => {
+    let mounted = true;
 
-      useEffect(() => {
-        const getInitialSession = async () => {
-          const { data: { session: initialSession } } = await supabase.auth.getSession();
-          await handleSession(initialSession);
-        };
-
-        getInitialSession();
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-          async (_event, session) => {
-            await handleSession(session);
-          }
-        );
-
-        return () => {
-          subscription.unsubscribe();
-        };
-      }, [handleSession]);
-
-      const signOut = useCallback(async () => {
-        setLoading(true);
-        const { error } = await supabase.auth.signOut();
-        if (error) {
-          console.error("Sign out error:", error);
-        }
-        // Force state update regardless of session change event
-        setUser(null);
-        setSession(null);
-        setIsAdmin(false);
-        
-        // This is a bit of a hack to ensure we clear any other sessions
-        // A more robust solution might involve custom logic with multiple storage keys
-        // But for this use-case, this should prevent logout loops.
-        Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('sb-')) {
-                localStorage.removeItem(key);
-            }
-        });
-
-        navigate('/login', { replace: true });
-        setLoading(false);
-      }, [navigate]);
-
-      const value = useMemo(() => ({
-        user,
-        session,
-        isAdmin,
-        loading,
-        signOut,
-      }), [user, session, isAdmin, loading, signOut]);
-
-      return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-    };
-
-    export const useAuth = () => {
-      const context = useContext(AuthContext);
-      if (context === undefined) {
-        throw new Error('useAuth must be used within an AuthProvider');
+    const getSession = async () => {
+      console.log("[AuthContext] Getting initial session...");
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error("[AuthContext] Error getting session:", error);
       }
-      return context;
+      if (mounted) {
+        handleSession(session);
+      }
     };
+
+    getSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log(`[AuthContext] Auth state changed: ${event}`);
+        if (mounted) {
+          handleSession(session);
+        }
+      }
+    );
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [handleSession]);
+
+  const signUp = useCallback(async (email, password, options) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options,
+    });
+
+    if (error) {
+      toast({
+        variant: "destructive",
+        title: "Sign up Failed",
+        description: error.message || "Something went wrong",
+      });
+    }
+
+    return { error };
+  }, [toast]);
+
+  const signIn = useCallback(async (email, password) => {
+    console.log("[AuthContext] Attempting sign in...");
+    const { error, data } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      console.error("[AuthContext] Sign in error:", error);
+      toast({
+        variant: "destructive",
+        title: "Sign in Failed",
+        description: error.message || "Something went wrong",
+      });
+    } else {
+      console.log("[AuthContext] Sign in successful, waiting for auth state change event...");
+    }
+
+    return { error, data };
+  }, [toast]);
+
+  const signOut = useCallback(async () => {
+    console.log("[AuthContext] Attempting sign out...");
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("[AuthContext] Sign out error:", error);
+      toast({
+        variant: "destructive",
+        title: "Sign out Failed",
+        description: error.message || "Something went wrong",
+      });
+    }
+
+    return { error };
+  }, [toast]);
+
+  const value = useMemo(() => ({
+    user,
+    session,
+    loading,
+    isAdmin,
+    signUp,
+    signIn,
+    signOut,
+  }), [user, session, loading, isAdmin, signUp, signIn, signOut]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

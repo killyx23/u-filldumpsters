@@ -19,9 +19,11 @@ const StarRating = ({ rating }) => (
 );
 
 const ReviewCard = ({ review, onReadMore }) => {
+    // Safely access nested properties to prevent crashes
     const isDeliveryTrailer = review.bookings?.plan?.id === 2 && review.bookings?.addons?.isDelivery;
-    const serviceName = isDeliveryTrailer ? 'Dump Loader Trailer Rental Service with Delivery' : review.bookings?.plan?.name || 'Service';
+    const serviceName = review.bookings?.plan?.name ? (isDeliveryTrailer ? 'Dump Loader Trailer Rental Service with Delivery' : review.bookings.plan.name) : 'Service';
     const isLongReview = review.content.length > 120;
+    const customerName = review.customers?.name || 'Valued Customer';
 
     return (
         <motion.div
@@ -42,7 +44,7 @@ const ReviewCard = ({ review, onReadMore }) => {
             <h4 className="text-lg font-bold text-white mb-2 truncate">{review.title || 'Great Service!'}</h4>
             <p className="text-blue-100 text-sm flex-grow line-clamp-3">"{review.content}"</p>
             <div className="flex justify-between items-end mt-4">
-                <p className="text-right font-semibold text-white">- {review.customers.name}</p>
+                <p className="text-right font-semibold text-white">- {customerName}</p>
                 {isLongReview && (
                     <Button variant="link" size="sm" className="p-0 h-auto text-yellow-400" onClick={() => onReadMore(review)}>
                         Read More
@@ -160,11 +162,11 @@ export const ReviewsCarousel = () => {
                             <DialogDescription className="flex flex-col gap-2">
                                 <div className="flex justify-between items-center">
                                     <StarRating rating={selectedReview.rating} />
-                                    <span className="text-sm">by {selectedReview.customers.name}</span>
+                                    <span className="text-sm">by {selectedReview.customers?.name || 'Valued Customer'}</span>
                                 </div>
                                 <div className="flex items-center text-yellow-400 text-sm font-semibold">
                                     <Package className="h-4 w-4 mr-2" />
-                                    <span>{selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Loader Trailer Rental Service with Delivery' : selectedReview.bookings?.plan?.name || 'Service'}</span>
+                                    <span>{selectedReview.bookings?.plan?.name ? (selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Loader Trailer Rental Service with Delivery' : selectedReview.bookings?.plan?.name) : 'Service'}</span>
                                 </div>
                             </DialogDescription>
                         </DialogHeader>

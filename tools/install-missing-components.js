@@ -62,14 +62,19 @@ async function run() {
         "npx -y shadcn@3 init -f --src-dir --no-base-style",
       );
 
-      stdout = [shadcnInitResult.stdout, shadcnInitResult.stderr]
+      const shadcnInitOutput = [
+        shadcnInitResult.stdout,
+        shadcnInitResult.stderr,
+      ]
         .filter(Boolean)
         .join("\n");
+
+      stdout = shadcnInitOutput;
 
       const isErrorStatus = !!shadcnInitResult.status;
 
       if (isErrorStatus) {
-        error = "Shadcn init failed";
+        error = `Shadcn failed to init: ${shadcnInitOutput}`;
       } else {
         updatedFiles.push(...FILES_UPDATED_BY_SHADCN_INIT);
       }
@@ -90,7 +95,7 @@ async function run() {
       const isErrorStatus = !!shadcnAddResult.status;
 
       if (isErrorStatus) {
-        error = "Shadcn add failed";
+        error = `Shadcn failed to add: ${shadcnAddOutput}`;
       } else {
         // Example output of shadcnAddOutput:
         //   - src/components/ui/button.tsx

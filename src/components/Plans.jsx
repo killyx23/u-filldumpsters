@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PlanCard } from '@/components/PlanCard';
@@ -33,7 +34,23 @@ export const Plans = ({ onSelectPlan }) => {
                 return;
             }
             
-            const startDate = formatISO(startOfDay(new Date()), { representation: 'date' });
+            const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
+            
+            // 1. Fetch explicit daily availability overrides for today from correct table
+            const { data: dateSpecificAvailData } = await supabase
+                .from('date_specific_availability')
+                .select('service_id, is_available')
+                .eq('date', todayStr);
+
+            const todayAvailabilityMap = {};
+            if (dateSpecificAvailData) {
+                dateSpecificAvailData.forEach(item => {
+                    todayAvailabilityMap[item.service_id] = item.is_available;
+                });
+            }
+
+            // 2. Fetch general 30-day availability as fallback
+            const startDate = todayStr;
             const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
             
             const availabilityPromises = plansData.map(plan => 
@@ -42,7 +59,7 @@ export const Plans = ({ onSelectPlan }) => {
                         serviceId: plan.id,
                         startDate,
                         endDate,
-                        isDelivery: plan.id === 2 ? false : undefined // Check self-pickup for plan 2
+                        isDelivery: plan.id === 2 ? false : undefined 
                     }
                 })
             );
@@ -55,25 +72,39 @@ export const Plans = ({ onSelectPlan }) => {
                 const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
                 const newAvailability = {};
 
-                results.slice(0, plansData.length).forEach((result, index) => {
-                    const planId = plansData[index].id;
-                    if (result.data?.availability) {
-                        const isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
-                        newAvailability[planId] = isAnyDayAvailable;
-                    } else {
-                        newAvailability[planId] = false;
+                plansData.forEach((plan, index) => {
+                    // Primary check: Is it explicitly marked closed today in admin?
+                    if (todayAvailabilityMap[plan.id] === false) {
+                        newAvailability[plan.id] = false;
+                        return;
                     }
+
+                    // Fallback check: Is it available at all in the next 30 days?
+                    let isAnyDayAvailable = false;
+                    const result = results[index];
+                    
+                    if (result.data?.availability) {
+                        isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
+                    }
+                    
+                    if (plan.id === 2) {
+                        const deliveryResult = results[results.length - 1];
+                        if (deliveryResult.data?.availability) {
+                            const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
+                            isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
+                        }
+                    }
+
+                    newAvailability[plan.id] = isAnyDayAvailable;
                 });
-                
-                const deliveryResult = results[results.length - 1];
-                if (deliveryResult.data?.availability) {
-                    const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
-                     newAvailability[2] = newAvailability[2] || isDeliveryAvailable;
-                }
 
                 setAvailability(newAvailability);
             } catch (error) {
                 console.error("Error fetching availability for plans:", error);
+                // Fallback to just today's map if edge functions fail
+                const fallbackAvail = {};
+                plansData.forEach(p => fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false);
+                setAvailability(fallbackAvail);
             } finally {
                 setLoading(false);
             }
