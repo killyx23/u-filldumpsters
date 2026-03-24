@@ -3,3 +3,6 @@ node_modules
 supabase/.temp/
 supabase/.env
  *:Zone.Identifier
+.env
+.env.local
+.env.*.local
