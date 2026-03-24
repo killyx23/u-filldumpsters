@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
@@ -18,14 +17,15 @@ import { ReviewsCarousel } from '@/components/ReviewsCarousel';
 import { KeyFeatures } from '@/components/KeyFeatures';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { StepIndicator } from '@/components/StepIndicator';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
-// Safely initialize Stripe with a fallback for development environments
-const stripeKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_TYooMQauvdEDq54NiTphI7jx';
-console.log('[Stripe Init] Initializing Stripe. Key available:', !!stripeKey);
-const stripePromise = loadStripe(stripeKey);
+const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePromise =
+  typeof stripePublishableKey === 'string' && stripePublishableKey.trim()
+    ? loadStripe(stripePublishableKey)
+    : null;
 
 function BookingJourney() {
   const [currentStep, setCurrentStep] = useState(0);
@@ -61,8 +61,8 @@ function BookingJourney() {
   const [bookingId, setBookingId] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
+  // Only need clientSecret now — no paymentIntentId needed in frontend
   const [clientSecret, setClientSecret] = useState('');
-  const [paymentIntentId, setPaymentIntentId] = useState('');
 
   const handlePlanSelect = (plan) => {
     setSelectedPlan(plan);
@@ -163,7 +163,6 @@ function BookingJourney() {
       // Step 1: Create pending booking via RPC
       const { data, error } = await supabase
         .rpc('create_pending_booking', { payload: pendingBookingPayload });
-
       if (error) throw error;
 
       // Step 2: Update customer with license info if provided
@@ -175,7 +174,6 @@ function BookingJourney() {
             license_image_urls: addonsData.licenseImageUrls,
           })
           .eq('id', data.customer_id);
-
         if (customerUpdateError) {
           console.warn("Could not update customer with license info, but proceeding:", customerUpdateError);
         }
@@ -187,12 +185,10 @@ function BookingJourney() {
           equipment_id: item.dbId,
           quantity: item.quantity,
         }));
-
         const { error: decrementError } = await supabase
           .rpc('decrement_equipment_quantities', {
             items_to_decrement: equipmentToDecrement,
           });
-
         if (decrementError) {
           console.error("Failed to decrement equipment quantities, but proceeding:", decrementError);
           toast({
@@ -205,22 +201,17 @@ function BookingJourney() {
 
       setBookingId(data.id);
 
-      // Step 4: Create payment intent
+      // Step 4: Create payment intent — only need clientSecret now
       const { data: paymentIntentData, error: paymentIntentError } = await supabase
         .functions.invoke('create-payment-intent', {
           body: { amount: Math.round(finalPrice * 100), bookingId: data.id },
         });
-
       if (paymentIntentError) throw paymentIntentError;
 
       const secret = paymentIntentData?.clientSecret || paymentIntentData?.client_secret;
-      const intentId = paymentIntentData?.paymentIntentId || paymentIntentData?.payment_intent_id;
-
-      if (!secret || !intentId) throw new Error("Could not retrieve secure payment details from server.");
+      if (!secret) throw new Error("Could not retrieve secure payment details from server.");
 
       setClientSecret(secret);
-      setPaymentIntentId(intentId);
-
       setCurrentStep(9);
       window.scrollTo(0, 0);
 
@@ -249,6 +240,33 @@ function BookingJourney() {
     }
     window.scrollTo(0, 0);
   };
+
+  // Stripe Elements appearance config
+  const elementsOptions = clientSecret ? {
+    clientSecret,
+    appearance: {
+      theme: 'night',
+      variables: {
+        colorPrimary: '#facc15',       // yellow-400
+        colorBackground: '#1e293b',    // slate-800
+        colorText: '#f1f5f9',          // slate-100
+        colorDanger: '#ef4444',        // red-500
+        fontFamily: '"Inter", system-ui, sans-serif',
+        borderRadius: '8px',
+      },
+      rules: {
+        '.Input': {
+          backgroundColor: '#0f172a',  // slate-900
+          border: '1px solid rgba(255,255,255,0.15)',
+        },
+        '.Input:focus': {
+          border: '1px solid #facc15',
+          boxShadow: '0 0 0 2px rgba(250,204,21,0.2)',
+        },
+        '.Label': { color: '#94a3b8' } // slate-400
+      }
+    }
+  } : null;
 
   const renderContent = () => {
     switch (currentStep) {
@@ -341,7 +359,18 @@ function BookingJourney() {
           />
         );
       case 9:
-        if (!clientSecret || !paymentIntentId) {
+        if (!stripePromise) {
+          return (
+            <div className="container mx-auto px-4 py-8">
+              <div className="max-w-4xl mx-auto bg-red-900/40 border border-red-500/50 p-4 rounded-lg text-red-200 font-semibold flex items-center shadow-lg">
+                <AlertTriangle className="h-6 w-6 mr-3 flex-shrink-0 text-red-400" />
+                <p>Payment configuration is missing. Please set VITE_STRIPE_PUBLISHABLE_KEY and reload.</p>
+              </div>
+            </div>
+          );
+        }
+        // Show loader while clientSecret is being set
+        if (!clientSecret || !elementsOptions) {
           return (
             <div className="flex flex-col justify-center items-center h-96 text-white">
               <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -358,7 +387,8 @@ function BookingJourney() {
                 <p>⚠️ Your delivery address could not be automatically verified. Distance fees may be estimated manually by our team.</p>
               </div>
             )}
-            <Elements stripe={stripePromise} options={{ clientSecret }}>
+            {/* Elements wraps PaymentPage and provides clientSecret context */}
+            <Elements stripe={stripePromise} options={elementsOptions}>
               <PaymentPage
                 totalPrice={finalPrice}
                 bookingData={bookingData}
@@ -367,7 +397,6 @@ function BookingJourney() {
                 onBack={() => handleBack(8)}
                 bookingId={bookingId}
                 deliveryService={deliveryService}
-                paymentIntentId={paymentIntentId}
               />
             </Elements>
           </div>
