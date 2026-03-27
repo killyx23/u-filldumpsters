@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MapPin, CheckCircle, Truck, Loader2, AlertCircle, RefreshCw, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
