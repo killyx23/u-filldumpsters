@@ -1,4 +1,3 @@
-
 import { calculateRoundTripDistance } from '../utils/distanceCalculationHelper';
 
 const cache = new Map();
