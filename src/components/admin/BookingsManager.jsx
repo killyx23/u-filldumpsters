@@ -1,268 +1,301 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+
+import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Truck, ArrowUpCircle, User, Sun, Cloud, CloudRain, Snowflake, Bell } from 'lucide-react';
-import { isToday, parseISO, startOfToday, isWithinInterval, endOfToday, format, formatISO, endOfMonth, startOfMonth, isSameMonth } from 'date-fns';
-import { StatusBadge } from '@/components/admin/StatusBadge';
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-
-const DailyTaskCard = ({ title, icon, bookings, onBookingClick }) => (
-    <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-        <div className="flex items-center mb-4">
-            {icon}
-            <h3 className="text-xl font-bold text-yellow-400 ml-3">{title}</h3>
-        </div>
-        <div className="space-y-3 max-h-60 overflow-y-auto">
-            {bookings.length > 0 ? bookings.map(booking => (
-                <div key={booking.id} onClick={() => onBookingClick(booking)} className="bg-white/10 p-3 rounded-md cursor-pointer hover:bg-white/20 transition-colors">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center">
-                            <User className="h-4 w-4 mr-2 text-blue-300" />
-                            <p className="font-bold text-white truncate">{booking.customers.name}</p>
-                        </div>
-                        <StatusBadge status={booking.status} />
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">{booking.plan.name}{booking.addons.isDelivery ? ' (Delivery)' : ''}</p>
-                </div>
-            )) : (
-                <p className="text-center text-blue-200 py-4">No {title.toLowerCase()} for today.</p>
-            )}
-        </div>
-    </div>
-);
-
-const WeatherIcon = ({ condition }) => {
-    if (!condition) return null;
-    const text = condition.toLowerCase();
-    if (text.includes('snow') || text.includes('ice') || text.includes('blizzard')) return <Snowflake className="h-4 w-4 text-cyan-300" />;
-    if (text.includes('rain') || text.includes('drizzle') || text.includes('shower')) return <CloudRain className="h-4 w-4 text-blue-300" />;
-    if (text.includes('cloud') || text.includes('overcast')) return <Cloud className="h-4 w-4 text-gray-400" />;
-    if (text.includes('sun') || text.includes('clear')) return <Sun className="h-4 w-4 text-yellow-300" />;
-    return null;
-};
+import { 
+  Edit, 
+  Eye, 
+  Search, 
+  AlertTriangle, 
+  ShieldAlert, 
+  CheckCircle, 
+  PlusCircle, 
+  Trash2, 
+  MapPin, 
+  Clock 
+} from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { format, parseISO } from 'date-fns';
+import { BookingDetails } from './BookingDetails';
+import { BookingEditForm } from './BookingEditForm';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 
 export const BookingsManager = ({ initialBookings }) => {
-    const [bookings, setBookings] = useState(initialBookings || []);
-    const [weather, setWeather] = useState({});
-    const [loading, setLoading] = useState(!initialBookings);
-    const [viewDate, setViewDate] = useState(new Date());
-    const navigate = useNavigate();
+    const [bookings, setBookings] = useState(initialBookings);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [selectedBooking, setSelectedBooking] = useState(null);
+    const [isEditMode, setIsEditMode] = useState(false);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpne] = useState(false);
+    const [bookingToDelete, setBookingToDelete] = useState(null);
 
-    const fetchBookingData = useCallback(async (date, isInitialLoad = true) => {
-        if (isInitialLoad) setLoading(true);
+    React.useEffect(() => {
+        setBookings(initialBookings);
+    }, [initialBookings]);
+
+    const handleUpdateBooking = async (updatedData) => {
         try {
-            const monthStart = startOfMonth(date);
-            const monthEnd = endOfMonth(date);
-            const monthStartISO = formatISO(monthStart, { representation: 'date' });
-            const monthEndISO = formatISO(monthEnd, { representation: 'date' });
+            const { error } = await supabase
+                .from('bookings')
+                .update(updatedData)
+                .eq('id', selectedBooking.id);
 
-            const [bookingRes, weatherRes] = await Promise.all([
-                supabase
-                    .from('bookings')
-                    .select('*, customers!inner(*)')
-                    .gte('drop_off_date', monthStartISO)
-                    .lte('drop_off_date', monthEndISO)
-                    .order('drop_off_date', { ascending: true }),
-                supabase.functions.invoke('get-weather', { body: { startDate: monthStartISO, endDate: monthEndISO } })
-            ]);
+            if (error) throw error;
 
-            if (bookingRes.error) throw bookingRes.error;
-            setBookings(bookingRes.data || []);
-            
-            if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
+            setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedData } : b));
+            toast({ title: 'Success', description: 'Booking updated successfully' });
+            setIsEditMode(false);
+            setSelectedBooking(null);
         } catch (error) {
-            toast({ title: 'Error fetching bookings', description: error.message, variant: 'destructive' });
-            setBookings([]);
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        }
+    };
+
+    const handleDeleteClick = (booking, e) => {
+        e.stopPropagation();
+        setBookingToDelete(booking);
+        setIsDeleteDialogOpne(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!bookingToDelete) return;
+
+        try {
+            const { error } = await supabase
+                .from('bookings')
+                .delete()
+                .eq('id', bookingToDelete.id);
+
+            if (error) throw error;
+
+            setBookings(prev => prev.filter(b => b.id !== bookingToDelete.id));
+            toast({ title: 'Success', description: 'Booking deleted successfully' });
+        } catch (error) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
         } finally {
-            if (isInitialLoad) setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!initialBookings) {
-            fetchBookingData(viewDate);
-        }
-    }, [fetchBookingData, viewDate, initialBookings]);
-
-    useEffect(() => {
-        const channel = supabase.channel('public:bookings:manager')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, 
-            (payload) => {
-                const currentMonthStart = startOfMonth(viewDate);
-                const currentMonthEnd = endOfMonth(viewDate);
-                const bookingDate = parseISO(payload.new.drop_off_date || payload.old.drop_off_date);
-
-                if (isWithinInterval(bookingDate, { start: currentMonthStart, end: currentMonthEnd })) {
-                    fetchBookingData(viewDate, false);
-                }
-                
-                if (payload.eventType === 'INSERT') {
-                    toast({ title: "New Booking Created!", description: `A new booking has been added.` });
-                } else if (payload.eventType === 'UPDATE') {
-                    if (payload.old.status !== 'pending_review' && payload.new.status === 'pending_review') {
-                         toast({
-                            title: "Action Required",
-                            description: `A change request has been submitted for booking #${payload.new.id}.`,
-                            action: <Bell className="h-5 w-5 text-yellow-400" />,
-                        });
-                    }
-                }
-            })
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }, [viewDate, fetchBookingData]);
-
-    const handleMonthChange = (info) => {
-        const newDate = info.view.currentStart;
-        if (!isSameMonth(newDate, viewDate)) {
-            setViewDate(newDate);
-            fetchBookingData(newDate);
+            setIsDeleteDialogOpne(false);
+            setBookingToDelete(null);
         }
     };
 
-    const { todaysDeliveries, todaysPickups, activeDumpLoaders, calendarEvents } = useMemo(() => {
-        const today = startOfToday();
-        
-        const paidAndConfirmed = ['Confirmed', 'Delivered', 'flagged', 'waiting_to_be_returned', 'Rescheduled'];
-        
-        const todaysDeliveries = bookings.filter(b => {
-            const isTrailerDelivery = b.plan.id === 2 && b.addons?.isDelivery;
-            return (b.plan.id === 1 || isTrailerDelivery) && isToday(parseISO(b.drop_off_date)) && paidAndConfirmed.includes(b.status);
-        });
+    const filteredBookings = useMemo(() => {
+        return bookings.filter(b => {
+            const matchesSearch =
+                b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                b.id.toString().includes(searchTerm) ||
+                (b.customers?.customer_id_text || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                b.email.toLowerCase().includes(searchTerm.toLowerCase());
 
-        const todaysPickups = bookings.filter(b => {
-            const isTrailerDelivery = b.plan.id === 2 && b.addons?.isDelivery;
-            return (b.plan.id === 1 || isTrailerDelivery) && isToday(parseISO(b.pickup_date)) && b.status === 'Delivered';
-        });
-        
-        const activeDumpLoaders = bookings.filter(b => {
-             if (b.plan.id !== 2 || b.addons?.isDelivery) return false;
-             const startDate = parseISO(b.drop_off_date);
-             const endDate = parseISO(b.pickup_date);
-             return isWithinInterval(today, { start: startDate, end: endDate }) && paidAndConfirmed.includes(b.status) && b.status !== 'Completed';
-        });
-        
-        const getEventColor = (booking) => {
-            const { status, plan, addons } = booking;
-            if (status === 'pending_payment') return '#ef4444'; // Red
-            if (status === 'pending_review') return '#ef4444'; // Red
-            if (status === 'pending_verification') return '#f97316'; // Orange
-            if (status === 'Confirmed') {
-                if (plan.id === 2 && addons?.isDelivery) return '#6d28d9'; // Dark Purple for trailer delivery
-                return '#facc15'; // Yellow
-            }
-            if (status === 'Rescheduled') return '#3b82f6'; // Blue
-            if (status === 'Completed') return '#22c55e'; // Green
-            if (status === 'flagged') return '#f97316'; // Orange
-            if (status === 'waiting_to_be_returned') return '#a855f7'; // Purple
-            if (status === 'Delivered') return '#0ea5e9'; // Cyan
+            // Added pending_address to the status filter
+            const matchesStatus = statusFilter === 'all' 
+                ? true 
+                : statusFilter === 'pending_address'
+                    ? b.pending_address_verification === true
+                    : b.status === statusFilter;
 
-            return '#6b7280'; // Default Gray
-        };
+            return matchesSearch && matchesStatus;
+        }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }, [bookings, searchTerm, statusFilter]);
 
-        const calendarEvents = bookings.map(booking => ({
-            id: booking.id,
-            title: `${booking.customers.name}`,
-            start: parseISO(booking.drop_off_date),
-            end: endOfToday(parseISO(booking.pickup_date)),
-            allDay: true,
-            backgroundColor: getEventColor(booking),
-            borderColor: getEventColor(booking),
-            extendedProps: {
-                customerId: booking.customer_id
-            }
-        }));
-
-        return { todaysDeliveries, todaysPickups, activeDumpLoaders, calendarEvents };
-    }, [bookings]);
-
-    const handleBookingClick = (booking) => {
-        navigate(`/admin/customer/${booking.customer_id}`);
+    const getStatusDisplay = (booking) => {
+        if (booking.pending_address_verification) {
+            return (
+                <span className="flex items-center text-orange-400 bg-orange-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <MapPin className="w-3 h-3 mr-1" /> Pending Address
+                </span>
+            );
+        }
+        if (booking.status === 'pending_verification') {
+            return (
+                <span className="flex items-center text-orange-400 bg-orange-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <AlertTriangle className="w-3 h-3 mr-1" /> Pending Ver.
+                </span>
+            );
+        }
+        if (booking.status === 'pending_review') {
+            return (
+                <span className="flex items-center text-amber-400 bg-amber-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <ShieldAlert className="w-3 h-3 mr-1" /> Manual Review
+                </span>
+            );
+        }
+        if (booking.status === 'pending_payment') {
+            return (
+                <span className="flex items-center text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <Clock className="w-3 h-3 mr-1" /> Pending Payment
+                </span>
+            );
+        }
+        if (booking.status === 'Confirmed') {
+            return (
+                <span className="flex items-center text-green-400 bg-green-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <CheckCircle className="w-3 h-3 mr-1" /> Confirmed
+                </span>
+            );
+        }
+        if (booking.status === 'Cancelled') {
+             return <span className="text-red-400 bg-red-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Cancelled</span>;
+        }
+        return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">{booking.status}</span>;
     };
-    
-    const handleEventClick = (clickInfo) => {
-        navigate(`/admin/customer/${clickInfo.event.extendedProps.customerId}`);
-    };
-
-    const renderDayCellContent = (dayRenderInfo) => {
-        const dateStr = format(dayRenderInfo.date, 'yyyy-MM-dd');
-        const dayEvents = calendarEvents.filter(event => {
-            const eventStart = startOfToday(event.start);
-            const eventEnd = event.end ? endOfToday(event.end) : eventStart;
-            return isWithinInterval(dayRenderInfo.date, { start: eventStart, end: eventEnd });
-        }).sort((a, b) => a.title.localeCompare(b.title));
-
-        return (
-            <Popover>
-                <PopoverTrigger asChild>
-                    <div className="fc-daygrid-day-frame-custom">
-                        <div className="fc-daygrid-day-top-custom">
-                            <WeatherIcon condition={weather[dateStr]} />
-                            <div className="fc-daygrid-day-number-custom">{dayRenderInfo.dayNumberText}</div>
-                        </div>
-                        <div className="fc-daygrid-day-events-custom">
-                            {dayEvents.slice(0, 2).map(event => (
-                                <div key={event.id} className="fc-event-custom" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
-                                </div>
-                            ))}
-                            {dayEvents.length > 2 && (
-                                <div className="fc-event-more-custom">+ {dayEvents.length - 2} more</div>
-                            )}
-                        </div>
-                    </div>
-                </PopoverTrigger>
-                {dayEvents.length > 0 && (
-                    <PopoverContent className="w-80 bg-gray-800 border-yellow-400 text-white">
-                        <div className="font-bold text-lg mb-2">{format(dayRenderInfo.date, 'PPP')}</div>
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {dayEvents.map(event => (
-                                <div key={event.id} className="p-2 rounded-md" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
-                                </div>
-                            ))}
-                        </div>
-                    </PopoverContent>
-                )}
-            </Popover>
-        );
-    };
-
-    if (loading) {
-        return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
-    }
 
     return (
-        <div className="space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <DailyTaskCard title="Today's Deliveries" icon={<Truck className="h-6 w-6 text-yellow-400" />} bookings={todaysDeliveries} onBookingClick={handleBookingClick} />
-                <DailyTaskCard title="Today's Pickups" icon={<ArrowUpCircle className="h-6 w-6 text-yellow-400" />} bookings={todaysPickups} onBookingClick={handleBookingClick} />
-                <DailyTaskCard title="Active Self-Service Loaders" icon={<Truck className="h-6 w-6 text-yellow-400" />} bookings={activeDumpLoaders} onBookingClick={handleBookingClick} />
+        <div className="space-y-6">
+            <div className="flex flex-col md:flex-row justify-between gap-4 bg-gray-800 p-4 rounded-lg">
+                <div className="flex-1 flex gap-4">
+                    <div className="relative flex-1 max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                        <Input
+                            placeholder="Search by ID, name, email or CID..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="pl-9 bg-gray-700 border-gray-600 text-white placeholder:text-gray-400"
+                        />
+                    </div>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="w-[180px] bg-gray-700 border-gray-600 text-white">
+                            <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-gray-700 border-gray-600 text-white">
+                            <SelectItem value="all">All Statuses</SelectItem>
+                            <SelectItem value="Confirmed">Confirmed</SelectItem>
+                            <SelectItem value="pending_address">Pending Address</SelectItem>
+                            <SelectItem value="pending_verification">Pending Verification</SelectItem>
+                            <SelectItem value="pending_review">Manual Review</SelectItem>
+                            <SelectItem value="pending_payment">Pending Payment</SelectItem>
+                            <SelectItem value="Delivered">Active (Delivered)</SelectItem>
+                            <SelectItem value="Completed">Completed</SelectItem>
+                            <SelectItem value="Cancelled">Cancelled</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={() => window.open('/', '_blank')}>
+                    <PlusCircle className="mr-2 h-4 w-4" /> New Booking
+                </Button>
             </div>
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 calendar-container">
-                <h2 className="text-2xl font-bold mb-4">Monthly Booking Calendar</h2>
-                <FullCalendar
-                    plugins={[dayGridPlugin, interactionPlugin]}
-                    events={calendarEvents}
-                    eventClick={handleEventClick}
-                    headerToolbar={{
-                        left: 'prev,next today',
-                        center: 'title',
-                        right: 'dayGridMonth'
-                    }}
-                    height="auto"
-                    datesSet={handleMonthChange}
-                    dayCellContent={renderDayCellContent}
-                    eventContent={() => null}
-                />
+
+            <div className="bg-gray-800 rounded-lg overflow-hidden overflow-x-auto border border-gray-700">
+                <Table>
+                    <TableHeader>
+                        <TableRow className="border-gray-700 hover:bg-gray-800">
+                            <TableHead className="text-gray-300">ID</TableHead>
+                            <TableHead className="text-gray-300">Customer</TableHead>
+                            <TableHead className="text-gray-300">Service</TableHead>
+                            <TableHead className="text-gray-300">Dates</TableHead>
+                            <TableHead className="text-gray-300">Status</TableHead>
+                            <TableHead className="text-gray-300 text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {filteredBookings.map((booking) => (
+                            <TableRow key={booking.id} className="border-gray-700 hover:bg-gray-750">
+                                <TableCell className="font-medium text-blue-400">#{booking.id}</TableCell>
+                                <TableCell>
+                                    <div className="font-semibold text-white">{booking.name}</div>
+                                    <div className="text-sm text-gray-400">{booking.customers?.customer_id_text}</div>
+                                    <div className="text-xs text-gray-500">{booking.email}</div>
+                                </TableCell>
+                                <TableCell>
+                                    <div className="text-gray-200">{booking.plan?.name || 'Unknown'}</div>
+                                    {booking.addons?.isDelivery && <div className="text-xs text-blue-400">w/ Delivery</div>}
+                                </TableCell>
+                                <TableCell>
+                                    <div className="text-sm text-gray-300">
+                                        Out: {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}
+                                    </div>
+                                    <div className="text-sm text-gray-300">
+                                        In: {format(parseISO(booking.pickup_date), 'MMM d, yyyy')}
+                                    </div>
+                                </TableCell>
+                                <TableCell>
+                                    {getStatusDisplay(booking)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                    <div className="flex justify-end gap-2">
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => { setSelectedBooking(booking); setIsEditMode(false); }}
+                                            className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/20"
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => { setSelectedBooking(booking); setIsEditMode(true); }}
+                                            className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/20"
+                                        >
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={(e) => handleDeleteClick(booking, e)}
+                                            className="text-red-400 hover:text-red-300 hover:bg-red-400/20"
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </TableCell>
+                            </TableRow>
+                        ))}
+                        {filteredBookings.length === 0 && (
+                            <TableRow>
+                                <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                                    No bookings found matching your criteria.
+                                </TableCell>
+                            </TableRow>
+                        )}
+                    </TableBody>
+                </Table>
             </div>
+
+            <Dialog open={!!selectedBooking} onOpenChange={(open) => !open && setSelectedBooking(null)}>
+                <DialogContent className="max-w-4xl bg-gray-900 border-gray-700 text-white max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl text-yellow-400">
+                            {isEditMode ? 'Edit Booking' : 'Booking Details'} #{selectedBooking?.id}
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    {selectedBooking && (
+                        isEditMode ? (
+                            <BookingEditForm
+                                booking={selectedBooking}
+                                onSave={handleUpdateBooking}
+                                onCancel={() => setIsEditMode(false)}
+                            />
+                        ) : (
+                            <BookingDetails
+                                booking={selectedBooking}
+                                onEdit={() => setIsEditMode(true)}
+                            />
+                        )
+                    )}
+                </DialogContent>
+            </Dialog>
+
+             <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpne}>
+                <DialogContent className="bg-gray-900 border-red-500 text-white">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-500 flex items-center">
+                            <AlertTriangle className="mr-2 h-5 w-5" />
+                            Confirm Deletion
+                        </DialogTitle>
+                        <DialogDescription className="text-gray-300">
+                            Are you sure you want to permanently delete Booking #{bookingToDelete?.id}? This action cannot be undone and will remove all associated records including payment history and customer notes tied specifically to this booking.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setIsDeleteDialogOpne(false)}>Cancel</Button>
+                        <Button variant="destructive" onClick={confirmDelete}>Yes, Delete Booking</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

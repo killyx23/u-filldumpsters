@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -10,7 +11,8 @@ import { EquipmentManager } from '@/components/admin/EquipmentManager';
 import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
 import { ReviewsManager } from '@/components/admin/ReviewsManager';
 import { FaqsManager } from '@/components/admin/FaqsManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle } from 'lucide-react';
+import { PendingVerificationsManager } from '@/components/admin/PendingVerificationsManager';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -19,19 +21,18 @@ const AdminDashboard = () => {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "action-items");
-
+    
     const [bookings, setBookings] = useState([]);
     const [customersWithUnreadNotes, setCustomersWithUnreadNotes] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const fetchDashboardData = useCallback(async (showLoading = true) => {
-        if (showLoading) setLoading(true);
-        console.log("Fetching dashboard data..."); // Log when data fetching starts
-
+        if(showLoading) setLoading(true);
         try {
             const bookingsPromise = supabase
                 .from('bookings')
                 .select('*, customers!inner(*)');
+
             const unreadNotesPromise = supabase
                 .from('customers')
                 .select('*')
@@ -39,44 +40,33 @@ const AdminDashboard = () => {
 
             const [{ data: bookingsData, error: bookingsError }, { data: unreadNotesData, error: unreadNotesError }] = await Promise.all([bookingsPromise, unreadNotesPromise]);
 
-            if (bookingsError) {
-                console.error("Error fetching bookings:", bookingsError);
-                throw bookingsError;
-            }
-            if (unreadNotesError) {
-                console.error("Error fetching unread notes:", unreadNotesError);
-                throw unreadNotesError;
-            }
-
-            console.log("Bookings Data:", bookingsData);  // Log the bookings data fetched
-            console.log("Unread Notes Data:", unreadNotesData);  // Log the unread notes data fetched
+            if (bookingsError) throw bookingsError;
+            if (unreadNotesError) throw unreadNotesError;
 
             setBookings(bookingsData || []);
             setCustomersWithUnreadNotes(unreadNotesData || []);
+
         } catch (error) {
-            console.error("Error fetching dashboard data:", error); // Log any error during the fetch
             toast({
                 title: "Error fetching dashboard data",
                 description: error.message,
                 variant: "destructive",
             });
         } finally {
-            if (showLoading) setLoading(false);
-            console.log("Dashboard data fetching completed");  // Log when data fetching is completed
+            if(showLoading) setLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        console.log("useEffect: Fetching dashboard data..."); // Log when useEffect triggers
         fetchDashboardData();
     }, [fetchDashboardData]);
-
+    
     useEffect(() => {
         const handleCustomerUpdate = (payload) => {
-            if (payload.new.has_unread_notes) {
+            if(payload.new.has_unread_notes) {
                 setCustomersWithUnreadNotes(prev => {
                     if (!prev.find(c => c.id === payload.new.id)) {
-                        return [...prev, payload.new];
+                       return [...prev, payload.new];
                     }
                     return prev;
                 });
@@ -86,16 +76,16 @@ const AdminDashboard = () => {
         };
 
         const handleNewNote = (payload) => {
-            if (payload.new.author_type === 'customer') {
-                supabase.from('customers').select('id, name, has_unread_notes').eq('id', payload.new.customer_id).single().then(({ data: customer }) => {
-                    if (customer && customer.has_unread_notes) {
-                        setCustomersWithUnreadNotes(prev => {
+            if(payload.new.author_type === 'customer') {
+                supabase.from('customers').select('id, name, has_unread_notes').eq('id', payload.new.customer_id).single().then(({data: customer}) => {
+                    if(customer && customer.has_unread_notes) {
+                         setCustomersWithUnreadNotes(prev => {
                             if (!prev.find(c => c.id === customer.id)) {
-                                return [...prev, customer];
+                               return [...prev, customer];
                             }
                             return prev;
                         });
-                        toast({
+                         toast({
                             title: "New Customer Message",
                             description: `A new message has been received from ${customer.name || 'a customer'}.`,
                             action: <Bell className="h-5 w-5 text-yellow-400" />,
@@ -125,9 +115,8 @@ const AdminDashboard = () => {
         setSearchParams({ tab: value });
     };
 
-    const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged', 'pending_payment'].includes(b.status)).length) + customersWithUnreadNotes.length;
-
-    console.log('Action Item Count:', actionItemCount); // Log the action item count
+    const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
+    const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged', 'pending_payment'].includes(b.status) && !b.pending_address_verification).length) + customersWithUnreadNotes.length;
 
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
@@ -145,22 +134,30 @@ const AdminDashboard = () => {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 sm:grid-cols-4 lg:grid-cols-8 mb-4 bg-gray-800 p-2 rounded-lg">
-                        <TabsTrigger value="action-items" className="relative">
-                            <AlertTriangle className="w-4 h-4 mr-2" /> Action Items
+                    <TabsList className="grid w-full grid-cols-4 sm:grid-cols-4 lg:grid-cols-9 mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">
+                        <TabsTrigger value="action-items" className="relative py-2">
+                            <AlertTriangle className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Action Items</span>
                             {actionItemCount > 0 && (
-                                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+                                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white shadow">
                                     {actionItemCount}
                                 </span>
                             )}
                         </TabsTrigger>
-                        <TabsTrigger value="bookings"><Truck className="w-4 h-4 mr-2" />Bookings</TabsTrigger>
-                        <TabsTrigger value="customers"><Users className="w-4 h-4 mr-2" />Customers</TabsTrigger>
-                        <TabsTrigger value="availability"><Calendar className="w-4 h-4 mr-2" />Availability</TabsTrigger>
-                        <TabsTrigger value="pricing"><DollarSign className="w-4 h-4 mr-2" />Pricing/Coupons</TabsTrigger>
-                        <TabsTrigger value="equipment"><Wrench className="w-4 h-4 mr-2" />Equipment</TabsTrigger>
-                        <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2" />Reviews</TabsTrigger>
-                        <TabsTrigger value="faqs"><HelpCircle className="w-4 h-4 mr-2" />FAQs</TabsTrigger>
+                        <TabsTrigger value="pending-address" className="relative py-2 bg-orange-900/20 data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                            <MapPin className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Verify Address</span>
+                            {pendingAddressCount > 0 && (
+                                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-xs text-white shadow border border-gray-900">
+                                    {pendingAddressCount}
+                                </span>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="bookings" className="py-2"><Truck className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Bookings</span></TabsTrigger>
+                        <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
+                        <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
+                        <TabsTrigger value="pricing" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Pricing</span></TabsTrigger>
+                        <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
+                        <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
+                        <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
                     </TabsList>
                     
                     {loading ? (
@@ -168,6 +165,7 @@ const AdminDashboard = () => {
                     ) : (
                         <>
                             <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
+                            <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
                             <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>

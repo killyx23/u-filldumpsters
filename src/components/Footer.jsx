@@ -22,7 +22,7 @@ export const Footer = () => {
           <p className="font-bold text-lg text-yellow-400 mb-4">Office Hours</p>
           <p className="text-blue-200">Mon-Fri: 8 AM - 10 AM</p>
           <p className="text-blue-200">Closed: Saturday & Sunday</p>
-          <p className="text-blue-200 mt-2">24/7 Online Booking</p>
+          <p className="text-blue-200 mt-2">24/7 Online Booking & Customer Portal. Complete control at your fingertips: Track deliveries in real-time, manage schedules, download receipts, write reviews, update your contact info, upload info needed, or use our messaging service.</p>
         </div>
         <div>
           <p className="font-bold text-lg text-yellow-400 mb-4">Legal</p>

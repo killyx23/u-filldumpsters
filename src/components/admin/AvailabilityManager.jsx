@@ -27,7 +27,7 @@ const TimeRangeSelector = ({ label, startValue, endValue, onStartChange, onEndCh
     </div>
 );
 
-const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, weeklyRules, clipboard, setClipboard }) => {
+const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, weeklyRules, clipboard, setClipboard, isSaving }) => {
     const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
     const [copiedAll, setCopiedAll] = useState(false);
@@ -51,11 +51,12 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
             const dateRule = existingRule?.find(r => r.service_id === service.id);
             const weeklyRule = weeklyRules?.find(wr => wr.service_id === service.id && wr.day_of_week === dayOfWeek);
 
+            // Default to true explicitly if not defined
             const isAvailable = dateRule?.is_available ?? weeklyRule?.is_available ?? true;
 
             return {
                 service_id: service.id,
-                is_available: isAvailable,
+                is_available: Boolean(isAvailable),
                 delivery_start_time: dateRule?.delivery_start_time ?? weeklyRule?.delivery_start_time,
                 delivery_end_time: dateRule?.delivery_end_time ?? weeklyRule?.delivery_end_time,
                 pickup_start_time: dateRule?.pickup_start_time ?? weeklyRule?.pickup_start_time,
@@ -71,13 +72,30 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
     }, [date, services, existingRule, weeklyRules]);
 
     const handleRuleChange = (service_id, field, value) => {
-        setRules(prev => prev.map(r => r.service_id === service_id ? { ...r, [field]: value } : r));
+        setRules(prev => prev.map(r => {
+            if (r.service_id === service_id) {
+                return { 
+                    ...r, 
+                    [field]: field === 'is_available' ? Boolean(value) : (value || null) 
+                };
+            }
+            return r;
+        }));
     };
 
     const handleSaveClick = () => {
         const payload = rules.map(rule => ({
             date: format(date, 'yyyy-MM-dd'),
-            ...rule,
+            service_id: rule.service_id,
+            is_available: Boolean(rule.is_available),
+            delivery_start_time: rule.delivery_start_time,
+            delivery_end_time: rule.delivery_end_time,
+            pickup_start_time: rule.pickup_start_time,
+            pickup_end_time: rule.pickup_end_time,
+            hourly_start_time: rule.hourly_start_time,
+            hourly_end_time: rule.hourly_end_time,
+            return_start_time: rule.return_start_time,
+            return_end_time: rule.return_end_time
         }));
         onSave(payload);
     };
@@ -162,7 +180,6 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                 {!loading && services && services.length > 0 ? services.map(service => {
                     const rule = rules.find(r => r.service_id === service.id);
                     if (!rule) return null;
-                    const serviceType = service.service_type;
                     const options = timeOptions[service.id] || generateTimeSlotOptions(120);
 
                     return (
@@ -172,8 +189,11 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                                 <div className="flex items-center gap-2">
                                     <Button variant="ghost" size="sm" onClick={() => handleCopy(service.id)}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
                                     <Button variant="ghost" size="sm" onClick={() => handlePaste(service.id)} disabled={!clipboard || clipboard.type !== 'single'}><ClipboardPaste className="h-4 w-4 mr-2" /> Paste</Button>
-                                    <Label className={rule.is_available ? 'text-green-400' : 'text-gray-400'}>{rule.is_available ? "Open" : "Closed"}</Label>
-                                    <Switch checked={rule.is_available} onCheckedChange={checked => handleRuleChange(service.id, 'is_available', checked)} />
+                                    <Label className={!rule.is_available ? 'text-red-400 font-bold' : 'text-gray-400'}>Closed</Label>
+                                    <Switch 
+                                        checked={!rule.is_available} 
+                                        onCheckedChange={checked => handleRuleChange(service.id, 'is_available', !checked)} 
+                                    />
                                 </div>
                             </div>
                             {rule.is_available && (
@@ -200,8 +220,11 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                 }) : !loading && <p>Could not load services. Please try again.</p>}
             </div>
             <DialogFooter className="mt-4">
-                <Button variant="outline" onClick={onCancel}>Cancel</Button>
-                <Button onClick={handleSaveClick}><Save className="mr-2 h-4 w-4" /> Save Changes</Button>
+                <Button variant="outline" onClick={onCancel} disabled={isSaving}>Cancel</Button>
+                <Button onClick={handleSaveClick} disabled={isSaving}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Changes
+                </Button>
             </DialogFooter>
         </DialogContent>
     );
@@ -213,6 +236,7 @@ export const AvailabilityManager = () => {
     const [dateSpecificRules, setDateSpecificRules] = useState([]);
     const [globalUnavailable, setGlobalUnavailable] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
     const [selectedDate, setSelectedDate] = useState(null);
     const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [clipboard, setClipboard] = useState(null);
@@ -224,11 +248,10 @@ export const AvailabilityManager = () => {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [servicesRes, weeklyRes, dateSpecificRes, globalUnavailRes] = await Promise.all([
+            const [servicesRes, weeklyRes, dateSpecificRes] = await Promise.all([
                 supabase.from('services').select('*').order('id'),
                 supabase.from('service_availability').select('*'),
                 supabase.from('date_specific_availability').select('*'),
-                supabase.from('unavailable_dates').select('*').is('service_id', null),
             ]);
 
             if (servicesRes.error) throw servicesRes.error;
@@ -240,10 +263,24 @@ export const AvailabilityManager = () => {
             if (dateSpecificRes.error) throw dateSpecificRes.error;
             setDateSpecificRules(dateSpecificRes.data);
             
-            if (globalUnavailRes.error) throw globalUnavailRes.error;
-            setGlobalUnavailable(globalUnavailRes.data.map(d => parseISO(d.date)));
+            // Calculate global unavailable dates (dates where ALL services are is_available: false)
+            const dateMap = {};
+            dateSpecificRes.data.forEach(rule => {
+                if (!dateMap[rule.date]) dateMap[rule.date] = [];
+                dateMap[rule.date].push(rule);
+            });
+            
+            const completelyUnavailableDates = Object.keys(dateMap)
+                .filter(date => {
+                    const rulesForDate = dateMap[date];
+                    return rulesForDate.length === servicesRes.data.length && rulesForDate.every(r => r.is_available === false);
+                })
+                .map(d => parseISO(d));
+                
+            setGlobalUnavailable(completelyUnavailableDates);
 
         } catch (error) {
+            console.error("Error fetching availability data:", error);
             toast({ title: 'Error fetching data', description: error.message, variant: 'destructive' });
         } finally {
             setLoading(false);
@@ -269,14 +306,27 @@ export const AvailabilityManager = () => {
     };
 
     const handleSaveDateSpecific = async (payload) => {
-        const { error } = await supabase.from('date_specific_availability').upsert(payload, { onConflict: 'date, service_id' });
-        if (error) {
-            toast({ title: 'Failed to save date-specific rules', description: error.message, variant: 'destructive' });
-        } else {
-            toast({ title: 'Date-specific rules saved!' });
+        setIsSaving(true);
+        try {
+            // Ensure payload always sends clean boolean for is_available
+            const cleanPayload = payload.map(p => ({
+                ...p,
+                is_available: Boolean(p.is_available)
+            }));
+            
+            const { error } = await supabase.from('date_specific_availability').upsert(cleanPayload, { onConflict: 'date, service_id' });
+            
+            if (error) throw error;
+            
+            toast({ title: 'Availability updated!', description: "The changes have been saved successfully." });
             setIsEditorOpen(false);
             setSelectedDate(null);
             fetchData();
+        } catch (error) {
+            console.error("Upsert error:", error);
+            toast({ title: 'Failed to save availability', description: error.message || 'An unexpected error occurred.', variant: 'destructive' });
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -287,21 +337,34 @@ export const AvailabilityManager = () => {
         const payload = pasteDates.flatMap(date => 
             clipboard.data.map(rule => ({
                 date: format(date, 'yyyy-MM-dd'),
-                ...rule,
+                service_id: rule.service_id,
+                is_available: Boolean(rule.is_available),
+                delivery_start_time: rule.delivery_start_time,
+                delivery_end_time: rule.delivery_end_time,
+                pickup_start_time: rule.pickup_start_time,
+                pickup_end_time: rule.pickup_end_time,
+                hourly_start_time: rule.hourly_start_time,
+                hourly_end_time: rule.hourly_end_time,
+                return_start_time: rule.return_start_time,
+                return_end_time: rule.return_end_time
             }))
         );
 
-        const { error } = await supabase.from('date_specific_availability').upsert(payload, { onConflict: 'date, service_id' });
-        
-        if (error) {
-            toast({ title: 'Failed to paste settings', description: error.message, variant: 'destructive' });
-        } else {
-            toast({ title: `Settings applied to ${pasteDates.length} dates!` });
+        try {
+            const { error } = await supabase.from('date_specific_availability').upsert(payload, { onConflict: 'date, service_id' });
+            
+            if (error) throw error;
+            
+            toast({ title: `Settings applied to ${pasteDates.length} dates!`, description: "Bulk update successful." });
             setClipboard(null);
             setPasteDates([]);
             fetchData();
+        } catch (error) {
+            console.error("Bulk upsert error:", error);
+            toast({ title: 'Failed to paste settings', description: error.message || 'Unknown error', variant: 'destructive' });
+        } finally {
+            setIsPasting(false);
         }
-        setIsPasting(false);
     };
 
     const cancelPasteMode = () => {
@@ -316,11 +379,11 @@ export const AvailabilityManager = () => {
             <div className="bg-yellow-900/20 border border-yellow-700 p-4 rounded-lg flex items-start gap-4">
                 <AlertTriangle className="h-8 w-8 text-yellow-400 mt-1" />
                 <div>
-                    <h3 className="font-bold text-yellow-300">New Availability Manager</h3>
+                    <h3 className="font-bold text-yellow-300">Date Specific Availability Manager</h3>
                     <p className="text-sm text-yellow-200">
                         {isPasteMode 
                             ? `PASTE MODE: Select dates on the calendar to apply the copied schedule. Click "Paste to Selected Days" when done.`
-                            : `Click a date to edit its specific hours. Use "Copy All" inside the editor to enter paste mode.`
+                            : `Click a date to edit its specific hours or toggle unavailability. Use "Copy All" inside the editor to enter paste mode.`
                         }
                     </p>
                 </div>
@@ -376,6 +439,7 @@ export const AvailabilityManager = () => {
                         }}
                         clipboard={clipboard}
                         setClipboard={setClipboard}
+                        isSaving={isSaving}
                     />
                 </Dialog>
             )}
