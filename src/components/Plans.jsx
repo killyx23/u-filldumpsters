@@ -4,11 +4,13 @@ import { PlanCard } from '@/components/PlanCard';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, CheckCircle } from 'lucide-react';
 import { formatISO, startOfDay, addDays } from 'date-fns';
+import { useDumpFees } from '@/hooks/useDumpFees';
 
 export const Plans = ({ onSelectPlan }) => {
     const [plans, setPlans] = useState([]);
     const [availability, setAvailability] = useState({});
     const [loading, setLoading] = useState(true);
+    const { dumpFees } = useDumpFees();
 
     useEffect(() => {
         const fetchPlansAndAvailability = async () => {
@@ -17,7 +19,7 @@ export const Plans = ({ onSelectPlan }) => {
             const { data: plansData, error: plansError } = await supabase
                 .from('services')
                 .select('*')
-                .in('id', [1, 2, 3])
+                .in('id', [1, 2, 3, 4])
                 .order('id');
             
             if (plansError) {
@@ -26,23 +28,41 @@ export const Plans = ({ onSelectPlan }) => {
                 return;
             }
             
-            setPlans(plansData);
+            // Filter to only show base plans on the frontend (1, 2, 3)
+            const frontendPlans = plansData.filter(p => [1, 2, 3].includes(p.id));
+            setPlans(frontendPlans);
 
-            if (plansData.length === 0) {
+            if (frontendPlans.length === 0) {
                 setLoading(false);
                 return;
             }
             
-            const startDate = formatISO(startOfDay(new Date()), { representation: 'date' });
+            const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
+            
+            // 1. Fetch explicit daily availability overrides for today from correct table
+            const { data: dateSpecificAvailData } = await supabase
+                .from('date_specific_availability')
+                .select('service_id, is_available')
+                .eq('date', todayStr);
+
+            const todayAvailabilityMap = {};
+            if (dateSpecificAvailData) {
+                dateSpecificAvailData.forEach(item => {
+                    todayAvailabilityMap[item.service_id] = item.is_available;
+                });
+            }
+
+            // 2. Fetch general 30-day availability as fallback
+            const startDate = todayStr;
             const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
             
-            const availabilityPromises = plansData.map(plan => 
+            const availabilityPromises = frontendPlans.map(plan => 
                 supabase.functions.invoke('get-availability', {
                     body: {
                         serviceId: plan.id,
                         startDate,
                         endDate,
-                        isDelivery: plan.id === 2 ? false : undefined // Check self-pickup for plan 2
+                        isDelivery: plan.id === 2 ? false : undefined 
                     }
                 })
             );
@@ -55,25 +75,39 @@ export const Plans = ({ onSelectPlan }) => {
                 const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
                 const newAvailability = {};
 
-                results.slice(0, plansData.length).forEach((result, index) => {
-                    const planId = plansData[index].id;
-                    if (result.data?.availability) {
-                        const isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
-                        newAvailability[planId] = isAnyDayAvailable;
-                    } else {
-                        newAvailability[planId] = false;
+                frontendPlans.forEach((plan, index) => {
+                    // Primary check: Is it explicitly marked closed today in admin?
+                    if (todayAvailabilityMap[plan.id] === false) {
+                        newAvailability[plan.id] = false;
+                        return;
                     }
+
+                    // Fallback check: Is it available at all in the next 30 days?
+                    let isAnyDayAvailable = false;
+                    const result = results[index];
+                    
+                    if (result.data?.availability) {
+                        isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
+                    }
+                    
+                    if (plan.id === 2) {
+                        const deliveryResult = results[results.length - 1];
+                        if (deliveryResult.data?.availability) {
+                            const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
+                            isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
+                        }
+                    }
+
+                    newAvailability[plan.id] = isAnyDayAvailable;
                 });
-                
-                const deliveryResult = results[results.length - 1];
-                if (deliveryResult.data?.availability) {
-                    const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
-                     newAvailability[2] = newAvailability[2] || isDeliveryAvailable;
-                }
 
                 setAvailability(newAvailability);
             } catch (error) {
                 console.error("Error fetching availability for plans:", error);
+                // Fallback to just today's map if edge functions fail
+                const fallbackAvail = {};
+                frontendPlans.forEach(p => fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false);
+                setAvailability(fallbackAvail);
             } finally {
                 setLoading(false);
             }
@@ -88,10 +122,23 @@ export const Plans = ({ onSelectPlan }) => {
         3: { text: 'Save Money and Time', delay: 0.3 },
     };
 
-    const plansWithHighlights = plans.map((plan) => ({
-        ...plan,
-        highlight: planHighlights[plan.id],
-    }));
+    const plansWithHighlights = plans.map((plan) => {
+        // Find if this plan has a dynamically managed dump fee
+        const dumpFeeData = dumpFees.find(df => df.service_id === plan.id);
+        const enhancedPlan = { ...plan, highlight: planHighlights[plan.id] };
+        
+        // Custom override for plan 3
+        if (plan.id === 3) {
+            enhancedPlan.name = "Rock, Decorative Rock, Mulch, & Gravel Delivery Service";
+        }
+        
+        if (dumpFeeData) {
+            enhancedPlan.dynamicDumpFee = parseFloat(dumpFeeData.fee_per_ton).toFixed(2);
+            enhancedPlan.dynamicMaxTons = dumpFeeData.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
+        }
+        
+        return enhancedPlan;
+    });
     
     if (loading) {
       return (

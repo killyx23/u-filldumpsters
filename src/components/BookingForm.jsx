@@ -1,62 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, User, Mail, Phone, Home, MapPin, Calendar as CalendarIcon, AlertTriangle, Loader2, Info, Clock, ShieldCheck, Truck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from "@/components/ui/checkbox";
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid, addDays, differenceInDays } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-
-const ImportantInfoIcon = () => {
-  const [isOpen, setIsOpen] = useState(false);
-  return <Popover open={isOpen} onOpenChange={setIsOpen}>
-    <PopoverTrigger asChild>
-      <div className="relative ml-2 cursor-pointer" onClick={() => setIsOpen(v => !v)}>
-        <div className="relative z-10 text-red-500 hover:text-red-400 transition-colors">
-          <Info className="h-7 w-7" />
-        </div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-          <div className="animate-ping-slow-outer h-5 w-5 rounded-full bg-red-500/80"></div>
-        </div>
-      </div>
-    </PopoverTrigger>
-    <PopoverContent side="bottom" className="bg-gray-900 border-red-400 text-white max-w-xs" onOpenAutoFocus={e => e.preventDefault()}>
-      <p className="font-bold text-red-400 mb-2">Important Rental Information</p>
-      <p className="text-sm">Rentals are ready to be picked up at the address given at 8:00 a.m. If picked up after that time, it is still considered to be a full-day charge, no matter what time it was picked up, and still needs to be returned by 10 p.m. the same day, or may be subject to a late fee or even an additional full-day charge.</p>
-      <p className="text-xs text-blue-200 mt-4">&copy; {new Date().getFullYear()} U-Fill Dumpsters. All rights reserved.</p>
-    </PopoverContent>
-  </Popover>;
-};
-
-const DeliveryServiceInfo = ({ deliveryFee }) => {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Info className="h-5 w-5 text-blue-300 hover:text-yellow-400 cursor-pointer transition-colors" />
-      </PopoverTrigger>
-      <PopoverContent className="w-80 bg-gray-900 border-yellow-400 text-white">
-        <p className="font-bold text-yellow-400 mb-2">About Our Delivery Service</p>
-        <div className="space-y-3 text-sm">
-          <p>This convenient service is for customers who need the dump loader trailer but don't have a suitable towing vehicle. Since the trailer is on wheels, we can place it on the street at the curb, avoiding any potential damage to your driveway or lawn.</p>
-          <p className="font-semibold">Pricing:</p>
-          <ul className="list-disc list-inside text-blue-200">
-            <li>A flat fee of <span className="font-bold text-white">${(deliveryFee || 0).toFixed(2)}</span> for drop-off and pickup.</li>
-            <li>A mileage charge of <span className="font-bold text-white">$0.85 per mile</span>, calculated for a round trip from our location.</li>
-            <li>You are responsible for dump fees, which are <span className="font-bold text-white">$45.00 per ton</span> (2.5 tons max).</li>
-          </ul>
-          <p className="bg-blue-900/30 border border-blue-500/50 p-2 rounded-md text-xs">
-            <span className="font-bold text-blue-300">Important:</span> It is the customer's responsibility to check local city ordinances regarding street placement. U-Fill Dumpsters is not liable for any fines or violations.
-          </p>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-};
-
+import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
+import { AvailabilityService } from '@/services/AvailabilityService';
+import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
+import { useDumpFees } from '@/hooks/useDumpFees';
 
 export const BookingForm = ({
   plan,
@@ -64,8 +22,6 @@ export const BookingForm = ({
   setBookingData,
   onSubmit,
   onBack,
-  onShowAgreement,
-  agreementAccepted,
   deliveryService,
   setDeliveryService
 }) => {
@@ -73,99 +29,143 @@ export const BookingForm = ({
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [availability, setAvailability] = useState({});
   const [loadingAvailability, setLoadingAvailability] = useState(true);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [addressWarning, setAddressWarning] = useState(null);
-  const [phoneWarning, setPhoneWarning] = useState(null);
-  const [showEmailConfirmDialog, setShowEmailConfirmDialog] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
-  const [distanceInfo, setDistanceInfo] = useState(null);
-  const [showDistanceFeeDialog, setShowDistanceFeeDialog] = useState(false);
-  const [calculatingFee, setCalculatingFee] = useState(false);
+  const [baseRentalPrice, setBaseRentalPrice] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
-
-  const isDelivery = plan.id === 2 && deliveryService;
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [currentMileageRate, setCurrentMileageRate] = useState(0.85);
+  const [currentDeliveryFee, setCurrentDeliveryFee] = useState(0);
+  const isDelivery = plan?.id === 2 && deliveryService;
+  const { getFeeForService } = useDumpFees();
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
-    if (isDelivery) {
-      return allPlans.find(p => p.id === 4) || allPlans.find(p => p.id === plan.id) || null;
-    }
-    return allPlans.find(p => p.id === plan.id) || null;
+    if (isDelivery) return allPlans.find(p => p.id === 4) || null;
+    return allPlans.find(p => p.id === plan?.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
-
-  const deliveryFeeInfo = useMemo(() => {
-    if (!isDelivery || !currentPlan) return null;
-
-    const feePlan = allPlans.find(p => p.id === 4) || currentPlan;
-
-    const deliveryFeeValue = feePlan.features?.find(f => f.name === 'Delivery Fee')?.value ?? 0;
-    const mileageFee = distanceInfo?.mileageFee ?? 0;
-    const roundTripMiles = distanceInfo?.roundTripMiles ?? 0;
-
-    return {
-      deliveryFee: deliveryFeeValue,
-      mileageFee: mileageFee,
-      totalFee: deliveryFeeValue + mileageFee,
-      roundTripMiles: roundTripMiles,
-    };
-  }, [currentPlan, isDelivery, distanceInfo, allPlans]);
-
-  const serviceIdForAvailability = currentPlan?.id || plan.id;
-
+  
   useEffect(() => {
     const fetchPlans = async () => {
       setLoadingPlans(true);
-      const { data, error } = await supabase.from('services').select('*');
-      if (!error && data) {
-        setAllPlans(data);
-      } else {
-        toast({ title: "Error fetching service details", description: error?.message, variant: "destructive" });
-      }
+      const {
+        data,
+        error
+      } = await supabase.from('services').select('*');
+      if (!error && data) setAllPlans(data);
       setLoadingPlans(false);
     };
     fetchPlans();
   }, []);
-
+  
+  useEffect(() => {
+    if (currentPlan) {
+        if (currentPlan.mileage_rate !== undefined && currentPlan.mileage_rate !== null) {
+          setCurrentMileageRate(Number(currentPlan.mileage_rate));
+        }
+        if (currentPlan.delivery_fee !== undefined && currentPlan.delivery_fee !== null) {
+          setCurrentDeliveryFee(Number(currentPlan.delivery_fee));
+        } else {
+          setCurrentDeliveryFee(0);
+        }
+    }
+  }, [currentPlan]);
+  
   useEffect(() => {
     if (isDelivery) {
-      setBookingData(prev => ({ ...prev, dropOffTimeSlot: '', pickupTimeSlot: '' }));
+      setBookingData(prev => ({
+        ...prev,
+        dropOffTimeSlot: '',
+        pickupTimeSlot: ''
+      }));
     }
   }, [isDelivery, setBookingData]);
-
+  
   const fetchAvailability = useCallback(async month => {
+    if (!plan) return;
     setLoadingAvailability(true);
-    const startDate = formatISO(startOfMonth(month), { representation: 'date' });
-    const endDate = formatISO(endOfMonth(month), { representation: 'date' });
-
+    const startDate = formatISO(startOfMonth(month), {
+      representation: 'date'
+    });
+    const endDate = formatISO(endOfMonth(month), {
+      representation: 'date'
+    });
+    const targetServiceId = currentPlan?.id || plan.id;
     try {
-      const { data, error } = await supabase.functions.invoke('get-availability', {
-        body: { serviceId: serviceIdForAvailability, startDate, endDate, isDelivery }
+      const {
+        data,
+        error
+      } = await supabase.functions.invoke('get-availability', {
+        body: {
+          serviceId: plan.id,
+          startDate,
+          endDate,
+          isDelivery
+        }
       });
-
-      if (error) throw new Error(error.message);
-      if (data.error) throw new Error(data.error);
-
-      setAvailability(prev => ({ ...prev, ...data.availability }));
+      let mergedAvailability = {};
+      if (!error && !data?.error) {
+        mergedAvailability = {
+          ...data.availability
+        };
+      }
+      const dailyOverrides = await AvailabilityService.getAvailabilityForDateRange(targetServiceId, startDate, endDate);
+      if (dailyOverrides && dailyOverrides.length > 0) {
+        dailyOverrides.forEach(override => {
+          if (!mergedAvailability[override.date]) {
+            mergedAvailability[override.date] = {
+              available: override.is_available
+            };
+          } else {
+            mergedAvailability[override.date].available = override.is_available;
+            if (!override.is_available) {
+              mergedAvailability[override.date].deliverySlots = [];
+              mergedAvailability[override.date].pickupSlots = [];
+              mergedAvailability[override.date].returnSlots = [];
+              mergedAvailability[override.date].hourlySlots = [];
+            }
+          }
+        });
+      }
+      setAvailability(prev => ({
+        ...prev,
+        ...mergedAvailability
+      }));
     } catch (error) {
-      toast({ title: "Error fetching availability", description: error.message, variant: "destructive", duration: 30000 });
+      console.error("Error fetching combined availability:", error);
+      toast({
+        title: 'Availability Error',
+        description: 'Failed to load date availability.',
+        variant: 'destructive'
+      });
     } finally {
       setLoadingAvailability(false);
     }
-  }, [serviceIdForAvailability, isDelivery]);
-
+  }, [plan, isDelivery, currentPlan]);
+  
+  useEffect(() => {
+    if (!plan) return;
+    const targetServiceId = currentPlan?.id || plan.id;
+    const channel = supabase.channel('date_specific_availability_changes').on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'date_specific_availability',
+      filter: `service_id=eq.${targetServiceId}`
+    }, () => {
+      fetchAvailability(currentMonth);
+    }).subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentPlan, plan, currentMonth, fetchAvailability]);
+  
   useEffect(() => {
     fetchAvailability(currentMonth);
   }, [fetchAvailability, currentMonth]);
-
-  const handleMonthChange = month => {
-    const newMonth = startOfMonth(month);
-    if (newMonth.getMonth() !== currentMonth.getMonth() || newMonth.getFullYear() !== currentMonth.getFullYear()) {
-      setCurrentMonth(newMonth);
-    }
-  };
-
+  
   const disabledDates = useMemo(() => {
-    const dates = [{ before: startOfDay(addDays(new Date(), 1)) }];
+    const dates = [{
+      before: startOfDay(addDays(new Date(), 1))
+    }];
     for (const dateStr in availability) {
       if (!availability[dateStr].available) {
         dates.push(parse(dateStr, 'yyyy-MM-dd', new Date()));
@@ -173,375 +173,539 @@ export const BookingForm = ({
     }
     return dates;
   }, [availability]);
-
+  
   const timeSlots = useMemo(() => {
-    if (!currentPlan) return { dropOff: [], pickup: [] };
+    if (!currentPlan || !plan) return {
+      dropOff: [],
+      pickup: []
+    };
     const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
     const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
-
     const dropOffAvail = dropOffDateStr ? availability[dropOffDateStr] : null;
     const pickupAvail = pickupDateStr ? availability[pickupDateStr] : null;
-
     let dropOffSlots = [];
     let pickupSlots = [];
-
-    const getSlots = (avail, isStart) => {
-      if (!avail) return [];
-
-      const serviceType = currentPlan.service_type;
-      const id = currentPlan.id;
-
-      if (id === 2) {
-        if (isDelivery) {
-          return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-        } else {
-          return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
-        }
-      }
-
-      if (id === 4) {
-        return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-      }
-
-      if (serviceType === 'window' || serviceType === 'material_delivery') {
-        return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-      }
-
-      if (serviceType === 'hourly') {
-        return isStart ? (avail.hourlySlots || []) : (avail.returnSlots || []);
-      }
-
-      if (serviceType === 'daily_rental') {
-        if (isDelivery) {
-          return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-        } else {
-          return isStart ? (avail.pickupSlots || []) : (avail.returnSlots || []);
-        }
-      }
-
-      return isStart ? (avail.deliverySlots || []) : (avail.pickupSlots || []);
-    };
-
-    if (dropOffAvail) {
-      dropOffSlots = getSlots(dropOffAvail, true);
+    if (dropOffAvail && dropOffAvail.available) {
+      if (plan.id === 1) dropOffSlots = dropOffAvail.deliverySlots || [];else if (plan.id === 2 && !isDelivery) dropOffSlots = dropOffAvail.pickupSlots || [];else if (plan.id === 2 && isDelivery) dropOffSlots = dropOffAvail.deliverySlots || [];else if (plan.id === 3) dropOffSlots = dropOffAvail.deliverySlots || [];
     }
-
-    if (pickupAvail) {
-      pickupSlots = getSlots(pickupAvail, false);
+    if (pickupAvail && pickupAvail.available) {
+      if (plan.id === 1) pickupSlots = pickupAvail.pickupSlots || [];else if (plan.id === 2 && !isDelivery) pickupSlots = pickupAvail.returnSlots || [];else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
     }
-
     return {
       dropOff: dropOffSlots,
-      pickup: pickupSlots,
+      pickup: pickupSlots
     };
-  }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, isDelivery]);
-
-  const handleInputChange = e => {
-    const { name, value } = e.target;
-    setBookingData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleTimeChange = (field, value) => setBookingData(prev => ({ ...prev, [field]: value }));
-
-  const handleDateSelect = (field, date) => {
+  }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery]);
+  
+  const handleDateSelect = async (field, date) => {
     const newDate = date ? startOfDay(date) : null;
-    setBookingData(prev => ({
-      ...prev,
-      [field]: newDate,
-      [`${field.replace('Date', '')}TimeSlot`]: ''
-    }));
-    if (field === 'dropOffDate' && newDate && currentPlan) {
-      const pickupDate = bookingData.pickupDate ? startOfDay(bookingData.pickupDate) : null;
-      if (currentPlan.id !== 3 && (!pickupDate || isBefore(pickupDate, newDate))) {
-        setBookingData(prev => ({
-          ...prev,
-          pickupDate: newDate,
-          pickupTimeSlot: ''
-        }));
+    if (newDate) {
+      const dateStr = format(newDate, 'yyyy-MM-dd');
+      const isAvail = availability[dateStr]?.available;
+      if (isAvail === false) {
+        setIsModalOpen(true);
+        return;
       }
     }
+    setBookingData(prev => {
+      const state = {
+        ...prev,
+        [field]: newDate,
+        [`${field.replace('Date', '')}TimeSlot`]: ''
+      };
+      if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3) {
+        if (!prev.pickupDate || isBefore(startOfDay(prev.pickupDate), newDate)) {
+          state.pickupDate = newDate;
+          state.pickupTimeSlot = '';
+        }
+      }
+      return state;
+    });
   };
-
-  // CHANGED: now calls verify-address-and-distance with strictVerify: false
-  // and reads data.distanceInfo instead of data directly
-  const calculateAddressBasedFee = useCallback(async () => {
-    if (!isDelivery) {
-      setDistanceInfo(null);
-      return;
-    }
-    const fullAddress = `${bookingData.street}, ${bookingData.city}, ${bookingData.state} ${bookingData.zip}`;
-    const addressComplete = bookingData.street && bookingData.city && bookingData.state && bookingData.zip;
-
-    if (!addressComplete) {
-      setDistanceInfo(null);
-      return;
-    }
-
-    setCalculatingFee(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('verify-address-and-distance', {
-        body: { address: fullAddress, strictVerify: false }
-      });
-      if (error) throw error;
-      setDistanceInfo(data.distanceInfo);
-    } catch (error) {
-      toast({ title: "Could not calculate delivery fee", description: error.message, variant: "destructive", duration: 30000 });
-      setDistanceInfo(null);
-    } finally {
-      setCalculatingFee(false);
-    }
-  }, [isDelivery, bookingData.street, bookingData.city, bookingData.state, bookingData.zip]);
-
+  
   useEffect(() => {
-    const handler = setTimeout(() => {
-      calculateAddressBasedFee();
-    }, 1000);
-    return () => clearTimeout(handler);
-  }, [calculateAddressBasedFee]);
-
-  useEffect(() => {
-    if (!currentPlan) {
-      setTotalPrice(0);
-      return;
+    if (bookingData.dropOffDate) {
+      const dropOffStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
+      if (availability[dropOffStr] && !availability[dropOffStr].available) {
+        setBookingData(prev => ({
+          ...prev,
+          dropOffDate: null,
+          dropOffTimeSlot: ''
+        }));
+        toast({
+          title: "Date Unavailable",
+          description: "Your selected start date is no longer available.",
+          variant: "destructive"
+        });
+      }
     }
-
-    let price = parseFloat(currentPlan.base_price);
-
+    if (bookingData.pickupDate) {
+      const pickupStr = format(bookingData.pickupDate, 'yyyy-MM-dd');
+      if (availability[pickupStr] && !availability[pickupStr].available) {
+        setBookingData(prev => ({
+          ...prev,
+          pickupDate: null,
+          pickupTimeSlot: ''
+        }));
+        toast({
+          title: "Date Unavailable",
+          description: "Your selected end date is no longer available.",
+          variant: "destructive"
+        });
+      }
+    }
+  }, [availability, bookingData.dropOffDate, bookingData.pickupDate, setBookingData]);
+  
+  useEffect(() => {
+    if (!currentPlan) return;
+    let basePriceCalculation = parseFloat(currentPlan.base_price) || 0;
+    
     if (bookingData.dropOffDate && (bookingData.pickupDate || currentPlan.id === 3)) {
       const dropOff = startOfDay(new Date(bookingData.dropOffDate));
       const pickup = currentPlan.id === 3 ? dropOff : startOfDay(new Date(bookingData.pickupDate));
-
       if (isValid(dropOff) && isValid(pickup) && !isBefore(pickup, dropOff)) {
         const dayDiff = differenceInDays(pickup, dropOff) + 1;
-
         if (currentPlan.id === 1) {
-          if (dayDiff === 7) {
-            price = 500;
-          } else {
-            const extraDays = Math.max(0, dayDiff - 1);
-            price = parseFloat(currentPlan.base_price) + (extraDays * 50);
-          }
+          basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
         } else if (currentPlan.id === 2 || currentPlan.id === 4) {
-          price = parseFloat(currentPlan.base_price) * dayDiff;
-        } else {
-          price = parseFloat(currentPlan.base_price);
+          basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         }
       }
     }
-
-    if (deliveryFeeInfo?.totalFee > 0) {
-      price += deliveryFeeInfo.totalFee;
-    }
-
-    setTotalPrice(price);
-  }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, deliveryFeeInfo]);
-
-  const pickupDisabledDates = useMemo(() => [...disabledDates, {
-    before: bookingData.dropOffDate ? startOfDay(bookingData.dropOffDate) : new Date()
-  }], [bookingData.dropOffDate, disabledDates]);
-
+    
+    setBaseRentalPrice(basePriceCalculation);
+    setTotalPrice(basePriceCalculation + currentDeliveryFee);
+  }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, currentDeliveryFee]);
+  
   const isFormValid = useMemo(() => {
     if (!currentPlan) return false;
-    const baseValid = agreementAccepted && bookingData.name && bookingData.email && bookingData.phone && bookingData.street && bookingData.city && bookingData.state && bookingData.zip && bookingData.dropOffDate && bookingData.dropOffTimeSlot;
-
-    if (currentPlan.id === 3) {
-      return baseValid;
-    }
-
-    const pickupValid = bookingData.pickupDate && bookingData.pickupTimeSlot;
-
-    if (isDelivery) {
-      return baseValid && pickupValid && deliveryFeeInfo !== null && !calculatingFee;
-    }
-    return baseValid && pickupValid;
-  }, [bookingData, agreementAccepted, isDelivery, deliveryFeeInfo, calculatingFee, currentPlan]);
-
-  const validatePhoneNumber = () => {
-    if (!/^\D*(\d{3})\D*(\d{3})\D*(\d{4})\D*$/.test(bookingData.phone) || bookingData.phone.replace(/\D/g, '').length < 10) {
-      setPhoneWarning("Please enter a valid 10-digit phone number.");
-      return false;
-    }
-    setPhoneWarning(null);
-    return true;
-  };
-
-  const proceedToNextStep = (addressSkipped) => {
-    let finalDistanceInfo = { deliveryService: isDelivery };
-    if (isDelivery) {
-      finalDistanceInfo = { ...finalDistanceInfo, ...deliveryFeeInfo };
-    } else if (distanceInfo) {
-      finalDistanceInfo = { ...finalDistanceInfo, fee: distanceInfo.fee, miles: distanceInfo.miles, roundTripMiles: distanceInfo.roundTripMiles };
-    }
-
-    if (currentPlan.id === 2 && !deliveryService) {
-      setShowEmailConfirmDialog(true);
-    } else {
-      onSubmit(totalPrice, addressSkipped, finalDistanceInfo, { deliveryService: isDelivery, plan: currentPlan });
-    }
-  };
-
-  // CHANGED: removed serviceType, added strictVerify: true
+    let baseValid = bookingData.dropOffDate && bookingData.dropOffTimeSlot;
+    let pickupValid = currentPlan.id === 3 ? true : bookingData.pickupDate && bookingData.pickupTimeSlot;
+    const cAddress = bookingData.contactAddress;
+    const addressValid = cAddress?.street && cAddress?.city && cAddress?.state && cAddress?.zip;
+    return baseValid && pickupValid && addressValid;
+  }, [bookingData, currentPlan]);
+  
   const handleFormSubmit = async e => {
     e.preventDefault();
-    if (!validatePhoneNumber() || !currentPlan) return;
-
-    if (isDelivery || currentPlan.id === 3) {
-      proceedToNextStep(false);
+    if (!isFormValid) {
+      toast({
+        title: "Incomplete Form",
+        description: "Please ensure all required fields are filled to proceed.",
+        variant: "destructive"
+      });
       return;
     }
+    
+    const addonsPayload = {
+      plan: {
+        ...currentPlan,
+        mileage_rate: currentMileageRate,
+        delivery_fee: currentDeliveryFee,
+        price: baseRentalPrice // We explicitly pass JUST the base rental to price
+      },
+      deliveryService: isDelivery,
+      deliveryFee: currentDeliveryFee
+    };
+    
+    // Set pending_address_verification flag if address was not verified by Google Places
+    if (!bookingData.contactAddress?.isVerified) {
+        addonsPayload.pending_address_verification = true;
+        addonsPayload.unverified_address = `${bookingData.contactAddress.street}, ${bookingData.contactAddress.city}, ${bookingData.contactAddress.state} ${bookingData.contactAddress.zip}`;
+        addonsPayload.pending_verification_reason = "Address entered manually";
+        
+        // Ensure child components understand this manual address has been accepted
+        bookingData.contactAddress.unverifiedAccepted = true;
+    }
 
-    setIsVerifying(true);
-    const fullAddress = `${bookingData.street}, ${bookingData.city}, ${bookingData.state} ${bookingData.zip}`;
-    try {
-      const { data, error } = await supabase.functions.invoke('verify-address-and-distance', {
-        body: {
-          address: fullAddress,
-          strictVerify: true
-        }
-      });
-      if (error) {
-        let errorMsg = `Function invoke failed: ${error.message}`;
-        try { const contextError = await error.context.json(); if (contextError.error) { errorMsg = contextError.error; } } catch (e) { /* Ignore */ }
-        throw new Error(errorMsg);
-      }
-      if (data.isValid === false) {
-        setAddressWarning(data.message || "The address could not be verified.");
-        setIsVerifying(false);
-        return;
-      }
-      setAddressWarning(null);
-      setDistanceInfo(data.distanceInfo);
-      if (data.distanceInfo?.fee > 0) {
-        setShowDistanceFeeDialog(true);
-      } else {
-        proceedToNextStep(false);
-      }
-    } catch (err) {
-      toast({ title: 'Verification Error', description: err.message, variant: 'destructive', duration: 30000 });
-      setIsVerifying(false);
-    } finally {
-      setIsVerifying(false);
+    // Submit base rental price for proper additive calculation in AddonsForm
+    onSubmit(bookingData, baseRentalPrice, null, null, addonsPayload);
+  };
+
+  const handleManualAddressChange = (field, value) => {
+      setBookingData(prev => ({
+          ...prev,
+          contactAddress: {
+              ...prev.contactAddress,
+              [field]: value,
+              isVerified: false,
+              unverifiedAccepted: true
+          }
+      }));
+  };
+  
+  const getFieldLabels = () => {
+    if (!currentPlan || !plan) return {
+      date1: 'Date',
+      date2: 'Date'
+    };
+    switch (isDelivery ? 4 : plan.id) {
+      case 1:
+        return {
+          date1: 'Delivery Date',
+          date2: 'Pickup Date'
+        };
+      case 2:
+        return {
+          date1: 'Pickup Date',
+          date2: 'Return Date'
+        };
+      case 3:
+        return {
+          date1: 'Delivery Date',
+          date2: ''
+        };
+      case 4:
+        return {
+          date1: 'Drop-off Date',
+          date2: 'Pickup Date'
+        };
+      default:
+        return {
+          date1: 'Start Date',
+          date2: 'End Date'
+        };
     }
   };
+  
+  if (loadingPlans || !plan) return <div className="flex justify-center items-center h-96"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
 
-  const handleAcceptDistanceFee = () => {
-    setShowDistanceFeeDialog(false);
-    proceedToNextStep(false);
+  const planName = currentPlan?.name || plan?.name || 'Selected Service';
+  
+  const renderDescription = () => {
+    const dumpFeeData = getFeeForService(currentPlan?.id);
+    const dynamicFee = dumpFeeData?.fee_per_ton ? parseFloat(dumpFeeData.fee_per_ton).toFixed(2) : '45.00';
+    const dynamicMaxTons = dumpFeeData?.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
+
+    if (currentPlan?.id === 4) {
+      return (
+        <div className="text-blue-200 mb-6 space-y-3 text-sm leading-relaxed">
+          <p>
+            Experience the ultimate convenience with our <strong>Dump Trailer Delivery & Removal Service</strong>. 
+            Perfect for residential or commercial projects, this service eliminates the need for you to own a towing vehicle.
+          </p>
+          <p>
+            Our professional drivers will drop off the trailer exactly where you need it. Because our trailers have rubber tires, 
+            they are <span className="text-yellow-400 font-semibold">driveway and street safe</span>, causing zero damage to your surfaces 
+            compared to traditional roll-off dumpsters.
+          </p>
+          <p>
+            <strong>Service Terms:</strong> Delivery fees are calculated based on your location from our facility. 
+            When your rental ends, we haul it away for you. Please note that customers are responsible for adhering to 
+            local city ordinances and any fines incurred from improper placement or overloading.
+          </p>
+          <div className="bg-black/20 p-3 rounded border border-blue-500/20">
+            <p className="font-bold text-white mb-1">Fee Structure:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Rental: Base rate per day (calculated below)</li>
+              {currentDeliveryFee > 0 && <li>Base Delivery Fee: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></li>}
+              <li>Mileage Charge: Distance-based calculation from our lot</li>
+              <li>Dump Fees: <span className="text-green-400">${dynamicFee} per ton</span></li>
+              <li>Weight Limit: <span className="text-orange-400">{dynamicMaxTons || 2.5}-ton maximum capacity</span></li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentPlan?.id === 1) {
+      return (
+         <div className="text-blue-200 mb-6 space-y-3 text-sm leading-relaxed">
+          <p>
+            Our <strong>16 Yard Dumpster Rental</strong> is perfect for mid-to-large cleanouts, remodeling projects, and construction debris.
+          </p>
+          <div className="bg-black/20 p-3 rounded border border-blue-500/20 mt-4">
+            <p className="font-bold text-white mb-1">Pricing Details:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Rental: Base rate covers up to 7 days</li>
+              {currentDeliveryFee > 0 && <li>Base Delivery Fee: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></li>}
+              <li>Dump Fees: <span className="text-green-400">${dynamicFee} per ton {dynamicMaxTons ? `(${dynamicMaxTons} tons max)` : ''}</span></li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentPlan?.id === 2) {
+      return (
+        <div className="text-blue-200 mb-6 space-y-3 text-sm leading-relaxed">
+          <p>
+            Our <strong>Dump Loader Trailer Rental</strong> is the heavy-duty solution for DIYers and professionals alike. 
+            Designed to handle everything from landscape debris to construction waste, this versatile 7x16 trailer 
+            empowers you to move materials on your own schedule.
+          </p>
+          <p>
+            <strong>Flexible Rental Options:</strong> We offer convenient daily rates with standard pickup available 
+            at <span className="text-white font-medium">7:00 AM</span> and returns required by 
+            <span className="text-white font-medium"> 11:00 PM</span>. Multi-day rentals are available for larger projects 
+            requiring extended haul time.
+          </p>
+          <p>
+            <strong>Hitch Requirements:</strong> To ensure safe transport, your vehicle MUST be equipped with a 
+            <span className="text-yellow-400 font-semibold"> 2-5/16" ball hitch</span> and a standard 7-way electrical connector. 
+            You will be required to perform a quick safety inspection upon pickup to ensure a secure connection. Pick is on the South of Saratoga Springs.
+          </p>
+          <div className="bg-black/20 p-3 rounded border border-blue-500/20">
+            <p className="font-bold text-white mb-1">Rental Includes:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Wireless Remote Control for easy dumping operation</li>
+              <li>Integrated Power Tarp Cover to secure your load</li>
+              <li>Hydraulic Jack for effortless coupling and uncoupling</li>
+              <li>Weight Limit: 5 ton capacity</li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
+    
+    return <p className="text-blue-200 mb-6">{currentPlan?.description || plan?.description || ''}</p>;
   };
-
-  const handleProceedWithRisk = () => {
-    setAddressWarning(null);
-    proceedToNextStep(true);
-  };
-
-  const handleEmailConfirmed = () => {
-    setShowEmailConfirmDialog(false);
-    const finalDistanceInfo = { deliveryService: isDelivery, ...distanceInfo, ...deliveryFeeInfo };
-    onSubmit(totalPrice, !!addressWarning, finalDistanceInfo, { deliveryService: isDelivery, plan: currentPlan });
-  };
-
-  const isDropOffLoading = loadingAvailability && (!bookingData.dropOffDate || !availability[format(bookingData.dropOffDate, 'yyyy-MM-dd')]);
-  const isPickupLoading = loadingAvailability && (!bookingData.pickupDate || !availability[format(bookingData.pickupDate, 'yyyy-MM-dd')]);
-
-  const currentPlanName = currentPlan?.name || plan.name;
-  const currentPlanDescription = currentPlan?.description || plan.description;
-  const deliveryFeeForInfo = allPlans.find(p => p.id === 4)?.features?.find(f => f.name === 'Delivery Fee')?.value;
-
-  if (loadingPlans) {
-    return <div className="flex justify-center items-center h-96"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
-  }
-
+  
   return <>
-    <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -50 }} transition={{ duration: 0.5 }} className="container mx-auto py-16 px-4">
+    <motion.div initial={{
+      opacity: 0,
+      y: 50
+    }} animate={{
+      opacity: 1,
+      y: 0
+    }} exit={{
+      opacity: 0,
+      y: -50
+    }} className="container mx-auto pt-8 pb-16 px-4">
       <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-        <div className="flex items-center mb-8"><Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20"><ArrowLeft /></Button><h2 className="text-3xl font-bold text-white">Booking Details</h2></div>
+        
+        <div className="flex items-center mb-8 border-b border-white/10 pb-4">
+            <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20">
+              <ArrowLeft />
+            </Button>
+            <h2 className="text-3xl font-bold text-white">
+              Booking Details
+            </h2>
+        </div>
+        
         <div className="grid md:grid-cols-2 gap-8">
-          <div className="bg-white/5 p-6 rounded-lg">
+          <div className="bg-white/5 p-6 rounded-lg h-fit border border-white/5">
             <div className="flex items-center mb-4">
-              <h3 className="text-2xl font-bold text-yellow-400">{currentPlanName}</h3>
-              {plan.id === 2 && !isDelivery && <ImportantInfoIcon />}
-            </div>
-            <p className="text-blue-200 mb-6">{currentPlanDescription}</p>
-            <div className="border-t border-white/20 pt-4">
-              <p className="text-white text-lg font-semibold">Estimated Price:</p>
-              <div className="flex items-baseline">
-                {(calculatingFee && isDelivery) || !currentPlan ? (
-                  <Loader2 className="h-8 w-8 animate-spin text-green-400" />
-                ) : (
-                  <p className="text-4xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
-                )}
-                <span className="text-sm text-blue-200 ml-2">(plus tax)</span>
-              </div>
-              <p className="text-sm text-blue-200 mt-1">Calculated based on selected dates.</p>
-              {isDelivery && deliveryFeeInfo && (
-                <div className="text-yellow-300 mt-2 text-sm">
-                  {calculatingFee ? (
-                    <p>Calculating delivery fee...</p>
-                  ) : (
-                    deliveryFeeInfo.totalFee > 0 &&
-                    <>
-                      <p>Includes Trailer Delivery Fee: ${deliveryFeeInfo.totalFee.toFixed(2)}</p>
-                      <p className="text-xs">(${deliveryFeeInfo.deliveryFee.toFixed(2)} Fee + ${deliveryFeeInfo.mileageFee.toFixed(2)} for {deliveryFeeInfo.roundTripMiles.toFixed(1)} miles)</p>
-                    </>
-                  )}
-                </div>
+              <h3 className="text-2xl font-bold text-yellow-400">{planName}</h3>
+              {plan?.id === 2 && !isDelivery && (
+                <TooltipProvider>
+                  <Tooltip delayDuration={200}>
+                    <TooltipTrigger asChild>
+                      <AlertCircle className="h-6 w-6 ml-2 text-yellow-500 cursor-help animate-pulse transition-transform hover:scale-110" />
+                    </TooltipTrigger>
+                    <TooltipContent 
+                      side="bottom" 
+                      align="start" 
+                      className="max-w-[400px] bg-gray-900 border-2 border-orange-500 p-4 shadow-xl shadow-orange-900/30 z-[9999]"
+                    >
+                      <div className="flex items-center space-x-2 mb-3 border-b border-orange-500/30 pb-2">
+                        <AlertCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                        <span className="font-bold text-orange-400 text-sm uppercase tracking-wide">Liability & Responsibility</span>
+                      </div>
+                      <ul className="space-y-3 text-xs text-gray-300">
+                        <li>
+                          <strong className="text-white block mb-0.5">Vehicle & Towing Requirements:</strong>
+                          Renter must ensure their vehicle meets the necessary towing capacity. Valid driver's license and proof of insurance are required.
+                        </li>
+                        <li>
+                          <strong className="text-white block mb-0.5">Damage & Improper Use:</strong>
+                          Renter is fully responsible for any trailer damage, overloading, or improper loading occurring during the rental period.
+                        </li>
+                        <li>
+                          <strong className="text-white block mb-0.5">Cleaning & Maintenance:</strong>
+                          The trailer must be returned completely empty and reasonably clean. Failure to do so will result in additional dump and cleaning fees.
+                        </li>
+                        <li>
+                          <strong className="text-white block mb-0.5">Insurance & Legal Compliance:</strong>
+                          Renter is fully liable for all traffic violations, accidents, and must comply with all local towing laws and regulations.
+                        </li>
+                        <li>
+                          <strong className="text-white block mb-0.5">Assumption of Risk:</strong>
+                          By renting, the customer assumes all risks associated with towing and operating the dump trailer.
+                        </li>
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {currentPlan?.id === 4 && (
+                <TooltipProvider>
+                  <Tooltip delayDuration={200}>
+                    <TooltipTrigger asChild>
+                      <AlertCircle className="h-6 w-6 ml-2 text-yellow-500 cursor-help animate-pulse transition-transform hover:scale-110" />
+                    </TooltipTrigger>
+                    <TooltipContent 
+                      side="bottom" 
+                      align="start" 
+                      className="max-w-[400px] bg-gray-900 border-2 border-orange-500 p-4 shadow-xl shadow-orange-900/30 z-[9999]"
+                    >
+                      <div className="flex items-center space-x-2 mb-3 border-b border-orange-500/30 pb-2">
+                        <AlertCircle className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                        <span className="font-bold text-orange-400 text-sm uppercase tracking-wide">Prohibited Materials</span>
+                      </div>
+                      <p className="text-xs text-gray-300 leading-relaxed">
+                        <strong className="text-white">CAUTION:</strong> These Materials are not allowed in the dumpster. Prohibited items include hazardous materials (paint, chemicals, asbestos), tires, and batteries. Mattresses and TVs can be taken to the dump, but they require an extra $25 for each mattress and $15 for each TV. Please refer to our user agreement for a complete list of restricted items. Disposing of these items in the dumpster may result in additional fees.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
-          </div>
-          <form onSubmit={handleFormSubmit} className="space-y-4">
-            <InputField icon={<User />} type="text" name="name" placeholder="Full Name" value={bookingData.name} onChange={handleInputChange} required />
-            <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
-            <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
-            <InputField icon={<Home />} type="text" name="street" placeholder="Street Address" value={bookingData.street} onChange={handleInputChange} required />
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4"><InputField icon={<MapPin />} type="text" name="city" placeholder="City" value={bookingData.city} onChange={handleInputChange} required /><InputField icon={<MapPin />} type="text" name="state" placeholder="State" value={bookingData.state} onChange={handleInputChange} required /><InputField icon={<MapPin />} type="text" name="zip" placeholder="ZIP Code" value={bookingData.zip} onChange={handleInputChange} required /></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <DatePickerField label={plan.id === 2 ? (isDelivery ? "Delivery Date" : "Pickup Date") : (currentPlan?.service_type === 'window' || currentPlan?.service_type === 'material_delivery' ? "Delivery Date" : "Pickup Date")} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={handleMonthChange} />
-              <TimeSlotPicker label="Time" value={bookingData.dropOffTimeSlot} onValueChange={v => handleTimeChange('dropOffTimeSlot', v)} slots={timeSlots.dropOff} disabled={!bookingData.dropOffDate} loading={isDropOffLoading} />
-              {currentPlan?.id !== 3 && <>
-                <DatePickerField label={plan.id === 2 ? (isDelivery ? "Pickup Date" : "Return Date") : (currentPlan?.service_type === 'window' ? "Pickup Date" : "Return Date")} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={pickupDisabledDates} onMonthChange={handleMonthChange} />
-                <TimeSlotPicker label="Time" value={bookingData.pickupTimeSlot} onValueChange={v => handleTimeChange('pickupTimeSlot', v)} slots={timeSlots.pickup} disabled={!bookingData.pickupDate} loading={isPickupLoading} />
-              </>}
-            </div>
-
-            {plan.id === 2 && (
-              <div className="flex items-center space-x-3 pt-2 bg-white/10 p-3 rounded-lg">
-                <Checkbox id="deliveryService" checked={deliveryService} onCheckedChange={setDeliveryService} />
-                <label htmlFor="deliveryService" className="text-sm font-semibold text-white">Don't have a truck? We've got you covered! Check here for delivery service.</label>
-                {deliveryFeeForInfo !== undefined && <DeliveryServiceInfo deliveryFee={deliveryFeeForInfo} />}
+            {renderDescription()}
+            <div className="border-t border-white/20 pt-4">
+              <p className="text-white text-lg font-semibold">Estimated Price (Rental + Base Delivery Fee):</p>
+              <div className="flex items-baseline mb-2">
+                <p className="text-4xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
+                <span className="text-sm text-blue-200 ml-2">(plus tax)</span>
               </div>
-            )}
+              <div className="text-sm text-gray-300 mb-2">
+                 <span>Base Rental: ${baseRentalPrice.toFixed(2)}</span>
+                 {currentDeliveryFee > 0 && <span className="ml-4">Delivery Fee: ${currentDeliveryFee.toFixed(2)}</span>}
+              </div>
+              {(isDelivery || plan?.id === 1) && <p className="text-xs text-yellow-300 italic flex items-center mt-2">
+                   <Truck className="h-4 w-4 mr-1" /> Mileage charge will be calculated in the next step based on distance.
+                </p>}
+            </div>
+          </div>
 
-            <div className="flex items-center space-x-3 pt-2"><Checkbox id="agreement" checked={agreementAccepted} onCheckedChange={onShowAgreement} className="border-white/50 data-[state=checked]:bg-yellow-400" /><label htmlFor="agreement" className="text-sm text-white">I have read and accept the <span onClick={onShowAgreement} className="text-yellow-400 font-bold underline cursor-pointer">user agreement</span>.</label></div>
-            {!agreementAccepted && <div className="flex items-center text-yellow-300 text-sm"><AlertTriangle className="h-4 w-4 mr-2" />Please accept the agreement to proceed.</div>}
+          <form onSubmit={handleFormSubmit} className="space-y-6">
+            <motion.div initial={{
+              opacity: 0,
+              x: 20
+            }} animate={{
+              opacity: 1,
+              x: 0
+            }} className="space-y-4">
+              {plan?.id === 2 && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
+                    <Checkbox id="deliveryService" checked={deliveryService} onCheckedChange={setDeliveryService} className="border-yellow-400 data-[state=checked]:bg-yellow-400" />
+                    <label htmlFor="deliveryService" className="text-sm font-semibold text-white cursor-pointer flex-1">
+                      Don't have a truck. Need delivery? We've got you covered! Check here for delivery.
+                    </label>
+                    <DeliveryServiceInfo deliveryFee={currentDeliveryFee > 0 ? currentDeliveryFee : 30} />
+                  </div>}
 
-            <Button type="submit" disabled={!isFormValid || isVerifying || calculatingFee} className="w-full py-3 text-lg font-semibold bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-black disabled:opacity-50 disabled:cursor-not-allowed">
-              {(isVerifying || calculatingFee) ? <Loader2 className="h-6 w-6 animate-spin" /> : isFormValid ? <>Proceed to Add-ons <ArrowRight className="ml-2" /></> : 'Complete All Fields to Continue'}
-            </Button>
+              <div className="space-y-4 mt-6 bg-black/20 p-5 rounded-lg border border-white/10">
+                  <h3 className="text-lg font-semibold text-white flex items-center">
+                      <MapPin className="mr-2 h-5 w-5 text-red-400" />
+                      Contact Address
+                  </h3>
+                  <div className="space-y-2">
+                      <GooglePlacesAutocomplete 
+                        value={bookingData.contactAddress?.street || ''} 
+                        onChange={val => setBookingData(prev => ({
+                            ...prev,
+                            contactAddress: {
+                              ...prev.contactAddress,
+                              street: val,
+                              isVerified: false,
+                              unverifiedAccepted: true
+                            }
+                        }))} 
+                        onAddressSelect={details => setBookingData(prev => ({
+                            ...prev,
+                            contactAddress: {
+                              ...prev.contactAddress,
+                              isVerified: true,
+                              unverifiedAccepted: false,
+                              ...details,
+                            }
+                        }))} 
+                        placeholder="Start typing your address..." 
+                        required 
+                      />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <InputField 
+                        icon={<MapPin />} 
+                        value={bookingData.contactAddress?.city || ''} 
+                        onChange={(e) => handleManualAddressChange('city', e.target.value)}
+                        placeholder="City" 
+                      />
+                      <InputField 
+                        icon={<MapPin />} 
+                        value={bookingData.contactAddress?.state || ''} 
+                        onChange={(e) => handleManualAddressChange('state', e.target.value)}
+                        placeholder="State" 
+                      />
+                      <InputField 
+                        icon={<MapPin />} 
+                        value={bookingData.contactAddress?.zip || ''} 
+                        onChange={(e) => handleManualAddressChange('zip', e.target.value)}
+                        placeholder="ZIP" 
+                      />
+                  </div>
+                  {!bookingData.contactAddress?.isVerified && bookingData.contactAddress?.street && (
+                      <p className="text-xs text-orange-300 bg-orange-900/20 p-2 rounded border border-orange-500/30 mt-2">
+                          Manual address entry requires admin verification. Delivery fees will be calculated and applied during the review process.
+                      </p>
+                  )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
+                  <DatePickerField label={getFieldLabels().date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
+                  <TimeSlotPicker label="Time" value={bookingData.dropOffTimeSlot} onValueChange={v => setBookingData(p => ({
+                  ...p,
+                  dropOffTimeSlot: v
+                }))} slots={timeSlots.dropOff} disabled={!bookingData.dropOffDate} loading={loadingAvailability} />
+                  
+                  {currentPlan?.id !== 3 && <>
+                          <DatePickerField label={getFieldLabels().date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
+                          <TimeSlotPicker label="Time" value={bookingData.pickupTimeSlot} onValueChange={v => setBookingData(p => ({
+                    ...p,
+                    pickupTimeSlot: v
+                  }))} slots={timeSlots.pickup} disabled={!bookingData.pickupDate} loading={loadingAvailability} />
+                      </>}
+              </div>
+              
+              <Button type="submit" disabled={!isFormValid} className="w-full py-4 text-lg font-semibold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-50 mt-6 shadow-lg shadow-green-900/50 hover:from-green-400 hover:to-emerald-500 transition-all">
+                Choose Add-ons <ArrowRight className="ml-2" />
+              </Button>
+            </motion.div>
           </form>
         </div>
       </div>
     </motion.div>
-    <Dialog open={!!addressWarning} onOpenChange={() => setAddressWarning(null)}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-red-400 text-2xl"><AlertTriangle className="mr-3 h-8 w-8" />Address Verification Failed</DialogTitle></DialogHeader><DialogDescription className="my-4 text-base">{addressWarning} Please review your address details to ensure they are correct.</DialogDescription><div className="bg-red-900/30 border border-red-500/50 p-4 rounded-md text-sm"><p className="font-bold text-red-300">Disclaimer and Assumption of Risk</p><p className="text-red-200 mt-2">By proceeding with an unverified or potentially incorrect address, you acknowledge and agree that this may result in significant delays or the cancellation of your delivery. You hereby assume all risks and associated costs, including but not to limited to non-refundable fees, that may arise from providing an inaccurate or unserviceable address.</p></div><DialogFooter className="gap-2 sm:justify-between mt-4"><Button onClick={() => setAddressWarning(null)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">Review Address</Button><Button onClick={handleProceedWithRisk} variant="destructive">I Understand & Continue</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={!!phoneWarning} onOpenChange={() => setPhoneWarning(null)}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-red-400 text-2xl"><AlertTriangle className="mr-3 h-8 w-8" />Invalid Phone Number</DialogTitle></DialogHeader><DialogDescription className="my-4 text-base">{phoneWarning}</DialogDescription><DialogFooter><Button onClick={() => setPhoneWarning(null)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black">OK</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={showDistanceFeeDialog} onOpenChange={setShowDistanceFeeDialog}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-yellow-400 text-2xl"><Truck className="mr-3 h-8 w-8" />Extended Delivery Service</DialogTitle></DialogHeader><div className="my-4 text-base"><p className="text-blue-200">We're happy to extend our service to your location! To help cover the additional travel, a one-time extended delivery fee will be applied to your order.</p>{distanceInfo?.miles && distanceInfo?.fee !== undefined ? (<div className="my-4 p-4 bg-white/10 rounded-lg text-center"><p className="text-sm text-blue-200">Distance from our location:</p><p className="text-2xl font-bold text-white">{distanceInfo.miles.toFixed(1)} miles</p><p className="text-sm text-blue-200 mt-2">Surcharge:</p><p className="text-2xl font-bold text-green-400">${distanceInfo.fee.toFixed(2)}</p><p className="text-xs text-gray-400">($0.80 per mile over 30 miles)</p></div>) : (<div className="flex justify-center p-4"><Loader2 className="h-8 w-8 animate-spin" /></div>)}<p className="text-blue-200">This fee allows us to serve a wider community. Please click below to accept and continue with your booking.</p></div><DialogFooter><Button onClick={handleAcceptDistanceFee} className="bg-yellow-500 text-black hover:bg-yellow-600">Accept & Continue</Button></DialogFooter></DialogContent></Dialog>
-    <Dialog open={showEmailConfirmDialog} onOpenChange={setShowEmailConfirmDialog}><DialogContent><DialogHeader><DialogTitle className="flex items-center text-yellow-400 text-2xl"><ShieldCheck className="mr-3 h-8 w-8" />Please Confirm Your Email</DialogTitle></DialogHeader><div className="my-4 text-base"><p className="text-blue-200">Please take a moment to verify that your email address is correct before proceeding:</p><p className="font-bold text-white text-lg my-3 text-center bg-white/10 p-3 rounded-md">{bookingData.email}</p><div className="bg-blue-900/30 border border-blue-500/50 p-4 rounded-md text-sm mt-4"><p className="font-bold text-blue-300 mb-2">Important Information Disclaimer</p><p className="text-blue-200">Your booking confirmation, which contains critical rental details, will be sent to this email address. This includes the precise pickup location for the trailer, access codes for the security lock, and essential instructions regarding proper equipment usage and safety protocols. An incorrect email address will result in you not receiving this vital information. By confirming, you acknowledge the accuracy of this email for receiving all official correspondence related to your rental.</p></div></div><DialogFooter className="gap-2 sm:justify-end"><Button onClick={() => setShowEmailConfirmDialog(false)} variant="outline" className="border-white/50 text-white hover:bg-white/20 hover:text-white">Edit Email</Button><Button onClick={handleEmailConfirmed} className="bg-yellow-500 text-black hover:bg-yellow-600">Email is Correct, Continue</Button></DialogFooter></DialogContent></Dialog>
+    
+    <UnavailableServiceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} serviceName={planName} />
   </>;
 };
-const InputField = ({ icon, ...props }) => <div className="relative flex items-center"><span className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-blue-300">{icon}</span><input {...props} className="w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-4 py-3 placeholder-blue-200" /></div>;
-const DatePickerField = ({ label, date, setDate, disabledDates, onMonthChange }) => <div className="md:col-span-1"><label className="text-sm font-medium text-white mb-2 block">{label}</label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4" />{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger><PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent></Popover></div>;
-const TimeSlotPicker = ({ label, value, onValueChange, slots, disabled, loading }) => {
-  return <div className="md:col-span-1">
+
+const InputField = ({
+  icon,
+  disabled,
+  ...props
+}) => <div className="relative flex items-center">
+    <span className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-300">{icon}</span>
+    <input {...props} disabled={disabled} className={`w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-9 pr-4 py-2 text-sm placeholder-blue-200 transition-colors ${disabled ? 'opacity-60 bg-gray-800 cursor-not-allowed' : ''}`} />
+  </div>;
+
+const DatePickerField = ({
+  label,
+  date,
+  setDate,
+  disabledDates,
+  onMonthChange
+}) => <div className="md:col-span-1">
+    <label className="text-sm font-medium text-white mb-2 block">{label}</label>
+    <Popover>
+      <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4" />{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger>
+      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent>
+    </Popover>
+  </div>;
+
+const TimeSlotPicker = ({
+  label,
+  value,
+  onValueChange,
+  slots,
+  disabled,
+  loading
+}) => <div className="md:col-span-1">
     <label className="text-sm font-medium text-white mb-2 block">{label}</label>
     <Select onValueChange={onValueChange} value={value} disabled={disabled || loading}>
-      <SelectTrigger className="w-full bg-white/10 border-white/30 text-white">
-        <Clock className="mr-2 h-4 w-4" />
-        <SelectValue placeholder="Select a time" />
-      </SelectTrigger>
+      <SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder="Select a time" /></SelectTrigger>
       <SelectContent className="bg-gray-800 border-gray-700 text-white">
-        {loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots && slots.length > 0 ? slots.map(slot => <SelectItem key={slot.value} value={slot.value}>
-          {slot.label}
-        </SelectItem>) : <SelectItem value="no-slots" disabled>No available slots</SelectItem>}
+        {loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots?.length > 0 ? slots.map(slot => <SelectItem key={slot.value} value={slot.value}>{slot.label || slot.value}</SelectItem>) : <SelectItem value="no-slots" disabled>None</SelectItem>}
       </SelectContent>
     </Select>
   </div>;
-};
