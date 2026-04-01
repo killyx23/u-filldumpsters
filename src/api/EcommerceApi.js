@@ -1,5 +1,5 @@
 const ECOMMERCE_API_URL = "https://api-ecommerce.hostinger.com";
-const ECOMMERCE_STORE_ID = "store_01K81SAW39KJQ4PTJNZD6TF3PF";
+const ECOMMERCE_STORE_ID = "store_01K1FXYT44PK94YYZGXRPRA00Z";
 
 export const formatCurrency = (priceInCents, currencyInfo) => {
 	if (!currencyInfo || priceInCents === null || priceInCents === undefined) {
