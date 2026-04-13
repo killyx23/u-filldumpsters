@@ -1,26 +1,15 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+
+import React, { useState, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card.jsx";
-import { Loader2, ShieldCheck, UploadCloud, X, Info, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Loader2, ShieldCheck, UploadCloud, Info } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-
-const FilePreview = ({ url, onRemove, isUploading }) => {
-    if (!url) return null;
-    return (
-        <div className="relative group w-full h-40 rounded-lg overflow-hidden border border-gray-600">
-            <img src={url} alt="Preview" className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="destructive" size="icon" className="h-8 w-8" onClick={onRemove} disabled={isUploading}>
-                    <X className="h-5 w-5" />
-                </Button>
-            </div>
-        </div>
-    );
-};
+import { uploadVerificationImage, saveVerificationDocumentToDb } from '@/utils/verificationImageHelper';
+import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 
 const PlateInfoTooltip = () => (
   <Tooltip>
@@ -39,11 +28,14 @@ const PlateInfoTooltip = () => (
 );
 
 export const VerificationManager = ({ customer, onUpdate }) => {
-    const [licensePlate, setLicensePlate] = useState(customer.license_plate || '');
+    const [licensePlate, setLicensePlate] = useState(customer?.license_plate || '');
     const [plateError, setPlateError] = useState('');
-    const [licenseImages, setLicenseImages] = useState(customer.license_image_urls || []);
     const [isUploading, setIsUploading] = useState(false);
-
+    
+    // Local form state for new uploads
+    const [frontImage, setFrontImage] = useState(null);
+    const [backImage, setBackImage] = useState(null);
+    
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
 
@@ -58,84 +50,89 @@ export const VerificationManager = ({ customer, onUpdate }) => {
         }
     };
 
-    const uploadFile = useCallback(async (file) => {
-        if (!file) return null;
-        const filePath = `licenses/${customer.id}/${Date.now()}-${file.name}`;
-        const { error } = await supabase.storage.from('customer-uploads').upload(filePath, file);
-        if (error) {
-            toast({ title: `Upload Failed for ${file.name}`, description: error.message, variant: "destructive" });
-            return null;
-        }
-        const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-        return data.publicUrl;
-    }, [customer.id]);
-
-    const handleFileChange = async (e, imageIndex) => {
+    const handleFileChange = async (e, type) => {
         const file = e.target.files[0];
-        if (!file) return;
+        if (!file || !customer?.id) return;
 
         setIsUploading(true);
-        const newUrl = await uploadFile(file);
-        if (newUrl) {
-            setLicenseImages(prev => {
-                const updatedImages = [...prev];
-                updatedImages[imageIndex] = newUrl;
-                return updatedImages;
-            });
+        try {
+            const uploaded = await uploadVerificationImage(customer.id, file, type);
+            if (type === 'license_front') setFrontImage(uploaded);
+            else setBackImage(uploaded);
+            toast({ title: "Image Uploaded", description: "Ready to save." });
+        } catch (error) {
+            toast({ title: `Upload Failed`, description: error.message, variant: "destructive" });
+        } finally {
+            setIsUploading(false);
         }
-        setIsUploading(false);
-    };
-
-    const handleRemoveImage = (indexToRemove) => {
-        setLicenseImages(prev => prev.filter((_, index) => index !== indexToRemove));
     };
 
     const handleSubmit = async () => {
+        if (!customer?.id) {
+            toast({ title: 'Authentication Error', description: 'Customer profile not found.', variant: 'destructive' });
+            return;
+        }
         if (plateError) {
             toast({ title: 'Invalid License Plate', description: 'Please correct the format.', variant: 'destructive' });
             return;
         }
+
         setIsUploading(true);
-        const { error } = await supabase
-            .from('customers')
-            .update({
-                license_plate: licensePlate,
-                license_image_urls: licenseImages,
-                has_incomplete_verification: !(licensePlate && licenseImages.length >= 2)
-            })
-            .eq('id', customer.id);
+        try {
+            // Update customers table (plate info)
+            const { error: customerError } = await supabase
+                .from('customers')
+                .update({
+                    license_plate: licensePlate,
+                    has_incomplete_verification: false
+                })
+                .eq('id', customer.id);
 
-        if (error) {
+            if (customerError) throw customerError;
+
+            // Only save if new images were uploaded here
+            if (frontImage && backImage) {
+                await saveVerificationDocumentToDb(
+                    customer.id,
+                    frontImage.url,
+                    frontImage.path,
+                    backImage.url,
+                    backImage.path,
+                    'pending'
+                );
+            }
+            
+            setFrontImage(null);
+            setBackImage(null);
+            
+            toast({ title: "Verification Info Updated!", description: "Your information has been submitted for review." });
+            if (onUpdate) onUpdate();
+        } catch (error) {
             toast({ title: "Update Failed", description: error.message, variant: "destructive" });
-        } else {
-            toast({ title: "Verification Info Updated!", description: "Your information has been saved." });
-            onUpdate();
+        } finally {
+            setIsUploading(false);
         }
-        setIsUploading(false);
     };
-
-    const isVerified = customer.has_incomplete_verification === false;
 
     return (
         <TooltipProvider>
+            <Card className="bg-white/5 border-white/10 text-white mb-6">
+                <CardHeader>
+                    <CardTitle className="text-lg font-bold text-yellow-400">Current Verification Status</CardTitle>
+                    <CardDescription className="text-blue-200">
+                        View your currently saved verification documents.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <VerificationImageDisplay customerId={customer?.id} />
+                </CardContent>
+            </Card>
+
             <Card className="bg-white/5 border-white/10 text-white">
                 <CardHeader>
-                    <div className="flex justify-between items-center">
-                        <CardTitle className="text-lg font-bold text-yellow-400">My Verification</CardTitle>
-                        {isVerified ? (
-                            <div className="flex items-center gap-2 text-green-400 font-semibold">
-                                <CheckCircle className="h-5 w-5" />
-                                Verified
-                            </div>
-                        ) : (
-                            <div className="flex items-center gap-2 text-orange-400 font-semibold">
-                                <AlertTriangle className="h-5 w-5" />
-                                Incomplete
-                            </div>
-                        )}
-                    </div>
+                    <CardTitle className="text-lg font-bold text-yellow-400">Update Verification</CardTitle>
                     <CardDescription className="text-blue-200">
-                        Keep your verification details up to date to ensure smooth rentals.
+                        Upload new documents if requested by our team.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -149,7 +146,7 @@ export const VerificationManager = ({ customer, onUpdate }) => {
                             value={licensePlate}
                             onChange={handlePlateChange}
                             placeholder="e.g., ABC1234"
-                            className="bg-white/20 uppercase"
+                            className="bg-white/20 uppercase mt-1"
                             maxLength="7"
                             disabled={isUploading}
                         />
@@ -158,33 +155,33 @@ export const VerificationManager = ({ customer, onUpdate }) => {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
-                            <Label>Driver's License (Front)</Label>
-                            {licenseImages[0] ? (
-                                <FilePreview url={licenseImages[0]} onRemove={() => handleRemoveImage(0)} isUploading={isUploading} />
+                            <Label>Replace Driver's License (Front)</Label>
+                            {frontImage ? (
+                                <div className="p-3 bg-green-900/30 border border-green-500 rounded text-green-300 text-sm text-center">New Front Image Selected</div>
                             ) : (
-                                <Button type="button" variant="outline" className="w-full h-40" onClick={() => fileInputFrontRef.current?.click()} disabled={isUploading}>
-                                    <UploadCloud className="mr-2 h-4 w-4" /> Upload Front
+                                <Button type="button" variant="outline" className="w-full h-20 bg-black/20 hover:bg-white/10" onClick={() => fileInputFrontRef.current?.click()} disabled={isUploading}>
+                                    <UploadCloud className="mr-2 h-4 w-4" /> Choose New Front
                                 </Button>
                             )}
-                            <Input ref={fileInputFrontRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 0)} disabled={isUploading} accept="image/*" />
+                            <Input ref={fileInputFrontRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 'license_front')} disabled={isUploading} accept="image/*" />
                         </div>
                         <div className="space-y-2">
-                            <Label>Driver's License (Back)</Label>
-                            {licenseImages[1] ? (
-                                <FilePreview url={licenseImages[1]} onRemove={() => handleRemoveImage(1)} isUploading={isUploading} />
+                            <Label>Replace Driver's License (Back)</Label>
+                            {backImage ? (
+                                <div className="p-3 bg-green-900/30 border border-green-500 rounded text-green-300 text-sm text-center">New Back Image Selected</div>
                             ) : (
-                                <Button type="button" variant="outline" className="w-full h-40" onClick={() => fileInputBackRef.current?.click()} disabled={isUploading}>
-                                    <UploadCloud className="mr-2 h-4 w-4" /> Upload Back
+                                <Button type="button" variant="outline" className="w-full h-20 bg-black/20 hover:bg-white/10" onClick={() => fileInputBackRef.current?.click()} disabled={isUploading}>
+                                    <UploadCloud className="mr-2 h-4 w-4" /> Choose New Back
                                 </Button>
                             )}
-                            <Input ref={fileInputBackRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 1)} disabled={isUploading} accept="image/*" />
+                            <Input ref={fileInputBackRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 'license_back')} disabled={isUploading} accept="image/*" />
                         </div>
                     </div>
 
-                    <div className="flex justify-end">
-                        <Button onClick={handleSubmit} disabled={isUploading}>
+                    <div className="flex justify-end pt-4">
+                        <Button onClick={handleSubmit} disabled={isUploading} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
                             {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                            Save Verification Info
+                            Submit Updates
                         </Button>
                     </div>
                 </CardContent>

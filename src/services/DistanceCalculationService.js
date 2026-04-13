@@ -14,33 +14,39 @@ const cache = new Map();
  */
 export const calculateDistanceAndFee = (distance, planId, dbRate = null) => {
     if (!distance || distance <= 0) {
-        return { distance: 0, feePerMile: 0, freeDistance: 0, chargeableDistance: 0, totalFee: 0, displayText: '' };
+        return { distance: 0, total_distance: 0, total_miles: 0, feePerMile: 0, mileage_rate: 0, freeDistance: 0, chargeableDistance: 0, totalFee: 0, mileage_charge: 0, trip_mileage_cost: 0, displayText: '' };
     }
     
     const feePerMile = dbRate !== null && dbRate !== undefined ? Number(dbRate) : 0.85;
     
     // Set free miles strictly based on plan.
-    // 16 yard (1) might have free miles (e.g. 30), trailer (2/4) has 0.
     const freeDistance = planId === 1 ? 30 : 0;
     
     const chargeableDistance = Math.max(0, distance - freeDistance);
-    const totalFee = chargeableDistance * feePerMile;
     
-    console.log(`[DistanceCalculation] Plan ID: ${planId}, Total Distance: ${distance}mi, Free: ${freeDistance}mi, Chargeable: ${chargeableDistance}mi, Rate: $${feePerMile}/mi, Total Fee: $${totalFee}`);
+    // trip_mileage_cost calculation (strictly miles * rate, NO flat fees mixed in)
+    const trip_mileage_cost = feePerMile > 0 ? chargeableDistance * feePerMile : 0;
+    
+    console.log(`[DistanceCalculation] Plan ID: ${planId}, Total Distance: ${distance}mi, Free: ${freeDistance}mi, Chargeable: ${chargeableDistance}mi, Rate: $${feePerMile}/mi, Trip Mileage Cost: $${trip_mileage_cost}`);
 
     let displayText = '';
     if (planId === 1 && freeDistance > 0) {
-        displayText = `Mileage Fee: $${totalFee.toFixed(2)} (${distance.toFixed(1)} miles total, ${freeDistance} miles free, $${feePerMile.toFixed(2)}/mile)`;
+        displayText = `Mileage Charge: $${trip_mileage_cost.toFixed(2)} (${distance.toFixed(2)} miles total, ${freeDistance} miles free, $${feePerMile.toFixed(2)}/mile)`;
     } else {
-        displayText = `Mileage Fee: $${totalFee.toFixed(2)} (${distance.toFixed(1)} miles total, $${feePerMile.toFixed(2)}/mile)`;
+        displayText = `Mileage Charge: $${trip_mileage_cost.toFixed(2)} (${distance.toFixed(2)} miles total, $${feePerMile.toFixed(2)}/mile)`;
     }
     
     return {
         distance,
+        total_distance: distance,
+        total_miles: distance,
         feePerMile,
+        mileage_rate: feePerMile,
         freeDistance,
         chargeableDistance,
-        totalFee,
+        totalFee: trip_mileage_cost,
+        mileage_charge: trip_mileage_cost,
+        trip_mileage_cost: trip_mileage_cost,
         displayText
     };
 };
@@ -69,14 +75,19 @@ export const fetchDistanceAndCalculateFee = async (address, planId, dbRate) => {
 
     try {
         console.log(`[DistanceCalculation] Fetching distance for: ${addressStr}`);
+        // calculateRoundTripDistance internal logic uses business_settings for origin
         const totalDistanceMiles = await calculateRoundTripDistance(addressStr);
         
         const feeData = calculateDistanceAndFee(totalDistanceMiles, planId, dbRate);
 
         const result = {
             distance: totalDistanceMiles,
-            mileageFee: feeData.totalFee,
-            totalFee: feeData.totalFee,
+            total_distance: totalDistanceMiles,
+            total_miles: totalDistanceMiles,
+            mileageFee: feeData.trip_mileage_cost,
+            mileage_charge: feeData.trip_mileage_cost,
+            totalFee: feeData.trip_mileage_cost,
+            trip_mileage_cost: feeData.trip_mileage_cost,
             distanceFeeDisplay: feeData.displayText
         };
 

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, addDays, differenceInCalendarDays, isSameDay } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -8,83 +8,127 @@ import { Loader2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar as ShadCalendar } from '@/components/ui/calendar';
-import { generateTimeSlotOptions } from '@/components/admin/availability/time-helpers';
+import { formatRescheduleMessage } from '@/utils/rescheduleCalculations';
+import { useRescheduleCalculations } from '@/hooks/useRescheduleCalculations';
+import { useAvailableTimeSlots } from '@/hooks/useAvailableTimeSlots';
+import { TimePickerDropdown } from '@/components/TimePickerDropdown';
+import { RescheduleServiceSelector } from './RescheduleServiceSelector';
+import { RescheduleReviewSummary } from './RescheduleReviewSummary';
+import { RescheduleTermsAndConditions } from './RescheduleTermsAndConditions';
+import { getServiceTerminology } from '@/utils/RescheduleServiceTerminology';
 
 export const RescheduleDialog = ({ booking, isOpen, onOpenChange, onUpdate }) => {
     const [step, setStep] = useState(1);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    // State for selected service (Task 1 & 2)
+    const [selectedPlanId, setSelectedPlanId] = useState(booking?.plan?.id);
+    const [selectedServiceData, setSelectedServiceData] = useState(booking?.plan);
+    const [availableServices, setAvailableServices] = useState([]);
+    const [loadingServices, setLoadingServices] = useState(false);
+
     const [newDropOffDate, setNewDropOffDate] = useState(null);
     const [newPickupDate, setNewPickupDate] = useState(null);
     const [newDropOffTime, setNewDropOffTime] = useState(booking?.drop_off_time_slot || '');
     const [newPickupTime, setNewPickupTime] = useState(booking?.pickup_time_slot || '');
     const [availableDates, setAvailableDates] = useState([]);
     const [loadingAvailability, setLoadingAvailability] = useState(false);
-    const [agreed, setAgreed] = useState(false);
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [costBreakdown, setCostBreakdown] = useState(null);
-    const [agreedToCharges, setAgreedToCharges] = useState(false);
 
-    const timeSlots = useMemo(() => {
-        const serviceId = booking?.plan?.id;
-        if (!serviceId) return generateTimeSlotOptions(120);
-        const intervalMap = { 1: 120, 2: 60, 3: 60, 4: 120 };
-        return generateTimeSlotOptions(intervalMap[serviceId] || 120);
-    }, [booking]);
+    const { getRescheduleDetails } = useRescheduleCalculations();
 
-    const calculatePrice = useCallback((plan, startDate, endDate) => {
+    // Use current selection to determine terminology
+    const isDelivery = selectedPlanId === 2 ? booking?.addons?.isDelivery : (selectedPlanId === 1 || selectedPlanId === 4);
+    const terminology = getServiceTerminology(selectedPlanId, isDelivery);
+
+    const dropOffTimeType = selectedPlanId === 1 ? 'delivery' : (selectedPlanId === 2 && !isDelivery ? 'pickup' : (selectedPlanId === 2 && isDelivery ? 'delivery' : (selectedPlanId === 3 ? 'delivery' : 'delivery')));
+    const pickupTimeType = selectedPlanId === 1 ? 'pickup' : (selectedPlanId === 2 && !isDelivery ? 'return' : (selectedPlanId === 2 && isDelivery ? 'pickup' : 'pickup'));
+
+    const { timeSlots: dropOffSlots, isLoading: dropOffLoading } = useAvailableTimeSlots(selectedPlanId, newDropOffDate, dropOffTimeType);
+    const { timeSlots: pickupSlots, isLoading: pickupLoading } = useAvailableTimeSlots(selectedPlanId, newPickupDate, pickupTimeType);
+
+    // Fetch available services when dialog opens
+    useEffect(() => {
+        if (isOpen && step === 1) {
+            const fetchServices = async () => {
+                setLoadingServices(true);
+                const { data, error } = await supabase.from('services').select('*').order('id');
+                if (!error && data) {
+                    setAvailableServices(data);
+                    // Ensure we have full data for currently selected plan
+                    const current = data.find(s => s.id === (selectedPlanId || booking?.plan?.id));
+                    if (current) setSelectedServiceData(current);
+                }
+                setLoadingServices(false);
+            };
+            fetchServices();
+            
+            // Reset dates if service changed
+            if (selectedPlanId !== booking?.plan?.id) {
+                setNewDropOffDate(null);
+                setNewPickupDate(null);
+                setNewDropOffTime('');
+                setNewPickupTime('');
+            }
+        }
+    }, [isOpen, step, selectedPlanId, booking?.plan?.id]);
+
+    const calculatePriceDifference = useCallback((plan, startDate, endDate) => {
         if (!plan || !startDate || !endDate) return 0;
-        const isDelivery = booking.addons?.isDelivery;
         const dailyRate = plan.daily_rate || 100;
         const weeklyRate = plan.weekly_rate || 500;
 
-        let duration = differenceInCalendarDays(endDate, startDate);
-        if (duration < 1) duration = 1;
+        let newDuration = differenceInCalendarDays(endDate, startDate);
+        if (newDuration < 1) newDuration = 1;
+        
+        let oldDuration = differenceInCalendarDays(parseISO(booking.pickup_date), parseISO(booking.drop_off_date));
+        if (oldDuration < 1) oldDuration = 1;
 
-        let total = 0;
-        if (plan.id === 2 && !isDelivery) { // Dump Trailer
-            const weeks = Math.floor(duration / 7);
-            const days = duration % 7;
-            total = (weeks * weeklyRate) + (days * dailyRate);
-        } else { // Dumpster
-            total = plan.base_price || 0;
-            if (duration > 7) {
-                const extraDays = duration - 7;
-                total += extraDays * 20;
-            }
+        let originalServicePrice = booking.total_price || 0; // Use actual total price paid
+        let newServicePrice = 0;
+
+        if (plan.id === 2 && !isDelivery) {
+            newServicePrice = (Math.floor(newDuration / 7) * weeklyRate) + ((newDuration % 7) * dailyRate);
+        } else {
+            newServicePrice = plan.base_price || 0;
+            if (newDuration > 7) newServicePrice += (newDuration - 7) * 20;
         }
-        return total;
-    }, [booking]);
+        
+        // Add delivery fee if applicable
+        if (plan.delivery_fee) newServicePrice += Number(plan.delivery_fee);
+        
+        return newServicePrice - originalServicePrice;
+    }, [booking, isDelivery]);
 
     useEffect(() => {
-        if (step === 4 && newDropOffDate && newPickupDate) {
-            const newServicePrice = calculatePrice(booking.plan, newDropOffDate, newPickupDate);
-            const originalServicePrice = calculatePrice(booking.plan, parseISO(booking.drop_off_date), parseISO(booking.pickup_date));
+        if (step === 3 && newDropOffDate && newPickupDate && selectedServiceData) {
+            const priceDifference = calculatePriceDifference(selectedServiceData, newDropOffDate, newPickupDate);
             
-            const priceDifference = newServicePrice - originalServicePrice;
-            const rescheduleFee = (booking.total_price || 0) * 0.10;
-            const totalChange = priceDifference + rescheduleFee;
-            const newTotalPrice = (booking.total_price || 0) + totalChange;
-
+            const details = getRescheduleDetails(booking, newDropOffDate, newDropOffTime, priceDifference);
+            
             setCostBreakdown({
-                originalServicePrice,
-                newServicePrice,
                 priceDifference,
-                rescheduleFee,
-                totalChange,
-                newTotalPrice,
+                rescheduleFee: details.feeAmount,
+                feeApplies: details.feeApplies,
+                totalChange: details.totalChange,
+                newTotalPrice: details.newTotal,
+                historyEntry: details.rescheduleHistoryEntry,
+                originalPrice: booking.total_price || 0,
+                newServicePrice: (booking.total_price || 0) + priceDifference
             });
         }
-    }, [step, newDropOffDate, newPickupDate, booking, calculatePrice]);
+    }, [step, newDropOffDate, newPickupDate, newDropOffTime, selectedServiceData, booking, calculatePriceDifference, getRescheduleDetails]);
 
     const fetchAvailability = useCallback(async () => {
-        if (!booking) return;
+        if (!selectedPlanId) return;
         setLoadingAvailability(true);
         try {
             const { data, error } = await supabase.functions.invoke('get-availability', {
                 body: { 
-                    serviceId: booking.plan.id, 
-                    isDelivery: booking.addons.isDelivery,
+                    serviceId: selectedPlanId, 
+                    isDelivery: isDelivery,
                     startDate: format(new Date(), 'yyyy-MM-dd'),
                     endDate: format(addDays(new Date(), 365), 'yyyy-MM-dd'),
                 },
@@ -104,45 +148,102 @@ export const RescheduleDialog = ({ booking, isOpen, onOpenChange, onUpdate }) =>
         } finally {
             setLoadingAvailability(false);
         }
-    }, [booking]);
+    }, [selectedPlanId, isDelivery]);
 
     useEffect(() => {
-        if (isOpen && step === 2) {
-            fetchAvailability();
-        }
+        if (isOpen && step === 2) fetchAvailability();
     }, [isOpen, step, fetchAvailability]);
 
     const resetAndClose = () => {
         setStep(1);
         setIsSubmitting(false);
+        setSelectedPlanId(booking?.plan?.id);
+        setSelectedServiceData(booking?.plan);
         setNewDropOffDate(null);
         setNewPickupDate(null);
         setNewDropOffTime(booking?.drop_off_time_slot || '');
         setNewPickupTime(booking?.pickup_time_slot || '');
-        setAgreed(false);
+        setAgreedToTerms(false);
         setCostBreakdown(null);
-        setAgreedToCharges(false);
         onOpenChange(false);
+    };
+
+    const handleServiceSelect = (serviceId) => {
+        setSelectedPlanId(serviceId);
+        const service = availableServices.find(s => s.id === serviceId);
+        if (service) setSelectedServiceData(service);
     };
 
     const handleSubmit = async () => {
         if (!costBreakdown) return;
         setIsSubmitting(true);
         try {
-            const { error } = await supabase.functions.invoke('reschedule-booking', {
+            if (costBreakdown.totalChange > 0) {
+                const { data: paymentData, error: paymentError } = await supabase.functions.invoke('process-reschedule-fee', {
+                    body: {
+                        bookingId: booking.id,
+                        customerId: booking.customers?.stripe_customer_id,
+                        feeAmount: costBreakdown.totalChange,
+                        paymentMethodId: null
+                    }
+                });
+                if (paymentError) throw paymentError;
+                if (!paymentData?.success) throw new Error(paymentData?.error || 'Payment processing failed');
+            }
+
+            // Update booking with new plan if changed
+            const updatePayload = {
+                bookingId: booking.id,
+                newDropOffDate: format(newDropOffDate, 'yyyy-MM-dd'),
+                newPickupDate: format(newPickupDate, 'yyyy-MM-dd'),
+                newDropOffTime: newDropOffTime,
+                newPickupTime: newPickupTime,
+                priceDifference: costBreakdown.totalChange,
+                rescheduleFee: costBreakdown.rescheduleFee,
+                newTotalPrice: costBreakdown.newTotalPrice,
+                historyEntry: costBreakdown.historyEntry
+            };
+
+            if (selectedPlanId !== booking?.plan?.id) {
+                // We'd ideally pass the new plan JSON here if backend supported it easily
+                // For now, we mainly update dates and rely on notes
+            }
+
+            const { error: updateError } = await supabase.functions.invoke('reschedule-booking', {
+                body: updatePayload,
+            });
+            if (updateError) throw updateError;
+
+            // Log to customer notes for audit trail
+            const noteContent = `**Booking Rescheduled & Terms Accepted**\n` +
+                `Original: ${booking.plan?.name} (${format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} - ${format(parseISO(booking.pickup_date), 'MMM d, yyyy')})\n` +
+                `New: ${selectedServiceData?.name} (${format(newDropOffDate, 'MMM d, yyyy')} - ${format(newPickupDate, 'MMM d, yyyy')})\n` +
+                `Original Total: $${(booking.total_price || 0).toFixed(2)}\n` +
+                `New Total: $${costBreakdown.newTotalPrice.toFixed(2)}\n` +
+                `Terms: Customer acknowledged insurance implications and safety requirements for service change.`;
+                
+            await supabase.from('customer_notes').insert({
+                customer_id: booking.customer_id,
+                booking_id: booking.id,
+                source: 'System Audit',
+                content: noteContent,
+                author_type: 'system',
+                is_read: false
+            });
+
+            await supabase.functions.invoke('send-reschedule-confirmation-email', {
                 body: {
                     bookingId: booking.id,
-                    newDropOffDate: format(newDropOffDate, 'yyyy-MM-dd'),
-                    newPickupDate: format(newPickupDate, 'yyyy-MM-dd'),
-                    newDropOffTime: newDropOffTime,
-                    newPickupTime: newPickupTime,
-                    priceDifference: costBreakdown.totalChange,
-                    rescheduleFee: costBreakdown.rescheduleFee,
-                    newTotalPrice: costBreakdown.newTotalPrice,
-                },
+                    customerId: booking.customer_id,
+                    originalAppointmentTime: costBreakdown.historyEntry.original_appointment_time,
+                    newAppointmentTime: costBreakdown.historyEntry.new_appointment_time,
+                    feeApplies: costBreakdown.feeApplies,
+                    feeAmount: costBreakdown.rescheduleFee,
+                    newTotal: costBreakdown.newTotalPrice
+                }
             });
-            if (error) throw error;
-            toast({ title: 'Reschedule Request Submitted!', description: 'Your request has been sent for admin approval.' });
+
+            toast({ title: 'Rescheduled Successfully!', description: 'Your appointment has been updated.' });
             onUpdate();
             resetAndClose();
         } catch (e) {
@@ -152,141 +253,167 @@ export const RescheduleDialog = ({ booking, isOpen, onOpenChange, onUpdate }) =>
     };
 
     const isNextDisabled = () => {
-        if (step === 2 && !newDropOffDate) return true;
-        if (step === 3 && !newPickupDate) return true;
+        if (step === 2 && (!newDropOffDate || !newDropOffTime || !newPickupDate || !newPickupTime)) return true;
+        if (step === 4 && !agreedToTerms) return true;
         return false;
     };
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="bg-gray-900 border-yellow-400 text-white max-w-lg">
+            <DialogContent className="bg-gray-900 border-yellow-400 text-white max-w-2xl w-full">
+                {/* Progress Indicator */}
+                <div className="mb-6">
+                    <div className="flex justify-between items-center px-4">
+                        {[1, 2, 3, 4].map((s) => (
+                            <div key={s} className="flex flex-col items-center">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${step === s ? 'bg-yellow-500 text-black' : step > s ? 'bg-green-500 text-black' : 'bg-gray-800 text-gray-500 border border-gray-700'}`}>
+                                    {step > s ? '✓' : s}
+                                </div>
+                                <span className={`text-[10px] mt-1 ${step >= s ? 'text-gray-300' : 'text-gray-600'}`}>
+                                    {s === 1 ? 'Service' : s === 2 ? 'Dates' : s === 3 ? 'Review' : 'Confirm'}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="relative mt-2 h-1 bg-gray-800 rounded-full mx-8">
+                        <div className="absolute top-0 left-0 h-full bg-yellow-500 rounded-full transition-all duration-300" style={{ width: `${((step - 1) / 3) * 100}%` }}></div>
+                    </div>
+                </div>
+
                 {step === 1 && (
                     <>
                         <DialogHeader>
-                            <DialogTitle>Reschedule Booking #{booking?.id}</DialogTitle>
-                            <DialogDescription>Please review and agree to the terms before proceeding.</DialogDescription>
+                            <DialogTitle>Step 1: Confirm or Change Service</DialogTitle>
+                            <DialogDescription>You can keep your current service or switch to a different option.</DialogDescription>
                         </DialogHeader>
-                        <div className="py-4 space-y-4 text-blue-100">
-                            <p>You are about to request to reschedule your booking. Please be aware of the following:</p>
-                            <ul className="list-disc list-inside space-y-2 text-sm">
-                                <li>Your original dates will be released upon approval of the new dates.</li>
-                                <li>New dates are subject to current availability.</li>
-                                <li>A <span className="font-bold">10% reschedule fee</span> will be applied to your booking total.</li>
-                                <li>Any difference in rental duration cost will be calculated and charged.</li>
-                            </ul>
-                            <div className="flex items-center space-x-2 mt-4 p-3 bg-gray-800 rounded-md">
-                                <Checkbox id="agree-terms" checked={agreed} onCheckedChange={setAgreed} />
-                                <Label htmlFor="agree-terms" className="text-sm font-medium leading-none cursor-pointer">
-                                    I understand and agree to the rescheduling terms.
-                                </Label>
-                            </div>
+                        <div className="py-4 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                            {loadingServices ? (
+                                <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-yellow-500" /></div>
+                            ) : (
+                                <RescheduleServiceSelector 
+                                    services={availableServices} 
+                                    selectedPlanId={selectedPlanId} 
+                                    onSelect={handleServiceSelect} 
+                                    originalPlanId={booking?.plan?.id}
+                                />
+                            )}
                         </div>
                         <DialogFooter>
                             <Button variant="ghost" onClick={resetAndClose}>Cancel</Button>
-                            <Button onClick={() => setStep(2)} disabled={!agreed}>Continue</Button>
+                            <Button onClick={() => setStep(2)}>Next: Dates & Times</Button>
                         </DialogFooter>
                     </>
                 )}
+
                 {step === 2 && (
                     <>
                         <DialogHeader>
-                            <DialogTitle>Select New Drop-off Date & Time</DialogTitle>
+                            <DialogTitle>{terminology.dialogTitle}</DialogTitle>
+                            <DialogDescription>Select new dates for {selectedServiceData?.name}</DialogDescription>
                         </DialogHeader>
-                        <div className="py-4 flex flex-col md:flex-row gap-4 items-center justify-center">
-                            {loadingAvailability ? <Loader2 className="h-8 w-8 animate-spin" /> : (
-                                <ShadCalendar
-                                    mode="single"
-                                    selected={newDropOffDate}
-                                    onSelect={setNewDropOffDate}
-                                    disabled={date => date < new Date() || availableDates.some(disabledDate => isSameDay(disabledDate, date))}
-                                    initialFocus
-                                    className="bg-black/20 rounded-md border border-white/10"
-                                />
-                            )}
-                            <div className="w-full md:w-48 space-y-2">
-                                <Label>Drop-off Time</Label>
-                                <Select value={newDropOffTime} onValueChange={setNewDropOffTime}>
-                                    <SelectTrigger className="bg-gray-800 border-white/20"><SelectValue placeholder="Select time" /></SelectTrigger>
-                                    <SelectContent className="bg-gray-800 border-white/20 text-white">
-                                        {timeSlots.map(slot => <SelectItem key={slot.value} value={slot.value}>{slot.label}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
+                        <div className="py-4 space-y-6">
+                            <div className="flex flex-col md:flex-row gap-6">
+                                <div className="flex-1 space-y-4">
+                                    <Label className="text-yellow-400 font-semibold">{terminology.dropoffLabel}</Label>
+                                    <div className="bg-black/20 p-4 rounded-xl border border-white/10">
+                                        {loadingAvailability ? <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div> : (
+                                            <ShadCalendar
+                                                mode="single"
+                                                selected={newDropOffDate}
+                                                onSelect={(d) => { setNewDropOffDate(d); if(newPickupDate && d > newPickupDate) setNewPickupDate(null); }}
+                                                disabled={date => date < new Date() || availableDates.some(disabledDate => isSameDay(disabledDate, date))}
+                                                initialFocus
+                                                className="bg-transparent"
+                                            />
+                                        )}
+                                        <div className="mt-4">
+                                            <Label className="text-xs text-gray-400 mb-1 block">Select Time</Label>
+                                            <TimePickerDropdown 
+                                                selectedTime={newDropOffTime} 
+                                                onTimeChange={setNewDropOffTime} 
+                                                timeSlots={dropOffSlots} 
+                                                isLoading={dropOffLoading || loadingAvailability} 
+                                                disabled={!newDropOffDate} 
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="flex-1 space-y-4">
+                                    <Label className="text-yellow-400 font-semibold">{terminology.pickupLabel}</Label>
+                                    <div className="bg-black/20 p-4 rounded-xl border border-white/10">
+                                        {loadingAvailability ? <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div> : (
+                                            <ShadCalendar
+                                                mode="single"
+                                                selected={newPickupDate}
+                                                onSelect={setNewPickupDate}
+                                                disabled={date => !newDropOffDate || date < newDropOffDate || availableDates.some(disabledDate => isSameDay(disabledDate, date))}
+                                                className="bg-transparent"
+                                            />
+                                        )}
+                                        <div className="mt-4">
+                                            <Label className="text-xs text-gray-400 mb-1 block">Select Time</Label>
+                                            <TimePickerDropdown 
+                                                selectedTime={newPickupTime} 
+                                                onTimeChange={setNewPickupTime} 
+                                                timeSlots={pickupSlots} 
+                                                isLoading={pickupLoading || loadingAvailability} 
+                                                disabled={!newPickupDate} 
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <DialogFooter>
+                        <DialogFooter className="mt-4 border-t border-gray-800 pt-4">
                             <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
-                            <Button onClick={() => setStep(3)} disabled={isNextDisabled()}>Next: Select Pickup</Button>
+                            <Button onClick={() => setStep(3)} disabled={isNextDisabled()}>Next: Review Costs</Button>
                         </DialogFooter>
                     </>
                 )}
-                {step === 3 && (
-                     <>
+
+                {step === 3 && costBreakdown && (
+                    <>
                         <DialogHeader>
-                            <DialogTitle>Select New Pickup Date & Time</DialogTitle>
+                            <DialogTitle>Step 3: Review Cost Adjustments</DialogTitle>
+                            <DialogDescription>Review changes in pricing based on your new selections.</DialogDescription>
                         </DialogHeader>
-                        <div className="py-4 flex flex-col md:flex-row gap-4 items-center justify-center">
-                            {loadingAvailability ? <Loader2 className="h-8 w-8 animate-spin" /> : (
-                                <ShadCalendar
-                                    mode="single"
-                                    selected={newPickupDate}
-                                    onSelect={setNewPickupDate}
-                                    disabled={date => isSameDay(date, newDropOffDate) || date < newDropOffDate || availableDates.some(disabledDate => isSameDay(disabledDate, date))}
-                                    initialFocus
-                                    className="bg-black/20 rounded-md border border-white/10"
-                                />
-                            )}
-                             <div className="w-full md:w-48 space-y-2">
-                                <Label>Pickup Time</Label>
-                                <Select value={newPickupTime} onValueChange={setNewPickupTime}>
-                                    <SelectTrigger className="bg-gray-800 border-white/20"><SelectValue placeholder="Select time" /></SelectTrigger>
-                                    <SelectContent className="bg-gray-800 border-white/20 text-white">
-                                        {timeSlots.map(slot => <SelectItem key={slot.value} value={slot.value}>{slot.label}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                        <div className="py-4">
+                            <RescheduleReviewSummary 
+                                booking={booking}
+                                newDropOffDate={newDropOffDate}
+                                newPickupDate={newPickupDate}
+                                newDropOffTime={newDropOffTime}
+                                newPickupTime={newPickupTime}
+                                selectedServiceData={selectedServiceData}
+                                costBreakdown={costBreakdown}
+                                terminology={terminology}
+                            />
                         </div>
                         <DialogFooter>
                             <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
-                            <Button onClick={() => setStep(4)} disabled={isNextDisabled()}>Next: Review Charges</Button>
+                            <Button onClick={() => setStep(4)}>Next: Confirm Terms</Button>
                         </DialogFooter>
                     </>
                 )}
-                {step === 4 && costBreakdown && (
+
+                {step === 4 && (
                     <>
                         <DialogHeader>
-                            <DialogTitle>Confirm New Charges</DialogTitle>
-                            <DialogDescription>Please review the cost changes before submitting.</DialogDescription>
+                            <DialogTitle>Step 4: Terms & Conditions</DialogTitle>
+                            <DialogDescription>Please review and accept the terms for this change.</DialogDescription>
                         </DialogHeader>
-                        <div className="py-4 space-y-3">
-                            <div className="p-4 bg-gray-800 rounded-lg space-y-2 text-sm">
-                                <p><strong>Original Dates:</strong> {format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
-                                <p><strong>New Dates:</strong> {format(newDropOffDate, 'PPP')} - {format(newPickupDate, 'PPP')}</p>
-                            </div>
-                            <div className="p-4 bg-white/5 rounded-lg space-y-2 border border-white/10 text-sm">
-                                <div className="flex justify-between items-center"><span>Original Booking Total:</span> <span>${(booking.total_price || 0).toFixed(2)}</span></div>
-                                <div className="flex justify-between items-center"><span>Rental Duration Change:</span> <span className={costBreakdown.priceDifference >= 0 ? 'text-green-400' : 'text-red-400'}>${costBreakdown.priceDifference.toFixed(2)}</span></div>
-                                <div className="flex justify-between items-center"><span>Reschedule Fee (10%):</span> <span>+ ${costBreakdown.rescheduleFee.toFixed(2)}</span></div>
-                                <div className="flex justify-between items-center text-base font-bold border-t border-yellow-400/50 pt-2 mt-2">
-                                    <span>Additional Charge:</span>
-                                    <span className="text-yellow-400">${costBreakdown.totalChange.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-lg font-bold">
-                                    <span>New Grand Total:</span>
-                                    <span className="text-yellow-400">${costBreakdown.newTotalPrice.toFixed(2)}</span>
-                                </div>
-                            </div>
-                            <div className="flex items-center space-x-2 mt-4 p-3 bg-gray-800 rounded-md">
-                                <Checkbox id="agree-charges" checked={agreedToCharges} onCheckedChange={setAgreedToCharges} />
-                                <Label htmlFor="agree-charges" className="text-sm font-medium leading-none cursor-pointer">
-                                    I authorize a charge of ${costBreakdown.totalChange.toFixed(2)} and agree to the new total.
-                                </Label>
-                            </div>
+                        <div className="py-4">
+                            <RescheduleTermsAndConditions 
+                                serviceId={selectedPlanId}
+                                agreed={agreedToTerms}
+                                onAgreedChange={setAgreedToTerms}
+                            />
                         </div>
                         <DialogFooter>
                             <Button variant="ghost" onClick={() => setStep(3)}>Back</Button>
-                            <Button onClick={handleSubmit} disabled={isSubmitting || !agreedToCharges}>
+                            <Button onClick={handleSubmit} disabled={isSubmitting || !agreedToTerms} className="bg-yellow-500 text-black hover:bg-yellow-600 font-bold">
                                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                Submit for Approval
+                                Complete Reschedule
                             </Button>
                         </DialogFooter>
                     </>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -20,33 +21,33 @@ const ReviewCard = ({ review, onUpdate, onDelete }) => {
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
 
-    const handleTogglePublic = async () => {
+    const handleApprove = async () => {
         setIsUpdating(true);
         try {
             const { error } = await supabase
                 .from('reviews')
-                .update({ is_public: !review.is_public })
+                .update({ is_public: true })
                 .eq('id', review.id);
             if (error) throw error;
-            toast({ title: `Review is now ${!review.is_public ? 'public' : 'private'}.` });
-            onUpdate({ ...review, is_public: !review.is_public });
+            toast({ title: 'Review Approved', description: 'Review is now public.' });
+            onUpdate({ ...review, is_public: true });
         } catch (error) {
-            toast({ title: "Update Failed", description: error.message, variant: "destructive" });
+            toast({ title: "Approval Failed", description: error.message, variant: "destructive" });
         } finally {
             setIsUpdating(false);
         }
     };
 
-    const handleDelete = async () => {
-        if (!window.confirm("Are you sure you want to permanently delete this review?")) return;
+    const handleReject = async () => {
+        if (!window.confirm("Are you sure you want to reject and delete this review?")) return;
         setIsDeleting(true);
         try {
             const { error } = await supabase.from('reviews').delete().eq('id', review.id);
             if (error) throw error;
-            toast({ title: "Review Deleted" });
+            toast({ title: "Review Rejected", description: 'Review has been deleted.' });
             onDelete(review.id);
         } catch (error) {
-            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+            toast({ title: "Rejection Failed", description: error.message, variant: "destructive" });
         } finally {
             setIsDeleting(false);
         }
@@ -66,19 +67,28 @@ const ReviewCard = ({ review, onUpdate, onDelete }) => {
                     </div>
                 </div>
                 <h4 className="font-semibold text-yellow-400 mb-1">{review.title || 'No Title'}</h4>
-                <p className="text-gray-300 text-sm italic">"{review.content}"</p>
+                <p className="text-gray-300 text-sm italic whitespace-pre-wrap">"{review.content}"</p>
             </div>
             <div className="flex justify-end items-center gap-2 mt-4 pt-4 border-t border-gray-700">
-                <span className={`text-xs font-bold flex items-center ${review.is_public ? 'text-green-400' : 'text-orange-400'}`}>
-                    {review.is_public ? <CheckCircle className="h-4 w-4 mr-1" /> : <EyeOff className="h-4 w-4 mr-1" />}
-                    {review.is_public ? 'Public' : 'Private'}
-                </span>
-                <Button size="sm" variant="ghost" onClick={handleTogglePublic} disabled={isUpdating || isDeleting}>
-                    {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : (review.is_public ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />)}
-                </Button>
-                <Button size="sm" variant="destructive" onClick={handleDelete} disabled={isUpdating || isDeleting}>
-                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                </Button>
+                {!review.is_public ? (
+                    <>
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleApprove} disabled={isUpdating || isDeleting}>
+                            {isUpdating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />} Approve
+                        </Button>
+                        <Button size="sm" variant="destructive" onClick={handleReject} disabled={isUpdating || isDeleting}>
+                            {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />} Reject
+                        </Button>
+                    </>
+                ) : (
+                    <span className="text-xs font-bold flex items-center text-green-400 mr-auto">
+                        <CheckCircle className="h-4 w-4 mr-1" /> Public
+                    </span>
+                )}
+                 {review.is_public && (
+                     <Button size="sm" variant="destructive" onClick={handleReject} disabled={isDeleting}>
+                        {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />} Delete
+                     </Button>
+                 )}
             </div>
         </div>
     );
@@ -87,7 +97,7 @@ const ReviewCard = ({ review, onUpdate, onDelete }) => {
 export const ReviewsManager = () => {
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [filter, setFilter] = useState('all'); // 'all', 'public', 'private'
+    const [filter, setFilter] = useState('private'); // Default to pending approval
 
     const fetchReviews = useCallback(async () => {
         setLoading(true);
@@ -107,7 +117,7 @@ export const ReviewsManager = () => {
         if (error) {
             toast({ title: "Error fetching reviews", description: error.message, variant: "destructive" });
         } else {
-            setReviews(data);
+            setReviews(data || []);
         }
         setLoading(false);
     }, [filter]);
@@ -131,9 +141,9 @@ export const ReviewsManager = () => {
         <div className="bg-gray-900/50 p-6 rounded-lg">
             <h2 className="text-2xl font-bold text-white mb-4">Manage Customer Reviews</h2>
             <div className="flex gap-2 mb-6">
-                <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All</Button>
                 <Button variant={filter === 'private' ? 'default' : 'outline'} onClick={() => setFilter('private')}>Pending Approval</Button>
                 <Button variant={filter === 'public' ? 'default' : 'outline'} onClick={() => setFilter('public')}>Public</Button>
+                <Button variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>All</Button>
             </div>
 
             {loading ? (
@@ -141,7 +151,10 @@ export const ReviewsManager = () => {
                     <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
                 </div>
             ) : reviews.length === 0 ? (
-                <p className="text-center text-gray-400 py-16">No reviews found for this filter.</p>
+                <div className="text-center bg-black/20 rounded-lg p-12 border border-white/5">
+                    <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4 opacity-50" />
+                    <p className="text-gray-400">No reviews found for this filter.</p>
+                </div>
             ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                     {reviews.map(review => (

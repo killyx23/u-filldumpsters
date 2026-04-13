@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { 
   CheckCircle, 
   AlertTriangle, 
@@ -11,7 +11,8 @@ import {
   XCircle, 
   Info, 
   MapPin, 
-  List 
+  List,
+  Star
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -24,7 +25,7 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
       if (filterStatus === 'upcoming') {
          result = result.filter(b => ['pending_payment', 'Confirmed', 'Rescheduled'].includes(b.status) && !b.pending_address_verification);
       } else if (filterStatus === 'past') {
-         result = result.filter(b => ['Completed', 'flagged', 'Cancelled'].includes(b.status));
+         result = result.filter(b => ['Completed', 'flagged', 'Returned', 'Cancelled'].includes(b.status));
       } else if (filterStatus === 'pending') {
          result = result.filter(b => b.pending_address_verification || ['pending_verification', 'pending_review'].includes(b.status));
       }
@@ -50,12 +51,26 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
             return { text: 'Active Rental', class: 'badge-in-transit', icon: <Truck className="h-3 w-3" /> };
         case 'Completed':
         case 'flagged':
+        case 'Returned':
             return { text: 'Completed', class: 'badge-delivered', icon: <CheckCircle className="h-3 w-3" /> };
         case 'Cancelled':
             return { text: 'Cancelled', class: 'badge-cancelled', icon: <XCircle className="h-3 w-3" /> };
         default:
             return { text: booking.status, class: 'bg-gray-800 text-gray-300', icon: <Info className="h-3 w-3" /> };
     }
+  };
+
+  const formatTime = (timeString) => {
+      if (!timeString) return 'TBD';
+      try {
+          const [hours, minutes] = timeString.split(':');
+          const date = new Date();
+          date.setHours(parseInt(hours, 10));
+          date.setMinutes(parseInt(minutes || '0', 10));
+          return isValid(date) ? format(date, 'h:mm a') : timeString;
+      } catch (e) {
+          return timeString;
+      }
   };
 
   return (
@@ -86,6 +101,7 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
           const serviceName = (booking.plan?.name || 'Service') + (isDelivery ? ' with Delivery' : '');
           const statusInfo = getStatusInfo(booking);
           const canModify = !booking.pending_address_verification && ['pending_payment', 'Confirmed', 'Rescheduled'].includes(booking.status);
+          const isCompleted = ['Completed', 'flagged', 'Returned'].includes(booking.status) || booking.returned_at;
 
           return (
             <Card key={booking.id} className={`bg-white/5 border-white/10 text-white flex flex-col ${booking.pending_address_verification ? 'border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.15)]' : ''}`}>
@@ -107,12 +123,12 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
                 )}
                 <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-gray-300">
                   <span className="text-gray-500 font-medium">Out:</span>
-                  <span>{format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • {booking.drop_off_time_slot || 'TBD'}</span>
+                  <span>{format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • {formatTime(booking.drop_off_time_slot)}</span>
                   
                   {booking.plan?.id !== 3 && (
                     <>
                       <span className="text-gray-500 font-medium">In:</span>
-                      <span>{format(parseISO(booking.pickup_date), 'MMM d, yyyy')} • {booking.pickup_time_slot || 'TBD'}</span>
+                      <span>{format(parseISO(booking.pickup_date), 'MMM d, yyyy')} • {formatTime(booking.pickup_time_slot)}</span>
                     </>
                   )}
                   
@@ -121,6 +137,11 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
                 </div>
               </CardContent>
               <CardFooter className="pt-4 border-t border-white/5 flex flex-wrap gap-2 justify-end">
+                {isCompleted && (
+                   <div className="w-full text-xs text-yellow-400/80 mb-2 flex items-center justify-end">
+                      <Star className="w-3 h-3 mr-1"/> Visit Communication Hub to leave a review
+                   </div>
+                )}
                 <Button variant="outline" size="sm" onClick={() => onReceiptClick(booking)} className="border-white/20 hover:bg-white/10">Details</Button>
                 {canModify && (
                   <>
