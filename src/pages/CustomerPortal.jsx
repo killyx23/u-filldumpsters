@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
-// New Components Import
 import { PortalNavigation } from '@/components/customer-portal/PortalNavigation';
 import { PortalDashboard } from '@/components/customer-portal/PortalDashboard';
 import { ActiveBookingsTracker } from '@/components/customer-portal/ActiveBookingsTracker';
@@ -20,7 +19,7 @@ import { DocumentsSection } from '@/components/customer-portal/DocumentsSection'
 import { ProfileManagement } from '@/components/customer-portal/ProfileManagement';
 import { CommunicationHub } from '@/components/customer-portal/CommunicationHub';
 import { VerificationManager } from '@/components/customer-portal/VerificationManager';
-
+import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
 
 export default function CustomerPortal() {
@@ -68,14 +67,13 @@ export default function CustomerPortal() {
 
         const customerDbId = user.user_metadata?.customer_db_id;
         if (!customerDbId) {
-             toast({ title: "Authentication Error", description: "Could not find your profile.", variant: "destructive" });
+            toast({ title: "Authentication Error", description: "Could not find your profile.", variant: "destructive" });
             if (isInitialLoad) setLoading(false);
-            signOut();
+            await signOut();
             return;
         }
 
         try {
-            // Using existing edge function to pull deep payload cleanly
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
                 body: { customerId: customerDbId }
             });
@@ -89,6 +87,8 @@ export default function CustomerPortal() {
             setLastUpdated(new Date());
 
         } catch (error) {
+            console.error("Portal Fetch Error:", error);
+            // Don't auto-sign out on simple fetch failures, just show error
             toast({ title: "Failed to load data", description: error.message, variant: "destructive" });
         } finally {
             if (isInitialLoad) setLoading(false);
@@ -168,7 +168,7 @@ export default function CustomerPortal() {
                         </div>
                         <CardTitle className="text-2xl font-bold text-white mb-2">Customer Portal</CardTitle>
                         <CardDescription className="text-blue-200">
-                            Enter your credentials to access your bookings.
+                            Enter your credentials to access your account.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -230,6 +230,10 @@ export default function CustomerPortal() {
                     <DocumentsSection bookings={bookings} customerData={customerData} />
                 )}
 
+                {activeTab === 'resources' && (
+                    <CustomerPortalResourcesPage />
+                )}
+
                 {activeTab === 'profile' && (
                     <ProfileManagement customer={customerData} onUpdate={() => fetchData(false)} />
                 )}
@@ -255,7 +259,6 @@ export default function CustomerPortal() {
                 )}
             </div>
 
-            {/* Global Modals attached to Portal Actions */}
             {selectedBookingForCancel && (
                 <CancelDialog 
                     booking={selectedBookingForCancel} 

@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info } from 'lucide-react';
+import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -10,9 +11,9 @@ import { EquipmentSection } from './addons/EquipmentSection';
 import { OrderSummary } from './addons/OrderSummary';
 import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 const addonPrices = {
-  insurance: 20,
   drivewayProtection: 15,
   equipment: {
     wheelbarrow: 10,
@@ -30,6 +31,7 @@ const equipmentMeta = [
 const disposalMeta = [
   { id: 'mattressDisposal', label: 'Mattress Disposal', price: 25, icon: <Trash2 className="h-6 w-6 mr-3 text-yellow-400" /> },
   { id: 'tvDisposal', label: 'TV Disposal', price: 15, icon: <Monitor className="h-6 w-6 mr-3 text-yellow-400" /> },
+  { id: 'applianceDisposal', label: 'Appliance Disposal', price: 35, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
 ];
 
 export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress }) => {
@@ -38,20 +40,31 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [showDisposalInfo, setShowDisposalInfo] = useState(false);
   const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
-  const [fetchedMileageRate, setFetchedMileageRate] = useState(plan?.mileage_rate !== undefined ? Number(plan.mileage_rate) : 20);
+  const [fetchedMileageRate, setFetchedMileageRate] = useState(plan?.mileage_rate !== undefined ? Number(plan.mileage_rate) : 0.85);
+  const [fetchedDeliveryFeeFlat, setFetchedDeliveryFeeFlat] = useState(plan?.delivery_fee !== undefined ? Number(plan.delivery_fee) : 10.00);
+
+  const { insurancePrice } = useInsurancePricing();
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
 
+  // Initialize insurance to 'accept' by default if it's missing/undefined
   useEffect(() => {
-    const fetchRate = async () => {
+    if (addonsData && addonsData.insurance === undefined) {
+      setAddonsData(prev => ({ ...prev, insurance: 'accept' }));
+    }
+  }, [addonsData?.insurance, setAddonsData]);
+
+  useEffect(() => {
+    const fetchPricing = async () => {
       if (plan?.id) {
-        const { data, error } = await supabase.from('services').select('mileage_rate').eq('id', plan.id).single();
-        if (!error && data && data.mileage_rate !== null) {
-          setFetchedMileageRate(Number(data.mileage_rate));
+        const { data, error } = await supabase.from('services').select('mileage_rate, delivery_fee').eq('id', plan.id).single();
+        if (!error && data) {
+          if (data.mileage_rate !== null) setFetchedMileageRate(Number(data.mileage_rate));
+          if (data.delivery_fee !== null) setFetchedDeliveryFeeFlat(Number(data.delivery_fee));
         }
       }
     };
-    fetchRate();
+    fetchPricing();
   }, [plan?.id]);
 
   const fetchInventory = useCallback(async () => {
@@ -122,7 +135,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     }));
   };
   
-  const handleProceed = async () => {
+  const handleProceed = async (appliedDeliveryFeeFlat, calculatedMileageCharge) => {
     if (isDeliveryRequired) {
       const dAddress = addonsData?.deliveryAddress;
       if (!dAddress || !dAddress.street || !dAddress.city || !dAddress.state || !dAddress.zip) {
@@ -136,8 +149,15 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     }
 
     let finalTotal = basePrice || 0;
-    if (addonsData?.insurance === 'accept') finalTotal += addonPrices.insurance;
-    if (addonsData?.drivewayProtection === 'accept' && (plan?.id === 1 || (plan?.id === 2 && deliveryService))) finalTotal += addonPrices.drivewayProtection;
+    
+    if (isDeliveryRequired) {
+        finalTotal += appliedDeliveryFeeFlat || 0;
+    }
+
+    // Dynamic insurance price from useInsurancePricing hook
+    // Notice this correctly checks for 'accept', which is now the default
+    if (addonsData?.insurance === 'accept') finalTotal += insurancePrice;
+    if (addonsData?.drivewayProtection === 'accept' && isDeliveryRequired) finalTotal += addonPrices.drivewayProtection;
     
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
@@ -161,13 +181,18 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
           totalDisposalFee += 15 * addonsData.tvDisposal;
           disposalItemsList.push(`${addonsData.tvDisposal}x TV Disposal`);
       }
+      if (addonsData?.applianceDisposal > 0) {
+          finalTotal += 35 * addonsData.applianceDisposal;
+          totalDisposalFee += 35 * addonsData.applianceDisposal;
+          disposalItemsList.push(`${addonsData.applianceDisposal}x Appliance Disposal`);
+      }
     }
 
     const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate);
-    const calculatedMileageCharge = feeResult.totalFee;
+    const resolvedMileageCharge = calculatedMileageCharge !== undefined ? calculatedMileageCharge : (feeResult.trip_mileage_cost || 0);
 
-    if (calculatedMileageCharge > 0) {
-      finalTotal += calculatedMileageCharge;
+    if (resolvedMileageCharge > 0 && isDeliveryRequired) {
+      finalTotal += resolvedMileageCharge;
     }
 
     if (addonsData?.coupon && addonsData.coupon.isValid) {
@@ -178,7 +203,13 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
     }
     
-    const updatedAddons = { ...addonsData, mileageCharge: calculatedMileageCharge, distanceFeeDisplay: feeResult.displayText };
+    const updatedAddons = { 
+        ...addonsData, 
+        deliveryFee: isDeliveryRequired ? appliedDeliveryFeeFlat : 0,
+        mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0, 
+        distanceFeeDisplay: feeResult.displayText,
+        insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0 // Keep track of applied price for edge cases
+    };
 
     if (disposalItemsList.length > 0) {
         updatedAddons.disposalNotes = `Disposal Items included: ${disposalItemsList.join(', ')} (Total Dump Fee: $${totalDisposalFee})`;
@@ -237,7 +268,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   handleInsuranceChange={handleInsuranceChange}
                   handleDrivewayProtectionChange={handleDrivewayProtectionChange}
                   plan={plan}
-                  addonPrices={addonPrices}
+                  addonPrices={{ ...addonPrices, insurance: insurancePrice }} // Dynamically inject insurance price
                   isDelivery={deliveryService && plan.id === 2}
                 />
                 <EquipmentSection 
@@ -326,6 +357,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   onCouponApply={handleCouponApply}
                   deliveryService={deliveryService}
                   fetchedMileageRate={fetchedMileageRate}
+                  fetchedDeliveryFeeFlat={fetchedDeliveryFeeFlat}
               />
             </div>
           </div>
@@ -351,10 +383,17 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       <Dialog open={showDisposalInfo} onOpenChange={setShowDisposalInfo}>
         <DialogContent className="bg-gray-900 border-white/20 text-white z-[9999]">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-white mb-2">Why These Fees?</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-white mb-2">Prohibited Materials & Extra Fees</DialogTitle>
           </DialogHeader>
           <DialogDescription className="text-blue-200 text-sm leading-relaxed pt-2 pb-4">
-            Mattress and TV disposal requires specialized handling and processing at certified waste facilities. These items cannot be disposed of in standard landfills due to environmental and safety regulations. The fees charged reflect the actual costs incurred by waste management facilities for proper recycling and disposal. By including these fees upfront, we ensure transparent pricing and proper environmental stewardship for these materials.
+            Mattress, TV, and appliance disposal requires specialized handling and processing at certified waste facilities. These items cannot be disposed of in standard landfills due to environmental and safety regulations. The fees charged reflect the actual costs incurred by waste management facilities for proper recycling and disposal:
+            <ul className="list-disc list-inside mt-2 space-y-1 text-white">
+              <li>Mattresses: $25/unit</li>
+              <li>TVs/Monitors: $15/unit</li>
+              <li>Appliances: $35/unit</li>
+            </ul>
+            <br />
+            By including these fees upfront, we ensure transparent pricing and proper environmental stewardship for these materials.
           </DialogDescription>
           <DialogFooter className="sm:justify-end">
             <Button onClick={() => setShowDisposalInfo(false)} variant="secondary" className="w-full sm:w-auto">

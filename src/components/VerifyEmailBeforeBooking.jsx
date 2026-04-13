@@ -1,15 +1,18 @@
+
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package } from 'lucide-react';
+import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid } from 'date-fns';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalPrice, onBack, onComplete, isProcessing }) => {
-    const [status, setStatus] = useState('initial'); // 'initial', 'sending', 'sent', 'verifying', 'verified'
+    const [status, setStatus] = useState('initial');
     const [code, setCode] = useState('');
+    const { insurancePrice } = useInsurancePricing();
 
     const handleSendCode = async () => {
         setStatus('sending');
@@ -44,7 +47,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
             if (!data.success) throw new Error(data.error || 'Invalid code');
             
             setStatus('verified');
-            onComplete(); // Trigger final booking creation
+            onComplete();
         } catch (err) {
             console.error("[VerifyEmailBeforeBooking] Verify error:", err);
             setStatus('sent');
@@ -65,6 +68,23 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         }
     };
 
+    // Calculate Breakdown Values accurately without fake processing fees
+    const insuranceCost = addonsData?.insurance === 'accept' ? insurancePrice : 0;
+    const drivewayCost = addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+    const equipmentCost = addonsData?.equipment?.reduce((acc, eq) => acc + ((eq.price || 0) * (eq.quantity || 1)), 0) || 0;
+    
+    // Calculate disposal costs if any
+    const mattressCost = (addonsData?.mattressDisposal || 0) * 25;
+    const tvCost = (addonsData?.tvDisposal || 0) * 15;
+    const applianceCost = (addonsData?.applianceDisposal || 0) * 35;
+    
+    const deliveryCost = addonsData?.deliveryFee || bookingData?.deliveryFee || 0;
+    const distanceCost = addonsData?.mileageCharge || bookingData?.distanceFee || 0;
+    
+    // Calculate accurate plan cost by subtracting all known addons from the exact total passed down
+    const totalKnownAddons = insuranceCost + drivewayCost + equipmentCost + deliveryCost + distanceCost + mattressCost + tvCost + applianceCost;
+    const planCost = plan?.price || plan?.base_price || (totalPrice - totalKnownAddons);
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 50 }}
@@ -72,7 +92,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
             exit={{ opacity: 0, y: -50 }}
             className="container mx-auto py-16 px-4"
         >
-            <div className="max-w-3xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+            <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
                 <div className="flex items-center mb-8 border-b border-white/10 pb-4">
                     <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20" disabled={isProcessing || status === 'verifying'}>
                         <ArrowLeft />
@@ -86,13 +106,15 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                 <div className="grid md:grid-cols-2 gap-8">
                     {/* Summary Section */}
                     <div className="bg-black/20 p-6 rounded-xl border border-white/10 space-y-4 text-sm">
-                        <h3 className="text-lg font-bold text-yellow-400 border-b border-white/10 pb-2 mb-4">Booking Summary</h3>
+                        <h3 className="text-lg font-bold text-yellow-400 border-b border-white/10 pb-2 mb-4 flex items-center">
+                            <Receipt className="h-5 w-5 mr-2" /> Booking Summary
+                        </h3>
                         
                         <div className="flex items-start text-gray-200">
                             <Package className="h-5 w-5 mr-3 text-blue-400 mt-0.5" />
                             <div>
-                                <p className="font-semibold text-white">{plan?.name}</p>
-                                {addonsData.equipment?.length > 0 && <p className="text-gray-400">+ {addonsData.equipment.length} Add-on(s)</p>}
+                                <p className="font-semibold text-white">{plan?.name || 'Selected Plan'}</p>
+                                {addonsData?.equipment?.length > 0 && <p className="text-gray-400">+ {addonsData.equipment.length} Add-on(s)</p>}
                             </div>
                         </div>
 
@@ -109,12 +131,78 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                         <div className="flex items-start text-gray-200">
                             <MapPin className="h-5 w-5 mr-3 text-red-400 mt-0.5" />
                             <div>
-                                <p>{bookingData.street}</p>
-                                <p>{bookingData.city}, {bookingData.state} {bookingData.zip}</p>
+                                <p>{bookingData.street || addonsData?.deliveryAddress?.street}</p>
+                                <p>{bookingData.city || addonsData?.deliveryAddress?.city}, {bookingData.state || addonsData?.deliveryAddress?.state} {bookingData.zip || addonsData?.deliveryAddress?.zip}</p>
                             </div>
                         </div>
 
-                        <div className="mt-6 pt-4 border-t border-white/10">
+                        {/* Itemized Breakdown */}
+                        <div className="mt-6 pt-4 border-t border-white/10 space-y-2 text-gray-300">
+                            <h4 className="text-white font-semibold mb-2">Cost Breakdown</h4>
+                            
+                            <div className="flex justify-between">
+                                <span>Rental/Plan Cost:</span>
+                                <span>${Math.max(0, planCost).toFixed(2)}</span>
+                            </div>
+                            
+                            {insuranceCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Insurance/Protection:</span>
+                                    <span>${insuranceCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {drivewayCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Driveway Protection:</span>
+                                    <span>${drivewayCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {equipmentCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Equipment Add-ons:</span>
+                                    <span>${equipmentCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {mattressCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Mattress Disposal:</span>
+                                    <span>${mattressCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {tvCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>TV Disposal:</span>
+                                    <span>${tvCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {applianceCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Appliance Disposal:</span>
+                                    <span>${applianceCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {deliveryCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Delivery Fee (Flat):</span>
+                                    <span>${deliveryCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                            
+                            {distanceCost > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Distance/Mileage Fee:</span>
+                                    <span>${distanceCost.toFixed(2)}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-white/10">
                             <div className="flex justify-between items-center text-lg">
                                 <span className="font-semibold text-white">Estimated Total:</span>
                                 <span className="font-bold text-green-400">${totalPrice.toFixed(2)}</span>
@@ -126,7 +214,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                     <div className="flex flex-col justify-center space-y-6">
                         <div className="text-center">
                             <Mail className="mx-auto h-12 w-12 text-blue-400 mb-4" />
-                            <h3 className="text-xl font-bold text-white mb-2">Verify Your Address</h3>
+                            <h3 className="text-xl font-bold text-white mb-2">Verify Your Email</h3>
                             <p className="text-gray-300 text-sm">
                                 We need to verify <strong className="text-yellow-300">{bookingData.email}</strong> to secure your booking and send your receipt.
                             </p>
