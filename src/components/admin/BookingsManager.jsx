@@ -12,7 +12,8 @@ import {
   PlusCircle, 
   Trash2, 
   MapPin, 
-  Clock 
+  Clock,
+  CreditCard
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from '@/components/ui/button';
@@ -87,9 +88,9 @@ export const BookingsManager = ({ initialBookings }) => {
                 b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 b.id.toString().includes(searchTerm) ||
                 (b.customers?.customer_id_text || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                b.email.toLowerCase().includes(searchTerm.toLowerCase());
+                b.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                (b.payment_intent || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-            // Added pending_address to the status filter
             const matchesStatus = statusFilter === 'all' 
                 ? true 
                 : statusFilter === 'pending_address'
@@ -149,7 +150,7 @@ export const BookingsManager = ({ initialBookings }) => {
                     <div className="relative flex-1 max-w-sm">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
                         <Input
-                            placeholder="Search by ID, name, email or CID..."
+                            placeholder="Search by ID, name, email or Stripe ID..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="pl-9 bg-gray-700 border-gray-600 text-white placeholder:text-gray-400"
@@ -183,66 +184,75 @@ export const BookingsManager = ({ initialBookings }) => {
                         <TableRow className="border-gray-700 hover:bg-gray-800">
                             <TableHead className="text-gray-300">ID</TableHead>
                             <TableHead className="text-gray-300">Customer</TableHead>
-                            <TableHead className="text-gray-300">Service</TableHead>
+                            <TableHead className="text-gray-300">Payment</TableHead>
                             <TableHead className="text-gray-300">Dates</TableHead>
                             <TableHead className="text-gray-300">Status</TableHead>
                             <TableHead className="text-gray-300 text-right">Actions</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredBookings.map((booking) => (
-                            <TableRow key={booking.id} className="border-gray-700 hover:bg-gray-750">
-                                <TableCell className="font-medium text-blue-400">#{booking.id}</TableCell>
-                                <TableCell>
-                                    <div className="font-semibold text-white">{booking.name}</div>
-                                    <div className="text-sm text-gray-400">{booking.customers?.customer_id_text}</div>
-                                    <div className="text-xs text-gray-500">{booking.email}</div>
-                                </TableCell>
-                                <TableCell>
-                                    <div className="text-gray-200">{booking.plan?.name || 'Unknown'}</div>
-                                    {booking.addons?.isDelivery && <div className="text-xs text-blue-400">w/ Delivery</div>}
-                                </TableCell>
-                                <TableCell>
-                                    <div className="text-sm text-gray-300">
-                                        Out: {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}
-                                    </div>
-                                    <div className="text-sm text-gray-300">
-                                        In: {format(parseISO(booking.pickup_date), 'MMM d, yyyy')}
-                                    </div>
-                                </TableCell>
-                                <TableCell>
-                                    {getStatusDisplay(booking)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                    <div className="flex justify-end gap-2">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => { setSelectedBooking(booking); setIsEditMode(false); }}
-                                            className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/20"
-                                        >
-                                            <Eye className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => { setSelectedBooking(booking); setIsEditMode(true); }}
-                                            className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/20"
-                                        >
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={(e) => handleDeleteClick(booking, e)}
-                                            className="text-red-400 hover:text-red-300 hover:bg-red-400/20"
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </TableCell>
-                            </TableRow>
-                        ))}
+                        {filteredBookings.map((booking) => {
+                            const stripeChargeId = 
+                                (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) || 
+                                booking.payment_intent || 'N/A';
+
+                            return (
+                                <TableRow key={booking.id} className="border-gray-700 hover:bg-gray-750">
+                                    <TableCell className="font-medium text-blue-400">#{booking.id}</TableCell>
+                                    <TableCell>
+                                        <div className="font-semibold text-white">{booking.name}</div>
+                                        <div className="text-sm text-gray-400">{booking.customers?.customer_id_text}</div>
+                                        <div className="text-xs text-gray-500">{booking.email}</div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="text-gray-200 font-medium">${Number(booking.total_price || 0).toFixed(2)}</div>
+                                        <div className="text-xs text-gray-400 flex items-center mt-1">
+                                            <CreditCard className="h-3 w-3 mr-1" />
+                                            {stripeChargeId.substring(0, 14)}{stripeChargeId.length > 14 ? '...' : ''}
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="text-sm text-gray-300">
+                                            Out: {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}
+                                        </div>
+                                        <div className="text-sm text-gray-300">
+                                            In: {format(parseISO(booking.pickup_date), 'MMM d, yyyy')}
+                                        </div>
+                                    </TableCell>
+                                    <TableCell>
+                                        {getStatusDisplay(booking)}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex justify-end gap-2">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => { setSelectedBooking(booking); setIsEditMode(false); }}
+                                                className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/20"
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => { setSelectedBooking(booking); setIsEditMode(true); }}
+                                                className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/20"
+                                            >
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={(e) => handleDeleteClick(booking, e)}
+                                                className="text-red-400 hover:text-red-300 hover:bg-red-400/20"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
                         {filteredBookings.length === 0 && (
                             <TableRow>
                                 <TableCell colSpan={6} className="text-center py-8 text-gray-500">

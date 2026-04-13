@@ -2,7 +2,7 @@
 import React from 'react';
 import { Clock, Truck, CheckCircle, MapPin } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 
 export const ActiveBookingsTracker = ({ bookings }) => {
   const activeBookings = bookings.filter(b => 
@@ -36,6 +36,19 @@ export const ActiveBookingsTracker = ({ bookings }) => {
       default:
         return { stage: 1, text: 'Scheduled', color: 'badge-scheduled' };
     }
+  };
+
+  const formatTime = (timeString) => {
+      if (!timeString) return 'TBD';
+      try {
+          const [hours, minutes] = timeString.split(':');
+          const date = new Date();
+          date.setHours(parseInt(hours, 10));
+          date.setMinutes(parseInt(minutes || '0', 10));
+          return isValid(date) ? format(date, 'h:mm a') : timeString;
+      } catch (e) {
+          return timeString;
+      }
   };
 
   return (
@@ -108,7 +121,7 @@ export const ActiveBookingsTracker = ({ bookings }) => {
                     <div>
                       <p className="text-xs text-gray-400 uppercase font-semibold">Estimated Time</p>
                       <p className="text-sm font-medium">
-                        {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • {booking.drop_off_time_slot || 'TBD'}
+                        {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • {formatTime(booking.drop_off_time_slot)}
                       </p>
                     </div>
                   </div>

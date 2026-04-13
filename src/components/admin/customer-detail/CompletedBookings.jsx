@@ -1,7 +1,9 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip, XCircle, Calendar } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin } from 'lucide-react';
+import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -20,6 +22,37 @@ const IssueItem = ({ title, details }) => (
     </div>
 );
 
+const DistanceWarning = ({ booking }) => {
+    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || null);
+    const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || null);
+
+    useEffect(() => {
+        if (!distance && booking) {
+            const address = booking.delivery_address?.formatted_address || `${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`;
+            if(address && address.length > 10) {
+                getBusinessAddress().then(origin => {
+                    calculateDistanceViaGoogleMaps(origin, address).then(res => {
+                        setDistance(res.distance);
+                        setTravelTime(res.travelTime);
+                    }).catch(e => console.error("Distance calculation error:", e));
+                });
+            }
+        }
+    }, [booking, distance]);
+
+    if (!distance || distance <= 30) return null;
+
+    return (
+        <div className="mt-4 p-3 bg-red-900/40 border border-red-500/50 rounded-lg text-sm flex flex-col gap-1 text-red-300">
+            <span className="font-semibold flex items-center"><AlertTriangle className="mr-1 h-4 w-4" /> Extended Delivery Red Flag</span>
+            <div className="flex gap-4 text-xs text-red-200 mt-1">
+                <span className="flex items-center"><MapPin className="mr-1 h-3 w-3 text-red-400" /> {Number(distance).toFixed(1)} mi</span>
+                <span className="flex items-center"><Clock className="mr-1 h-3 w-3 text-red-400" /> {travelTime} mins</span>
+            </div>
+        </div>
+    );
+};
+
 export const CompletedBookings = ({ bookings, equipment }) => {
     if (!bookings || bookings.length === 0) return null;
 
@@ -32,6 +65,9 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                  const fees = booking.fees || {};
                  const refundDetails = booking.refund_details || null;
 
+                 const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
+                 const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
+
                  return (
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
                         <div className="flex justify-between items-start mb-4">
@@ -42,10 +78,13 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                             <StatusBadge status={booking.status} />
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <DistanceWarning booking={booking} />
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                              <DetailItem icon={<Clock />} label="Start Date" value={format(parseISO(booking.drop_off_date), 'PPP')} />
                              <DetailItem icon={<Clock />} label="End Date" value={format(parseISO(booking.pickup_date), 'PPP')} />
                              <DetailItem icon={<DollarSign />} label="Final Price" value={`$${booking.total_price.toFixed(2)}`} />
+                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
                              {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
