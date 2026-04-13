@@ -4,6 +4,7 @@ import { Truck, CheckCircle, Clock, MapPin, AlertTriangle, RefreshCw } from 'luc
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format, isFuture, parseISO, differenceInDays } from 'date-fns';
+import { StatusDetailsModal } from './StatusDetailsModal';
 
 export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
   const [stats, setStats] = useState({
@@ -13,6 +14,8 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
     completedCount: 0,
     urgentItems: []
   });
+  
+  const [selectedStatusType, setSelectedStatusType] = useState(null);
 
   useEffect(() => {
     if (!bookings) return;
@@ -43,6 +46,8 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
       urgentItems: urgent
     });
   }, [bookings]);
+
+  const customerId = bookings?.[0]?.customer_id;
 
   return (
     <div className="space-y-6">
@@ -77,7 +82,10 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors">
+        <Card 
+          onClick={() => setSelectedStatusType('active')}
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors cursor-pointer interactive-hover"
+        >
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-blue-200">Active Bookings</CardTitle>
             <div className="bg-green-500/20 p-2 rounded-full"><CheckCircle className="h-4 w-4 text-green-400" /></div>
@@ -88,7 +96,10 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
           </CardContent>
         </Card>
 
-        <Card className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors">
+        <Card 
+          onClick={() => setSelectedStatusType('pending')}
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors cursor-pointer interactive-hover"
+        >
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-blue-200">Pending Address</CardTitle>
             <div className="bg-yellow-500/20 p-2 rounded-full"><MapPin className="h-4 w-4 text-yellow-400" /></div>
@@ -99,7 +110,10 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
           </CardContent>
         </Card>
 
-        <Card className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors">
+        <Card 
+          onClick={() => setSelectedStatusType('upcoming')}
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors cursor-pointer interactive-hover"
+        >
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-blue-200">Upcoming Deliveries</CardTitle>
             <div className="bg-blue-500/20 p-2 rounded-full"><Truck className="h-4 w-4 text-blue-400" /></div>
@@ -110,7 +124,10 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
           </CardContent>
         </Card>
 
-        <Card className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors">
+        <Card 
+          onClick={() => setSelectedStatusType('completed')}
+          className="bg-white/5 border-white/10 text-white hover:bg-white/10 transition-colors cursor-pointer interactive-hover"
+        >
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-blue-200">Completed Rentals</CardTitle>
             <div className="bg-gray-500/20 p-2 rounded-full"><Clock className="h-4 w-4 text-gray-400" /></div>
@@ -121,6 +138,13 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
           </CardContent>
         </Card>
       </div>
+
+      <StatusDetailsModal 
+        isOpen={!!selectedStatusType} 
+        onClose={() => setSelectedStatusType(null)} 
+        type={selectedStatusType}
+        customerId={customerId}
+      />
     </div>
   );
 };

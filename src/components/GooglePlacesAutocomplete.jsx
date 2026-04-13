@@ -73,6 +73,7 @@ export const GooglePlacesAutocomplete = ({
 
   const handleInputChange = (e) => {
     onChange(e.target.value);
+    setIsOpen(false);
     setIsOpen(true);
   };
 
@@ -118,7 +119,7 @@ export const GooglePlacesAutocomplete = ({
           <Edit2 className="h-4 w-4 mr-2" />
           Manual Address Entry
         </div>
-        <p className="text-xs text-orange-200 mb-2">Please ensure your address is accurate. Manual entry requires admin verification.</p>
+        <p className="text-xs text-orange-200 mb-2">Manual address entry should only be used if there is no match or if the address is not yet on Google Maps. You can also use this option if you don't have the exact address handy and plan to update it in our portal shortly.</p>
         
         <Input 
           type="text" 

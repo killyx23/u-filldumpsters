@@ -8,11 +8,9 @@ import {
   FileText, 
   User, 
   MessageSquare, 
-  CreditCard, 
-  HelpCircle,
-  Menu,
-  X,
-  ShieldCheck
+  ShieldCheck,
+  BookOpen,
+  Menu
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -24,6 +22,7 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
     { id: 'tracking', label: 'Tracking', icon: Map },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
     { id: 'documents', label: 'Documents', icon: FileText },
+    { id: 'resources', label: 'How-To & Guides', icon: BookOpen },
     { id: 'profile', label: 'Profile', icon: User },
     { 
       id: 'verification', 
@@ -61,7 +60,7 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
               }`}
             >
               <Icon className={`h-5 w-5 ${isActive ? 'text-yellow-400' : 'text-gray-400'}`} />
-              <span className="font-medium">{item.label}</span>
+              <span className="font-medium text-left">{item.label}</span>
               {item.alert && (
                 <span className={`ml-auto w-2 h-2 rounded-full ${item.alertColor}`} />
               )}

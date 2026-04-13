@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -6,9 +7,9 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 const addonPrices = {
-  insurance: 20,
   drivewayProtection: 15,
 };
 
@@ -18,13 +19,16 @@ const equipmentMeta = [
   { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
 ];
 
-export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProcessing, onCouponApply, deliveryService, fetchedMileageRate }) => {
+export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProcessing, onCouponApply, deliveryService, fetchedMileageRate, fetchedDeliveryFeeFlat }) => {
   const [couponCode, setCouponCode] = useState('');
   const [coupon, setCoupon] = useState(null);
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState('');
   
+  const { insurancePrice } = useInsurancePricing();
+  
   const [mileageRate, setMileageRate] = useState(fetchedMileageRate !== undefined ? fetchedMileageRate : (plan?.mileage_rate || 0.85));
+  const [deliveryFeeFlat, setDeliveryFeeFlat] = useState(fetchedDeliveryFeeFlat !== undefined ? fetchedDeliveryFeeFlat : (addons?.deliveryFee || 10.00));
 
   useEffect(() => {
     if (addons?.coupon) {
@@ -36,18 +40,23 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
   useEffect(() => {
     if (fetchedMileageRate !== undefined) {
       setMileageRate(fetchedMileageRate);
-    } else {
-      const fetchRate = async () => {
+    }
+    if (fetchedDeliveryFeeFlat !== undefined) {
+      setDeliveryFeeFlat(fetchedDeliveryFeeFlat);
+    }
+    if (fetchedMileageRate === undefined || fetchedDeliveryFeeFlat === undefined) {
+      const fetchPricing = async () => {
         if (plan?.id) {
-            const { data, error } = await supabase.from('services').select('mileage_rate').eq('id', plan.id).single();
-            if (!error && data && data.mileage_rate !== null) {
-              setMileageRate(Number(data.mileage_rate));
+            const { data, error } = await supabase.from('services').select('mileage_rate, delivery_fee').eq('id', plan.id).single();
+            if (!error && data) {
+              if (data.mileage_rate !== null) setMileageRate(Number(data.mileage_rate));
+              if (data.delivery_fee !== null) setDeliveryFeeFlat(Number(data.delivery_fee));
             }
         }
       };
-      fetchRate();
+      fetchPricing();
     }
-  }, [fetchedMileageRate, plan?.id]);
+  }, [fetchedMileageRate, fetchedDeliveryFeeFlat, plan?.id]);
 
   const getDiscountAmount = (subtotal) => {
     if (coupon && coupon.isValid) {
@@ -61,14 +70,15 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
   };
 
   const calculateTotal = () => {
-    // plan.price here is JUST the base rental now (passed securely from BookingForm).
     const baseRental = plan?.price || 0;
-    const deliveryFee = addons?.deliveryFee || 0;
+    
+    const isDeliveryPlan = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
+    const appliedDeliveryFeeFlat = isDeliveryPlan ? deliveryFeeFlat : 0;
 
-    let subtotal = baseRental + deliveryFee;
+    let subtotal = baseRental + appliedDeliveryFeeFlat;
 
-    if (addons?.insurance === 'accept') subtotal += addonPrices.insurance;
-    if (addons?.drivewayProtection === 'accept' && (plan?.id === 1 || (plan?.id === 2 && deliveryService))) subtotal += addonPrices.drivewayProtection;
+    if (addons?.insurance === 'accept') subtotal += insurancePrice;
+    if (addons?.drivewayProtection === 'accept' && isDeliveryPlan) subtotal += addonPrices.drivewayProtection;
     
     if (addons?.equipment && Array.isArray(addons.equipment)) {
         addons.equipment.forEach(item => {
@@ -79,28 +89,24 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
         });
     }
 
-    if (addons?.mattressDisposal > 0) {
-      subtotal += 25 * addons.mattressDisposal;
-    }
-
-    if (addons?.tvDisposal > 0) {
-      subtotal += 15 * addons.tvDisposal;
-    }
+    if (addons?.mattressDisposal > 0) subtotal += 25 * addons.mattressDisposal;
+    if (addons?.tvDisposal > 0) subtotal += 15 * addons.tvDisposal;
+    if (addons?.applianceDisposal > 0) subtotal += 35 * addons.applianceDisposal;
 
     const feeResult = calculateDistanceAndFee(addons?.deliveryDistance || 0, plan?.id, mileageRate);
-    const calculatedMileageCharge = feeResult.totalFee;
+    const calculatedMileageCharge = feeResult.trip_mileage_cost || 0;
 
-    if (calculatedMileageCharge > 0) {
+    if (calculatedMileageCharge > 0 && isDeliveryPlan) {
       subtotal += calculatedMileageCharge;
     }
 
     const discountAmount = getDiscountAmount(subtotal);
     const total = subtotal - discountAmount;
 
-    return { baseRental, deliveryFee, subtotal, discountAmount, total, calculatedMileageCharge, feeResult };
+    return { baseRental, appliedDeliveryFeeFlat, subtotal, discountAmount, total, calculatedMileageCharge, feeResult, isDeliveryPlan };
   };
 
-  const { baseRental, deliveryFee, discountAmount, total, calculatedMileageCharge, feeResult } = calculateTotal();
+  const { baseRental, appliedDeliveryFeeFlat, discountAmount, total, calculatedMileageCharge, feeResult, isDeliveryPlan } = calculateTotal();
 
   const handleApplyCoupon = async () => {
     if (!couponCode || !plan?.id) return;
@@ -126,6 +132,12 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
     setCouponLoading(false);
   };
 
+  const proceedWithData = () => {
+    if (onProceed) {
+      onProceed(appliedDeliveryFeeFlat, calculatedMileageCharge);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -141,21 +153,21 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
           <span className="font-semibold text-white">{formatCurrency(baseRental * 100)}</span>
         </div>
 
-        {deliveryFee > 0 && (
+        {appliedDeliveryFeeFlat > 0 && (
           <div className="flex justify-between items-center summary-item">
-            <span className="text-blue-200">Delivery Fee</span>
-            <span className="font-semibold text-white">{formatCurrency(deliveryFee * 100)}</span>
+            <span className="text-blue-200">Delivery Fee (Flat)</span>
+            <span className="font-semibold text-white">{formatCurrency(appliedDeliveryFeeFlat * 100)}</span>
           </div>
         )}
         
         {addons?.insurance === 'accept' && (
           <div className="flex justify-between items-center summary-item">
             <span className="text-blue-200">Rental Insurance</span>
-            <span className="font-semibold text-white">{formatCurrency(addonPrices.insurance * 100)}</span>
+            <span className="font-semibold text-white">{formatCurrency(insurancePrice * 100)}</span>
           </div>
         )}
         
-        {addons?.drivewayProtection === 'accept' && (plan?.id === 1 || (plan?.id === 2 && deliveryService)) && (
+        {addons?.drivewayProtection === 'accept' && isDeliveryPlan && (
           <div className="flex justify-between items-center summary-item">
             <span className="text-blue-200">Driveway Protection</span>
             <span className="font-semibold text-white">{formatCurrency(addonPrices.drivewayProtection * 100)}</span>
@@ -180,7 +192,7 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
           </div>
         )}
 
-        {(addons?.mattressDisposal > 0 || addons?.tvDisposal > 0) && (
+        {(addons?.mattressDisposal > 0 || addons?.tvDisposal > 0 || addons?.applianceDisposal > 0) && (
           <div>
             <p className="text-blue-200 mb-2">Disposal Items:</p>
             <ul className="space-y-1 pl-4">
@@ -196,11 +208,17 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
                   <span className="text-green-400">{formatCurrency(15 * addons.tvDisposal * 100)}</span>
                 </li>
               )}
+              {addons?.applianceDisposal > 0 && (
+                <li className="flex justify-between text-sm summary-item">
+                  <span className="text-gray-300">Appliance Disposal x{addons.applianceDisposal}</span>
+                  <span className="text-green-400">{formatCurrency(35 * addons.applianceDisposal * 100)}</span>
+                </li>
+              )}
             </ul>
           </div>
         )}
 
-        {(plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4) && (addons?.deliveryDistance || 0) > 0 && (
+        {isDeliveryPlan && (addons?.deliveryDistance || 0) > 0 && (
           <div className="border-t border-white/10 pt-4 mt-2">
             <div className="flex justify-between items-center summary-item">
               <div className="flex items-center gap-1">
@@ -266,16 +284,12 @@ export const OrderSummary = ({ plan, addons, contactAddress, onProceed, isProces
         </div>
       </div>
       <Button
-        onClick={() => onProceed()}
+        onClick={proceedWithData}
         className="w-full mt-8 text-lg bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 shadow-lg shadow-blue-900/50 interactive-hover"
         size="lg"
         disabled={isProcessing}
       >
-        {isProcessing ? (
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-        ) : (
-          <Tag className="mr-2 h-5 w-5" />
-        )}
+        {isProcessing ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Tag className="mr-2 h-5 w-5" />}
         {isProcessing ? 'Processing...' : 'Proceed to Checkout'}
       </Button>
     </motion.div>

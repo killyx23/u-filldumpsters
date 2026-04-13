@@ -2,12 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, CheckCircle, XCircle, AlertTriangle, MapPin, ExternalLink } from 'lucide-react';
+import { Loader2, CheckCircle, AlertTriangle, MapPin, ExternalLink, ShieldAlert } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 
 export const PendingVerificationsManager = () => {
     const { user } = useAuth();
@@ -66,7 +67,6 @@ export const PendingVerificationsManager = () => {
                 author_type: 'admin'
             });
 
-            // Send confirmation email
             await supabase.functions.invoke('send-booking-confirmation', { body: { booking_id: selectedBooking.id } });
 
             toast({ title: "Address Verified", description: "Booking has been confirmed and customer notified." });
@@ -177,28 +177,40 @@ export const PendingVerificationsManager = () => {
                 </div>
             )}
 
-            {/* Approve Dialog */}
             <Dialog open={isApproveDialogOpen} onOpenChange={setIsApproveDialogOpen}>
-                <DialogContent className="bg-gray-900 border-green-500 text-white">
+                <DialogContent className="bg-gray-900 border-green-500 text-white max-w-3xl">
                     <DialogHeader>
                         <DialogTitle>Approve Delivery Address</DialogTitle>
-                        <DialogDescription>Confirm that you have manually verified this address.</DialogDescription>
+                        <DialogDescription>Review the customer's information before approving.</DialogDescription>
                     </DialogHeader>
-                    <div className="py-4">
-                        <p className="text-sm text-gray-300 mb-2">You are approving delivery to:</p>
-                        <p className="font-bold text-lg text-white bg-black/30 p-3 rounded">{selectedBooking?.unverified_address}</p>
-                        <p className="text-xs text-gray-400 mt-4">This will change the booking status to Confirmed and send a confirmation email to the customer.</p>
+                    <div className="py-4 space-y-6">
+                        <div>
+                            <p className="text-sm text-gray-300 mb-2">You are approving delivery to:</p>
+                            <p className="font-bold text-lg text-white bg-black/30 p-3 rounded">{selectedBooking?.unverified_address}</p>
+                        </div>
+                        
+                        <div className="border-t border-gray-700 pt-4">
+                            <h4 className="flex items-center text-md font-bold mb-4 text-yellow-400">
+                                <ShieldAlert className="h-5 w-5 mr-2" /> License Verification Documents
+                            </h4>
+                            {selectedBooking?.customer_id ? (
+                                <VerificationImageDisplay customerId={selectedBooking.customer_id} />
+                            ) : (
+                                <div className="text-yellow-400 text-sm">No customer ID linked.</div>
+                            )}
+                        </div>
+
+                        <p className="text-xs text-gray-400 mt-4">Approving this will change the booking status to Confirmed and send a confirmation email to the customer.</p>
                     </div>
                     <DialogFooter>
                         <Button variant="ghost" onClick={() => setIsApproveDialogOpen(false)}>Cancel</Button>
                         <Button onClick={handleApprove} disabled={actionLoading} className="bg-green-600 hover:bg-green-700 text-white">
-                            {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />} Approve Address
+                            {actionLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle className="h-4 w-4 mr-2" />} Approve Request
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Cancel Dialog */}
             <Dialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
                 <DialogContent className="bg-gray-900 border-red-500 text-white">
                     <DialogHeader>

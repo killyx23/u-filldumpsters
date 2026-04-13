@@ -125,7 +125,6 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
         const currentAddr = prev.deliveryAddress || {};
         const newAddr = { ...currentAddr, [field]: value, isVerified: false, unverifiedAccepted: true };
         
-        // We trigger distance calculation bypassing so it sets "Pending Admin Verification"
         if (field === 'street' || field === 'city' || field === 'state' || field === 'zip') {
             calculateDistance(newAddr);
         }
@@ -156,7 +155,6 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
         calculateDistance(addonsData.deliveryAddress);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded]);
 
   const isWaitingForMaps = !isLoaded && !initialCalcAttempted.current && 
@@ -209,7 +207,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                             
                             {isUnverified ? (
                                 <p className="text-xs text-orange-300 mt-2 bg-orange-900/20 p-2 rounded">
-                                    Manual address entry. Delivery fees will be calculated by our team upon review.
+                                    Manual address entry requires verification from our scheduling department. If applicable, any additional fees and or delivery fees will be calculated and applied during the review process.
                                 </p>
                             ) : isCurrentlyCalculating ? (
                                 <p className="text-xs text-yellow-400 mt-2 flex items-center distance-loading">
@@ -286,7 +284,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                     <div className="bg-orange-900/30 border border-orange-500/50 p-3 rounded-lg flex items-start gap-2">
                         <AlertTriangle className="h-5 w-5 text-orange-400 flex-shrink-0 mt-0.5" />
                         <p className="text-orange-200 text-sm">
-                            Manual address entry requires admin verification. Delivery fees will be calculated and applied during the review process.
+                            Manual address entry requires verification from our scheduling department. If applicable, any additional fees and or delivery fees will be calculated and applied during the review process.
                         </p>
                     </div>
                 ) : isCurrentlyCalculating ? (

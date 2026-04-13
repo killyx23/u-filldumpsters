@@ -33,7 +33,6 @@ export const CustomerDetailView = () => {
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
     const [hasUnreadNotes, setHasUnreadNotes] = useState(false);
 
-
     const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
         if (isInitialLoad) {
             setLoading(true);

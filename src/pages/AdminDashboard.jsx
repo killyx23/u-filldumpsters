@@ -12,7 +12,9 @@ import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
 import { ReviewsManager } from '@/components/admin/ReviewsManager';
 import { FaqsManager } from '@/components/admin/FaqsManager';
 import { PendingVerificationsManager } from '@/components/admin/PendingVerificationsManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin } from 'lucide-react';
+import { SettingsManager } from '@/components/admin/SettingsManager';
+import { ResourceManagement } from '@/components/admin/ResourceManagement';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -134,7 +136,7 @@ const AdminDashboard = () => {
                 </div>
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-                    <TabsList className="grid w-full grid-cols-4 sm:grid-cols-4 lg:grid-cols-9 mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">
+                    <TabsList className="flex flex-wrap justify-start mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">
                         <TabsTrigger value="action-items" className="relative py-2">
                             <AlertTriangle className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Action Items</span>
                             {actionItemCount > 0 && (
@@ -158,6 +160,8 @@ const AdminDashboard = () => {
                         <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
                         <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
                         <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
+                        <TabsTrigger value="resources" className="py-2"><BookOpen className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Resources</span></TabsTrigger>
+                        <TabsTrigger value="settings" className="py-2"><Settings className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Settings</span></TabsTrigger>
                     </TabsList>
                     
                     {loading ? (
@@ -173,6 +177,8 @@ const AdminDashboard = () => {
                             <TabsContent value="equipment"><EquipmentManager /></TabsContent>
                             <TabsContent value="reviews"><ReviewsManager /></TabsContent>
                             <TabsContent value="faqs"><FaqsManager /></TabsContent>
+                            <TabsContent value="resources"><ResourceManagement /></TabsContent>
+                            <TabsContent value="settings"><SettingsManager /></TabsContent>
                         </>
                     )}
                 </Tabs>

@@ -33,7 +33,7 @@ export const AddressVerificationDialog = ({ isOpen, onOpenChange, onContinue }) 
                         If you continue without verification, your delivery may be delayed. Cancellation fees or credit card charges may apply if the address is invalid.
                     </p>
                     <p className="text-orange-200 bg-orange-900/20 p-3 rounded border border-orange-500/30">
-                        Our team will need to manually verify your address before delivery. This may take 24-48 hours.
+                        Manual address entry requires verification from our scheduling department. If applicable, any additional fees and or delivery fees will be calculated and applied during the review process.
                     </p>
                     <div className="flex items-start space-x-3 bg-black/40 p-4 rounded-lg border border-white/10 mt-4">
                         <Checkbox 

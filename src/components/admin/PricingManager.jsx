@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 const ServicePricingCard = ({ service, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
@@ -30,15 +31,12 @@ const ServicePricingCard = ({ service, onSave }) => {
     const handleSave = async () => {
         try {
             setIsSaving(true);
-            
-            // Prepare strict payload
             const updatePayload = {
                 base_price: parseFloat(price) || 0,
                 price_unit: unit || '',
                 mileage_rate: parseFloat(mileageRate) || 0,
                 delivery_fee: parseFloat(deliveryFee) || 0
             };
-
             await onSave(service.id, updatePayload);
         } catch (error) {
             console.error("Error preparing save data:", error);
@@ -106,11 +104,7 @@ const ServicePricingCard = ({ service, onSave }) => {
                     </>
                 )}
                 <Button onClick={handleSave} size="sm" disabled={isSaving} className="ml-2 min-w-[90px] bg-blue-600 hover:bg-blue-700 text-white">
-                    {isSaving ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
-                    ) : (
-                        <><Save className="mr-2 h-4 w-4" /> Save</>
-                    )}
+                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save</>}
                 </Button>
             </div>
         </div>
@@ -163,13 +157,51 @@ const DumpFeeCard = ({ service, dumpFeeData, onSave }) => {
                         disabled={isSaving}
                     />
                 </div>
-               
                 <Button onClick={handleSave} size="sm" disabled={isSaving} className="ml-2 min-w-[90px] bg-green-600 hover:bg-green-700 text-white">
-                    {isSaving ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
-                    ) : (
-                        <><Save className="mr-2 h-4 w-4" /> Save Fee</>
-                    )}
+                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Fee</>}
+                </Button>
+            </div>
+        </div>
+    );
+};
+
+const InsurancePricingCard = () => {
+    const { insurancePrice, loading, updateInsurancePrice } = useInsurancePricing();
+    const [priceInput, setPriceInput] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        if (!loading) {
+            setPriceInput(insurancePrice.toString());
+        }
+    }, [insurancePrice, loading]);
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        await updateInsurancePrice(parseFloat(priceInput));
+        setIsSaving(false);
+    };
+
+    if (loading) return null;
+
+    return (
+        <div className="bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border border-white/10">
+            <p className="text-lg font-bold text-white w-full md:w-1/4">Hardware Protection (Insurance)</p>
+            <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
+                <div className="flex items-center gap-2">
+                    <Label className="text-white">Price ($):</Label>
+                    <Input 
+                        type="number" 
+                        step="0.01"
+                        value={priceInput} 
+                        onChange={(e) => setPriceInput(e.target.value)}
+                        className="w-32 bg-white/10 text-white"
+                        placeholder="e.g., 20.00"
+                        disabled={isSaving}
+                    />
+                </div>
+                <Button onClick={handleSave} size="sm" disabled={isSaving} className="ml-2 min-w-[90px] bg-purple-600 hover:bg-purple-700 text-white">
+                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Price</>}
                 </Button>
             </div>
         </div>
@@ -186,9 +218,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
     const [applyToAll, setApplyToAll] = useState(!coupon?.service_ids || coupon.service_ids.length === 0);
 
     const handleServiceToggle = (serviceId) => {
-        setSelectedServices(prev => 
-            prev.includes(serviceId) ? prev.filter(id => id !== serviceId) : [...prev, serviceId]
-        );
+        setSelectedServices(prev => prev.includes(serviceId) ? prev.filter(id => id !== serviceId) : [...prev, serviceId]);
     };
 
     const handleSubmit = () => {
@@ -201,9 +231,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
             service_ids: applyToAll ? null : selectedServices,
             is_active: coupon ? coupon.is_active : true,
         };
-        if (coupon?.id) {
-            couponData.id = coupon.id;
-        }
+        if (coupon?.id) couponData.id = coupon.id;
         onSave(couponData);
     };
 
@@ -211,9 +239,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
         <DialogContent className="bg-gray-900 border-yellow-400 text-white">
             <DialogHeader>
                 <DialogTitle>{coupon ? 'Edit Coupon' : 'Create New Coupon'}</DialogTitle>
-                <DialogDescription>
-                    {coupon ? 'Update the details for this coupon.' : 'Fill out the form to create a new promotional coupon.'}
-                </DialogDescription>
+                <DialogDescription>Fill out the form to create or edit a promotional coupon.</DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -319,21 +345,13 @@ export const PricingManager = () => {
 
     const handleSaveService = async (id, updateData) => {
         try {
-            const { error } = await supabase
-                .from('services')
-                .update(updateData)
-                .eq('id', id);
-            
-            if (error) {
-                console.error("Supabase update error:", error);
-                throw error;
-            }
-            
+            const { error } = await supabase.from('services').update(updateData).eq('id', id);
+            if (error) throw error;
             toast({ title: "Service pricing updated successfully" });
-            await fetchData(); // Refresh to ensure UI stays perfectly synced with DB
+            await fetchData();
         } catch (error) {
             console.error("Failed to save service pricing:", error);
-            toast({ title: "Failed to save pricing", description: error.message || "An unknown database error occurred.", variant: "destructive" });
+            toast({ title: "Failed to save pricing", description: error.message || "An unknown error occurred.", variant: "destructive" });
         }
     };
 
@@ -341,7 +359,6 @@ export const PricingManager = () => {
         try {
             const { error } = await supabase.from('coupons').upsert(couponData, { onConflict: 'id' });
             if (error) throw error;
-            
             toast({ title: 'Coupon saved successfully!' });
             setIsCouponFormOpen(false);
             setEditingCoupon(null);
@@ -353,16 +370,12 @@ export const PricingManager = () => {
 
     const handleToggleCouponStatus = async (coupon) => {
         try {
-            const { error } = await supabase
-                .from('coupons')
-                .update({ is_active: !coupon.is_active })
-                .eq('id', coupon.id);
+            const { error } = await supabase.from('coupons').update({ is_active: !coupon.is_active }).eq('id', coupon.id);
             if (error) throw error;
-            
             toast({ title: `Coupon ${coupon.is_active ? 'deactivated' : 'activated'}.` });
             fetchData();
         } catch (error) {
-            toast({ title: 'Failed to update coupon status', variant: 'destructive', description: error.message });
+            toast({ title: 'Failed to update status', variant: 'destructive', description: error.message });
         }
     };
 
@@ -370,7 +383,7 @@ export const PricingManager = () => {
         return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
     }
 
-    const dumpFeeServices = services.filter(s => [1, 4].includes(s.id)); // 16 Yard and Trailer Delivery
+    const dumpFeeServices = services.filter(s => [1, 4].includes(s.id));
 
     return (
         <div className="space-y-8">
@@ -380,6 +393,13 @@ export const PricingManager = () => {
                     {services.filter(s => [1,2,3,4].includes(s.id)).map(service => (
                         <ServicePricingCard key={service.id} service={service} onSave={handleSaveService} />
                     ))}
+                </div>
+            </div>
+
+            <div className="bg-white/10 p-6 rounded-2xl border border-white/20">
+                <h2 className="text-2xl font-bold mb-4 text-white">Add-ons & Options</h2>
+                <div className="space-y-4">
+                    <InsurancePricingCard />
                 </div>
             </div>
 
@@ -431,9 +451,7 @@ export const PricingManager = () => {
                             </div>
                         </div>
                     ))}
-                    {coupons.length === 0 && (
-                        <p className="text-gray-400 py-4 text-center">No coupons created yet.</p>
-                    )}
+                    {coupons.length === 0 && <p className="text-gray-400 py-4 text-center">No coupons created yet.</p>}
                 </div>
             </div>
 

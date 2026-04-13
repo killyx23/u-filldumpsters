@@ -1,4 +1,3 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -27,11 +26,11 @@
     --radius: 0.5rem;
 
     /* Status Colors */
-    --status-scheduled: 217 91% 60%; /* Blue #3B82F6 */
-    --status-in-transit: 38 92% 50%; /* Orange #F59E0B */
-    --status-delivered: 160 84% 39%; /* Green #10B981 */
-    --status-pending: 45 93% 58%; /* Yellow #FBBF24 */
-    --status-cancelled: 0 84% 60%; /* Red #EF4444 */
+    --status-scheduled: 217 91% 60%;
+    --status-in-transit: 38 92% 50%;
+    --status-delivered: 160 84% 39%;
+    --status-pending: 45 93% 58%;
+    --status-cancelled: 0 84% 60%;
   }
 
   .dark {
@@ -54,13 +53,6 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
-
-    /* Status Colors */
-    --status-scheduled: 217 91% 60%;
-    --status-in-transit: 38 92% 50%;
-    --status-delivered: 160 84% 39%;
-    --status-pending: 45 93% 58%;
-    --status-cancelled: 0 84% 60%;
   }
 }
 
@@ -69,11 +61,105 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  h1 { @apply text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight; }
+  h2 { @apply text-2xl md:text-3xl font-semibold tracking-tight; }
+  h3 { @apply text-xl md:text-2xl font-semibold tracking-tight; }
+  p { @apply leading-7; }
+}
+
+@layer components {
+  .header-container {
+    @apply transition-all duration-300;
+  }
+
+  .logo-img {
+    height: 60px;
+    width: auto;
+    object-fit: contain;
+    max-width: 100%;
+  }
+
+  @media (min-width: 768px) {
+    .logo-img {
+      height: 90px;
+    }
+  }
+
+  /* Chat Specific Styles */
+  .chat-scroll-container {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    scroll-behavior: smooth;
+  }
+  
+  .chat-scroll-container::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .chat-scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .chat-scroll-container::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+  }
+  
+  .chat-scroll-container::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* Time Picker Styles */
+  .time-picker-popover {
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  }
+
+  .time-picker-scroll [data-radix-scroll-area-viewport] {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+  
+  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+  }
+  
+  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* Custom Scrollbar for inner components */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
   }
 }
 
 @layer utilities {
+  .tap-target {
+    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  }
+  
   .badge-scheduled {
     @apply bg-[hsl(var(--status-scheduled)_/_0.2)] text-[hsl(var(--status-scheduled))];
   }
@@ -90,256 +176,7 @@
     @apply bg-[hsl(var(--status-cancelled)_/_0.2)] text-[hsl(var(--status-cancelled))];
   }
 
-  .text-status-scheduled {
-    color: hsl(var(--status-scheduled));
+  .interactive-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0.5;
   }
-  .text-status-in-transit {
-    color: hsl(var(--status-in-transit));
-  }
-  .text-status-delivered {
-    color: hsl(var(--status-delivered));
-  }
-  .text-status-pending {
-    color: hsl(var(--status-pending));
-  }
-  .text-status-cancelled {
-    color: hsl(var(--status-cancelled));
-  }
-  
-  .bg-status-scheduled {
-    background-color: hsl(var(--status-scheduled));
-  }
-  .bg-status-in-transit {
-    background-color: hsl(var(--status-in-transit));
-  }
-  .bg-status-delivered {
-    background-color: hsl(var(--status-delivered));
-  }
-  .bg-status-pending {
-    background-color: hsl(var(--status-pending));
-  }
-  .bg-status-cancelled {
-    background-color: hsl(var(--status-cancelled));
-  }
-}
-
-.calendar-container .fc {
-    color: white;
-}
-
-.calendar-container .fc-daygrid-day-frame-custom {
-    position: relative;
-    min-height: 120px;
-    display: flex;
-    flex-direction: column;
-}
-
-.calendar-container .fc-daygrid-day-top-custom {
-    display: flex;
-    justify-content: space-between;
-    padding: 4px;
-    align-items: center;
-}
-
-.calendar-container .fc-daygrid-day-number-custom {
-    color: #e5e7eb;
-    font-size: 0.8em;
-}
-
-.calendar-container .fc-daygrid-day-events-custom {
-    flex-grow: 1;
-    overflow: hidden;
-    padding: 0 4px 4px;
-}
-
-.calendar-container .fc-event-custom {
-    color: white;
-    padding: 2px 4px;
-    border-radius: 4px;
-    font-size: 0.75em;
-    margin-bottom: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.calendar-container .fc-event-more-custom {
-    color: #fcd34d;
-    font-size: 0.75em;
-    padding: 2px 4px;
-    font-weight: bold;
-}
-
-.calendar-container .fc-toolbar-title {
-  font-size: 1.5rem !important;
-  font-weight: bold;
-  color: #fbbf24;
-}
-
-.calendar-container .fc-button {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-  color: white !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow: none !important;
-}
-
-.calendar-container .fc-button-primary:not(:disabled):hover {
-    background-color: rgba(255, 255, 255, 0.2) !important;
-}
-
-.calendar-container .fc-button-primary:disabled {
-    opacity: 0.5;
-}
-
-.calendar-container .fc-day-today {
-    background-color: rgba(251, 191, 36, 0.15) !important;
-}
-
-.calendar-container .fc-daygrid-day:hover {
-    background-color: rgba(255,255,255,0.05);
-}
-
-.calendar-container .fc-day-other .fc-daygrid-day-top-custom {
-    opacity: 0.5;
-}
-
-@keyframes ping-slow {
-    75%, 100% {
-        transform: scale(1.8);
-        opacity: 0;
-    }
-}
-.animate-ping-slow {
-    animation: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-@keyframes ping-slow-outer {
-    75%, 100% {
-        transform: scale(2.2);
-        opacity: 0;
-    }
-}
-.animate-ping-slow-outer {
-    animation: ping-slow-outer 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-/* Custom Scrollbar for Modal and Lists */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.4);
-}
-
-/* Distance calculation specific styles */
-.distance-loading {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.error-message {
-  transition: all 0.3s ease;
-}
-
-.retry-btn {
-  transition: all 0.2s ease;
-}
-
-.retry-btn:hover {
-  transform: translateY(-1px);
-}
-
-.retry-btn:active {
-  transform: translateY(1px);
-}
-
-.summary-container .summary-item {
-  transition: all 0.2s ease;
-}
-
-.summary-container .summary-item:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-  border-radius: 0.25rem;
-  padding-left: 0.25rem;
-  padding-right: 0.25rem;
-  margin-left: -0.25rem;
-  margin-right: -0.25rem;
-}
-
-.interactive-hover {
-  transition: all 0.2s ease-in-out;
-}
-
-.interactive-hover:hover {
-  transform: translateY(-1px);
-}
-
-.interactive-hover:active {
-  transform: translateY(1px);
-}
-
-/* Layering utilities for fixed layout components */
-.z-tooltip {
-  z-index: 9999 !important;
-  position: relative;
-}
-
-[data-radix-popper-content-wrapper] {
-  z-index: 9999 !important;
-}
-
-.z-panel {
-  z-index: 40 !important;
-  position: relative;
-}
-
-/* Print specific rules */
-@media print {
-  @page {
-    size: auto;
-    margin: 15mm;
-  }
-  
-  body {
-    background-color: #ffffff !important;
-    background: #ffffff !important;
-    color: #000000 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  
-  .no-print {
-    display: none !important;
-  }
-  
-  .print-only {
-    display: block !important;
-  }
-  
-  .page-break-before {
-    page-break-before: always;
-  }
-  
-  .page-break-after {
-    page-break-after: always;
-  }
-  
-  .page-break-inside-avoid {
-    page-break-inside: avoid;
-  }
-}
-
-.print-only {
-  display: none;
 }

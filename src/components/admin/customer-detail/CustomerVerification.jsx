@@ -1,13 +1,18 @@
+
 import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, Image as ImageIcon, DollarSign, Loader2, Download, UploadCloud, Edit, Save, MessageSquare } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
+import { updateVerificationStatus } from '@/utils/verificationImageHelper';
+import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
+import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
+import { format, parseISO } from 'date-fns';
 
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
@@ -111,70 +116,6 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     );
 };
 
-const ImageUploader = ({ customer, onUpdate }) => {
-    const [isUploading, setIsUploading] = useState(false);
-    const fileInputRef = React.useRef(null);
-
-    const handlePhotoUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        setIsUploading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-             toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
-             setIsUploading(false);
-             return;
-        }
-
-        const filePath = `${customer.id}/licenses/${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file, {
-            upsert: false,
-        });
-
-        if (uploadError) {
-            toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
-        } else {
-            const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-            
-            const existingUrls = customer.license_image_urls || [];
-            const newImage = { url: data.publicUrl, path: filePath, name: file.name };
-            const updatedUrls = [...existingUrls, newImage];
-
-            const { error: dbUpdateError } = await supabase.from('customers').update({ license_image_urls: updatedUrls }).eq('id', customer.id);
-
-            if (dbUpdateError) {
-                 toast({ title: "DB Update Failed", description: dbUpdateError.message, variant: "destructive" });
-            } else {
-                toast({ title: "Photo uploaded and linked successfully!" });
-                onUpdate();
-            }
-        }
-        setIsUploading(false);
-        if (fileInputRef.current) {
-            fileInputRef.current.value = "";
-        }
-    };
-
-    return (
-        <div>
-            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-                <UploadCloud className="mr-2 h-4 w-4" />
-                {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Upload License Image"}
-            </Button>
-            <Input
-                ref={fileInputRef}
-                id="license-image-upload"
-                type="file"
-                className="hidden"
-                onChange={handlePhotoUpload}
-                disabled={isUploading}
-                accept="image/*"
-            />
-        </div>
-    );
-};
-
 const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
     const [stripeCustomerId, setStripeCustomerId] = useState('');
     const [stripePaymentIntentId, setStripePaymentIntentId] = useState('');
@@ -247,13 +188,15 @@ const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
     );
 };
 
-
 export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
     const [selectedBookingForStripe, setSelectedBookingForStripe] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
-    const [plate, setPlate] = useState(customer.license_plate || '');
+    const [plate, setPlate] = useState(customer?.license_plate || '');
     const [isSavingPlate, setIsSavingPlate] = useState(false);
+    const [isProcessingStatus, setIsProcessingStatus] = useState(false);
+
+    const { history, loading: historyLoading } = useVerificationImageHistory(customer?.id);
 
     const handleSavePlate = async () => {
         setIsSavingPlate(true);
@@ -270,6 +213,20 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             setIsEditingPlate(false);
         }
         setIsSavingPlate(false);
+    };
+
+    const handleUpdateDocStatus = async (status) => {
+        setIsProcessingStatus(true);
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            await updateVerificationStatus(customer.id, status, user?.id);
+            toast({ title: "Status Updated", description: `Verification status set to ${status}.` });
+            onUpdate(); // Trigger refresh which cascades
+        } catch (error) {
+            toast({ title: "Error updating status", description: error.message, variant: "destructive" });
+        } finally {
+            setIsProcessingStatus(false);
+        }
     };
     
     const handleApprove = async (booking) => {
@@ -294,25 +251,6 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         setSelectedBookingForRefund(booking);
     };
 
-    const handleDownload = async (filePath, filename) => {
-        try {
-            const { data, error } = await supabase.storage.from('customer-uploads').download(filePath);
-            if (error) throw error;
-            
-            const blob = data;
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(link.href);
-        } catch (error) {
-            console.error("Download Error:", error);
-            toast({ title: "Download Failed", description: error.message || "Could not download the image.", variant: "destructive" });
-        }
-    };
-
     const getVerificationCardStyles = (status) => {
         switch (status) {
             case 'pending_review':
@@ -329,7 +267,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     icon: <DollarSign className="mr-2 h-4 w-4"/>,
                     titleText: "Payment Pending for Booking #"
                 };
-            default: // pending_verification
+            default:
                 return {
                     container: "bg-orange-900/30 border-orange-500",
                     title: "text-orange-300 font-bold",
@@ -358,58 +296,76 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         <>
         <RefundDialog booking={selectedBookingForRefund} customer={customer} open={!!selectedBookingForRefund} onOpenChange={() => setSelectedBookingForRefund(null)} onUpdate={onUpdate} />
         {selectedBookingForStripe && <StripeIdDialog booking={selectedBookingForStripe} open={!!selectedBookingForStripe} onOpenChange={() => setSelectedBookingForStripe(null)} onUpdate={onUpdate} />}
+        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><Car className="mr-3 h-6 w-6"/>Vehicle & License Details</h3>
-                <div className="space-y-4">
-                    <div>
-                        <div className="flex justify-between items-center">
-                            <p className="font-semibold text-blue-200">License Plate:</p>
-                            {isEditingPlate ? (
-                                <div className="flex items-center gap-2">
-                                    <Button size="sm" onClick={handleSavePlate} disabled={isSavingPlate}>
-                                        {isSavingPlate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                    </Button>
-                                    <Button size="sm" variant="ghost" onClick={() => setIsEditingPlate(false)}><X className="h-4 w-4" /></Button>
-                                </div>
-                            ) : (
-                                <Button size="sm" variant="outline" onClick={() => setIsEditingPlate(true)}><Edit className="mr-2 h-4 w-4" /> Edit</Button>
-                            )}
-                        </div>
+            <div className="bg-white/5 p-6 rounded-lg shadow-lg space-y-6">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="flex items-center text-xl font-bold text-yellow-400"><Car className="mr-3 h-6 w-6"/>Vehicle & License Details</h3>
+                </div>
+                
+                <div>
+                    <div className="flex justify-between items-center">
+                        <p className="font-semibold text-blue-200">License Plate:</p>
                         {isEditingPlate ? (
-                            <Input value={plate} onChange={(e) => setPlate(e.target.value.toUpperCase())} className="font-mono text-lg mt-2" />
+                            <div className="flex items-center gap-2">
+                                <Button size="sm" onClick={handleSavePlate} disabled={isSavingPlate}>
+                                    {isSavingPlate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setIsEditingPlate(false)}><X className="h-4 w-4" /></Button>
+                            </div>
                         ) : (
-                            <p className="text-white font-mono text-lg bg-white/10 p-2 rounded-md mt-2">{plate || 'Not Provided'}</p>
+                            <Button size="sm" variant="outline" onClick={() => setIsEditingPlate(true)}><Edit className="mr-2 h-4 w-4" /> Edit</Button>
                         )}
                     </div>
-                     <div>
-                        <p className="font-semibold text-blue-200">Driver's License Images:</p>
-                        <div className="mt-2 grid grid-cols-1 gap-4">
-                           {customer.license_image_urls && customer.license_image_urls.length > 0 ? customer.license_image_urls.map((img, index) => (
-                               <div key={index} className="relative group">
-                                  <a href={img.url} target="_blank" rel="noopener noreferrer" className="block relative">
-                                    <img src={img.url} alt={`License ${index+1}`} className="w-full h-auto rounded-lg object-cover aspect-video" />
-                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <ImageIcon className="h-8 w-8 text-white"/>
-                                    </div>
-                                  </a>
-                                  <Button size="sm" variant="secondary" className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => {e.preventDefault(); handleDownload(img.path, img.name);}}>
-                                    <Download className="h-4 w-4 mr-2" /> Download
-                                  </Button>
-                               </div>
-                           )) : <p className="text-blue-200 col-span-2 text-center py-4">No images uploaded.</p>}
-                        </div>
-                        <div className="mt-4">
-                            <ImageUploader customer={customer} onUpdate={onUpdate} />
-                        </div>
+                    {isEditingPlate ? (
+                        <Input value={plate} onChange={(e) => setPlate(e.target.value.toUpperCase())} className="font-mono text-lg mt-2" />
+                    ) : (
+                        <p className="text-white font-mono text-lg bg-white/10 p-2 rounded-md mt-2">{plate || 'Not Provided'}</p>
+                    )}
+                </div>
+                
+                <div className="pt-4 border-t border-white/10">
+                    <VerificationImageDisplay customerId={customer?.id} />
+                    
+                    <div className="mt-4 flex justify-end gap-2">
+                        <Button variant="destructive" size="sm" onClick={() => handleUpdateDocStatus('rejected')} disabled={isProcessingStatus}>
+                            <X className="mr-2 h-4 w-4" /> Reject Docs
+                        </Button>
+                        <Button className="bg-green-600 hover:bg-green-700" size="sm" onClick={() => handleUpdateDocStatus('approved')} disabled={isProcessingStatus}>
+                            <CheckCircle className="mr-2 h-4 w-4" /> Approve Docs
+                        </Button>
                     </div>
+                </div>
+
+                <div className="pt-4 border-t border-white/10">
+                    <h4 className="font-semibold text-blue-200 flex items-center mb-3">
+                        <History className="h-4 w-4 mr-2" /> Audit Trail
+                    </h4>
+                    {historyLoading ? (
+                        <div className="flex items-center text-gray-400"><Loader2 className="animate-spin h-4 w-4 mr-2" /> Loading history...</div>
+                    ) : history.length > 0 ? (
+                        <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
+                            {history.map(item => (
+                                <div key={item.id} className="bg-black/20 p-2 rounded text-xs">
+                                    <div className="flex justify-between items-center text-gray-300">
+                                        <span className="font-medium text-yellow-400">{item.image_type}</span>
+                                        <span>{format(parseISO(item.created_at), 'MMM d, yyyy h:mm a')}</span>
+                                    </div>
+                                    <p className="text-gray-400 mt-1 capitalize">Action: {item.action}</p>
+                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline mt-1 inline-block">View Version</a>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-sm text-gray-400">No history records found.</p>
+                    )}
                 </div>
             </div>
 
             <div className="bg-white/5 p-6 rounded-lg shadow-lg">
-                <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><ShieldAlert className="mr-3 h-6 w-6"/>Pending Verifications</h3>
+                <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><ShieldAlert className="mr-3 h-6 w-6"/>Pending Booking Verifications</h3>
                  <div className="space-y-4">
-                    {verificationBookings.length > 0 ? verificationBookings.map(booking => {
+                    {verificationBookings?.length > 0 ? verificationBookings.map(booking => {
                         const styles = getVerificationCardStyles(booking.status);
                         const requestNotes = verificationNotes[booking.id] || [];
                         return (
@@ -434,14 +390,14 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                     ) : (
                                         <>
                                             <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
-                                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}><Check className="mr-2 h-4 w-4"/>Approve</Button>
+                                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}><Check className="mr-2 h-4 w-4"/>Approve Booking</Button>
                                         </>
                                     )}
                                 </div>
                             </div>
                         )
                     }) : (
-                        <p className="text-center text-blue-200 py-8">No bookings are pending verification.</p>
+                        <p className="text-center text-blue-200 py-8 bg-black/20 rounded-lg border border-white/5">No bookings are pending verification.</p>
                     )}
                 </div>
             </div>

@@ -1,8 +1,10 @@
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO, isValid } from 'date-fns';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -15,6 +17,7 @@ export const BookingSummaryReview = ({
     deliveryService
 }) => {
     const isDelivery = plan?.id === 2 && deliveryService;
+    const { insurancePrice } = useInsurancePricing();
 
     const formatDate = date => {
         if (!date) return 'N/A';
@@ -47,7 +50,6 @@ export const BookingSummaryReview = ({
     ];
 
     const addonPrices = {
-        insurance: 20,
         drivewayProtection: 15,
     };
 
@@ -55,16 +57,38 @@ export const BookingSummaryReview = ({
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
 
     const contactAddress = bookingData?.contactAddress || {};
-    const hasAddress = contactAddress.street || bookingData?.street || isDelivery;
-    const displayStreet = contactAddress.street || bookingData?.street || 'Address not provided';
-    const displayCity = contactAddress.city || bookingData?.city || '';
-    const displayState = contactAddress.state || bookingData?.state || '';
-    const displayZip = contactAddress.zip || bookingData?.zip || '';
+    
+    // Task implementation: Custom location logic for review step
+    const isDumpsterService = plan?.id === 2 && !deliveryService;
+    const displayLocation = isDumpsterService 
+        ? "South Saratoga Springs" 
+        : (contactAddress.city || bookingData?.city || 'City not provided');
 
-    // basePrice passed from AddonsForm includes the delivery fee initially set by BookingForm.
-    // We isolate the actual base rental to display it clearly ($80 base rental vs $20 delivery fee).
-    const deliveryFeeAmount = addonsData?.deliveryFee || 0;
-    const displayBasePrice = (basePrice || 0) - deliveryFeeAmount;
+    const basePriceAmount = plan?.price !== undefined ? plan.price : (basePrice || 0);
+    const deliveryFeeFlat = addonsData?.deliveryFee || 0;
+    const tripMileageCost = addonsData?.mileageCharge || 0;
+    
+    let subtotal = basePriceAmount + deliveryFeeFlat + tripMileageCost;
+
+    if (addonsData?.insurance === 'accept') subtotal += insurancePrice;
+    if ((plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
+    
+    if (addonsData?.equipment?.length > 0) {
+        addonsData.equipment.forEach(item => {
+            const eq = equipmentList.find(e => e.id === item.id);
+            if (eq) subtotal += (eq.price * item.quantity);
+        });
+    }
+
+    if (addonsData?.mattressDisposal > 0) subtotal += (addonsData.mattressDisposal * 25);
+    if (addonsData?.tvDisposal > 0) subtotal += (addonsData.tvDisposal * 15);
+    if (addonsData?.applianceDisposal > 0) subtotal += (addonsData.applianceDisposal * 35);
+
+    const discountAmount = addonsData?.coupon?.isValid 
+        ? (addonsData.coupon.discountType === 'fixed' ? (addonsData.coupon.discountValue || 0) : (subtotal * (addonsData.coupon.discountValue / 100))) 
+        : 0;
+
+    const displayTotal = subtotal - discountAmount;
 
     return (
         <motion.div
@@ -92,13 +116,10 @@ export const BookingSummaryReview = ({
                                 <p className="text-sm text-gray-400">Selected Plan</p>
                                 <p className="font-semibold text-white text-lg">{displayPlanName}</p>
                             </div>
-                            {hasAddress && (
-                                <div>
-                                    <p className="text-sm text-gray-400">Location</p>
-                                    <p className="font-semibold text-white">{displayStreet}</p>
-                                    <p className="text-sm">{displayCity}, {displayState} {displayZip}</p>
-                                </div>
-                            )}
+                            <div>
+                                <p className="text-sm text-gray-400">Location</p>
+                                <p className="font-semibold text-white text-lg">{displayLocation}</p>
+                            </div>
                             <div>
                                 <p className="text-sm text-gray-400">{isDelivery ? 'Delivery' : 'Drop-off'}</p>
                                 <p className="font-semibold text-white">{formatDate(bookingData?.dropOffDate)}</p>
@@ -119,13 +140,27 @@ export const BookingSummaryReview = ({
                         <div className="space-y-3 text-gray-200">
                             <div className="flex justify-between">
                                 <span>Base Rental Price</span>
-                                <span>${displayBasePrice.toFixed(2)}</span>
+                                <span>${basePriceAmount.toFixed(2)}</span>
                             </div>
 
-                            {deliveryFeeAmount > 0 && (
+                            {deliveryFeeFlat > 0 && (
                                 <div className="flex justify-between text-blue-300">
-                                    <span>Delivery Fee</span>
-                                    <span>${deliveryFeeAmount.toFixed(2)}</span>
+                                    <span>Delivery Fee (Flat)</span>
+                                    <span>${deliveryFeeFlat.toFixed(2)}</span>
+                                </div>
+                            )}
+
+                            {tripMileageCost > 0 && (
+                                <div className="flex flex-col">
+                                    <div className="flex justify-between text-blue-300">
+                                        <span>Mileage Charge</span>
+                                        <span>${tripMileageCost.toFixed(2)}</span>
+                                    </div>
+                                    {addonsData.distanceFeeDisplay && (
+                                        <div className="text-[11px] text-cyan-300/70 mt-0.5">
+                                            {addonsData.distanceFeeDisplay}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -153,25 +188,18 @@ export const BookingSummaryReview = ({
                                     <span>${(addonsData.tvDisposal * 15).toFixed(2)}</span>
                                 </div>
                             )}
-                            
-                            {(addonsData?.mileageCharge || 0) > 0 && (
-                                <div className="flex flex-col">
-                                    <div className="flex justify-between text-blue-300">
-                                        <span>Mileage Charge</span>
-                                        <span>${addonsData.mileageCharge.toFixed(2)}</span>
-                                    </div>
-                                    {addonsData.distanceFeeDisplay && (
-                                        <div className="text-[11px] text-cyan-300/70 mt-0.5">
-                                            {addonsData.distanceFeeDisplay}
-                                        </div>
-                                    )}
+
+                            {(addonsData?.applianceDisposal || 0) > 0 && (
+                                <div className="flex justify-between text-blue-300">
+                                    <span>Appliance Disposal (x{addonsData.applianceDisposal})</span>
+                                    <span>${(addonsData.applianceDisposal * 35).toFixed(2)}</span>
                                 </div>
                             )}
                             
                             {addonsData?.insurance === 'accept' && (
                                 <div className="flex justify-between text-blue-300">
                                     <span>Rental Insurance</span>
-                                    <span>${addonPrices.insurance.toFixed(2)}</span>
+                                    <span>${insurancePrice.toFixed(2)}</span>
                                 </div>
                             )}
                             
@@ -182,21 +210,24 @@ export const BookingSummaryReview = ({
                                 </div>
                             )}
 
-                            {addonsData?.coupon?.isValid && (
-                                <div className="flex justify-between text-green-400 font-semibold">
+                            <div className="border-t border-white/20 pt-2 mt-2">
+                                <div className="flex justify-between font-semibold text-gray-300">
+                                    <span>Subtotal</span>
+                                    <span>${subtotal.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            {discountAmount > 0 && (
+                                <div className="flex justify-between text-green-400 font-semibold mt-2">
                                     <span>Discount ({addonsData.coupon.code || 'Applied'})</span>
-                                    <span>
-                                        {addonsData.coupon.discountType === 'fixed' 
-                                            ? `-$${(addonsData.coupon.discountValue || 0).toFixed(2)}` 
-                                            : `-${addonsData.coupon.discountValue || 0}%`}
-                                    </span>
+                                    <span>-${discountAmount.toFixed(2)}</span>
                                 </div>
                             )}
 
                             <div className="border-t border-white/20 pt-4 mt-4">
                                 <div className="flex justify-between items-center text-xl font-bold text-white">
                                     <span>Estimated Total</span>
-                                    <span className="text-green-400">${(totalPrice || 0).toFixed(2)} <span className="text-sm text-gray-400 font-normal">(plus tax)</span></span>
+                                    <span className="text-green-400">${displayTotal.toFixed(2)} <span className="text-sm text-gray-400 font-normal">(plus tax)</span></span>
                                 </div>
                             </div>
                         </div>
