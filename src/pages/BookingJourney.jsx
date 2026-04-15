@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
@@ -354,6 +355,12 @@ function BookingJourney() {
           <>
             <Banner />
             <Hero />
+            
+            {/* Scroll anchors for ProductShowcase */}
+            <div id="service-16-yard" className="scroll-mt-24"></div>
+            <div id="service-10-yard" className="scroll-mt-24"></div>
+            <div id="service-6-yard" className="scroll-mt-24"></div>
+
             <Plans onSelectPlan={handlePlanSelect} />
             <ReviewsCarousel />
             <KeyFeatures />

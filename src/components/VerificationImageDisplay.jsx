@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { useVerificationImageLoader } from '@/hooks/useVerificationImageLoader';
 import { Loader2, Download, AlertTriangle, Image as ImageIcon, ExternalLink } from 'lucide-react';

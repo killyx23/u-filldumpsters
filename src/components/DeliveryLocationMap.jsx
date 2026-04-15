@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { MapPin, ExternalLink, AlertTriangle } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';

@@ -1,4 +1,3 @@
-
 # Real-Time Chat Testing Guide
 
 ## Preparation

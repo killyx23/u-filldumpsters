@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, Ban, Calendar as CalendarIcon, Save, Settings, AlertTriangle, Copy, ClipboardPaste, CopyCheck, X } from 'lucide-react';
-import { format, parseISO, startOfDay, addDays, isSameDay, getDay } from 'date-fns';
+import { Loader2, AlertTriangle, Copy, ClipboardPaste, CopyCheck, X, Save } from 'lucide-react';
+import { format, parseISO, startOfDay, isSameDay, getDay } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -35,7 +36,7 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
     const timeOptions = {
         1: generateTimeSlotOptions(120), // Service 1: 2 hours
         2: generateTimeSlotOptions(60),  // Service 2: 1 hour
-        3: generateTimeSlotOptions(60),  // Service 3: 1 hour
+        3: generateTimeSlotOptions(120), // Service 3: 2 hours
         4: generateTimeSlotOptions(120), // Service 4: 2 hours
     };
 
@@ -51,7 +52,6 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
             const dateRule = existingRule?.find(r => r.service_id === service.id);
             const weeklyRule = weeklyRules?.find(wr => wr.service_id === service.id && wr.day_of_week === dayOfWeek);
 
-            // Default to true explicitly if not defined
             const isAvailable = dateRule?.is_available ?? weeklyRule?.is_available ?? true;
 
             return {
@@ -61,8 +61,8 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                 delivery_end_time: dateRule?.delivery_end_time ?? weeklyRule?.delivery_end_time,
                 pickup_start_time: dateRule?.pickup_start_time ?? weeklyRule?.pickup_start_time,
                 pickup_end_time: dateRule?.pickup_end_time ?? weeklyRule?.pickup_end_time,
-                hourly_start_time: dateRule?.hourly_start_time ?? weeklyRule?.hourly_start_time,
-                hourly_end_time: dateRule?.hourly_end_time ?? weeklyRule?.hourly_end_time,
+                delivery_pickup_start_time: dateRule?.delivery_pickup_start_time ?? weeklyRule?.delivery_pickup_start_time,
+                delivery_pickup_end_time: dateRule?.delivery_pickup_end_time ?? weeklyRule?.delivery_pickup_end_time,
                 return_start_time: dateRule?.return_start_time ?? weeklyRule?.return_start_time,
                 return_end_time: dateRule?.return_end_time ?? weeklyRule?.return_end_time,
             };
@@ -92,8 +92,8 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
             delivery_end_time: rule.delivery_end_time,
             pickup_start_time: rule.pickup_start_time,
             pickup_end_time: rule.pickup_end_time,
-            hourly_start_time: rule.hourly_start_time,
-            hourly_end_time: rule.hourly_end_time,
+            delivery_pickup_start_time: rule.delivery_pickup_start_time,
+            delivery_pickup_end_time: rule.delivery_pickup_end_time,
             return_start_time: rule.return_start_time,
             return_end_time: rule.return_end_time
         }));
@@ -198,17 +198,17 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                             </div>
                             {rule.is_available && (
                                 <div className="space-y-4 pt-3 border-t border-white/10">
-                                    {service.id === 1 || service.id === 4 ? ( // Dumpster or Delivery Trailer
+                                    {service.id === 1 || service.id === 4 ? ( 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <TimeRangeSelector label="Delivery" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
-                                            <TimeRangeSelector label="Pickup" startValue={rule.pickup_start_time} endValue={rule.pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'pickup_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Delivery Pickup" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
                                         </div>
-                                    ) : service.id === 2 ? ( // Hourly Trailer
+                                    ) : service.id === 2 ? ( 
                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Pickup" startValue={rule.hourly_start_time} endValue={rule.hourly_end_time} onStartChange={v => handleRuleChange(service.id, 'hourly_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'hourly_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Pickup" startValue={rule.pickup_start_time} endValue={rule.pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'pickup_end_time', v)} options={options} />
                                             <TimeRangeSelector label="Return" startValue={rule.return_start_time} endValue={rule.return_end_time} onStartChange={v => handleRuleChange(service.id, 'return_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'return_end_time', v)} options={options} />
                                         </div>
-                                    ) : service.id === 3 ? ( // Material Delivery
+                                    ) : service.id === 3 ? ( 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <TimeRangeSelector label="Delivery" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
                                         </div>
@@ -263,7 +263,6 @@ export const AvailabilityManager = () => {
             if (dateSpecificRes.error) throw dateSpecificRes.error;
             setDateSpecificRules(dateSpecificRes.data);
             
-            // Calculate global unavailable dates (dates where ALL services are is_available: false)
             const dateMap = {};
             dateSpecificRes.data.forEach(rule => {
                 if (!dateMap[rule.date]) dateMap[rule.date] = [];
@@ -308,7 +307,6 @@ export const AvailabilityManager = () => {
     const handleSaveDateSpecific = async (payload) => {
         setIsSaving(true);
         try {
-            // Ensure payload always sends clean boolean for is_available
             const cleanPayload = payload.map(p => ({
                 ...p,
                 is_available: Boolean(p.is_available)
@@ -343,8 +341,8 @@ export const AvailabilityManager = () => {
                 delivery_end_time: rule.delivery_end_time,
                 pickup_start_time: rule.pickup_start_time,
                 pickup_end_time: rule.pickup_end_time,
-                hourly_start_time: rule.hourly_start_time,
-                hourly_end_time: rule.hourly_end_time,
+                delivery_pickup_start_time: rule.delivery_pickup_start_time,
+                delivery_pickup_end_time: rule.delivery_pickup_end_time,
                 return_start_time: rule.return_start_time,
                 return_end_time: rule.return_end_time
             }))
