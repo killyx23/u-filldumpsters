@@ -1,3 +1,4 @@
+
 import { format, parse, set, addMinutes, isBefore } from 'date-fns';
 
 export const formatTimeForDisplay = (timeString, outputFormat = 'h:mm a') => {
@@ -25,23 +26,26 @@ export const generateTimeSlotOptions = (intervalMinutes = 30) => {
     return options;
 };
 
+export const getIncrementForService = (serviceId) => {
+    // 1-hour for Dump Loader Trailer Rental (ID: 2)
+    // 2-hours for 16 Yard Dumpster (ID: 1), Rock/Mulch (ID: 3), Dump Loader with Delivery (ID: 4)
+    return serviceId === 2 ? 60 : 120;
+};
+
 export const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate, now) => {
     if (!startTime || !endTime) return [];
     
     let start = parse(startTime, 'HH:mm:ss', currentDate);
     const end = parse(endTime, 'HH:mm:ss', currentDate);
 
-    // If the date is today, adjust start time to be at least 2 hours from now
     if (isBefore(start, now) && isBefore(start, end)) {
         start = now;
-        
         const twoHoursFromNow = addMinutes(start, 120);
         if (isBefore(start, twoHoursFromNow)) {
           start = twoHoursFromNow;
         }
     }
     
-    // Round up to the next slot interval
     const minutes = start.getMinutes();
     const roundedMinutes = Math.ceil(minutes / intervalMinutes) * intervalMinutes;
     let currentTime = set(start, { minutes: roundedMinutes, seconds: 0, milliseconds: 0 });
@@ -49,7 +53,7 @@ export const generateSlotsFromRange = (startTime, endTime, intervalMinutes, curr
     const slots = [];
     while (isBefore(currentTime, end)) {
         const slotEnd = addMinutes(currentTime, intervalMinutes);
-        if (isBefore(slotEnd, addMinutes(end, 1))) { // allows slot to end exactly at end time
+        if (isBefore(slotEnd, addMinutes(end, 1))) {
             slots.push({
                 start: format(currentTime, 'HH:mm:ss'),
                 end: format(slotEnd, 'HH:mm:ss'),

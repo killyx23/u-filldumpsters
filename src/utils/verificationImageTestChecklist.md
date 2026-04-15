@@ -1,4 +1,3 @@
-
 # Verification Image Consistency Test Checklist
 
 ## 1. Baseline Verification

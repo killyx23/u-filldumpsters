@@ -31,6 +31,11 @@
     --status-delivered: 160 84% 39%;
     --status-pending: 45 93% 58%;
     --status-cancelled: 0 84% 60%;
+
+    /* Premium / Gold Accents */
+    --gold: 45 93% 58%;
+    --gold-light: 45 93% 70%;
+    --gold-dark: 45 93% 35%;
   }
 
   .dark {
@@ -53,6 +58,11 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+
+    /* Premium / Gold Accents */
+    --gold: 45 93% 58%;
+    --gold-light: 45 93% 70%;
+    --gold-dark: 45 93% 35%;
   }
 }
 
@@ -64,119 +74,70 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
-  h1 { @apply text-3xl md:text-4xl lg:text-5xl font-bold tracking-tight; }
-  h2 { @apply text-2xl md:text-3xl font-semibold tracking-tight; }
-  h3 { @apply text-xl md:text-2xl font-semibold tracking-tight; }
-  p { @apply leading-7; }
+  h1 { @apply text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight; }
+  h2 { @apply text-3xl md:text-4xl font-bold tracking-tight; }
+  h3 { @apply text-2xl md:text-3xl font-semibold tracking-tight; }
+  p { @apply leading-relaxed; }
 }
 
 @layer components {
-  .header-container {
-    @apply transition-all duration-300;
+  /* Reschedule Dialog Specific Layout */
+  .reschedule-dialog-wide {
+    @apply w-[95vw] md:min-w-[900px] max-w-[1200px] h-[95vh] md:h-[90vh] max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0 bg-gray-950 border-gray-800 shadow-2xl rounded-2xl sm:rounded-3xl;
+  }
+  
+  .reschedule-content-area {
+    @apply flex-1 overflow-y-auto px-5 sm:px-8 md:px-12 py-10 bg-gray-950 hide-scrollbar;
   }
 
-  .logo-img {
-    height: 60px;
-    width: auto;
-    object-fit: contain;
-    max-width: 100%;
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
-  @media (min-width: 768px) {
-    .logo-img {
-      height: 90px;
-    }
+  .pricing-row {
+    @apply flex justify-between items-start py-2.5 border-b border-gray-800/50 text-sm;
   }
 
-  /* Chat Specific Styles */
-  .chat-scroll-container {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-    scroll-behavior: smooth;
-  }
-  
-  .chat-scroll-container::-webkit-scrollbar {
-    width: 6px;
-  }
-  
-  .chat-scroll-container::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  
-  .chat-scroll-container::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
-  }
-  
-  .chat-scroll-container::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.4);
+  .agreement-checkbox-wrapper {
+    @apply flex items-start space-x-3 p-4 rounded-xl border border-gray-800 bg-gray-900/50 transition-colors hover:bg-gray-800 hover:border-gray-700;
   }
 
-  /* Time Picker Styles */
-  .time-picker-popover {
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  .modal-backdrop-blur {
+    @apply backdrop-blur-xl bg-black/80;
   }
 
-  .time-picker-scroll [data-radix-scroll-area-viewport] {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  /* Custom Calendar Sizing in Reschedule Dialog */
+  .custom-calendar-wrapper .rdp {
+    @apply m-0;
   }
-  
-  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar {
-    width: 6px;
+  .custom-calendar-wrapper .rdp-months {
+    @apply justify-center flex-col md:flex-row gap-6;
   }
-  
-  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  
-  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
-  }
-  
-  .time-picker-scroll [data-radix-scroll-area-viewport]::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.4);
-  }
-
-  /* Custom Scrollbar for inner components */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.3);
+  .custom-calendar-wrapper .rdp-day_selected, 
+  .custom-calendar-wrapper .rdp-day_selected:focus-visible, 
+  .custom-calendar-wrapper .rdp-day_selected:hover {
+    @apply bg-gold text-gray-950 font-bold;
   }
 }
 
 @layer utilities {
-  .tap-target {
-    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  .text-gold {
+    color: hsl(var(--gold));
   }
-  
-  .badge-scheduled {
-    @apply bg-[hsl(var(--status-scheduled)_/_0.2)] text-[hsl(var(--status-scheduled))];
+  .text-gold-light {
+    color: hsl(var(--gold-light));
   }
-  .badge-in-transit {
-    @apply bg-[hsl(var(--status-in-transit)_/_0.2)] text-[hsl(var(--status-in-transit))];
+  .bg-gold {
+    background-color: hsl(var(--gold));
   }
-  .badge-delivered {
-    @apply bg-[hsl(var(--status-delivered)_/_0.2)] text-[hsl(var(--status-delivered))];
+  .border-gold {
+    border-color: hsl(var(--gold));
   }
-  .badge-pending {
-    @apply bg-[hsl(var(--status-pending)_/_0.2)] text-[hsl(var(--status-pending))];
-  }
-  .badge-cancelled {
-    @apply bg-[hsl(var(--status-cancelled)_/_0.2)] text-[hsl(var(--status-cancelled))];
-  }
-
-  .interactive-hover {
-    @apply transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0.5;
+  .shadow-gold {
+    box-shadow: 0 0 20px hsla(var(--gold), 0.4);
   }
 }

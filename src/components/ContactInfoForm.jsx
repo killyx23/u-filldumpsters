@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2 } from 'lucide-react';

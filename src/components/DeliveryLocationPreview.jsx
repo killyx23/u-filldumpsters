@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { MapPin, ExternalLink } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';

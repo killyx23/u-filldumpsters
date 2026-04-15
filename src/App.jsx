@@ -21,6 +21,7 @@ import ReviewsPage from '@/pages/ReviewsPage';
 import ReceiptPage from '@/pages/ReceiptPage';
 import TestEmailPage from '@/pages/TestEmailPage';
 import VerifyEmailPage from '@/pages/VerifyEmailPage';
+import ProductShowcasePage from '@/pages/ProductShowcasePage';
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
@@ -65,6 +66,7 @@ function App() {
                     {/* Public Routes */}
                     <Route path="/" element={<BookingJourney />} />
                     <Route path="/admin/login" element={<AdminLogin />} />
+                    <Route path="/product-showcase" element={<ProductShowcasePage />} />
                     
                     {/* Protected Admin Routes */}
                     <Route element={<AdminLayout />}>

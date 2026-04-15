@@ -1,14 +1,23 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
 
 export function useRealTimeChat(customerId) {
     const [messages, setMessages] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isConnected, setIsConnected] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState('connecting');
     
     const conversationId = `cust_${customerId}`;
+    const channelRef = useRef(null);
 
     const fetchMessages = useCallback(async () => {
         if (!customerId) return;
@@ -21,6 +30,7 @@ export function useRealTimeChat(customerId) {
                 .order('created_at', { ascending: true });
                 
             if (fetchError) throw fetchError;
+            
             setMessages(data || []);
             setError(null);
         } catch (err) {
@@ -31,97 +41,118 @@ export function useRealTimeChat(customerId) {
         }
     }, [conversationId, customerId]);
 
-    useEffect(() => {
-        fetchMessages();
-
+    const setupSubscription = useCallback(() => {
         if (!customerId) return;
 
-        const channel = supabase.channel(`chat_${conversationId}`)
+        setConnectionStatus('connecting');
+        const channelName = `conversation:${conversationId}`;
+
+        if (channelRef.current) {
+            supabase.removeChannel(channelRef.current);
+        }
+
+        // Subscribes EXCLUSIVELY to chat_messages table
+        channelRef.current = supabase.channel(channelName)
             .on(
                 'postgres_changes',
                 {
-                    event: '*',
+                    event: 'INSERT',
                     schema: 'public',
                     table: 'chat_messages',
                     filter: `conversation_id=eq.${conversationId}`
                 },
                 (payload) => {
-                    if (payload.eventType === 'INSERT') {
-                        setMessages(prev => {
-                            // Prevent duplicates if optimistic update already added it
-                            if (prev.some(m => m.id === payload.new.id)) return prev;
-                            return [...prev, payload.new];
-                        });
-                    } else if (payload.eventType === 'UPDATE') {
-                        setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new : m));
-                    }
+                    setMessages(prev => {
+                        if (prev.some(m => m.id === payload.new.id)) return prev;
+                        return [...prev, payload.new].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    });
+                }
+            )
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'chat_messages',
+                    filter: `conversation_id=eq.${conversationId}`
+                },
+                (payload) => {
+                    setMessages(prev => prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
                 }
             )
             .subscribe((status) => {
-                setIsConnected(status === 'SUBSCRIBED');
+                if (status === 'SUBSCRIBED') {
+                    setConnectionStatus('connected');
+                } else if (status === 'CLOSED') {
+                    setConnectionStatus('disconnected');
+                } else if (status === 'CHANNEL_ERROR') {
+                    setConnectionStatus('error');
+                }
             });
+    }, [conversationId, customerId]);
+
+    useEffect(() => {
+        fetchMessages();
+        setupSubscription();
 
         return () => {
-            supabase.removeChannel(channel);
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+            }
         };
-    }, [conversationId, customerId, fetchMessages]);
+    }, [fetchMessages, setupSubscription]);
 
-    const sendMessage = async (content, senderType, attachment = null) => {
-        const tempId = `temp_${Date.now()}`;
-        const newMessage = {
-            id: tempId,
+    const sendMessage = useCallback(async (content, senderType, attachment = null) => {
+        const messageId = generateUUID();
+        
+        const dbPayload = {
+            id: messageId,
             conversation_id: conversationId,
             customer_id: customerId,
             sender_type: senderType,
             message_content: content,
             attachment_url: attachment?.url || null,
             attachment_name: attachment?.name || null,
-            is_read: false,
-            created_at: new Date().toISOString(),
-            status: 'sending'
+            is_read: false
         };
+
+        const newMessage = { ...dbPayload, created_at: new Date().toISOString() };
 
         // Optimistic update
         setMessages(prev => [...prev, newMessage]);
 
         try {
-            const { data, error } = await supabase
-                .from('chat_messages')
-                .insert([{
-                    conversation_id: conversationId,
-                    customer_id: customerId,
-                    sender_type: senderType,
-                    message_content: content,
-                    attachment_url: attachment?.url || null,
-                    attachment_name: attachment?.name || null
-                }])
-                .select()
-                .single();
-
+            const { data, error } = await supabase.from('chat_messages').insert([dbPayload]).select().single();
             if (error) throw error;
-
-            // Update temp message with real DB message
-            setMessages(prev => prev.map(m => m.id === tempId ? { ...data, status: 'delivered' } : m));
+            setMessages(prev => prev.map(m => m.id === messageId ? data : m));
             return data;
         } catch (err) {
             console.error("Error sending message:", err);
-            // Mark as failed
-            setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'error' } : m));
+            setMessages(prev => prev.filter(m => m.id !== messageId));
             throw err;
         }
-    };
+    }, [conversationId, customerId]);
 
-    const markAsRead = async (messageIds) => {
+    const markAsRead = useCallback(async (messageIds) => {
         if (!messageIds || messageIds.length === 0) return;
         try {
-            await supabase
-                .from('chat_messages')
-                .update({ is_read: true })
-                .in('id', messageIds);
+            await supabase.from('chat_messages').update({ is_read: true }).in('id', messageIds);
         } catch (err) {
             console.error("Error marking messages as read:", err);
         }
-    };
+    }, []);
 
-    return { messages, sendMessage, markAsRead, isLoading, error, isConnected, refetch: fetchMessages };
+    const reconnect = useCallback(() => {
+        setupSubscription();
+    }, [setupSubscription]);
+
+    return { 
+        messages, 
+        isLoading, 
+        error, 
+        connectionStatus, 
+        sendMessage, 
+        markAsRead,
+        reconnect
+    };
 }
