@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Calendar, MapPin, AlertTriangle, Truck, CheckCircle, Star, ChevronRight, Loader2 } from 'lucide-react';

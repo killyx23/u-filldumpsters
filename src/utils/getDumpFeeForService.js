@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 
 export const getDumpFeeForService = async (serviceId) => {

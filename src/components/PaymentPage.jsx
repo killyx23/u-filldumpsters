@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';

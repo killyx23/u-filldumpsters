@@ -1,12 +1,13 @@
 
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Calendar, MapPin, Loader2, DollarSign, Package, Info, AlertTriangle, Navigation } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Calendar, MapPin, Loader2, DollarSign, Package, Info, AlertTriangle, Navigation, RefreshCw } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
 
 export default function CustomerPortalBookingDetail() {
   const { id } = useParams();
@@ -14,49 +15,48 @@ export default function CustomerPortalBookingDetail() {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [distanceInfo, setDistanceInfo] = useState({ distance: 0, travelTime: 0, loading: true, error: null });
+  const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+
+  const fetchBookingAndDistance = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, customers(*)')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      setBooking(data);
+
+      const address = data.delivery_address?.formatted_address || `${data.street}, ${data.city}, ${data.state} ${data.zip}`;
+      if (address) {
+        try {
+          const origin = await getBusinessAddress();
+          const res = await calculateDistanceViaGoogleMaps(origin, address);
+          const estimatedTravelTime = res.travelTime || Math.round(res.distance * 2);
+          setDistanceInfo({
+            distance: res.distance,
+            travelTime: estimatedTravelTime,
+            loading: false,
+            error: null
+          });
+        } catch (distError) {
+          setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "Failed to calculate distance" });
+        }
+      } else {
+          setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "No address provided" });
+      }
+    } catch (error) {
+      console.error('Error fetching booking details:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchBookingAndDistance = async () => {
-      try {
-        setLoading(true);
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (error) throw error;
-        setBooking(data);
-
-        // Calculate distance
-        const address = data.delivery_address?.formatted_address || `${data.street}, ${data.city}, ${data.state} ${data.zip}`;
-        if (address) {
-          try {
-            const origin = await getBusinessAddress();
-            const res = await calculateDistanceViaGoogleMaps(origin, address);
-            // Estimate extra time based on distance (avg 30 mph -> 2 mins per mile) if travelTime is missing
-            const estimatedTravelTime = res.travelTime || Math.round(res.distance * 2);
-            setDistanceInfo({
-              distance: res.distance,
-              travelTime: estimatedTravelTime,
-              loading: false,
-              error: null
-            });
-          } catch (distError) {
-            console.error("Distance calculation failed:", distError);
-            setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "Failed to calculate distance" });
-          }
-        } else {
-            setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "No address provided" });
-        }
-      } catch (error) {
-        console.error('Error fetching booking details:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     if (id) fetchBookingAndDistance();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (loading) {
@@ -80,17 +80,25 @@ export default function CustomerPortalBookingDetail() {
 
   const planName = booking.plan?.name || 'Custom Rental';
   const isHighDistance = distanceInfo.distance > 30;
+  const canReschedule = booking.status === 'pending_payment' || booking.status === 'confirmed' || booking.status === 'active';
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-4 mb-8">
-        <Button onClick={() => navigate('/portal?tab=bookings')} variant="ghost" className="text-gray-400 hover:text-white hover:bg-white/10">
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Portal
-        </Button>
-        <h1 className="text-3xl font-bold text-white">Order #{booking.id}</h1>
-        <span className="px-3 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full text-sm font-semibold uppercase tracking-wider">
-          {booking.status?.replace(/_/g, ' ')}
-        </span>
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-4">
+            <Button onClick={() => navigate('/portal?tab=bookings')} variant="ghost" className="text-gray-400 hover:text-white hover:bg-white/10">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to Portal
+            </Button>
+            <h1 className="text-3xl font-bold text-white">Order #{booking.id}</h1>
+            <span className="px-3 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full text-sm font-semibold uppercase tracking-wider">
+            {booking.status?.replace(/_/g, ' ')}
+            </span>
+        </div>
+        {canReschedule && (
+            <Button onClick={() => setIsRescheduleOpen(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+                <RefreshCw className="w-4 h-4 mr-2" /> Reschedule
+            </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -192,6 +200,13 @@ export default function CustomerPortalBookingDetail() {
           </CardContent>
         </Card>
       </div>
+
+      <RescheduleDialog 
+        booking={booking} 
+        isOpen={isRescheduleOpen} 
+        onOpenChange={setIsRescheduleOpen} 
+        onSuccess={fetchBookingAndDistance} 
+      />
     </div>
   );
 }

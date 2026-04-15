@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { Truck, CheckCircle, Clock, MapPin, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

@@ -2,37 +2,49 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://u-filldumpsters.com/</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1</priority>
+  </url>
+  <url>
+    <loc>https://u-filldumpsters.com/product-showcase</loc>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
     <loc>https://u-filldumpsters.com/confirmation</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
     <loc>https://u-filldumpsters.com/contact</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
     <loc>https://u-filldumpsters.com/faq</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
     <loc>https://u-filldumpsters.com/reviews</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>
   <url>
     <loc>https://u-filldumpsters.com/receipt</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-04-14</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1</priority>
+  </url>
+  <url>
+    <loc>https://u-filldumpsters.com/verify</loc>
+    <lastmod>2026-04-14</lastmod>
     <changefreq>daily</changefreq>
     <priority>1</priority>
   </url>

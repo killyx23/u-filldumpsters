@@ -6,23 +6,23 @@ import { AddressVerificationDialog } from './AddressVerificationDialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
-const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || import.meta.env.GOOGLE_MAPS_API_KEY || "";
 
 export const GooglePlacesAutocomplete = ({ 
-  value, 
+  value = "", 
   onChange, 
   onAddressSelect, 
   placeholder = "Start typing your address...",
   required = false
 }) => {
-  const [manualMode, setManualMode] = useState(!GOOGLE_API_KEY);
+  const [manualMode, setManualMode] = useState(false);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
   const [manualAddress, setManualAddress] = useState({ street: value || '', city: '', state: '', zip: '' });
   
   const { 
     isLoaded, 
     loadError,
-    suggestions, 
+    suggestions = [], 
     loading, 
     error: apiError, 
     fetchSuggestions, 
@@ -32,11 +32,21 @@ export const GooglePlacesAutocomplete = ({
   } = useGooglePlacesAutocomplete(GOOGLE_API_KEY);
 
   const [isOpen, setIsOpen] = useState(false);
-  const [debouncedInputValue, setDebouncedInputValue] = useState(value);
+  const [inputValue, setInputValue] = useState(value || "");
+  const [debouncedInputValue, setDebouncedInputValue] = useState(value || "");
   const wrapperRef = useRef(null);
 
+  // Sync internal input value with external value if it changes externally (e.g. initial load)
   useEffect(() => {
-    if (!GOOGLE_API_KEY || loadError || retryCount >= 2 || (apiError && apiError.includes("REQUEST_DENIED"))) {
+    if (value !== inputValue && !isOpen) {
+      setInputValue(value || "");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  useEffect(() => {
+    // Trigger manual mode only if there's a hard failure or missing key
+    if (!GOOGLE_API_KEY || loadError || retryCount >= 3 || (apiError && apiError.includes("REQUEST_DENIED"))) {
       if (!manualMode) {
         console.warn("[GooglePlacesAutocomplete] Triggering automatic manual mode fallback.");
         setManualMode(true);
@@ -54,30 +64,45 @@ export const GooglePlacesAutocomplete = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [wrapperRef]);
 
+  // Handle debouncing
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      setDebouncedInputValue(value);
-    }, 400);
+      setDebouncedInputValue(inputValue);
+    }, 300); // Optimized to 300ms for better responsiveness
     return () => clearTimeout(timeoutId);
-  }, [value]);
+  }, [inputValue]);
 
+  // Fetch suggestions when debounced value changes
   useEffect(() => {
     if (manualMode) return;
     
-    if (debouncedInputValue && isOpen && debouncedInputValue.length > 2) {
+    if (debouncedInputValue && isOpen && debouncedInputValue.trim().length >= 2) {
       fetchSuggestions(debouncedInputValue);
-    } else if (!debouncedInputValue || debouncedInputValue.length <= 2) {
+    } else if (!debouncedInputValue || debouncedInputValue.trim().length < 2) {
       clearSuggestions();
     }
   }, [debouncedInputValue, fetchSuggestions, clearSuggestions, isOpen, manualMode]);
 
   const handleInputChange = (e) => {
-    onChange(e.target.value);
-    setIsOpen(false);
+    const val = e.target.value;
+    setInputValue(val);
+    onChange(val);
     setIsOpen(true);
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); // Prevent form submission
+      if (isOpen && suggestions.length > 0) {
+        handleSelectSuggestion(suggestions[0].place_id, suggestions[0].description);
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+    }
+  };
+
   const handleSelectSuggestion = async (placeId, description) => {
+    setInputValue(description);
     onChange(description);
     setIsOpen(false);
     clearSuggestions();
@@ -93,6 +118,7 @@ export const GooglePlacesAutocomplete = ({
   };
 
   const clearInput = () => {
+    setInputValue('');
     onChange('');
     setIsOpen(false);
     clearSuggestions();
@@ -178,8 +204,9 @@ export const GooglePlacesAutocomplete = ({
         </span>
         <input
           type="text"
-          value={value}
+          value={inputValue}
           onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
           onFocus={() => setIsOpen(true)}
           placeholder={!isLoaded ? "Loading address service..." : placeholder}
           disabled={!isLoaded}
@@ -187,11 +214,11 @@ export const GooglePlacesAutocomplete = ({
           autoComplete="off"
           className="w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-10 py-3 placeholder-blue-200 disabled:opacity-50 relative z-10"
         />
-        {value && (
+        {inputValue && (
           <button 
             type="button"
             onClick={clearInput}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300 hover:text-white z-10"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300 hover:text-white z-10 focus:outline-none"
           >
             <X className="h-4 w-4" />
           </button>
@@ -204,7 +231,7 @@ export const GooglePlacesAutocomplete = ({
         </div>
       )}
 
-      {isOpen && debouncedInputValue?.length > 2 && (
+      {isOpen && debouncedInputValue?.trim().length >= 2 && (
         <div className="absolute top-full left-0 z-[100] w-full mt-2 bg-gray-900 border border-yellow-500/30 rounded-md shadow-2xl max-h-60 overflow-y-auto backdrop-blur-md">
           {loading && suggestions.length === 0 && (
             <div className="p-4 text-sm text-yellow-400 flex items-center justify-center">
@@ -212,7 +239,7 @@ export const GooglePlacesAutocomplete = ({
             </div>
           )}
           
-          {!loading && suggestions.length === 0 && !apiError && (
+          {!loading && suggestions.length === 0 && !apiError && debouncedInputValue && (
              <div className="p-4 text-sm text-gray-400 text-center">
                No results found. Try adjusting your search.
              </div>
@@ -242,7 +269,7 @@ export const GooglePlacesAutocomplete = ({
         <button
           type="button"
           onClick={() => setShowVerificationDialog(true)}
-          className="text-xs text-blue-300 hover:text-yellow-400 underline transition-colors"
+          className="text-xs text-blue-300 hover:text-yellow-400 underline transition-colors focus:outline-none"
         >
           Can't find your address? Enter manually
         </button>

@@ -2,15 +2,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { MessageSquare, Loader2, Send, Paperclip, Smile, RefreshCw } from 'lucide-react';
+import { MessageSquare, Loader2, Send, Paperclip, Smile } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import EmojiPicker from 'emoji-picker-react';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
-import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
-import { TypingIndicator } from '@/components/chat/TypingIndicator';
+import { ConnectionStatus } from '@/components/ConnectionStatus';
 
 export const CommunicationLog = ({ customer }) => {
     const [input, setInput] = useState('');
@@ -18,17 +17,16 @@ export const CommunicationLog = ({ customer }) => {
     const chatContainerRef = useRef(null);
     const fileInputRef = useRef(null);
 
-    const { messages, sendMessage, markAsRead, isLoading, isConnected, refetch } = useRealTimeChat(customer.id);
-    const { isOtherUserTyping, setIsTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'admin');
+    const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
 
     // Auto-scroll to bottom
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messages, isOtherUserTyping]);
+    }, [messages]);
 
-    // Mark unread messages as read
+    // Mark unread messages from customer as read when viewing them
     useEffect(() => {
         const unreadIds = messages.filter(m => m.sender_type === 'customer' && !m.is_read).map(m => m.id);
         if (unreadIds.length > 0) {
@@ -48,7 +46,6 @@ export const CommunicationLog = ({ customer }) => {
 
     const handleInputChange = (e) => {
         setInput(e.target.value);
-        setIsTyping();
     };
 
     const handleFileUpload = async (e) => {
@@ -91,13 +88,7 @@ export const CommunicationLog = ({ customer }) => {
                     Chat with {customer.name}
                 </h3>
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                        <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                        {isConnected ? 'Live' : 'Offline'}
-                    </div>
-                    <Button variant="ghost" size="icon" onClick={refetch} className="h-8 w-8 text-gray-400 hover:text-white">
-                        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-                    </Button>
+                    <ConnectionStatus status={connectionStatus} onReconnect={reconnect} />
                 </div>
             </header>
 
@@ -121,7 +112,6 @@ export const CommunicationLog = ({ customer }) => {
                         />
                     ))
                 )}
-                <TypingIndicator isTyping={isOtherUserTyping} text={typingIndicatorText} />
             </div>
 
             <footer className="p-3 border-t border-gray-700 bg-gray-900 rounded-b-lg">
@@ -153,7 +143,7 @@ export const CommunicationLog = ({ customer }) => {
                             {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                         </Button>
                         <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-                        <Button size="icon" className="h-8 w-8 bg-blue-600 hover:bg-blue-700" onClick={() => handleSend()} disabled={isUploading || (!input.trim() && !fileInputRef.current?.files?.length)}>
+                        <Button size="icon" className="h-8 w-8 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleSend()} disabled={isUploading || (!input.trim() && !fileInputRef.current?.files?.length)}>
                             <Send className="h-4 w-4" />
                         </Button>
                     </div>

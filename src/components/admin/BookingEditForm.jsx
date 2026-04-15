@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -8,81 +7,26 @@ import { Calendar as CalendarIcon, X, Save } from 'lucide-react';
 import { EditInput } from '@/components/admin/EditInput';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { useAvailableTimeSlots } from '@/hooks/useAvailableTimeSlots';
-import { TimePickerDropdown } from '@/components/TimePickerDropdown';
 
-export const BookingEditForm = ({ editedBooking, onInputChange, onDateChange, onSave, onCancel }) => {
-    const isDelivery = editedBooking.addons?.isDelivery;
-    const planId = editedBooking.plan?.id;
-
-    const dropOffTimeType = planId === 1 ? 'delivery' : (planId === 2 && !isDelivery ? 'pickup' : (planId === 2 && isDelivery ? 'delivery' : (planId === 3 ? 'delivery' : 'delivery')));
-    const pickupTimeType = planId === 1 ? 'pickup' : (planId === 2 && !isDelivery ? 'return' : (planId === 2 && isDelivery ? 'pickup' : 'pickup'));
-
-    const dropOffDateObj = new Date(editedBooking.dropOffDate + 'T00:00:00');
-    const pickupDateObj = new Date(editedBooking.pickupDate + 'T00:00:00');
-
-    const { timeSlots: dropOffSlots, isLoading: dropOffLoading } = useAvailableTimeSlots(planId, dropOffDateObj, dropOffTimeType);
-    const { timeSlots: pickupSlots, isLoading: pickupLoading } = useAvailableTimeSlots(planId, pickupDateObj, pickupTimeType);
-
-    return (
-        <div>
-            <h3 className="text-2xl font-bold text-yellow-400 mb-4">Editing Booking</h3>
-            <div className="space-y-4">
-                <EditInput label="Name" name="name" value={editedBooking.name} onChange={onInputChange} />
-                <EditInput label="Email" name="email" type="email" value={editedBooking.email} onChange={onInputChange} />
-                <EditInput label="Phone" name="phone" type="tel" value={editedBooking.phone} onChange={onInputChange} />
-                
-                <div className="grid grid-cols-2 gap-4">
-                    <EditDateInput label="Drop-off Date" date={dropOffDateObj} onDateChange={(d) => onDateChange(d, 'dropOffDate')} />
-                    <div>
-                        <Label className="block text-sm font-medium text-blue-200 mb-1">Drop-off Time</Label>
-                        <TimePickerDropdown 
-                            selectedTime={editedBooking.dropOffTimeSlot} 
-                            onTimeChange={(val) => onInputChange({ target: { name: 'dropOffTimeSlot', value: val }})} 
-                            timeSlots={dropOffSlots} 
-                            isLoading={dropOffLoading} 
-                        />
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                    <EditDateInput label="Pickup Date" date={pickupDateObj} onDateChange={(d) => onDateChange(d, 'pickupDate')} />
-                    <div>
-                        <Label className="block text-sm font-medium text-blue-200 mb-1">Pickup Time</Label>
-                        <TimePickerDropdown 
-                            selectedTime={editedBooking.pickupTimeSlot} 
-                            onTimeChange={(val) => onInputChange({ target: { name: 'pickupTimeSlot', value: val }})} 
-                            timeSlots={pickupSlots} 
-                            isLoading={pickupLoading} 
-                        />
-                    </div>
-                </div>
-                
-                <div>
-                    <Label htmlFor="notes" className="block text-sm font-medium text-blue-200 mb-1">Notes</Label>
-                    <Textarea id="notes" name="notes" value={editedBooking.notes || ''} onChange={onInputChange} className="bg-white/10 border-white/30" placeholder="Add any internal notes for this booking..." />
-                </div>
-            </div>
-            <div className="mt-6 flex space-x-4">
-                <Button onClick={onSave} className="bg-green-500 hover:bg-green-600"><Save className="mr-2 h-4 w-4" /> Save</Button>
-                <Button onClick={onCancel} variant="ghost" className="text-white hover:bg-white/10"><X className="mr-2 h-4 w-4" /> Cancel</Button>
+export const BookingEditForm = ({ editedBooking, onInputChange, onDateChange, onSave, onCancel }) => (
+    <div>
+        <h3 className="text-2xl font-bold text-yellow-400 mb-4">Editing Booking</h3>
+        <div className="space-y-4">
+            <EditInput label="Name" name="name" value={editedBooking.name} onChange={onInputChange} />
+            <EditInput label="Email" name="email" type="email" value={editedBooking.email} onChange={onInputChange} />
+            <EditInput label="Phone" name="phone" type="tel" value={editedBooking.phone} onChange={onInputChange} />
+            <EditDateInput label="Drop-off Date" date={new Date(editedBooking.dropOffDate + 'T00:00:00')} onDateChange={(d) => onDateChange(d, 'dropOffDate')} />
+            <EditDateInput label="Pickup Date" date={new Date(editedBooking.pickupDate + 'T00:00:00')} onDateChange={(d) => onDateChange(d, 'pickupDate')} />
+            <div>
+                <Label htmlFor="notes" className="block text-sm font-medium text-blue-200 mb-1">Notes</Label>
+                <Textarea id="notes" name="notes" value={editedBooking.notes || ''} onChange={onInputChange} className="bg-white/10 border-white/30" placeholder="Add any internal notes for this booking..." />
             </div>
         </div>
-    );
-};
-
-const EditDateInput = ({ label, date, onDateChange }) => (
-    <div>
-        <label className="block text-sm font-medium text-blue-200 mb-1">{label}</label>
-        <Popover>
-            <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white">
-                    <CalendarIcon className="mr-2 h-4 w-4"/>{format(date, 'PPP')}
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white">
-                <Calendar mode="single" selected={date} onSelect={onDateChange} initialFocus />
-            </PopoverContent>
-        </Popover>
+        <div className="mt-6 flex space-x-4">
+            <Button onClick={onSave} className="bg-green-500 hover:bg-green-600"><Save className="mr-2 h-4 w-4" /> Save</Button>
+            <Button onClick={onCancel} variant="ghost" className="text-white hover:bg-white/10"><X className="mr-2 h-4 w-4" /> Cancel</Button>
+        </div>
     </div>
 );
+
+const EditDateInput = ({ label, date, onDateChange }) => (<div><label className="block text-sm font-medium text-blue-200 mb-1">{label}</label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4"/>{format(date, 'PPP')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={onDateChange} initialFocus /></PopoverContent></Popover></div>);

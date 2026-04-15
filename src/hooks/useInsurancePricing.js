@@ -41,7 +41,6 @@ export const useInsurancePricing = () => {
         }
 
         try {
-            // Try to update existing first
             const { data: existing } = await supabase
                 .from('business_settings')
                 .select('id')

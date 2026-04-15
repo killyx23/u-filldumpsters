@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save } from 'lucide-react';
@@ -20,10 +21,10 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                 delivery_end_time: existing?.delivery_end_time,
                 pickup_start_time: existing?.pickup_start_time,
                 pickup_end_time: existing?.pickup_end_time,
+                delivery_pickup_start_time: existing?.delivery_pickup_start_time,
+                delivery_pickup_end_time: existing?.delivery_pickup_end_time,
                 return_start_time: existing?.return_start_time,
                 return_end_time: existing?.return_end_time,
-                hourly_start_time: existing?.hourly_start_time,
-                hourly_end_time: existing?.hourly_end_time,
             };
         });
         setWeeklyAvailability(initialAvailability);
@@ -45,10 +46,10 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
             delivery_end_time: day.delivery_end_time,
             pickup_start_time: day.pickup_start_time,
             pickup_end_time: day.pickup_end_time,
+            delivery_pickup_start_time: day.delivery_pickup_start_time,
+            delivery_pickup_end_time: day.delivery_pickup_end_time,
             return_start_time: day.return_start_time,
             return_end_time: day.return_end_time,
-            hourly_start_time: day.hourly_start_time,
-            hourly_end_time: day.hourly_end_time,
         }));
         onSaveChanges(payload);
         setHasChanges(false);
@@ -70,8 +71,7 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                         day={day}
                         dayIndex={index}
                         onUpdate={handleDayUpdate}
-                        serviceType={service.service_type}
-                        timeConfig={service.time_config}
+                        serviceId={service.id}
                     />
                 ))}
             </div>
