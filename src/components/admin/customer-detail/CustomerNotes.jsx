@@ -1,7 +1,8 @@
-import React, { useCallback, useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { BookOpen, Clock, Loader2, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, Clock, Loader2, CheckCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO } from 'date-fns';
 import { Switch } from "@/components/ui/switch";
@@ -50,6 +51,35 @@ const NoteCard = ({ note, onToggleReadStatus }) => {
 
 export const CustomerNotes = ({ customer, notes, setNotes, onUpdate, loading }) => {
     
+    // Subscribe to realtime updates for customer_notes to keep the unread counter synced automatically
+    useEffect(() => {
+        if (!customer?.id) return;
+
+        const channel = supabase.channel(`customer_notes_updates_${customer.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'customer_notes',
+                    filter: `customer_id=eq.${customer.id}`
+                },
+                (payload) => {
+                    console.log("[CustomerNotes Debug] Realtime payload received:", payload);
+                    // Instead of duplicating complex fetching logic, 
+                    // we trigger the parent's generic onUpdate hook to pull fresh data completely
+                    if (onUpdate) {
+                        onUpdate();
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [customer?.id, onUpdate]);
+
     const markAllAsRead = async () => {
         const unreadNoteIds = notes.filter(n => !n.is_read).map(n => n.id);
         if (unreadNoteIds.length === 0) return;
@@ -63,7 +93,8 @@ export const CustomerNotes = ({ customer, notes, setNotes, onUpdate, loading }) 
             toast({ title: 'Failed to mark notes as read', description: updateNotesError.message, variant: 'destructive' });
         } else {
             toast({ title: 'All notes marked as read!' });
-            onUpdate();
+            // onUpdate will be triggered by realtime subscription anyway, but calling it here is a safe fallback
+            if (onUpdate) onUpdate();
         }
     };
     
@@ -77,7 +108,8 @@ export const CustomerNotes = ({ customer, notes, setNotes, onUpdate, loading }) 
             toast({ title: 'Failed to update note status', description: error.message, variant: 'destructive' });
         } else {
             toast({ title: `Note marked as ${newReadStatus ? 'read' : 'unread'}` });
-            onUpdate();
+            // onUpdate will be triggered by realtime subscription anyway
+            if (onUpdate) onUpdate();
         }
     };
     
@@ -87,11 +119,16 @@ export const CustomerNotes = ({ customer, notes, setNotes, onUpdate, loading }) 
         <div>
             <div className="flex justify-between items-center mb-4">
                 <h3 className="flex items-center text-xl font-bold text-yellow-400">Customer Communication Log</h3>
-                {hasUnreadNotes && (
-                    <Button size="sm" onClick={markAllAsRead} variant="outline" className="text-yellow-400 border-yellow-400 hover:bg-yellow-400 hover:text-black">
-                       <CheckCircle className="mr-2 h-4 w-4"/> Mark All as Read
+                <div className="flex gap-2">
+                    <Button size="icon" variant="ghost" onClick={onUpdate} className="text-gray-400 hover:text-white" title="Manual Refresh">
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
-                )}
+                    {hasUnreadNotes && (
+                        <Button size="sm" onClick={markAllAsRead} variant="outline" className="text-yellow-400 border-yellow-400 hover:bg-yellow-400 hover:text-black">
+                        <CheckCircle className="mr-2 h-4 w-4"/> Mark All as Read
+                        </Button>
+                    )}
+                </div>
             </div>
             {loading ? (
                 <div className="flex justify-center items-center h-48">

@@ -2,16 +2,17 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Minus, Plus, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Minus, Plus, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const handTruckImages = [
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/438c04aacba2716be43c830e350b5eb6.jpg",
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/86e98c2dc6d87e71b72926251853bc97.jpg",
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/32442900188c66551491ad9c3a07a680.jpg",
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/38ccd7fd464955d1c8cd2c74e3c81ac1.jpg",
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/d8ad679fd9727d4de60d63303ee3c773.jpg",
-  "https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/814730697e17b8d9b311c32ddf45da75.jpg"
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/438c04aacba2716be43c830e350b5eb6.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/86e98c2dc6d87e71b72926251853bc97.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/32442900188c66551491ad9c3a07a680.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/38ccd7fd464955d1c8cd2c74e3c81ac1.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/d8ad679fd9727d4de60d63303ee3c773.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/814730697e17b8d9b311c32ddf45da75.jpg"
 ];
 
 const handTruckFeatures = [
@@ -22,25 +23,152 @@ const handTruckFeatures = [
   "Versatile Use: Perfect for hauling heavy appliances, furniture, or maneuvering bulky furniture up stairs. This 3-in-1 powerhouse adapts to any job site and is also great for moving any heavy items to the trash."
 ];
 
+const gorillaImages = [
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/bf76a0fe48c0067c3d5cf8111f67bb6e.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/1b47df06cca424854ef628599b7724ed.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/3f278af24cb7e75e4fd71de66f75df17.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/b5178280ff3c8203532f253ccdf125ea.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/8c7d92ee5ec7d1aa3cd25a1cf6961f7b.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/2b5135e077b05c73e5d3a26b79796310.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/a0818a449711b9c10b3e121797bb3a7e.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/b4265b04e3d99c0b792667f7b8fcba8f.jpg",
+  "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/27e96171270f4792935dea32a3123abc.jpg"
+];
+
+const gorillaFeatures = [
+  "1,200 lb. heavy-duty hauling capacity",
+  "10 cu. ft. rust-proof poly bed for superior durability",
+  "Patented quick-release dumping system makes unloading fast and easy",
+  "Innovative 2-in-1 handle allows the cart to be easily towed behind a lawn tractor or ATV, or pulled by hand",
+  "13-inch pneumatic tires are designed to tackle any terrain",
+  "Heavy-duty steel frame with a durable powder-coated finish",
+  "Perfect for moving heavy mulch, rocks, soil, or debris around the yard or job site"
+];
+
+// Shared modal component for both Gorilla Cart and Hand Truck
+const SharedProductModal = ({ isOpen, onClose, title, images, features, videoId, videoStart = 0 }) => {
+  const [imageIndex, setImageIndex] = useState(0);
+
+  const handleNext = () => setImageIndex((prev) => (prev + 1) % images.length);
+  const handlePrev = () => setImageIndex((prev) => (prev - 1 + images.length) % images.length);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl bg-white text-slate-900 border-border max-h-[90vh] overflow-y-auto overflow-x-hidden p-0 shadow-2xl">
+        <DialogHeader className="p-6 pb-2 sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-slate-100 text-center">
+          <DialogTitle className="text-2xl md:text-3xl font-extrabold text-slate-900">
+            {title}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="p-6 space-y-8 flex flex-col items-center">
+          {/* Responsive & Centered Video Section */}
+          <div className="w-full max-w-2xl mx-auto">
+            <div className="aspect-video w-full overflow-hidden rounded-xl shadow-lg bg-black">
+              <iframe
+                className="w-full h-full"
+                src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&start=${videoStart}`}
+                title={`${title} Showcase Video`}
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          </div>
+
+          {/* Centered Image Gallery */}
+          <div className="w-full max-w-2xl mx-auto space-y-6">
+            <div className="relative aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-50 group">
+              <AnimatePresence mode="wait">
+                <motion.img
+                  key={imageIndex}
+                  src={images[imageIndex]}
+                  alt={`${title} Gallery Image ${imageIndex + 1}`}
+                  className="w-full h-full object-contain"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                />
+              </AnimatePresence>
+              
+              <Button 
+                variant="secondary" 
+                size="icon" 
+                className="absolute left-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 hover:bg-white text-slate-900 shadow-md"
+                onClick={handlePrev}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+              <Button 
+                variant="secondary" 
+                size="icon" 
+                className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 hover:bg-white text-slate-900 shadow-md"
+                onClick={handleNext}
+              >
+                <ChevronRight className="h-5 w-5" />
+              </Button>
+            </div>
+
+            {/* Thumbnail Strip - Centered and Wrapped (No horizontal scroll) */}
+            <div className="flex flex-wrap justify-center gap-3">
+              {images.map((img, idx) => (
+                <button 
+                  key={idx} 
+                  onClick={() => setImageIndex(idx)} 
+                  className={`flex-shrink-0 w-20 h-16 sm:w-24 sm:h-20 rounded-lg overflow-hidden border-2 transition-all ${
+                    idx === imageIndex 
+                      ? 'border-blue-600 ring-2 ring-blue-600/20 ring-offset-1' 
+                      : 'border-slate-200 hover:border-blue-400 opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <img src={img} className="w-full h-full object-cover" alt={`Thumbnail ${idx + 1}`} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Centered Features Description */}
+          <div className="w-full max-w-3xl mx-auto bg-slate-50 p-6 rounded-xl border border-slate-100">
+            <h3 className="text-xl font-bold mb-4 text-slate-900 flex items-center justify-center gap-2">
+              <Info className="h-5 w-5 text-blue-600" />
+              Key Features
+            </h3>
+            <ul className="grid md:grid-cols-2 gap-4">
+              {features.map((feat, idx) => (
+                <li key={idx} className="flex items-start gap-3 text-slate-700">
+                  <div className="mt-2 h-1.5 w-1.5 rounded-full bg-blue-600 flex-shrink-0" />
+                  <span className="leading-relaxed text-sm sm:text-base">{feat}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, quantity, onQuantityChange, available }) => {
     const isAvailable = available > 0;
     const canAddMore = available > quantity;
-    const isHandTruck = label === 'Hand Truck' || label.includes('Hand Truck');
+    
+    // Categorize item types
+    const isGorillaCart = label === 'Wheelbarrow' || label.includes('Gorilla') || label.includes('Dump Cart');
+    const isHandTruck = label === 'Hand Truck' || label.includes('Hand Truck') || label.includes('3-in-1');
+    const isInteractive = isGorillaCart || isHandTruck;
+    
+    // Set appropriate display label
+    let displayLabel = label;
+    if (isGorillaCart) displayLabel = 'Gorilla Heavy-Duty Dump Cart';
+    if (isHandTruck) displayLabel = '3-in-1 Convertible Hand Truck';
 
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-    const openModal = () => setIsModalOpen(true);
-    const closeModal = () => setIsModalOpen(false);
-
-    const nextImage = (e) => {
-        e.stopPropagation();
-        setCurrentImageIndex((prev) => (prev + 1) % handTruckImages.length);
-    };
-
-    const prevImage = (e) => {
-        e.stopPropagation();
-        setCurrentImageIndex((prev) => (prev - 1 + handTruckImages.length) % handTruckImages.length);
+    const handleItemClick = () => {
+        if (isInteractive) {
+            setIsModalOpen(true);
+        }
     };
 
     const addButton = (
@@ -51,140 +179,74 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
 
     return (
         <>
-            <div className="flex items-center p-3 bg-white/10 rounded-lg">
+            <div 
+                className={`flex items-center p-3 bg-white/10 rounded-lg transition-all duration-300 ${
+                    isInteractive ? 'cursor-pointer hover:bg-white/20 hover:shadow-lg border border-transparent hover:border-white/20' : ''
+                }`}
+                onClick={handleItemClick}
+            >
                 <div className="p-2 text-white">
                     {icon}
                 </div>
                 
-                <span className="ml-3 text-white flex-grow flex items-center gap-3">
-                    {label}
-                    {isHandTruck && (
-                        <img 
-                            src="https://horizons-cdn.hostinger.com/fd437a4e-c58b-43b8-bbf1-15b6bcb2f2a7/c6beec9aa845d4853f814902b0574010.jpg"
-                            alt="View Hand Truck Details"
-                            className="w-12 h-8 object-cover rounded cursor-pointer transition-transform duration-200 hover:scale-110 shadow-sm border border-white/20"
-                            onClick={openModal}
-                            title="Click to view hand truck details"
-                        />
+                <div className="ml-3 text-white flex-grow flex items-center flex-wrap gap-3">
+                    <span className="font-medium">{displayLabel}</span>
+                    
+                    {isInteractive && (
+                        <span className="text-[10px] uppercase tracking-wider bg-blue-600/80 text-white px-2 py-0.5 rounded-full font-bold animate-pulse shadow-sm">
+                            Click for Details
+                        </span>
                     )}
-                </span>
+                </div>
                 
-                {hasQuantitySelector ? (
-                    <div className="flex items-center gap-2">
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(Math.max(0, quantity - 1))}>
-                            <Minus className="h-4 w-4" />
-                        </Button>
-                        <span className="font-bold text-lg text-white w-8 text-center">{quantity}</span>
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <span tabIndex={0}>
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(quantity + 1)} disabled={!canAddMore}>
-                                            <Plus className="h-4 w-4" />
-                                        </Button>
-                                    </span>
-                                </TooltipTrigger>
-                                {!canAddMore && <TooltipContent><p>No more available.</p></TooltipContent>}
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
-                ) : (
-                    <>
-                        <span className="font-semibold text-green-400 mr-4">+${price.toFixed(2)}</span>
-                        {!isAvailable && quantity === 0 ? (
+                <div onClick={(e) => e.stopPropagation()} className="flex items-center shrink-0 ml-4">
+                    {hasQuantitySelector ? (
+                        <div className="flex items-center gap-2">
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(Math.max(0, quantity - 1))}>
+                                <Minus className="h-4 w-4" />
+                            </Button>
+                            <span className="font-bold text-lg text-white w-8 text-center">{quantity}</span>
                             <TooltipProvider>
                                 <Tooltip>
-                                    <TooltipTrigger asChild><span tabIndex={0}>{addButton}</span></TooltipTrigger>
-                                    <TooltipContent><p>This item is temporarily out of stock.</p></TooltipContent>
+                                    <TooltipTrigger asChild>
+                                        <span tabIndex={0}>
+                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(quantity + 1)} disabled={!canAddMore}>
+                                                <Plus className="h-4 w-4" />
+                                            </Button>
+                                        </span>
+                                    </TooltipTrigger>
+                                    {!canAddMore && <TooltipContent><p>No more available.</p></TooltipContent>}
                                 </Tooltip>
                             </TooltipProvider>
-                        ) : addButton}
-                    </>
-                )}
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-4">
+                            <span className="font-semibold text-green-400">+${price.toFixed(2)}</span>
+                            {!isAvailable && quantity === 0 ? (
+                                <TooltipProvider>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild><span tabIndex={0}>{addButton}</span></TooltipTrigger>
+                                        <TooltipContent><p>This item is temporarily out of stock.</p></TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
+                            ) : addButton}
+                        </div>
+                    )}
+                </div>
             </div>
 
-            <AnimatePresence>
-                {isModalOpen && isHandTruck && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6" style={{ backgroundColor: 'rgba(0, 0, 0, 0.8)' }}>
-                        <motion.div 
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="absolute inset-0"
-                            onClick={closeModal}
-                        />
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 20 }}
-                            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto relative z-10 flex flex-col"
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex justify-between items-center p-4 border-b border-gray-100">
-                                <h3 className="text-xl font-bold text-gray-900">{label} Details</h3>
-                                <Button variant="ghost" size="icon" onClick={closeModal} className="text-gray-500 hover:text-gray-900 hover:bg-gray-100">
-                                    <X className="h-5 w-5" />
-                                </Button>
-                            </div>
-                            
-                            <div className="p-4 sm:p-6">
-                                <div className="relative bg-gray-100 rounded-lg overflow-hidden flex items-center justify-center aspect-[4/3] sm:aspect-[16/9] group">
-                                    <AnimatePresence mode="wait">
-                                        <motion.img
-                                            key={currentImageIndex}
-                                            src={handTruckImages[currentImageIndex]}
-                                            alt={`Hand Truck Image ${currentImageIndex + 1}`}
-                                            className="max-h-full max-w-full object-contain"
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            exit={{ opacity: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                        />
-                                    </AnimatePresence>
-                                    
-                                    <Button 
-                                        variant="secondary" 
-                                        size="icon" 
-                                        className="absolute left-2 top-1/2 -translate-y-1/2 opacity-70 hover:opacity-100 bg-white/90 text-gray-900"
-                                        onClick={prevImage}
-                                    >
-                                        <ChevronLeft className="h-6 w-6" />
-                                    </Button>
-                                    <Button 
-                                        variant="secondary" 
-                                        size="icon" 
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 opacity-70 hover:opacity-100 bg-white/90 text-gray-900"
-                                        onClick={nextImage}
-                                    >
-                                        <ChevronRight className="h-6 w-6" />
-                                    </Button>
-                                </div>
-                                <div className="text-center text-sm text-gray-500 mt-3 font-medium">
-                                    Image {currentImageIndex + 1} of {handTruckImages.length}
-                                </div>
-
-                                <div className="mt-6">
-                                    <h4 className="text-lg font-bold text-gray-900 mb-3">Key Features:</h4>
-                                    <ul className="space-y-2 text-gray-700 text-sm sm:text-base">
-                                        {handTruckFeatures.map((feature, index) => {
-                                            const [title, description] = feature.split(': ');
-                                            return (
-                                                <li key={index} className="flex items-start">
-                                                    <span className="text-blue-500 mr-2 mt-1">•</span>
-                                                    <span>
-                                                        <strong className="text-gray-900">{title}: </strong>
-                                                        {description}
-                                                    </span>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
+            {/* Dynamic Modal rendering based on item type */}
+            {isInteractive && (
+                <SharedProductModal 
+                    isOpen={isModalOpen} 
+                    onClose={() => setIsModalOpen(false)}
+                    title={displayLabel}
+                    images={isGorillaCart ? gorillaImages : handTruckImages}
+                    features={isGorillaCart ? gorillaFeatures : handTruckFeatures}
+                    videoId="7CZB55q6H3k"
+                    videoStart={isGorillaCart ? 23 : 0}
+                />
+            )}
         </>
     );
 };

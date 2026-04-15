@@ -17,6 +17,10 @@ export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDri
         }
     }, [addonsData.insurance, handleInsuranceChange]);
 
+    // Visually treat it as accepted immediately on mount, even before the state update completes
+    const isInsuranceAccepted = !addonsData.insurance || addonsData.insurance === 'accept';
+    const isInsuranceDeclined = addonsData.insurance === 'decline';
+
     const insuranceTooltip = (
         <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-3 -mr-3 [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-400">
             <p className="font-bold text-base border-b border-gray-700 pb-1">Hardware Protection For Only ${insurancePrice.toFixed(2)}</p>
@@ -79,33 +83,35 @@ export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDri
                     For just ${insurancePrice.toFixed(2)}, get peace of mind. Declining means you accept full responsibility for any damage to the rental unit during your rental period.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                    <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                        <Button
-                            onClick={() => handleInsuranceChange('accept')}
-                            variant={addonsData.insurance === 'accept' ? 'default' : 'outline'}
-                            className={cn(
-                                "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
-                                addonsData.insurance === 'accept' 
-                                    ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                    : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
-                            )}
-                        >
-                            {addonsData.insurance === 'accept' ? 'Accepted' : `Accept (+$${insurancePrice.toFixed(2)})`}
-                        </Button>
-                    </motion.div>
-                    
+                    {/* Decline button moved to the LEFT */}
                     <motion.div whileTap={{ scale: 0.95, y: 2 }}>
                         <Button
                             onClick={() => handleInsuranceChange('decline')}
                             variant="default"
                             className={cn(
                                 "h-12 w-full text-lg transition-all font-semibold active:bg-red-900 border",
-                                addonsData.insurance === 'decline' 
+                                isInsuranceDeclined 
                                     ? 'bg-red-800 text-white hover:bg-red-900 border-red-800 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
                                     : 'bg-red-700 text-black hover:bg-red-800 border-red-700'
                             )}
                         >
-                            {addonsData.insurance === 'decline' ? 'Declined' : 'Decline'}
+                            {isInsuranceDeclined ? 'Declined' : 'Decline'}
+                        </Button>
+                    </motion.div>
+
+                    {/* Accept button moved to the RIGHT */}
+                    <motion.div whileTap={{ scale: 0.95, y: 2 }}>
+                        <Button
+                            onClick={() => handleInsuranceChange('accept')}
+                            variant={isInsuranceAccepted ? 'default' : 'outline'}
+                            className={cn(
+                                "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
+                                isInsuranceAccepted 
+                                    ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
+                                    : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
+                            )}
+                        >
+                            {isInsuranceAccepted ? 'Accepted' : `Accept (+$${insurancePrice.toFixed(2)})`}
                         </Button>
                     </motion.div>
                 </div>
@@ -121,20 +127,7 @@ export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDri
                         For ${addonPrices.drivewayProtection.toFixed(2)}, we'll use protective devices to prevent scratches or cracks. Declining means you accept responsibility for any driveway damage.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
-                        <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                            <Button
-                                onClick={() => handleDrivewayProtectionChange('accept')}
-                                variant={addonsData.drivewayProtection === 'accept' ? 'default' : 'outline'}
-                                className={cn(
-                                    "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
-                                    addonsData.drivewayProtection === 'accept' 
-                                        ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                        : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
-                                )}
-                            >
-                                {addonsData.drivewayProtection === 'accept' ? 'Accepted' : `Accept (+$${addonPrices.drivewayProtection.toFixed(2)})`}
-                            </Button>
-                        </motion.div>
+                        {/* Decline button moved to the LEFT */}
                         <motion.div whileTap={{ scale: 0.95, y: 2 }}>
                             <Button
                                 onClick={() => handleDrivewayProtectionChange('decline')}
@@ -147,6 +140,22 @@ export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDri
                                 )}
                             >
                                 {addonsData.drivewayProtection === 'decline' ? 'Declined' : 'Decline'}
+                            </Button>
+                        </motion.div>
+
+                        {/* Accept button moved to the RIGHT */}
+                        <motion.div whileTap={{ scale: 0.95, y: 2 }}>
+                            <Button
+                                onClick={() => handleDrivewayProtectionChange('accept')}
+                                variant={addonsData.drivewayProtection === 'accept' ? 'default' : 'outline'}
+                                className={cn(
+                                    "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
+                                    addonsData.drivewayProtection === 'accept' 
+                                        ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
+                                        : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
+                                )}
+                            >
+                                {addonsData.drivewayProtection === 'accept' ? 'Accepted' : `Accept (+$${addonPrices.drivewayProtection.toFixed(2)})`}
                             </Button>
                         </motion.div>
                     </div>

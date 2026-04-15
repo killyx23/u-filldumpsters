@@ -10,9 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Star, MessageSquare, Ticket, Send, Paperclip, Loader2, CheckCircle, Clock } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
-import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
-import { TypingIndicator } from '@/components/chat/TypingIndicator';
+import { ConnectionStatus } from '@/components/ConnectionStatus';
 
 export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefreshData }) => {
     return (
@@ -51,15 +50,15 @@ const ChatInterface = ({ customer }) => {
     const chatContainerRef = useRef(null);
     const fileInputRef = useRef(null);
 
-    const { messages, sendMessage, markAsRead, isLoading, isConnected } = useRealTimeChat(customer.id);
-    const { isOtherUserTyping, setIsTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'customer');
+    const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
 
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messages, isOtherUserTyping]);
+    }, [messages]);
 
+    // Mark incoming admin messages as read
     useEffect(() => {
         const unreadIds = messages.filter(m => m.sender_type === 'admin' && !m.is_read).map(m => m.id);
         if (unreadIds.length > 0) {
@@ -105,9 +104,8 @@ const ChatInterface = ({ customer }) => {
                     <CardTitle className="text-lg flex items-center text-white"><MessageSquare className="w-5 h-5 mr-2 text-blue-400"/> Live Support</CardTitle>
                     <CardDescription className="text-gray-400">We usually reply instantly during business hours.</CardDescription>
                 </div>
-                <div className="flex items-center gap-1.5 text-xs text-gray-400 bg-black/30 px-2 py-1 rounded-full border border-white/5">
-                    <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                    {isConnected ? 'Connected' : 'Reconnecting...'}
+                <div className="flex items-center gap-1.5">
+                    <ConnectionStatus status={connectionStatus} onReconnect={reconnect} />
                 </div>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-4 flex flex-col chat-scroll-container" ref={chatContainerRef}>
@@ -128,10 +126,9 @@ const ChatInterface = ({ customer }) => {
                                 key={msg.id} 
                                 message={msg} 
                                 isCurrentUser={msg.sender_type === 'customer'} 
-                                senderName="Support Team" 
+                                senderName={msg.sender_type === 'admin' ? "Support Team" : "You"} 
                             />
                         ))}
-                        <TypingIndicator isTyping={isOtherUserTyping} text={typingIndicatorText} />
                     </>
                 )}
             </CardContent>
@@ -139,7 +136,7 @@ const ChatInterface = ({ customer }) => {
                 <div className="relative flex items-center">
                     <Textarea 
                         value={input} 
-                        onChange={(e) => { setInput(e.target.value); setIsTyping(); }}
+                        onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                         placeholder="Type your message... (Shift+Enter for new line)" 
                         className="bg-gray-800 border-gray-700 pr-24 resize-none h-[50px] min-h-[50px] max-h-[120px] text-white focus-visible:ring-blue-500"
@@ -163,13 +160,12 @@ const ChatInterface = ({ customer }) => {
     );
 };
 
-// ... (SupportTickets and ReviewsSection components remain exactly the same as in previous implementation, just preserving them to avoid incomplete file issues)
-
 const SupportTickets = ({ customer, notes, onNewNote }) => {
     const [subject, setSubject] = useState('');
     const [description, setDescription] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Support tickets rightfully stay in customer_notes
     const ticketNotes = notes.filter(n => n.source === 'Support Ticket').sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 
     const handleSubmit = async (e) => {
@@ -187,7 +183,7 @@ const SupportTickets = ({ customer, notes, onNewNote }) => {
             toast({ title: 'Failed to create ticket', description: error.message, variant: 'destructive' });
         } else {
             toast({ title: 'Ticket created', description: 'Support will review this shortly.' });
-            onNewNote(data);
+            if (onNewNote) onNewNote(data);
             setSubject('');
             setDescription('');
         }
