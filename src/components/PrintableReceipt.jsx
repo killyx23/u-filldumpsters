@@ -1,7 +1,9 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { format, parseISO, isValid, differenceInDays, addHours } from 'date-fns';
 import { Key, Repeat, FileSignature, Clock, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 
 const formatTime = (timeString, isWindow = false, isSelfService = false) => {
     if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) return 'N/A';
@@ -23,16 +25,6 @@ const formatTime = (timeString, isWindow = false, isSelfService = false) => {
         return 'N/A';
     }
 };
-
-const addonPrices = {
-  drivewayProtection: 15,
-};
-
-const equipmentMeta = [
-  { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
-  { id: 'handTruck', label: 'Hand Truck', price: 15 },
-  { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
-];
 
 const AgreementText = ({ booking }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
@@ -68,9 +60,36 @@ const AgreementText = ({ booking }) => {
 };
 
 export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
-    const { insurancePrice } = useInsurancePricing();
+    const [equipmentPrices, setEquipmentPrices] = useState({});
+    const [loading, setLoading] = useState(true);
+
+    // Load equipment prices from database
+    useEffect(() => {
+        const loadPrices = async () => {
+            const prices = {};
+            try {
+                // Load all equipment prices (IDs 1-7)
+                for (let id = 1; id <= 7; id++) {
+                    if (isValidEquipmentId(id)) {
+                        prices[id] = await getPriceForEquipment(id);
+                    }
+                }
+                setEquipmentPrices(prices);
+            } catch (error) {
+                console.error('[PrintableReceipt] Error loading prices:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        if (booking) {
+            loadPrices();
+        }
+    }, [booking]);
     
-    if (!booking || !booking.customers || !booking.plan) return null;
+    if (!booking || !booking.customers || !booking.plan || loading) {
+        return <div className="p-8">Loading receipt...</div>;
+    }
 
     const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues } = booking;
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
@@ -101,6 +120,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const pickup = parseISO(pickup_date);
     const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
 
+    // Calculate base service price
     let baseServicePrice = currentPlan.base_price || 0;
     if (currentPlan.id === 1 && duration === 7) {
         baseServicePrice = 500;
@@ -113,38 +133,79 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
-    let addonsTotal = 0;
-    if (addons.insurance === 'accept') addonsTotal += insurancePrice;
-    if ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') addonsTotal += addonPrices.drivewayProtection;
-    
-    addons.equipment?.forEach(item => {
-        const meta = equipmentMeta.find(e => e.id === item.id);
-        if (meta) addonsTotal += meta.price * item.quantity;
-    });
+    // Protection costs
+    const insuranceCost = addons.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+    const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
 
-    const mattressDisposalCount = addons.mattressDisposal || 0;
-    const tvDisposalCount = addons.tvDisposal || 0;
-    const applianceDisposalCount = addons.applianceDisposal || 0;
+    // Equipment costs
+    let rentEquipmentCost = 0;
+    let purchaseItemsCost = 0;
+    const equipmentBreakdown = [];
 
-    if (mattressDisposalCount > 0) addonsTotal += 25 * mattressDisposalCount;
-    if (tvDisposalCount > 0) addonsTotal += 15 * tvDisposalCount;
-    if (applianceDisposalCount > 0) addonsTotal += 35 * applianceDisposalCount;
+    if (addons.equipment && Array.isArray(addons.equipment)) {
+        addons.equipment.forEach(item => {
+            const equipmentId = item.equipment_id || item.dbId || item.id;
+            if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
 
-    const subtotal = baseServicePrice + deliveryChargeFlat + tripMileageCost + addonsTotal;
+            const price = Number(equipmentPrices[equipmentId] || 0);
+            const quantity = Number(item.quantity || 1);
+            const itemTotal = price * quantity;
+            
+            let itemName = `Equipment #${equipmentId}`;
+            if (equipmentId === 1) itemName = 'Wheelbarrow';
+            else if (equipmentId === 2) itemName = 'Hand Truck';
+            else if (equipmentId === 3) itemName = 'Working Gloves (Pair)';
 
-    const getDiscountAmount = () => {
-        if (coupon && coupon.isValid) {
-            if (coupon.discountType === 'fixed') return coupon.discountValue;
-            else if (coupon.discountType === 'percentage') return subtotal * (coupon.discountValue / 100);
+            equipmentBreakdown.push({
+                id: equipmentId,
+                name: itemName,
+                quantity,
+                price,
+                total: itemTotal,
+                isPurchase: equipmentId === 3
+            });
+
+            if (equipmentId === 3) {
+                purchaseItemsCost += itemTotal;
+            } else {
+                rentEquipmentCost += itemTotal;
+            }
+        });
+    }
+
+    // Disposal costs
+    const mattressCount = addons.mattressDisposal || 0;
+    const tvCount = addons.tvDisposal || 0;
+    const applianceCount = addons.applianceDisposal || 0;
+
+    const mattressCost = mattressCount > 0 ? Number(equipmentPrices[4] || 25) * mattressCount : 0;
+    const tvCost = tvCount > 0 ? Number(equipmentPrices[5] || 15) * tvCount : 0;
+    const applianceCost = applianceCount > 0 ? Number(equipmentPrices[6] || 35) * applianceCount : 0;
+    const disposalCost = mattressCost + tvCost + applianceCost;
+
+    // Subtotal before discount
+    const subtotalBeforeDiscount = baseServicePrice + deliveryChargeFlat + tripMileageCost + 
+                                    insuranceCost + drivewayProtectionCost + 
+                                    rentEquipmentCost + purchaseItemsCost + disposalCost;
+
+    // Discount
+    let discountAmount = 0;
+    if (coupon && coupon.isValid) {
+        if (coupon.discountType === 'fixed') {
+            discountAmount = Number(coupon.discountValue || 0);
+        } else if (coupon.discountType === 'percentage') {
+            discountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
         }
-        return 0;
-    };
-    
-    const discountAmount = getDiscountAmount();
-    const calculatedTotal = subtotal - discountAmount;
+    }
+
+    const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+    const tax = subtotal * 0.07; // 7% tax
+    const calculatedTotal = subtotal + tax;
+
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
     const totalMiles = addons.distanceInfo?.miles || addons.distanceInfo?.roundTripMiles || addons.deliveryDistance || 0;
+    const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
 
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -158,6 +219,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         {isCancelledAndRefunded ? 'Refund Receipt' : 'Booking Receipt'}
                     </h2>
                 </header>
+
                 <section className="grid grid-cols-2 gap-8 my-6">
                     <div>
                         <h3 className="font-bold text-lg mb-2">Billed To:</h3>
@@ -198,64 +260,186 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 )}
 
                 <section style={{ pageBreakInside: 'avoid' }}>
-                    <h3 className="font-bold text-lg mb-2 border-b pb-2">Order Summary</h3>
-                    <table className="w-full">
-                        <thead>
-                            <tr className="border-b"><th className="text-left py-2">Item</th><th className="text-right py-2">Total</th></tr>
-                        </thead>
+                    <h3 className="font-bold text-lg mb-4 border-b pb-2">Price Breakdown</h3>
+                    
+                    {/* Service Details */}
+                    <div className="mb-4 p-3 bg-gray-50 rounded">
+                        <p className="font-semibold text-lg">{serviceName}</p>
+                        {reschedule_history && reschedule_history.length > 0 && (
+                            <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
+                                <p className="font-bold">Original Dates:</p>
+                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_drop_off_time, isWindowService, isSelfServiceTrailer)}</p>
+                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_pickup_time, isWindowService, isSelfServiceTrailer)}</p>
+                            </div>
+                        )}
+                        <p className="text-sm text-gray-600 mt-1">{isWindowService ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTime(drop_off_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfServiceTrailer ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTime(pickup_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>}
+                    </div>
+
+                    {/* 8-Category Breakdown */}
+                    <table className="w-full text-sm mb-4">
                         <tbody>
-                            <tr className="border-b">
-                                <td className="py-2">
-                                    <p className="font-semibold">{serviceName}</p>
-                                    {reschedule_history && reschedule_history.length > 0 && (
-                                        <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
-                                            <p className="font-bold">Original Dates:</p>
-                                            <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_drop_off_time, isWindowService, isSelfServiceTrailer)}</p>
-                                            <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_pickup_time, isWindowService, isSelfServiceTrailer)}</p>
-                                        </div>
-                                    )}
-                                    <p className="text-sm text-gray-600 mt-1">{isWindowService ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTime(drop_off_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>
-                                    {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfServiceTrailer ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTime(pickup_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>}
-                                </td>
-                                <td className="text-right py-2 align-top">${baseServicePrice.toFixed(2)}</td>
-                            </tr>
-                            {deliveryChargeFlat > 0 && <tr className="border-b"><td className="py-2 pl-4">Delivery Fee (Flat)</td><td className="text-right py-2">${deliveryChargeFlat.toFixed(2)}</td></tr>}
-                            {tripMileageCost > 0 && <tr className="border-b"><td className="py-2 pl-4">{`Mileage Charge (${totalMiles.toFixed(2)} miles total${freeMiles > 0 ? `, ${freeMiles} free` : ''})`}</td><td className="text-right py-2">${tripMileageCost.toFixed(2)}</td></tr>}
-                            {addons.insurance === 'accept' && <tr className="border-b"><td className="py-2 pl-4">Rental Insurance</td><td className="text-right py-2">${insurancePrice.toFixed(2)}</td></tr>}
-                            {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept' && <tr className="border-b"><td className="py-2 pl-4">Driveway Protection</td><td className="text-right py-2">${addonPrices.drivewayProtection.toFixed(2)}</td></tr>}
-                            {addons.equipment && addons.equipment.map(item => {
-                                const meta = equipmentMeta.find(e => e.id === item.id);
-                                if (!meta) return null;
-                                const issue = return_issues ? return_issues[meta.label] : null;
-                                return (
-                                    <tr key={item.id} className="border-b">
-                                        <td className="py-2 pl-4">{meta.label} (x{item.quantity}){issue && <span className="text-red-600 font-bold ml-2">({issue.status.replace(/_/g, ' ')})</span>}</td>
-                                        <td className="text-right py-2">${(meta.price * item.quantity).toFixed(2)}</td>
-                                    </tr>
-                                )
-                            })}
-                            {mattressDisposalCount > 0 && <tr className="border-b"><td className="py-2 pl-4">Mattress Disposal (x{mattressDisposalCount})</td><td className="text-right py-2">${(25 * mattressDisposalCount).toFixed(2)}</td></tr>}
-                            {tvDisposalCount > 0 && <tr className="border-b"><td className="py-2 pl-4">TV Disposal (x{tvDisposalCount})</td><td className="text-right py-2">${(15 * tvDisposalCount).toFixed(2)}</td></tr>}
-                            {applianceDisposalCount > 0 && <tr className="border-b"><td className="py-2 pl-4">Appliance Disposal (x{applianceDisposalCount})</td><td className="text-right py-2">${(35 * applianceDisposalCount).toFixed(2)}</td></tr>}
-                        </tbody>
-                        <tfoot>
-                            {discountAmount > 0 && !isCancelledAndRefunded && (
-                                <tr><td className="text-right font-bold pt-3" colSpan="1">Subtotal:</td><td className="text-right font-bold pt-3">${subtotal.toFixed(2)}</td></tr>
-                            )}
-                            {discountAmount > 0 && !isCancelledAndRefunded && (
-                                <tr><td className="text-right font-bold text-green-600" colSpan="1">Coupon Discount ({coupon.code}):</td><td className="text-right font-bold text-green-600">- ${discountAmount.toFixed(2)}</td></tr>
-                            )}
-                            {!isCancelledAndRefunded ? (
-                                <tr><td className="text-right font-bold py-3" colSpan="1">Grand Total:</td><td className="text-right font-bold py-3">${calculatedTotal.toFixed(2)}</td></tr>
-                            ) : (
+                            {/* 1. Service Costs */}
+                            {baseServicePrice > 0 && (
                                 <>
-                                    <tr><td className="text-right font-bold pt-3" colSpan="1">Original Total:</td><td className="text-right font-bold pt-3">${calculatedTotal.toFixed(2)}</td></tr>
-                                    <tr><td className="text-right font-bold" colSpan="1">Cancellation Fee:</td><td className="text-right font-bold text-red-600">- ${(calculatedTotal - (refund_details.amount || 0)).toFixed(2)}</td></tr>
-                                    <tr><td className="text-right font-bold py-3 border-t" colSpan="1">Amount Refunded:</td><td className="text-right font-bold py-3 border-t text-green-600">${(refund_details.amount || 0).toFixed(2)}</td></tr>
+                                    <tr className="bg-blue-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold">📦 Service Costs</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                        <td className="py-1 px-6">Base Rental ({duration} {duration === 1 ? 'day' : 'days'})</td>
+                                        <td className="text-right py-1 pr-3">${baseServicePrice.toFixed(2)}</td>
+                                    </tr>
                                 </>
                             )}
-                        </tfoot>
+                            
+                            {deliveryChargeFlat > 0 && (
+                                <tr className="border-b">
+                                    <td className="py-1 px-6">Base Delivery Fee</td>
+                                    <td className="text-right py-1 pr-3">${deliveryChargeFlat.toFixed(2)}</td>
+                                </tr>
+                            )}
+                            
+                            {tripMileageCost > 0 && (
+                                <tr className="border-b">
+                                    <td className="py-1 px-6">Mileage Charge ({totalMiles.toFixed(2)} miles{freeMiles > 0 ? `, ${freeMiles} free` : ''})</td>
+                                    <td className="text-right py-1 pr-3">${tripMileageCost.toFixed(2)}</td>
+                                </tr>
+                            )}
+
+                            {/* 2. Protection Options */}
+                            {(insuranceCost > 0 || drivewayProtectionCost > 0) && (
+                                <>
+                                    <tr className="bg-blue-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold">🛡️ Protection Options</td>
+                                    </tr>
+                                    {insuranceCost > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6">Rental Insurance</td>
+                                            <td className="text-right py-1 pr-3">${insuranceCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {drivewayProtectionCost > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6">Driveway Protection</td>
+                                            <td className="text-right py-1 pr-3">${drivewayProtectionCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                </>
+                            )}
+
+                            {/* 3. Rent Equipment */}
+                            {equipmentBreakdown.filter(e => !e.isPurchase).length > 0 && (
+                                <>
+                                    <tr className="bg-blue-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold">🚚 Rent Equipment</td>
+                                    </tr>
+                                    {equipmentBreakdown.filter(e => !e.isPurchase).map((item, idx) => {
+                                        const issue = return_issues ? return_issues[item.name] : null;
+                                        return (
+                                            <tr key={idx} className="border-b">
+                                                <td className="py-1 px-6">
+                                                    {item.name} (x{item.quantity})
+                                                    {issue && <span className="text-red-600 font-bold ml-2">({issue.status.replace(/_/g, ' ')})</span>}
+                                                </td>
+                                                <td className="text-right py-1 pr-3">${item.total.toFixed(2)}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </>
+                            )}
+
+                            {/* 4. Items for Purchase */}
+                            {equipmentBreakdown.filter(e => e.isPurchase).length > 0 && (
+                                <>
+                                    <tr className="bg-blue-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold">🛒 Items for Purchase</td>
+                                    </tr>
+                                    {equipmentBreakdown.filter(e => e.isPurchase).map((item, idx) => (
+                                        <tr key={idx} className="border-b">
+                                            <td className="py-1 px-6">{item.name} (x{item.quantity})</td>
+                                            <td className="text-right py-1 pr-3">${item.total.toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                </>
+                            )}
+
+                            {/* 5. Disposal Items */}
+                            {(mattressCount > 0 || tvCount > 0 || applianceCount > 0) && (
+                                <>
+                                    <tr className="bg-blue-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold">♻️ Disposal Items</td>
+                                    </tr>
+                                    {mattressCount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6">Mattress Disposal (x{mattressCount})</td>
+                                            <td className="text-right py-1 pr-3">${mattressCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {tvCount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6">TV Disposal (x{tvCount})</td>
+                                            <td className="text-right py-1 pr-3">${tvCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {applianceCount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6">Appliance Disposal (x{applianceCount})</td>
+                                            <td className="text-right py-1 pr-3">${applianceCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                </>
+                            )}
+
+                            {/* 6. Discounts */}
+                            {discountAmount > 0 && !isCancelledAndRefunded && (
+                                <>
+                                    <tr className="bg-green-50">
+                                        <td colSpan="2" className="py-2 px-3 font-bold text-green-700">🏷️ Discounts</td>
+                                    </tr>
+                                    <tr className="border-b">
+                                        <td className="py-1 px-6 text-green-700">Coupon ({coupon.code})</td>
+                                        <td className="text-right py-1 pr-3 text-green-700 font-semibold">-${discountAmount.toFixed(2)}</td>
+                                    </tr>
+                                </>
+                            )}
+
+                            {/* 7. Totals */}
+                            <tr className="border-t-2 border-gray-400">
+                                <td className="py-2 px-3 font-bold">Subtotal</td>
+                                <td className="text-right py-2 pr-3 font-bold">${subtotal.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <td className="py-1 px-3 font-semibold">Tax (7%)</td>
+                                <td className="text-right py-1 pr-3 font-semibold">${tax.toFixed(2)}</td>
+                            </tr>
+                            <tr className="border-t-2 border-gray-400 bg-gray-100">
+                                <td className="py-2 px-3 font-bold text-lg">Total</td>
+                                <td className="text-right py-2 pr-3 font-bold text-lg text-green-600">${calculatedTotal.toFixed(2)}</td>
+                            </tr>
+
+                            {isCancelledAndRefunded && (
+                                <>
+                                    <tr className="border-t">
+                                        <td className="py-1 px-3">Cancellation Fee</td>
+                                        <td className="text-right py-1 pr-3 text-red-600">-${(calculatedTotal - (refund_details.amount || 0)).toFixed(2)}</td>
+                                    </tr>
+                                    <tr className="bg-green-50">
+                                        <td className="py-2 px-3 font-bold">Amount Refunded</td>
+                                        <td className="text-right py-2 pr-3 font-bold text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
+                                    </tr>
+                                </>
+                            )}
+                        </tbody>
                     </table>
+
+                    {/* 8. Landfill/Disposal Fees */}
+                    {isDeliveryServiceForFees && !isCancelledAndRefunded && (
+                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
+                            <p className="font-bold text-sm">🏗️ Landfill/Disposal Fees (TBD)</p>
+                            <p className="text-xs text-gray-700 mt-1">Pending dump fees will be calculated based on actual waste processed and charged separately.</p>
+                        </div>
+                    )}
+
                     {hasReturnIssues && (
                         <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
                             <h4 className="font-bold text-lg mb-2 text-red-800 flex items-center"><AlertTriangle className="mr-2 h-5 w-5"/> Post-Rental Issues</h4>
@@ -265,6 +449,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         </div>
                     )}
                 </section>
+
                 {addons.notes && (
                     <section className="mt-6" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 border-b pb-2">Customer Notes</h3>
@@ -279,8 +464,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 {addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
                 {addons.addressVerificationSkipped && <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>}
-                 <AgreementText booking={booking} />
-                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
+                <AgreementText booking={booking} />
+                <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
             </footer>
         </div>
     );
