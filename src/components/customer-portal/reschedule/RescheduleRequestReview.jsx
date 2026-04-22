@@ -6,23 +6,50 @@ import { Clock, Calendar, MapPin, MessageSquare, Package, CheckSquare, DollarSig
 import { formatCurrency } from '@/api/EcommerceApi';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString, safeExtractNumber } from '@/utils/stringExtractors';
+import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
 
 export const RescheduleRequestReview = ({ 
+    bookingId,
     originalBooking, 
     originalService, 
-    originalCosts,
     newService, 
-    newAddonsList = [],
-    newCosts,
     newDropOffDate, 
     newPickupDate, 
     newDropOffTime, 
     newPickupTime, 
-    address, 
-    comments, 
-    agreements 
+    selectedAddonsList,
+    deliveryAddress, 
+    comments 
 }) => {
-    const diffVal = safeExtractNumber(newCosts?.total) - safeExtractNumber(originalCosts?.total);
+    // Calculate original costs
+    const origDays = calculateDays(originalBooking?.drop_off_date, originalBooking?.pickup_date);
+    const originalDistance = Number(originalBooking?.customers?.distance_miles || 0);
+    
+    // Get original addons from booking_equipment (passed via selectedAddonsList initially)
+    const originalAddonsList = [];
+    if (originalBooking?.addons && typeof originalBooking.addons === 'object') {
+        Object.entries(originalBooking.addons).forEach(([key, val]) => {
+            if (key.toLowerCase().includes('insurance')) {
+                const price = typeof val === 'object' ? Number(val.price || 25) : Number(val || 25);
+                originalAddonsList.push({
+                    id: 'insurance',
+                    name: 'Premium Insurance',
+                    quantity: 1,
+                    price: price
+                });
+            }
+        });
+    }
+    
+    const originalCosts = calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance);
+    
+    // Calculate new costs
+    const newDays = calculateDays(newDropOffDate, newPickupDate);
+    const newDistance = originalDistance; // Using same distance unless address changed
+    const newCosts = calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance);
+    
+    const diffVal = newCosts.total - originalCosts.total;
+    
     const originalServiceName = safeExtractString(originalService?.name, 'Standard Service');
     const newServiceName = safeExtractString(newService?.name, 'New Service');
     
@@ -33,8 +60,15 @@ export const RescheduleRequestReview = ({
 
     const newDropOffTimeStr = safeExtractString(newDropOffTime, '08:00');
     const newPickupTimeStr = safeExtractString(newPickupTime, '17:00');
-    const safeAddress = safeExtractString(address, 'No address provided');
+    const safeAddress = safeExtractString(deliveryAddress, 'No address provided');
     const safeComments = safeExtractString(comments, '');
+
+    // Agreements state (these should all be true to reach this step)
+    const agreements = {
+        terms: true,
+        charges: true,
+        release: true
+    };
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto w-full">
@@ -73,7 +107,7 @@ export const RescheduleRequestReview = ({
                         </div>
                         <div className="pt-6 border-t border-gray-800 flex justify-between items-end">
                             <span className="text-xs font-black text-gray-500 uppercase tracking-widest">Original Receipt</span>
-                            <span className="text-2xl font-bold text-gray-300">{formatCurrency(safeExtractNumber(originalCosts?.total) * 100, {code: 'USD', symbol: '$'})}</span>
+                            <span className="text-2xl font-bold text-gray-300">{formatCurrency(originalCosts.total * 100, {code: 'USD', symbol: '$'})}</span>
                         </div>
                     </CardContent>
                 </Card>
@@ -95,7 +129,7 @@ export const RescheduleRequestReview = ({
                                 <div>
                                     <span className="text-white font-black text-xl block mb-2">{newServiceName}</span>
                                     <div className="flex flex-wrap gap-2 text-gold-light mt-3">
-                                        {newAddonsList.map((addon, idx) => {
+                                        {(selectedAddonsList || []).map((addon, idx) => {
                                             const aName = safeExtractString(addon?.name, 'Add-on');
                                             return (
                                                 <span key={`new-addon-${idx}`} className="bg-[hsl(var(--gold)_/_0.15)] border border-[hsl(var(--gold)_/_0.3)] px-3 py-1 text-xs font-bold rounded-md shadow-sm">
@@ -119,7 +153,7 @@ export const RescheduleRequestReview = ({
                         </div>
                         <div className="pt-6 border-t border-[hsl(var(--gold)_/_0.2)] flex justify-between items-end">
                             <span className="text-xs font-black text-gold-light uppercase tracking-widest">New Receipt</span>
-                            <span className="text-3xl font-black text-gold drop-shadow-[0_0_8px_hsla(var(--gold),0.4)]">{formatCurrency(safeExtractNumber(newCosts?.total) * 100, {code: 'USD', symbol: '$'})}</span>
+                            <span className="text-3xl font-black text-gold drop-shadow-[0_0_8px_hsla(var(--gold),0.4)]">{formatCurrency(newCosts.total * 100, {code: 'USD', symbol: '$'})}</span>
                         </div>
                     </CardContent>
                 </Card>

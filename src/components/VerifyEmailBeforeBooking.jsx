@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package, Receipt } from 'lucide-react';
@@ -67,10 +68,19 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         }
     };
 
+    const equipmentList = [
+        { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
+        { id: 'handTruck', label: 'Hand Truck', price: 15 },
+        { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 }
+    ];
+
     // Calculate Breakdown Values accurately without fake processing fees
     const insuranceCost = addonsData?.insurance === 'accept' ? insurancePrice : 0;
     const drivewayCost = addonsData?.drivewayProtection === 'accept' ? 15 : 0;
-    const equipmentCost = addonsData?.equipment?.reduce((acc, eq) => acc + ((eq.price || 0) * (eq.quantity || 1)), 0) || 0;
+    const equipmentCost = addonsData?.equipment?.reduce((acc, item) => {
+        const eqMeta = equipmentList.find(e => e.id === item.id);
+        return acc + ((eqMeta?.price || 0) * (item.quantity || 1));
+    }, 0) || 0;
     
     // Calculate disposal costs if any
     const mattressCost = (addonsData?.mattressDisposal || 0) * 25;
@@ -83,6 +93,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
     // Calculate accurate plan cost by subtracting all known addons from the exact total passed down
     const totalKnownAddons = insuranceCost + drivewayCost + equipmentCost + deliveryCost + distanceCost + mattressCost + tvCost + applianceCost;
     const planCost = plan?.price || plan?.base_price || (totalPrice - totalKnownAddons);
+    const subtotal = Math.max(0, planCost) + totalKnownAddons;
 
     return (
         <motion.div
@@ -144,61 +155,74 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                                 <span>${Math.max(0, planCost).toFixed(2)}</span>
                             </div>
                             
-                            {insuranceCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Insurance/Protection:</span>
-                                    <span>${insuranceCost.toFixed(2)}</span>
+                            {totalKnownAddons > 0 && (
+                                <div className="pl-3 border-l-2 border-blue-500/30 space-y-1 my-2 text-sm">
+                                    {insuranceCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Insurance/Protection:</span>
+                                            <span>${insuranceCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {drivewayCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Driveway Protection:</span>
+                                            <span>${drivewayCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {addonsData?.equipment?.map((item, index) => {
+                                        const eqMeta = equipmentList.find(e => e.id === item.id);
+                                        if (!eqMeta) return null;
+                                        return (
+                                            <div key={index} className="flex justify-between text-blue-300">
+                                                <span>{eqMeta.label} (x{item.quantity || 1}):</span>
+                                                <span>${((eqMeta.price || 0) * (item.quantity || 1)).toFixed(2)}</span>
+                                            </div>
+                                        );
+                                    })}
+                                    
+                                    {mattressCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Mattress Disposal (x{addonsData.mattressDisposal}):</span>
+                                            <span>${mattressCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {tvCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>TV Disposal (x{addonsData.tvDisposal}):</span>
+                                            <span>${tvCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {applianceCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Appliance Disposal (x{addonsData.applianceDisposal}):</span>
+                                            <span>${applianceCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {deliveryCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Delivery Fee (Flat):</span>
+                                            <span>${deliveryCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    {distanceCost > 0 && (
+                                        <div className="flex justify-between text-blue-300">
+                                            <span>Distance/Mileage Fee:</span>
+                                            <span>${distanceCost.toFixed(2)}</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            
-                            {drivewayCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Driveway Protection:</span>
-                                    <span>${drivewayCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {equipmentCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Equipment Add-ons:</span>
-                                    <span>${equipmentCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {mattressCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Mattress Disposal:</span>
-                                    <span>${mattressCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {tvCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>TV Disposal:</span>
-                                    <span>${tvCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {applianceCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Appliance Disposal:</span>
-                                    <span>${applianceCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {deliveryCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Delivery Fee (Flat):</span>
-                                    <span>${deliveryCost.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {distanceCost > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Distance/Mileage Fee:</span>
-                                    <span>${distanceCost.toFixed(2)}</span>
-                                </div>
-                            )}
+
+                            <div className="flex justify-between mt-3 pt-3 border-t border-white/10 font-semibold text-white">
+                                <span>Subtotal:</span>
+                                <span>${subtotal.toFixed(2)}</span>
+                            </div>
                         </div>
 
                         <div className="mt-4 pt-4 border-t border-white/10">

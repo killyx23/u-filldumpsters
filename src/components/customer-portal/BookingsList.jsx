@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -72,6 +73,12 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
       }
   };
 
+  const handleRescheduleClick = (booking) => {
+    if (onRescheduleClick) {
+      onRescheduleClick(booking);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -144,7 +151,14 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
                 <Button variant="outline" size="sm" onClick={() => onReceiptClick(booking)} className="border-white/20 hover:bg-white/10">Details</Button>
                 {canModify && (
                   <>
-                    <Button variant="secondary" size="sm" onClick={() => onRescheduleClick(booking)}>Reschedule</Button>
+                    <Button 
+                      variant="secondary" 
+                      size="sm" 
+                      onClick={() => handleRescheduleClick(booking)}
+                      className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-black font-bold transition-all duration-200 active:scale-95 shadow-sm hover:shadow-md"
+                    >
+                      Reschedule
+                    </Button>
                     <Button variant="destructive" size="sm" onClick={() => onCancelClick(booking)} className="bg-red-600/80 hover:bg-red-600">Cancel</Button>
                   </>
                 )}
