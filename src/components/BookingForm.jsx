@@ -16,6 +16,7 @@ import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 
 export const BookingForm = ({
   plan,
@@ -43,6 +44,12 @@ export const BookingForm = ({
   const isDelivery = plan?.id === 2 && deliveryService;
   const { getFeeForService } = useDumpFees();
 
+  console.group('[BookingForm] Component Initialization');
+  console.log('Plan ID:', plan?.id);
+  console.log('Delivery Service:', deliveryService);
+  console.log('Is Delivery:', isDelivery);
+  console.groupEnd();
+
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
     if (isDelivery) return allPlans.find(p => p.id === 4) || null;
@@ -53,23 +60,25 @@ export const BookingForm = ({
   const formatTimeToAmPm = (timeStr) => {
     if (!timeStr) return '';
     try {
-      // Handle HH:mm:ss format from database
       const parsed = parse(timeStr, 'HH:mm:ss', new Date());
       return format(parsed, 'h:mm a');
     } catch (error) {
-      console.warn('Time formatting error:', error);
-      return timeStr; // Return original if parsing fails
+      console.warn('[BookingForm] Time formatting error:', error);
+      return timeStr;
     }
   };
   
   useEffect(() => {
     const fetchPlans = async () => {
+      console.log('[BookingForm] Fetching service plans...');
       setLoadingPlans(true);
-      const {
-        data,
-        error
-      } = await supabase.from('services').select('*');
-      if (!error && data) setAllPlans(data);
+      const { data, error } = await supabase.from('services').select('*');
+      if (!error && data) {
+        console.log('[BookingForm] ✓ Loaded', data.length, 'service plans');
+        setAllPlans(data);
+      } else {
+        console.error('[BookingForm] ❌ Failed to fetch plans:', error);
+      }
       setLoadingPlans(false);
     };
     fetchPlans();
@@ -77,11 +86,14 @@ export const BookingForm = ({
   
   useEffect(() => {
     if (currentPlan) {
+        console.log('[BookingForm] Setting pricing for plan:', currentPlan.id, currentPlan.name);
         if (currentPlan.mileage_rate !== undefined && currentPlan.mileage_rate !== null) {
           setCurrentMileageRate(Number(currentPlan.mileage_rate));
+          console.log('[BookingForm] Mileage rate:', currentPlan.mileage_rate);
         }
         if (currentPlan.delivery_fee !== undefined && currentPlan.delivery_fee !== null) {
           setCurrentDeliveryFee(Number(currentPlan.delivery_fee));
+          console.log('[BookingForm] Delivery fee:', currentPlan.delivery_fee);
         } else {
           setCurrentDeliveryFee(0);
         }
@@ -90,6 +102,7 @@ export const BookingForm = ({
   
   useEffect(() => {
     if (isDelivery) {
+      console.log('[BookingForm] Delivery service enabled - clearing time slots');
       setBookingData(prev => ({
         ...prev,
         dropOffTimeSlot: '',
@@ -103,12 +116,12 @@ export const BookingForm = ({
     if (currentPlan?.id !== 2 || isDelivery) return;
 
     const fetchTrailerRentalHours = async () => {
+      console.log('[BookingForm] Fetching trailer rental hours for service 2');
       let pickupStart = '';
       let returnBy = '';
       const defaultHours = { pickupStart: '8:00 AM', returnBy: '6:00 PM' };
 
       try {
-        // If a drop-off date is selected, check date_specific_availability first
         if (bookingData.dropOffDate) {
           const dateStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
           const { data: dsa, error: dsaError } = await supabase
@@ -119,14 +132,13 @@ export const BookingForm = ({
             .maybeSingle();
 
           if (dsaError) {
-            console.warn('Error fetching date-specific availability:', dsaError);
+            console.warn('[BookingForm] Error fetching date-specific availability:', dsaError);
           }
 
           if (dsa?.pickup_start_time) pickupStart = dsa.pickup_start_time;
           if (dsa?.return_by_time) returnBy = dsa.return_by_time;
         }
 
-        // Fallback to service_availability if not found in date-specific
         if (!pickupStart || !returnBy) {
           const dow = bookingData.dropOffDate ? bookingData.dropOffDate.getDay() : new Date().getDay();
           const { data: sa, error: saError } = await supabase
@@ -137,26 +149,24 @@ export const BookingForm = ({
             .maybeSingle();
 
           if (saError) {
-            console.warn('Error fetching service availability:', saError);
+            console.warn('[BookingForm] Error fetching service availability:', saError);
           }
 
           if (sa) {
             if (!pickupStart && sa.pickup_start_time) pickupStart = sa.pickup_start_time;
             if (!returnBy && sa.return_by_time) returnBy = sa.return_by_time;
-          } else {
-            console.warn('No service_availability data found for service_id=2, day_of_week=' + dow + '. Using default hours.');
           }
         }
 
-        // Set the hours with fallback to defaults
         setTrailerRentalHours({
           pickupStart: pickupStart ? formatTimeToAmPm(pickupStart) : defaultHours.pickupStart,
           returnBy: returnBy ? formatTimeToAmPm(returnBy) : defaultHours.returnBy
         });
 
+        console.log('[BookingForm] ✓ Trailer rental hours:', { pickupStart, returnBy });
+
       } catch (error) {
-        console.warn('Unexpected error fetching trailer rental hours:', error);
-        // Use default hours on any error
+        console.warn('[BookingForm] Unexpected error fetching trailer rental hours:', error);
         setTrailerRentalHours(defaultHours);
       }
     };
@@ -166,39 +176,27 @@ export const BookingForm = ({
   
   const fetchAvailability = useCallback(async month => {
     if (!plan) return;
+    console.log('[BookingForm] Fetching availability for month:', format(month, 'yyyy-MM'));
     setLoadingAvailability(true);
-    const startDate = formatISO(startOfMonth(month), {
-      representation: 'date'
-    });
-    const endDate = formatISO(endOfMonth(month), {
-      representation: 'date'
-    });
+    const startDate = formatISO(startOfMonth(month), { representation: 'date' });
+    const endDate = formatISO(endOfMonth(month), { representation: 'date' });
     const targetServiceId = currentPlan?.id || plan.id;
+    
     try {
-      const {
-        data,
-        error
-      } = await supabase.functions.invoke('get-availability', {
-        body: {
-          serviceId: plan.id,
-          startDate,
-          endDate,
-          isDelivery
-        }
+      const { data, error } = await supabase.functions.invoke('get-availability', {
+        body: { serviceId: plan.id, startDate, endDate, isDelivery }
       });
+      
       let mergedAvailability = {};
       if (!error && !data?.error) {
-        mergedAvailability = {
-          ...data.availability
-        };
+        mergedAvailability = { ...data.availability };
       }
+      
       const dailyOverrides = await AvailabilityService.getAvailabilityForDateRange(targetServiceId, startDate, endDate);
       if (dailyOverrides && dailyOverrides.length > 0) {
         dailyOverrides.forEach(override => {
           if (!mergedAvailability[override.date]) {
-            mergedAvailability[override.date] = {
-              available: override.is_available
-            };
+            mergedAvailability[override.date] = { available: override.is_available };
           } else {
             mergedAvailability[override.date].available = override.is_available;
             if (!override.is_available) {
@@ -210,12 +208,12 @@ export const BookingForm = ({
           }
         });
       }
-      setAvailability(prev => ({
-        ...prev,
-        ...mergedAvailability
-      }));
+      
+      setAvailability(prev => ({ ...prev, ...mergedAvailability }));
+      console.log('[BookingForm] ✓ Availability loaded for', Object.keys(mergedAvailability).length, 'dates');
+      
     } catch (error) {
-      console.error("Error fetching combined availability:", error);
+      console.error('[BookingForm] ❌ Error fetching availability:', error);
       toast({
         title: 'Availability Error',
         description: 'Failed to load date availability.',
@@ -235,6 +233,7 @@ export const BookingForm = ({
       table: 'date_specific_availability',
       filter: `service_id=eq.${targetServiceId}`
     }, () => {
+      console.log('[BookingForm] Availability change detected - refreshing');
       fetchAvailability(currentMonth);
     }).subscribe();
     return () => {
@@ -251,6 +250,7 @@ export const BookingForm = ({
     if (!currentPlan || currentPlan.id !== 2 || isDelivery) return;
 
     const fetchExactTimes = async () => {
+      console.log('[BookingForm] Fetching exact times for trailer rental');
       setFetchingExactTimes(true);
       let pStartTime = '';
       let rByTime = '';
@@ -262,7 +262,6 @@ export const BookingForm = ({
           const dateStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
           const dow = bookingData.dropOffDate.getDay();
           
-          // Check date-specific availability first
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('pickup_start_time')
@@ -271,13 +270,12 @@ export const BookingForm = ({
             .maybeSingle();
           
           if (dsaError) {
-            console.warn('Error fetching date-specific pickup time:', dsaError);
+            console.warn('[BookingForm] Error fetching date-specific pickup time:', dsaError);
           }
           
           if (dsa?.pickup_start_time) {
             pStartTime = dsa.pickup_start_time;
           } else {
-            // Fallback to service_availability
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('pickup_start_time')
@@ -286,13 +284,11 @@ export const BookingForm = ({
               .maybeSingle();
             
             if (saError) {
-              console.warn('Error fetching service availability pickup time:', saError);
+              console.warn('[BookingForm] Error fetching service availability pickup time:', saError);
             }
             
             if (sa?.pickup_start_time) {
               pStartTime = sa.pickup_start_time;
-            } else {
-              console.warn('No pickup_start_time found, using default');
             }
           }
         }
@@ -301,7 +297,6 @@ export const BookingForm = ({
           const dateStr = format(bookingData.pickupDate, 'yyyy-MM-dd');
           const dow = bookingData.pickupDate.getDay();
           
-          // Check date-specific availability first
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('return_by_time')
@@ -310,13 +305,12 @@ export const BookingForm = ({
             .maybeSingle();
           
           if (dsaError) {
-            console.warn('Error fetching date-specific return time:', dsaError);
+            console.warn('[BookingForm] Error fetching date-specific return time:', dsaError);
           }
           
           if (dsa?.return_by_time) {
             rByTime = dsa.return_by_time;
           } else {
-            // Fallback to service_availability
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('return_by_time')
@@ -325,13 +319,11 @@ export const BookingForm = ({
               .maybeSingle();
             
             if (saError) {
-              console.warn('Error fetching service availability return time:', saError);
+              console.warn('[BookingForm] Error fetching service availability return time:', saError);
             }
             
             if (sa?.return_by_time) {
               rByTime = sa.return_by_time;
-            } else {
-              console.warn('No return_by_time found, using default');
             }
           }
         }
@@ -342,9 +334,13 @@ export const BookingForm = ({
           pickupTimeSlot: rByTime ? formatTimeToAmPm(rByTime) : defaultReturn
         }));
 
+        console.log('[BookingForm] ✓ Exact times set:', {
+          dropOff: pStartTime || defaultStart,
+          pickup: rByTime || defaultReturn
+        });
+
       } catch (error) {
-        console.warn('Unexpected error fetching exact times:', error);
-        // Set defaults on error
+        console.warn('[BookingForm] Unexpected error fetching exact times:', error);
         setBookingData(prev => ({
           ...prev,
           dropOffTimeSlot: defaultStart,
@@ -370,11 +366,11 @@ export const BookingForm = ({
     }
 
     const fetchPickupWindow = async () => {
+        console.log('[BookingForm] Fetching delivery pickup window for service', currentPlan.id);
         const dateStr = format(targetDate, 'yyyy-MM-dd');
         const dow = targetDate.getDay();
 
         try {
-          // 1. Check date_specific_availability
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('delivery_pickup_start_time, delivery_pickup_end_time')
@@ -383,13 +379,12 @@ export const BookingForm = ({
             .maybeSingle();
 
           if (dsaError) {
-            console.warn('Error fetching date-specific delivery pickup window:', dsaError);
+            console.warn('[BookingForm] Error fetching date-specific delivery pickup window:', dsaError);
           }
 
           let startTime = dsa?.delivery_pickup_start_time;
           let endTime = dsa?.delivery_pickup_end_time;
 
-          // 2. Fallback to service_availability
           if (!startTime || !endTime) {
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
@@ -399,7 +394,7 @@ export const BookingForm = ({
               .maybeSingle();
 
             if (saError) {
-              console.warn('Error fetching service availability delivery pickup window:', saError);
+              console.warn('[BookingForm] Error fetching service availability delivery pickup window:', saError);
             }
 
             startTime = startTime || sa?.delivery_pickup_window_start_time;
@@ -410,12 +405,13 @@ export const BookingForm = ({
             const formattedLabel = `${formatTimeToAmPm(startTime)} - ${formatTimeToAmPm(endTime)}`;
             const rawValue = `${startTime}|${endTime}`;
             setFetchedPickupWindows([{ label: formattedLabel, value: rawValue }]);
+            console.log('[BookingForm] ✓ Delivery pickup window:', formattedLabel);
           } else {
-            console.warn('No delivery pickup window found for service_id=' + currentPlan.id);
+            console.warn('[BookingForm] No delivery pickup window found for service_id=' + currentPlan.id);
             setFetchedPickupWindows([]);
           }
         } catch (error) {
-          console.warn('Unexpected error fetching delivery pickup window:', error);
+          console.warn('[BookingForm] Unexpected error fetching delivery pickup window:', error);
           setFetchedPickupWindows([]);
         }
     };
@@ -424,9 +420,7 @@ export const BookingForm = ({
   }, [bookingData.dropOffDate, currentPlan]);
   
   const disabledDates = useMemo(() => {
-    const dates = [{
-      before: startOfDay(addDays(new Date(), 1))
-    }];
+    const dates = [{ before: startOfDay(addDays(new Date(), 1)) }];
     for (const dateStr in availability) {
       if (!availability[dateStr].available) {
         dates.push(parse(dateStr, 'yyyy-MM-dd', new Date()));
@@ -436,10 +430,7 @@ export const BookingForm = ({
   }, [availability]);
   
   const timeSlots = useMemo(() => {
-    if (!currentPlan || !plan) return {
-      dropOff: [],
-      pickup: []
-    };
+    if (!currentPlan || !plan) return { dropOff: [], pickup: [] };
     const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
     const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
     const dropOffAvail = dropOffDateStr ? availability[dropOffDateStr] : null;
@@ -459,15 +450,16 @@ export const BookingForm = ({
       else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
     }
     
-    // Apply overriding fetched Delivery Pickup Windows for Service 1 & 4
     if (currentPlan && (currentPlan.id === 1 || currentPlan.id === 4)) {
         pickupSlots = fetchedPickupWindows.length > 0 ? fetchedPickupWindows : [];
     }
     
-    return {
-      dropOff: dropOffSlots,
-      pickup: pickupSlots
-    };
+    console.log('[BookingForm] Time slots:', {
+      dropOff: dropOffSlots.length,
+      pickup: pickupSlots.length
+    });
+    
+    return { dropOff: dropOffSlots, pickup: pickupSlots };
   }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery, fetchedPickupWindows]);
   
   const handleDateSelect = async (field, date) => {
@@ -476,15 +468,16 @@ export const BookingForm = ({
       const dateStr = format(newDate, 'yyyy-MM-dd');
       const isAvail = availability[dateStr]?.available;
       if (isAvail === false) {
+        console.warn('[BookingForm] Selected unavailable date:', dateStr);
         setIsModalOpen(true);
         return;
       }
+      console.log('[BookingForm] Date selected:', field, dateStr);
     }
     setBookingData(prev => {
       const state = {
         ...prev,
         [field]: newDate,
-        // Only clear timeslot if it's NOT service ID 2 (which is auto-populated)
         ...(currentPlan?.id !== 2 || isDelivery ? { [`${field.replace('Date', '')}TimeSlot`]: '' } : {})
       };
       if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3) {
@@ -503,6 +496,7 @@ export const BookingForm = ({
     if (bookingData.dropOffDate) {
       const dropOffStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
       if (availability[dropOffStr] && !availability[dropOffStr].available) {
+        console.warn('[BookingForm] Drop-off date became unavailable:', dropOffStr);
         setBookingData(prev => ({
           ...prev,
           dropOffDate: null,
@@ -518,6 +512,7 @@ export const BookingForm = ({
     if (bookingData.pickupDate) {
       const pickupStr = format(bookingData.pickupDate, 'yyyy-MM-dd');
       if (availability[pickupStr] && !availability[pickupStr].available) {
+        console.warn('[BookingForm] Pickup date became unavailable:', pickupStr);
         setBookingData(prev => ({
           ...prev,
           pickupDate: null,
@@ -534,6 +529,8 @@ export const BookingForm = ({
   
   useEffect(() => {
     if (!currentPlan) return;
+    
+    // Calculate base rental price
     let basePriceCalculation = parseFloat(currentPlan.base_price) || 0;
     
     if (bookingData.dropOffDate && (bookingData.pickupDate || currentPlan.id === 3)) {
@@ -546,11 +543,24 @@ export const BookingForm = ({
         } else if (currentPlan.id === 2 || currentPlan.id === 4) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         }
+        console.log('[BookingForm] Base rental calculation:', {
+          days: dayDiff,
+          basePrice: basePriceCalculation
+        });
       }
     }
     
     setBaseRentalPrice(basePriceCalculation);
-    setTotalPrice(basePriceCalculation + currentDeliveryFee);
+    
+    // Calculate total: base rental + delivery fee (equipment not included here, only in OrderSummary)
+    const total = basePriceCalculation + currentDeliveryFee;
+    setTotalPrice(total);
+    
+    console.log('[BookingForm] Price totals:', {
+      baseRental: basePriceCalculation,
+      deliveryFee: currentDeliveryFee,
+      total
+    });
   }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, currentDeliveryFee]);
   
   const isFormValid = useMemo(() => {
@@ -564,7 +574,10 @@ export const BookingForm = ({
   
   const handleFormSubmit = async e => {
     e.preventDefault();
+    console.log('[BookingForm] Form submission initiated');
+    
     if (!isFormValid) {
+      console.warn('[BookingForm] Form validation failed');
       toast({
         title: "Incomplete Form",
         description: "Please ensure all required fields are filled and valid times are selected to proceed.",
@@ -585,16 +598,31 @@ export const BookingForm = ({
     };
     
     if (!bookingData.contactAddress?.isVerified) {
+        console.log('[BookingForm] Address not verified - marking for verification');
         addonsPayload.pending_address_verification = true;
         addonsPayload.unverified_address = `${bookingData.contactAddress.street}, ${bookingData.contactAddress.city}, ${bookingData.contactAddress.state} ${bookingData.contactAddress.zip}`;
         addonsPayload.pending_verification_reason = "Address entered manually";
         bookingData.contactAddress.unverifiedAccepted = true;
     }
 
+    console.log('[BookingForm] ✓ Submitting booking data:', {
+      plan: currentPlan.name,
+      dates: {
+        dropOff: bookingData.dropOffDate,
+        pickup: bookingData.pickupDate
+      },
+      pricing: {
+        baseRental: baseRentalPrice,
+        deliveryFee: currentDeliveryFee,
+        total: totalPrice
+      }
+    });
+
     onSubmit(bookingData, baseRentalPrice, null, null, addonsPayload);
   };
 
   const handleManualAddressChange = (field, value) => {
+      console.log('[BookingForm] Manual address change:', field, value);
       setBookingData(prev => ({
           ...prev,
           contactAddress: {
@@ -650,7 +678,10 @@ export const BookingForm = ({
     setIsServiceTermsExpanded(!isServiceTermsExpanded);
   };
   
-  if (loadingPlans || !plan) return <div className="flex justify-center items-center h-96"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
+  if (loadingPlans || !plan) {
+    console.log('[BookingForm] Loading plans...');
+    return <div className="flex justify-center items-center h-96"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
+  }
 
   const planName = currentPlan?.name || plan?.name || 'Selected Service';
   const labels = getFieldLabels();
@@ -837,6 +868,8 @@ export const BookingForm = ({
     
     return <p className="text-blue-200 mb-6">{currentPlan?.description || plan?.description || ''}</p>;
   };
+  
+  console.log('[BookingForm] Render complete');
   
   return <>
     <motion.div initial={{
@@ -1096,7 +1129,6 @@ const ReadOnlyTimeField = ({ label, value, loading }) => {
       const parsed = parse(timeStr, 'HH:mm:ss', new Date());
       return format(parsed, 'h:mm a');
     } catch {
-      // If already formatted or invalid, return as-is
       return timeStr;
     }
   };

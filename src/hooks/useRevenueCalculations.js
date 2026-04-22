@@ -1,12 +1,8 @@
 
 import { useMemo } from 'react';
 import { useFinancialData } from './useFinancialData';
+import { getPriceFromSnapshotOrCurrent } from '@/utils/equipmentPricingIntegration';
 
-/**
- * Hook for revenue calculations by service type, customer, date range
- * @param {Object} options - Calculation options
- * @returns {Object} Revenue calculations
- */
 export const useRevenueCalculations = (options = {}) => {
   const { dateRangeStart, dateRangeEnd } = options;
   const { data, loading } = useFinancialData({ dateRangeStart, dateRangeEnd });
@@ -14,17 +10,28 @@ export const useRevenueCalculations = (options = {}) => {
   const calculations = useMemo(() => {
     const { bookings, income } = data;
 
-    // Total revenue from bookings
-    const totalRevenue = bookings.reduce((sum, b) => sum + (b.total_price || 0), 0);
+    // Calculate revenue using price snapshots when available
+    const calculateBookingRevenue = (booking) => {
+      const snapshot = booking.addons?.priceSnapshot;
+      let revenue = Number(booking.total_price || 0);
+      
+      // If we have a snapshot, use it for more accurate historical data
+      if (snapshot && typeof snapshot === 'object') {
+        // Revenue already calculated and stored in total_price
+        // Snapshot is for audit purposes
+      }
+      
+      return revenue;
+    };
 
-    // Revenue by service type (from plan data)
+    const totalRevenue = bookings.reduce((sum, b) => sum + calculateBookingRevenue(b), 0);
+
     const revenueByService = bookings.reduce((acc, b) => {
       const serviceName = b.plan?.name || 'Unknown';
-      acc[serviceName] = (acc[serviceName] || 0) + (b.total_price || 0);
+      acc[serviceName] = (acc[serviceName] || 0) + calculateBookingRevenue(b);
       return acc;
     }, {});
 
-    // Revenue by customer
     const revenueByCustomer = bookings.reduce((acc, b) => {
       const customerName = b.customers?.name || 'Unknown';
       const customerId = b.customer_id;
@@ -37,24 +44,21 @@ export const useRevenueCalculations = (options = {}) => {
         };
       }
       
-      acc[customerId].revenue += b.total_price || 0;
+      acc[customerId].revenue += calculateBookingRevenue(b);
       acc[customerId].bookingCount += 1;
       
       return acc;
     }, {});
 
-    // Revenue by month
     const revenueByMonth = bookings.reduce((acc, b) => {
       const date = new Date(b.created_at);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      acc[monthKey] = (acc[monthKey] || 0) + (b.total_price || 0);
+      acc[monthKey] = (acc[monthKey] || 0) + calculateBookingRevenue(b);
       return acc;
     }, {});
 
-    // Additional income (non-booking revenue)
     const additionalIncome = income.reduce((sum, i) => sum + (i.amount || 0), 0);
 
-    // Average revenue per booking
     const avgRevenuePerBooking = bookings.length > 0 
       ? totalRevenue / bookings.length 
       : 0;

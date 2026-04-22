@@ -1,8 +1,10 @@
+
 import React from 'react';
 import { Link } from 'react-router-dom';
+
 export const Footer = () => {
   return <footer className="bg-black/20 text-white py-12 px-4 mt-16">
-      <div className="container mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 text-center md:text-left">
+      <div className="container mx-auto grid grid-cols-1 md:grid-cols-5 gap-8 text-center md:text-left">
         <div>
           <p className="font-bold text-lg text-yellow-400 mb-4">U-Fill Dumpsters</p>
           <p className="text-blue-200">Phone: (801) 810-8832</p>
@@ -16,6 +18,39 @@ export const Footer = () => {
             <li><Link to="/contact" className="hover:text-yellow-300 transition-colors">Contact</Link></li>
             <li><Link to="/reviews" className="hover:text-yellow-300 transition-colors">Reviews</Link></li>
              <li><Link to="/login" className="hover:text-yellow-300 transition-colors">Customer Portal</Link></li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-bold text-lg text-yellow-400 mb-4">Some Of Our Services</p>
+          <ul className="space-y-2">
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Flexible Scheduling</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Residential Rentals</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Commercial Rentals</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">DIYers Junk Removal</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Recycling Services</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Delivery & Pickup</span>
+            </li>
+            <li className="flex items-start md:items-center justify-center md:justify-start gap-2">
+              <span className="text-yellow-400 text-sm mt-0.5 md:mt-0">•</span>
+              <span className="text-blue-200 hover:text-yellow-300 transition-colors cursor-default">Equipment Rentals</span>
+            </li>
           </ul>
         </div>
         <div>
