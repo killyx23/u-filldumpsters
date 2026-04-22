@@ -1,5 +1,6 @@
 
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
+import { getPriceForEquipment, getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
 
@@ -14,7 +15,7 @@ export const calculateDays = (dropOff, pickup) => {
     return Math.max(1, days);
 };
 
-export const calculateBookingCosts = (service, days, addonsList, distanceMiles = 0) => {
+export const calculateBookingCosts = async (service, days, addonsList, distanceMiles = 0, priceSnapshot = null) => {
     if (!service) {
         return { serviceCost: 0, addonsCost: 0, subtotal: 0, tax: 0, total: 0 };
     }
@@ -23,50 +24,55 @@ export const calculateBookingCosts = (service, days, addonsList, distanceMiles =
     const deliveryFee = Number(service.delivery_fee) || 0;
     const mileageRate = Number(service.mileage_rate) || 0.85;
     
-    // Calculate service cost using exact BookingForm logic
+    // Calculate service cost
     let serviceCost = 0;
     if (service.id === 1) {
-        // 16 Yard Dumpster: 7 days = $500, otherwise base_price + (days-1) * $50
         serviceCost = days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
     } else if (service.id === 2 || service.id === 4) {
-        // Dump Loader Trailer or with Delivery: base_price * days
         serviceCost = basePrice * days;
     } else if (service.id === 3) {
-        // Flat Bed Delivery: just base_price (single day)
         serviceCost = basePrice;
     }
 
-    // Add delivery fee for delivery services
+    // Add delivery fee
     const isDeliveryService = service.id === 1 || service.id === 4 || service.id === 3;
     if (isDeliveryService) {
         serviceCost += deliveryFee;
     }
 
-    // Add mileage charge for delivery services (round-trip)
+    // Add mileage charge
     let mileageCharge = 0;
     if (isDeliveryService && distanceMiles > 0) {
         mileageCharge = distanceMiles * 2 * mileageRate;
         serviceCost += mileageCharge;
     }
 
-    // Calculate add-ons cost
+    // Calculate add-ons cost using equipment_pricing
     let addonsCost = 0;
     if (Array.isArray(addonsList)) {
-        addonsCost = addonsList.reduce((sum, addon) => {
-            const price = Number(addon?.price || 0);
-            const qty = Number(addon?.quantity || 1);
-            return sum + (price * qty);
-        }, 0);
+        for (const addon of addonsList) {
+            const equipmentId = addon.equipment_id || addon.dbId || addon.id;
+            if (equipmentId) {
+                const price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
+                const qty = Number(addon?.quantity || 1);
+                addonsCost += price * qty;
+            } else {
+                // Fallback to addon.price if no equipment_id
+                const price = Number(addon?.price || 0);
+                const qty = Number(addon?.quantity || 1);
+                addonsCost += price * qty;
+            }
+        }
     } else if (addonsList && typeof addonsList === 'object') {
-        addonsCost = Object.values(addonsList).reduce((sum, val) => {
+        for (const [key, val] of Object.entries(addonsList)) {
             const p = Number(val?.price || val) || 0;
             const q = Number(val?.quantity || 1);
-            return sum + (p * q);
-        }, 0);
+            addonsCost += p * q;
+        }
     }
 
     const subtotal = serviceCost + addonsCost;
-    const tax = subtotal * 0.07; // 7% tax (exactly like BookingForm)
+    const tax = subtotal * 0.07;
     const total = subtotal + tax;
 
     return {
@@ -116,82 +122,81 @@ export const calculateRescheduleFee = (originalTotal, originalApptTime, requestT
     };
 };
 
-/**
- * Calculate inventory differences between original and new add-ons
- * Returns arrays of items to return and items to allocate
- */
-export const calculateAddonsDifference = (originalAddons = [], newAddons = []) => {
+export const calculateAddonsDifference = async (originalAddons = [], newAddons = [], priceSnapshot = null) => {
     const originalMap = new Map();
     const newMap = new Map();
     
-    // Build maps by equipment ID
-    originalAddons.forEach(addon => {
+    // Build maps with current prices
+    for (const addon of originalAddons) {
         const key = addon.id || addon.equipment_id;
+        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
         originalMap.set(key, {
             ...addon,
-            quantity: Number(addon.quantity || 1)
+            quantity: Number(addon.quantity || 1),
+            price
         });
-    });
+    }
     
-    newAddons.forEach(addon => {
+    for (const addon of newAddons) {
         const key = addon.id || addon.equipment_id;
+        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
         newMap.set(key, {
             ...addon,
-            quantity: Number(addon.quantity || 1)
+            quantity: Number(addon.quantity || 1),
+            price
         });
-    });
+    }
     
-    const toReturn = []; // Items removed or quantity decreased
-    const toAllocate = []; // Items added or quantity increased
-    const unchanged = []; // Items with same quantity
+    const toReturn = [];
+    const toAllocate = [];
+    const unchanged = [];
     
-    // Check all original items
     originalMap.forEach((originalItem, id) => {
         const newItem = newMap.get(id);
         
         if (!newItem) {
-            // Item completely removed - return to inventory
             toReturn.push({
                 equipment_id: id,
                 name: originalItem.name,
                 quantity: originalItem.quantity,
-                type: originalItem.type
+                type: originalItem.type,
+                price: originalItem.price
             });
         } else if (newItem.quantity < originalItem.quantity) {
-            // Quantity decreased - return difference
             toReturn.push({
                 equipment_id: id,
                 name: originalItem.name,
                 quantity: originalItem.quantity - newItem.quantity,
-                type: originalItem.type
+                type: originalItem.type,
+                price: originalItem.price
             });
         } else if (newItem.quantity > originalItem.quantity) {
-            // Quantity increased - allocate difference
             toAllocate.push({
                 equipment_id: id,
                 name: newItem.name,
                 quantity: newItem.quantity - originalItem.quantity,
-                type: newItem.type
+                type: newItem.type,
+                price: newItem.price
             });
         } else {
-            // Same quantity
             unchanged.push({
                 equipment_id: id,
                 name: originalItem.name,
                 quantity: originalItem.quantity,
-                type: originalItem.type
+                type: originalItem.type,
+                price: originalItem.price
             });
         }
     });
     
-    // Check for completely new items
     newMap.forEach((newItem, id) => {
         if (!originalMap.has(id)) {
             toAllocate.push({
                 equipment_id: id,
                 name: newItem.name,
                 quantity: newItem.quantity,
-                type: newItem.type
+                type: newItem.type,
+                price: newItem.price
             });
         }
     });
@@ -203,71 +208,63 @@ export const calculateAddonsDifference = (originalAddons = [], newAddons = []) =
     };
 };
 
-export function calculateComprehensivePricing(
+export async function calculateComprehensivePricing(
   serviceId,
   basePrice,
   numberOfDays,
   selectedAddons = [],
   mileageDistance = 0,
   deliveryFee = 0,
-  insurancePrice = 0
+  insurancePrice = 0,
+  priceSnapshot = null
 ) {
-  // Calculate base rental cost based on service type
   let baseRentalCost = 0;
   
   if (serviceId === 1) {
-    // Service 1 (16 Yard Dumpster): 7 days = $500, else base_price + (days-1) × $50
-    if (numberOfDays === 7) {
-      baseRentalCost = 500;
-    } else {
-      baseRentalCost = basePrice + (numberOfDays - 1) * 50;
-    }
+    baseRentalCost = numberOfDays === 7 ? 500 : basePrice + (numberOfDays - 1) * 50;
   } else if (serviceId === 2) {
-    // Service 2 (Dump Loader Trailer): base_price × days
     baseRentalCost = basePrice * numberOfDays;
   } else if (serviceId === 3) {
-    // Service 3 (Flat Bed Delivery): base_price (single day)
     baseRentalCost = basePrice;
   } else if (serviceId === 4) {
-    // Service 4 (Dump Loader with Delivery): base_price × days
     baseRentalCost = basePrice * numberOfDays;
   } else {
-    // Default: base_price × days
     baseRentalCost = basePrice * numberOfDays;
   }
 
-  // Calculate mileage charge (round-trip distance × rate)
-  const mileageCharge = mileageDistance > 0 ? mileageDistance * 0.5 : 0; // Assuming $0.50 per mile; adjust if needed
+  const mileageCharge = mileageDistance > 0 ? mileageDistance * 0.5 : 0;
 
-  // Calculate add-ons breakdown
-  const addonsBreakdown = selectedAddons
-    .filter(addon => addon.quantity > 0)
-    .map(addon => ({
+  // Calculate add-ons using equipment_pricing
+  const addonsBreakdown = [];
+  for (const addon of selectedAddons.filter(a => a.quantity > 0)) {
+    const equipmentId = addon.equipment_id || addon.dbId || addon.id;
+    let price = Number(addon.price || 0);
+    
+    if (equipmentId) {
+      price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
+    }
+    
+    addonsBreakdown.push({
       name: addon.name,
-      price: addon.price,
+      price,
       quantity: addon.quantity,
-      total: addon.price * addon.quantity
-    }));
+      total: price * addon.quantity
+    });
+  }
 
   const addonsTotal = addonsBreakdown.reduce((sum, addon) => sum + addon.total, 0);
-
-  // Calculate subtotal (before tax)
   const subtotal = baseRentalCost + deliveryFee + mileageCharge + addonsTotal + insurancePrice;
-
-  // Calculate tax (7%)
   const tax = subtotal * 0.07;
-
-  // Calculate estimated total
   const estimatedTotal = subtotal + tax;
 
   return {
-    baseRentalCost,
-    deliveryFee,
-    mileageCharge,
+    baseRentalCost: round2(baseRentalCost),
+    deliveryFee: round2(deliveryFee),
+    mileageCharge: round2(mileageCharge),
     addonsBreakdown,
-    insurancePrice,
-    subtotal,
-    tax,
-    estimatedTotal
+    insurancePrice: round2(insurancePrice),
+    subtotal: round2(subtotal),
+    tax: round2(tax),
+    estimatedTotal: round2(estimatedTotal)
   };
 }

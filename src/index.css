@@ -109,6 +109,40 @@
 }
 
 @layer components {
+  /* Price Breakdown Components */
+  .price-breakdown-category {
+    @apply mb-4;
+  }
+
+  .category-separator {
+    @apply w-full h-px bg-gradient-to-r from-transparent via-white/20 to-transparent;
+  }
+
+  .price-breakdown-container {
+    @apply bg-white/5 rounded-xl p-6 border border-white/10;
+  }
+
+  .price-breakdown-scrollable {
+    @apply max-h-[60vh] overflow-y-auto pr-2;
+  }
+
+  /* Scrollbar Styling */
+  .scrollbar-thin::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-white/20 rounded-full;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/30;
+  }
+
   /* Financial Dashboard Specific Styles */
   .financial-metric-card {
     @apply rounded-lg p-6 border shadow-lg transition-all hover:shadow-xl;

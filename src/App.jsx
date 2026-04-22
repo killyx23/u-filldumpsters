@@ -24,8 +24,12 @@ import ProductShowcasePage from '@/pages/ProductShowcasePage';
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
+import EquipmentDataVerificationPage from '@/pages/EquipmentDataVerificationPage';
+import EquipmentPriceSyncPage from '@/pages/EquipmentPriceSyncPage';
+import SystemHealthCheckPage from '@/pages/SystemHealthCheckPage';
 import { CartProvider } from '@/hooks/useCart';
 import AuthErrorBoundary from '@/components/AuthErrorBoundary';
+import { useEquipmentPricingInit } from '@/hooks/useEquipmentPricingInit';
 import { Loader2 } from 'lucide-react';
 
 // Loading fallback component
@@ -76,6 +80,9 @@ const CustomerLayout = () => (
 );
 
 function AppContent() {
+  // Initialize equipment pricing on app mount
+  useEquipmentPricingInit();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 text-white relative flex flex-col">
       <Toaster />
@@ -93,6 +100,9 @@ function AppContent() {
             <Route element={<AdminLayout />}>
               <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/admin/customer/:id" element={<CustomerDetailPage />} />
+              <Route path="/admin/equipment-verification" element={<EquipmentDataVerificationPage />} />
+              <Route path="/admin/equipment-sync" element={<EquipmentPriceSyncPage />} />
+              <Route path="/admin/system-health" element={<SystemHealthCheckPage />} />
             </Route>
 
             {/* Customer Portal Routes */}

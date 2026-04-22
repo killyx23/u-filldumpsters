@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -40,11 +40,6 @@ export default function CustomerPortal() {
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(new Date());
 
-    // Prevent overlapping / bursty calls to the edge function (interval + realtime + manual refresh).
-    const fetchInFlightRef = useRef(false);
-    const pendingFetchRef = useRef(false);
-    const lastFetchAtRef = useRef(0);
-
     // Action States
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
@@ -70,7 +65,6 @@ export default function CustomerPortal() {
     // ENHANCED: Fetch data with comprehensive logging
     const fetchData = useCallback(async (isInitialLoad = true) => {
         const timestamp = new Date().toISOString();
-        const nowMs = Date.now();
         
         if (!user || !session) {
             console.log(`[${timestamp}] [CustomerPortal] No user/session, skipping fetch`, {
@@ -79,24 +73,6 @@ export default function CustomerPortal() {
             });
             if (isInitialLoad) setLoading(false);
             return;
-        }
-
-        // Coalesce bursts of refresh triggers (realtime + interval) into a single request.
-        // Also avoid overlapping requests which can cause browser/network errors.
-        const minGapMs = 1500;
-        if (!isInitialLoad) {
-            if (fetchInFlightRef.current) {
-                pendingFetchRef.current = true;
-                console.log(`[${timestamp}] [CustomerPortal] Fetch already in-flight; queued one refresh`);
-                return;
-            }
-            if (nowMs - lastFetchAtRef.current < minGapMs) {
-                pendingFetchRef.current = true;
-                console.log(`[${timestamp}] [CustomerPortal] Fetch called too soon; queued one refresh`, {
-                    msSinceLastFetch: nowMs - lastFetchAtRef.current
-                });
-                return;
-            }
         }
 
         console.log(`[${timestamp}] [CustomerPortal] Starting data fetch`, {
@@ -129,8 +105,6 @@ export default function CustomerPortal() {
         }
 
         try {
-            fetchInFlightRef.current = true;
-            lastFetchAtRef.current = nowMs;
             console.log(`[${timestamp}] [CustomerPortal] Calling get-customer-details edge function...`);
 
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
@@ -182,17 +156,7 @@ export default function CustomerPortal() {
                 variant: "destructive" 
             });
         } finally {
-            fetchInFlightRef.current = false;
             if (isInitialLoad) setLoading(false);
-
-            // If more triggers fired while we were busy (or too soon), run one follow-up fetch.
-            if (pendingFetchRef.current) {
-                pendingFetchRef.current = false;
-                const followUpTs = new Date().toISOString();
-                console.log(`[${followUpTs}] [CustomerPortal] Running queued refresh fetch`);
-                // Fire-and-forget; this function already handles its own state.
-                fetchData(false);
-            }
         }
     }, [user, session, signOut]);
 

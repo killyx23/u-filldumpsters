@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { AddonSection } from './AddonSection';
@@ -18,12 +19,15 @@ export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, eq
                     const inventoryItem = equipmentInventory.find(inv => inv.id === item.dbId);
                     const available = inventoryItem ? inventoryItem.total_quantity : 0;
                     
+                    // Use price from item metadata (loaded from equipment_pricing in parent)
+                    const itemPrice = Number(item.price || 0);
+                    
                     return (
                         <EquipmentItem 
                             key={item.id} 
                             id={item.id} 
                             label={item.label} 
-                            price={item.price}
+                            price={itemPrice}
                             icon={item.icon}
                             hasQuantitySelector={item.quantity}
                             quantity={quantity}

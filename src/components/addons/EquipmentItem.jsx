@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Minus, Plus, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { Minus, Plus, ChevronLeft, ChevronRight, Info, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const handTruckImages = [
@@ -36,17 +36,25 @@ const gorillaImages = [
 ];
 
 const gorillaFeatures = [
-  "1,200 lb. heavy-duty hauling capacity",
-  "10 cu. ft. rust-proof poly bed for superior durability",
-  "Patented quick-release dumping system makes unloading fast and easy",
-  "Innovative 2-in-1 handle allows the cart to be easily towed behind a lawn tractor or ATV, or pulled by hand",
-  "13-inch pneumatic tires are designed to tackle any terrain",
-  "Heavy-duty steel frame with a durable powder-coated finish",
-  "Perfect for moving heavy mulch, rocks, soil, or debris around the yard or job site"
+  "1,500 lb. Heavy Duty Capacity - Perfect for moving heavy items, rocks, soil, or debris from the yard or job site",
+  "Patented Quick-Release Dumping System - Allows unloading with ease",
+  "Innovative Steel Frame Design - Reduces assembly time while offering improved maneuverability",
+  "Easy to Maneuver - Tight-turning steering for better control",
+  "Huge Heavy-Duty Rust-Resistant Poly Bed - Durable construction",
+  "Patented 2-in-1 Handle - Allows cart to be towed behind a lawn tractor or ATV or pulled by hand",
+  "16″ Pneumatic Tires - To haul heavy loads"
+];
+
+const gorillaSpecs = [
+  { label: "Product Dimensions", value: "55.2\"D x 32.5\"W x 30.2\"H" },
+  { label: "Brand", value: "Gorilla Carts" },
+  { label: "Material", value: "Steel, heavy-duty poly, and pneumatic turf tires" },
+  { label: "Color", value: "Black" },
+  { label: "Special Feature", value: "Durable" }
 ];
 
 // Shared modal component for both Gorilla Cart and Hand Truck
-const SharedProductModal = ({ isOpen, onClose, title, images, features, videoId, videoStart = 0 }) => {
+const SharedProductModal = ({ isOpen, onClose, title, images, features, specifications, videoId, videoStart = 0, showVideo = true }) => {
   const [imageIndex, setImageIndex] = useState(0);
 
   const handleNext = () => setImageIndex((prev) => (prev + 1) % images.length);
@@ -63,18 +71,20 @@ const SharedProductModal = ({ isOpen, onClose, title, images, features, videoId,
 
         <div className="p-6 space-y-8 flex flex-col items-center">
           {/* Responsive & Centered Video Section */}
-          <div className="w-full max-w-2xl mx-auto">
-            <div className="aspect-video w-full overflow-hidden rounded-xl shadow-lg bg-black">
-              <iframe
-                className="w-full h-full"
-                src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&start=${videoStart}`}
-                title={`${title} Showcase Video`}
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              ></iframe>
+          {showVideo && (
+            <div className="w-full max-w-2xl mx-auto">
+              <div className="aspect-video w-full overflow-hidden rounded-xl shadow-lg bg-black">
+                <iframe
+                  className="w-full h-full"
+                  src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&start=${videoStart}`}
+                  title={`${title} Showcase Video`}
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Centered Image Gallery */}
           <div className="w-full max-w-2xl mx-auto space-y-6">
@@ -143,6 +153,24 @@ const SharedProductModal = ({ isOpen, onClose, title, images, features, videoId,
               ))}
             </ul>
           </div>
+
+          {/* Specifications Section */}
+          {specifications && specifications.length > 0 && (
+            <div className="w-full max-w-3xl mx-auto bg-slate-50 p-6 rounded-xl border border-slate-100">
+              <h3 className="text-xl font-bold mb-4 text-slate-900 flex items-center justify-center gap-2">
+                <Package className="h-5 w-5 text-blue-600" />
+                Specifications
+              </h3>
+              <div className="space-y-3">
+                {specifications.map((spec, idx) => (
+                  <div key={idx} className="flex items-start justify-between gap-4 py-2 border-b border-slate-200 last:border-0">
+                    <span className="font-semibold text-slate-900 text-sm sm:text-base">{spec.label}:</span>
+                    <span className="text-slate-700 text-sm sm:text-base text-right">{spec.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -170,6 +198,9 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
             setIsModalOpen(true);
         }
     };
+
+    // Calculate item total: price × quantity
+    const itemTotal = Number(price) * Number(quantity);
 
     const addButton = (
         <Button size="sm" variant={quantity > 0 ? "destructive" : "secondary"} onClick={() => onQuantityChange(quantity > 0 ? 0 : 1)} disabled={!isAvailable && quantity === 0}>
@@ -221,7 +252,9 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
                         </div>
                     ) : (
                         <div className="flex items-center gap-4">
-                            <span className="font-semibold text-green-400">+${price.toFixed(2)}</span>
+                            <span className="font-semibold text-green-400">
+                                {quantity > 0 ? `$${itemTotal.toFixed(2)}` : `+$${Number(price).toFixed(2)}`}
+                            </span>
                             {!isAvailable && quantity === 0 ? (
                                 <TooltipProvider>
                                     <Tooltip>
@@ -243,8 +276,10 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
                     title={displayLabel}
                     images={isGorillaCart ? gorillaImages : handTruckImages}
                     features={isGorillaCart ? gorillaFeatures : handTruckFeatures}
+                    specifications={isGorillaCart ? gorillaSpecs : null}
                     videoId="7CZB55q6H3k"
                     videoStart={isGorillaCart ? 23 : 0}
+                    showVideo={isGorillaCart}
                 />
             )}
         </>

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import { BookingsManager } from '@/components/admin/BookingsManager';
 import { CustomersManager } from '@/components/admin/CustomersManager';
 import { PricingManager } from '@/components/admin/PricingManager';
@@ -15,9 +16,11 @@ import { PendingVerificationsManager } from '@/components/admin/PendingVerificat
 import { SettingsManager } from '@/components/admin/SettingsManager';
 import { ResourceManagement } from '@/components/admin/ResourceManagement';
 import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator } from 'lucide-react';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
+import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
 
 const AdminDashboard = () => {
     const { user, signOut } = useAuth();
@@ -28,6 +31,9 @@ const AdminDashboard = () => {
     const [bookings, setBookings] = useState([]);
     const [customersWithUnreadNotes, setCustomersWithUnreadNotes] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [pricingHealth, setPricingHealth] = useState(null);
+    const [showPricingAlert, setShowPricingAlert] = useState(false);
+    const [runningMigration, setRunningMigration] = useState(false);
 
     const fetchDashboardData = useCallback(async (showLoading = true) => {
         if(showLoading) setLoading(true);
@@ -60,9 +66,19 @@ const AdminDashboard = () => {
         }
     }, []);
 
+    const checkPricingHealth = useCallback(async () => {
+        const health = await checkEquipmentPricingHealth();
+        setPricingHealth(health);
+        
+        if (health.issues_found > 0) {
+          setShowPricingAlert(true);
+        }
+    }, []);
+
     useEffect(() => {
         fetchDashboardData();
-    }, [fetchDashboardData]);
+        checkPricingHealth();
+    }, [fetchDashboardData, checkPricingHealth]);
     
     useEffect(() => {
         const handleCustomerUpdate = (payload) => {
@@ -118,6 +134,30 @@ const AdminDashboard = () => {
         setSearchParams({ tab: value });
     };
 
+    const handleRunMigration = async () => {
+      setRunningMigration(true);
+      
+      const result = await runEquipmentPricingMigration();
+      
+      if (result.success) {
+        toast({
+          title: 'Migration Successful',
+          description: `Created ${result.created_records} pricing records, updated ${result.updated_records} records.`
+        });
+        
+        // Refresh health check
+        await checkPricingHealth();
+      } else {
+        toast({
+          title: 'Migration Completed with Errors',
+          description: `${result.errors} errors occurred. Check console for details.`,
+          variant: 'destructive'
+        });
+      }
+      
+      setRunningMigration(false);
+    };
+
     const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
     const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged', 'pending_payment'].includes(b.status) && !b.pending_address_verification).length) + customersWithUnreadNotes.length;
 
@@ -135,6 +175,59 @@ const AdminDashboard = () => {
                         </div>
                     )}
                 </div>
+
+                {showPricingAlert && pricingHealth && pricingHealth.issues_found > 0 && (
+                  <div className="bg-orange-900/20 border border-orange-500/30 rounded-lg p-4 mb-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 flex-1">
+                        <AlertCircle className="h-5 w-5 text-orange-400 mt-0.5" />
+                        <div>
+                          <h3 className="font-bold text-orange-300 mb-2">
+                            Equipment Pricing Issues Detected
+                          </h3>
+                          <p className="text-sm text-orange-200 mb-3">
+                            {pricingHealth.issues_found} equipment record(s) have pricing configuration issues.
+                          </p>
+                          <div className="space-y-1 text-sm text-orange-100 mb-3">
+                            {pricingHealth.missing_pricing.length > 0 && (
+                              <p>• {pricingHealth.missing_pricing.length} missing pricing records</p>
+                            )}
+                            {pricingHealth.null_item_types.length > 0 && (
+                              <p>• {pricingHealth.null_item_types.length} records with null item_type</p>
+                            )}
+                            {pricingHealth.invalid_prices.length > 0 && (
+                              <p>• {pricingHealth.invalid_prices.length} records with invalid prices</p>
+                            )}
+                            {pricingHealth.price_mismatches.length > 0 && (
+                              <p>• {pricingHealth.price_mismatches.length} price mismatches</p>
+                            )}
+                          </div>
+                          <Button 
+                            onClick={handleRunMigration}
+                            disabled={runningMigration}
+                            className="bg-orange-600 hover:bg-orange-700"
+                          >
+                            {runningMigration ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Fixing Issues...
+                              </>
+                            ) : (
+                              'Fix All Issues'
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setShowPricingAlert(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
                     <TabsList className="flex flex-wrap justify-start mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">

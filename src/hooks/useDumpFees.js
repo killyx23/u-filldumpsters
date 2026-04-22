@@ -1,6 +1,16 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+
+/**
+ * Dump Fees Hook
+ * Loads dump fees and delivery pricing from dump_fees and services tables
+ * 
+ * IMPORTANT: This hook performs SELECT and UPDATE queries only.
+ * INSERT operations (upsert) are allowed for dump_fees table.
+ * No INSERT attempts are made to business_settings table.
+ */
 
 export const useDumpFees = () => {
   const [dumpFees, setDumpFees] = useState([]);
@@ -10,7 +20,9 @@ export const useDumpFees = () => {
   const fetchDumpFees = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch dump fees along with associated service delivery_fee and mileage_rate from services table
+      console.log('[Dump Fees] Fetching dump fees and service pricing');
+      
+      // SELECT only from dump_fees and services tables
       const { data, error } = await supabase
         .from('dump_fees')
         .select('*, services(id, name, delivery_fee, mileage_rate)');
@@ -18,7 +30,6 @@ export const useDumpFees = () => {
       if (error) throw error;
       setDumpFees(data || []);
 
-      // Build a pricing map for easy access
       const pricingMap = {};
       if (data) {
         data.forEach(item => {
@@ -31,8 +42,9 @@ export const useDumpFees = () => {
         });
       }
       setServicesPricing(pricingMap);
+      console.log('[Dump Fees] ✓ Loaded dump fees for', Object.keys(pricingMap).length, 'services');
     } catch (error) {
-      console.error('Error fetching dump fees:', error);
+      console.error('[Dump Fees] Error fetching dump fees:', error);
       toast({
         title: 'Error loading dump fees',
         description: error.message,
@@ -49,6 +61,9 @@ export const useDumpFees = () => {
 
   const updateDumpFee = async (serviceId, feePerTon, maxTons) => {
     try {
+      console.log('[Dump Fees] Updating dump fee for service:', serviceId);
+      
+      // UPSERT is allowed for dump_fees table (has proper RLS policies)
       const { error } = await supabase
         .from('dump_fees')
         .upsert(
@@ -68,9 +83,10 @@ export const useDumpFees = () => {
         description: 'The dump fee has been successfully updated.',
       });
       await fetchDumpFees();
+      console.log('[Dump Fees] ✓ Dump fee updated successfully');
       return true;
     } catch (error) {
-      console.error('Error updating dump fee:', error);
+      console.error('[Dump Fees] Error updating dump fee:', error);
       toast({
         title: 'Error updating dump fee',
         description: error.message,
@@ -89,7 +105,6 @@ export const useDumpFees = () => {
     const delivery_fee_flat = pricing.delivery_fee_flat;
     const mileage_rate = pricing.mileage_rate;
     
-    // Guardrails
     const safe_delivery_fee_flat = delivery_fee_flat !== undefined && delivery_fee_flat !== null ? delivery_fee_flat : 10.00;
     const safe_mileage_rate = mileage_rate !== undefined && mileage_rate !== null ? mileage_rate : 0;
     const trip_mileage_cost = miles > 0 && safe_mileage_rate > 0 ? (miles * safe_mileage_rate) : 0;

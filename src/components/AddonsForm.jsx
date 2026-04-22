@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
@@ -11,26 +12,19 @@ import { OrderSummary } from './addons/OrderSummary';
 import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
-
-const addonPrices = {
-  drivewayProtection: 15,
-  equipment: {
-    wheelbarrow: 10,
-    handTruck: 15,
-    gloves: 5,
-  },
-};
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 
 const equipmentMeta = [
-  { id: 'wheelbarrow', dbId: 1, label: 'Wheelbarrow', price: addonPrices.equipment.wheelbarrow, icon: <ShoppingCart className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
-  { id: 'handTruck', dbId: 2, label: 'Hand Truck', price: addonPrices.equipment.handTruck, icon: <Hammer className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
-  { id: 'gloves', dbId: 3, label: 'Working Gloves (Pair)', price: addonPrices.equipment.gloves, icon: <HardHat className="h-6 w-6 mr-3 text-yellow-400" />, quantity: true, type: 'purchase' },
+  { id: 'wheelbarrow', dbId: 1, label: 'Wheelbarrow', price: 0, icon: <ShoppingCart className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
+  { id: 'handTruck', dbId: 2, label: 'Hand Truck', price: 0, icon: <Hammer className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
+  { id: 'gloves', dbId: 3, label: 'Working Gloves (Pair)', price: 0, icon: <HardHat className="h-6 w-6 mr-3 text-yellow-400" />, quantity: true, type: 'purchase' },
 ];
 
 const disposalMeta = [
-  { id: 'mattressDisposal', label: 'Mattress Disposal', price: 25, icon: <Trash2 className="h-6 w-6 mr-3 text-yellow-400" /> },
-  { id: 'tvDisposal', label: 'TV Disposal', price: 15, icon: <Monitor className="h-6 w-6 mr-3 text-yellow-400" /> },
-  { id: 'applianceDisposal', label: 'Appliance Disposal', price: 35, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
+  { id: 'mattressDisposal', dbId: 4, label: 'Mattress Disposal', price: 0, icon: <Trash2 className="h-6 w-6 mr-3 text-yellow-400" /> },
+  { id: 'tvDisposal', dbId: 5, label: 'TV Disposal', price: 0, icon: <Monitor className="h-6 w-6 mr-3 text-yellow-400" /> },
+  { id: 'applianceDisposal', dbId: 6, label: 'Appliance Disposal', price: 0, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
 ];
 
 export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress }) => {
@@ -41,10 +35,17 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [fetchedMileageRate, setFetchedMileageRate] = useState(plan?.mileage_rate !== undefined ? Number(plan.mileage_rate) : 0.85);
   const [fetchedDeliveryFeeFlat, setFetchedDeliveryFeeFlat] = useState(plan?.delivery_fee !== undefined ? Number(plan.delivery_fee) : 10.00);
+  const [equipmentMetaWithPrices, setEquipmentMetaWithPrices] = useState(equipmentMeta);
+  const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
 
-  const { insurancePrice } = useInsurancePricing();
+  // Load insurance and driveway protection prices from hooks
+  const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
+  const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
+
+  console.log('[AddonsForm] Insurance price from hook:', insurancePrice);
+  console.log('[AddonsForm] Driveway protection price from hook:', drivewayPrice);
 
   // Initialize insurance to 'accept' by default if it's missing/undefined
   useEffect(() => {
@@ -52,6 +53,46 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       setAddonsData(prev => ({ ...prev, insurance: 'accept' }));
     }
   }, [addonsData?.insurance, setAddonsData]);
+
+  // Load equipment and disposal prices from database
+  useEffect(() => {
+    const loadPrices = async () => {
+      try {
+        console.log('[AddonsForm] Loading equipment and disposal prices from database');
+
+        // Load equipment prices (IDs 1-3)
+        const updatedEquipmentMeta = await Promise.all(
+          equipmentMeta.map(async (item) => {
+            const price = await getPriceForEquipment(item.dbId);
+            console.log(`[AddonsForm] Loaded price for ${item.label} (ID ${item.dbId}): $${price}`);
+            return { ...item, price };
+          })
+        );
+
+        // Load disposal prices (IDs 4-6)
+        const updatedDisposalMeta = await Promise.all(
+          disposalMeta.map(async (item) => {
+            const price = await getPriceForEquipment(item.dbId);
+            console.log(`[AddonsForm] Loaded price for ${item.label} (ID ${item.dbId}): $${price}`);
+            return { ...item, price };
+          })
+        );
+
+        setEquipmentMetaWithPrices(updatedEquipmentMeta);
+        setDisposalMetaWithPrices(updatedDisposalMeta);
+        console.log('[AddonsForm] ✓ All prices loaded from database');
+      } catch (error) {
+        console.error('[AddonsForm] Error loading prices:', error);
+        toast({
+          title: 'Error Loading Prices',
+          description: 'Some prices could not be loaded from database.',
+          variant: 'destructive'
+        });
+      }
+    };
+
+    loadPrices();
+  }, []);
 
   useEffect(() => {
     const fetchPricing = async () => {
@@ -109,7 +150,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
   const handleEquipmentQuantityChange = (itemId, newQuantity) => {
     setAddonsData(prev => {
-      const equipmentInfo = equipmentMeta.find(e => e.id === itemId);
+      const equipmentInfo = equipmentMetaWithPrices.find(e => e.id === itemId);
       if(!equipmentInfo) return prev;
 
       const currentEquipment = Array.isArray(prev.equipment) ? prev.equipment : [];
@@ -153,15 +194,26 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         finalTotal += appliedDeliveryFeeFlat || 0;
     }
 
-    // Dynamic insurance price from useInsurancePricing hook
-    // Notice this correctly checks for 'accept', which is now the default
-    if (addonsData?.insurance === 'accept') finalTotal += insurancePrice;
-    if (addonsData?.drivewayProtection === 'accept' && isDeliveryRequired) finalTotal += addonPrices.drivewayProtection;
+    // Dynamic insurance price from database (via hook)
+    if (addonsData?.insurance === 'accept') {
+      finalTotal += insurancePrice;
+      console.log('[AddonsForm] Adding insurance cost:', insurancePrice);
+    }
     
+    // Dynamic driveway protection price from database (via hook)
+    if (addonsData?.drivewayProtection === 'accept' && isDeliveryRequired) {
+      finalTotal += drivewayPrice;
+      console.log('[AddonsForm] Adding driveway protection cost:', drivewayPrice);
+    }
+    
+    // Equipment prices from database
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
-          const meta = equipmentMeta.find(e => e.id === item.id);
-          if (meta) finalTotal += meta.price * item.quantity;
+          const meta = equipmentMetaWithPrices.find(e => e.id === item.id);
+          if (meta) {
+            finalTotal += meta.price * item.quantity;
+            console.log('[AddonsForm] Adding equipment cost:', meta.label, meta.price * item.quantity);
+          }
         });
     }
 
@@ -171,18 +223,21 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     // Do not process disposal items for Dump Loader Trailer (ID 2)
     if (plan?.id !== 2) {
       if (addonsData?.mattressDisposal > 0) {
-          finalTotal += 25 * addonsData.mattressDisposal;
-          totalDisposalFee += 25 * addonsData.mattressDisposal;
+          const mattressPrice = disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25;
+          finalTotal += mattressPrice * addonsData.mattressDisposal;
+          totalDisposalFee += mattressPrice * addonsData.mattressDisposal;
           disposalItemsList.push(`${addonsData.mattressDisposal}x Mattress Disposal`);
       }
       if (addonsData?.tvDisposal > 0) {
-          finalTotal += 15 * addonsData.tvDisposal;
-          totalDisposalFee += 15 * addonsData.tvDisposal;
+          const tvPrice = disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15;
+          finalTotal += tvPrice * addonsData.tvDisposal;
+          totalDisposalFee += tvPrice * addonsData.tvDisposal;
           disposalItemsList.push(`${addonsData.tvDisposal}x TV Disposal`);
       }
       if (addonsData?.applianceDisposal > 0) {
-          finalTotal += 35 * addonsData.applianceDisposal;
-          totalDisposalFee += 35 * addonsData.applianceDisposal;
+          const appliancePrice = disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35;
+          finalTotal += appliancePrice * addonsData.applianceDisposal;
+          totalDisposalFee += appliancePrice * addonsData.applianceDisposal;
           disposalItemsList.push(`${addonsData.applianceDisposal}x Appliance Disposal`);
       }
     }
@@ -207,7 +262,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         deliveryFee: isDeliveryRequired ? appliedDeliveryFeeFlat : 0,
         mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0, 
         distanceFeeDisplay: feeResult.displayText,
-        insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0 // Keep track of applied price for edge cases
+        insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0,
+        drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0
     };
 
     if (disposalItemsList.length > 0) {
@@ -215,6 +271,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     } else {
         updatedAddons.disposalNotes = null;
     }
+
+    console.log('[AddonsForm] Final total calculated:', finalTotal);
+    console.log('[AddonsForm] Updated addons:', updatedAddons);
 
     onSubmit(finalTotal, null, updatedAddons);
   };
@@ -227,8 +286,13 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     return null;
   }
   
-  const rentalEquipment = equipmentMeta.filter(item => item.type === 'rental');
-  const purchaseItems = equipmentMeta.filter(item => item.type === 'purchase');
+  const rentalEquipment = equipmentMetaWithPrices.filter(item => item.type === 'rental');
+  const purchaseItems = equipmentMetaWithPrices.filter(item => item.type === 'purchase');
+
+  // Show loading indicator if insurance or driveway prices are still loading
+  if (insuranceLoading || drivewayLoading) {
+    console.log('[AddonsForm] Waiting for insurance/driveway prices to load...');
+  }
 
   return (
     <>
@@ -267,7 +331,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   handleInsuranceChange={handleInsuranceChange}
                   handleDrivewayProtectionChange={handleDrivewayProtectionChange}
                   plan={plan}
-                  addonPrices={{ ...addonPrices, insurance: insurancePrice }} // Dynamically inject insurance price
+                  addonPrices={{ insurance: insurancePrice, drivewayProtection: drivewayPrice }}
                   isDelivery={deliveryService && plan.id === 2}
                 />
                 <EquipmentSection 
@@ -304,7 +368,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                       </button>
                     </div>
                     <div className="space-y-4">
-                      {disposalMeta.map(item => {
+                      {disposalMetaWithPrices.map(item => {
                         const quantity = addonsData?.[item.id] || 0;
                         return (
                           <div key={item.id} className="flex items-center justify-between bg-white/5 p-4 rounded-lg border border-white/5">
@@ -387,9 +451,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
           <DialogDescription className="text-blue-200 text-sm leading-relaxed pt-2 pb-4">
             Mattress, TV, and appliance disposal requires specialized handling and processing at certified waste facilities. These items cannot be disposed of in standard landfills due to environmental and safety regulations. The fees charged reflect the actual costs incurred by waste management facilities for proper recycling and disposal:
             <ul className="list-disc list-inside mt-2 space-y-1 text-white">
-              <li>Mattresses: $25/unit</li>
-              <li>TVs/Monitors: $15/unit</li>
-              <li>Appliances: $35/unit</li>
+              <li>Mattresses: ${disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25}/unit</li>
+              <li>TVs/Monitors: ${disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15}/unit</li>
+              <li>Appliances: ${disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35}/unit</li>
             </ul>
             <br />
             By including these fees upfront, we ensure transparent pricing and proper environmental stewardship for these materials.
