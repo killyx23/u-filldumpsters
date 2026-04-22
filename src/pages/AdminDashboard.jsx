@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -13,7 +14,8 @@ import { FaqsManager } from '@/components/admin/FaqsManager';
 import { PendingVerificationsManager } from '@/components/admin/PendingVerificationsManager';
 import { SettingsManager } from '@/components/admin/SettingsManager';
 import { ResourceManagement } from '@/components/admin/ResourceManagement';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen } from 'lucide-react';
+import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -152,6 +154,9 @@ const AdminDashboard = () => {
                                 </span>
                             )}
                         </TabsTrigger>
+                        <TabsTrigger value="financial" className="py-2 bg-green-900/20 data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                            <Calculator className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Financial Books</span>
+                        </TabsTrigger>
                         <TabsTrigger value="bookings" className="py-2"><Truck className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Bookings</span></TabsTrigger>
                         <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
                         <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
@@ -169,6 +174,7 @@ const AdminDashboard = () => {
                         <>
                             <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
                             <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
+                            <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
                             <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>

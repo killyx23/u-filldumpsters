@@ -1,3 +1,4 @@
+
 import { supabase } from '@/lib/customSupabaseClient';
 
 export const AvailabilityService = {
@@ -18,18 +19,23 @@ export const AvailabilityService = {
    * @returns {Promise<Object|null>} The availability record or null if not found
    */
   async getDateSpecificAvailability(serviceId, date) {
-    const { data, error } = await supabase
-      .from('date_specific_availability')
-      .select('*')
-      .eq('service_id', serviceId)
-      .eq('date', date)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('date_specific_availability')
+        .select('*')
+        .eq('service_id', serviceId)
+        .eq('date', date)
+        .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching date specific availability:', error);
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching date specific availability:', error);
+        return null;
+      }
+      return data; // Returns null if no record exists
+    } catch (err) {
+      console.error('Exception in getDateSpecificAvailability:', err);
       return null;
     }
-    return data; // Returns null if no record exists
   },
 
   /**
@@ -40,17 +46,22 @@ export const AvailabilityService = {
    * @returns {Promise<Array>} Array of availability records
    */
   async getAvailabilityForDateRange(serviceId, startDate, endDate) {
-    const { data, error } = await supabase
-      .from('date_specific_availability')
-      .select('*')
-      .eq('service_id', serviceId)
-      .gte('date', startDate)
-      .lte('date', endDate);
+    try {
+      const { data, error } = await supabase
+        .from('date_specific_availability')
+        .select('*')
+        .eq('service_id', serviceId)
+        .gte('date', startDate)
+        .lte('date', endDate);
 
-    if (error) {
-      console.error('Error fetching availability range:', error);
+      if (error) {
+        console.error('Error fetching availability range:', error);
+        return [];
+      }
+      return data || [];
+    } catch (err) {
+      console.error('Exception in getAvailabilityForDateRange:', err);
       return [];
     }
-    return data || [];
   }
 };
