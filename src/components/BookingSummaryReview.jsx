@@ -1,9 +1,12 @@
-import React from 'react';
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO, isValid } from 'date-fns';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
+import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -16,7 +19,32 @@ export const BookingSummaryReview = ({
     deliveryService
 }) => {
     const isDelivery = plan?.id === 2 && deliveryService;
-    const { insurancePrice } = useInsurancePricing();
+    const [equipmentPrices, setEquipmentPrices] = useState({});
+    const [loading, setLoading] = useState(true);
+
+    // Load equipment prices from database
+    useEffect(() => {
+        const loadPrices = async () => {
+            setLoading(true);
+            const prices = {};
+
+            try {
+                // Load all equipment prices (IDs 1-7)
+                for (let id = 1; id <= 7; id++) {
+                    if (isValidEquipmentId(id)) {
+                        prices[id] = await getPriceForEquipment(id);
+                    }
+                }
+                setEquipmentPrices(prices);
+            } catch (error) {
+                console.error('[BookingSummaryReview] Error loading prices:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadPrices();
+    }, []);
 
     const formatDate = date => {
         if (!date) return 'N/A';
@@ -42,52 +70,193 @@ export const BookingSummaryReview = ({
         }
     };
 
-    const equipmentList = [
-        { id: 'wheelbarrow', label: 'Wheelbarrow', price: 10 },
-        { id: 'handTruck', label: 'Hand Truck', price: 15 },
-        { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 }
-    ];
+    const calculatedTotals = useMemo(() => {
+        const basePriceAmount = plan?.price !== undefined ? plan.price : (basePrice || 0);
+        const deliveryFeeFlat = addonsData?.deliveryFee || 0;
+        const tripMileageCost = addonsData?.mileageCharge || 0;
+        
+        // Protection costs
+        const insuranceCost = addonsData?.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
 
-    const addonPrices = {
-        drivewayProtection: 15,
-    };
+        // Equipment costs
+        let rentEquipmentCost = 0;
+        let purchaseItemsCost = 0;
+
+        if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
+            addonsData.equipment.forEach(item => {
+                const equipmentId = item.equipment_id || item.dbId || item.id;
+                if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+
+                const price = Number(equipmentPrices[equipmentId] || 0);
+                const quantity = Number(item.quantity || 1);
+                const itemTotal = price * quantity;
+
+                // ID 3 is Working Gloves (purchase item)
+                if (equipmentId === 3) {
+                    purchaseItemsCost += itemTotal;
+                } else {
+                    rentEquipmentCost += itemTotal;
+                }
+            });
+        }
+
+        // Disposal costs
+        let disposalCost = 0;
+        if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
+            disposalCost += Number(equipmentPrices[4] || 25) * addonsData.mattressDisposal;
+        }
+        if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
+            disposalCost += Number(equipmentPrices[5] || 15) * addonsData.tvDisposal;
+        }
+        if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
+            disposalCost += Number(equipmentPrices[6] || 35) * addonsData.applianceDisposal;
+        }
+
+        // Subtotal before discount
+        const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost + 
+                                        insuranceCost + drivewayProtectionCost + 
+                                        rentEquipmentCost + purchaseItemsCost + disposalCost;
+
+        // Discount
+        let discount = 0;
+        if (addonsData?.coupon?.isValid) {
+            if (addonsData.coupon.discountType === 'fixed') {
+                discount = Number(addonsData.coupon.discountValue || 0);
+            } else if (addonsData.coupon.discountType === 'percentage') {
+                discount = (subtotalBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+            }
+        }
+
+        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
+        const tax = subtotal * 0.07; // 7% tax
+        const total = subtotal + tax;
+
+        return {
+            basePriceAmount,
+            deliveryFeeFlat,
+            tripMileageCost,
+            insuranceCost,
+            drivewayProtectionCost,
+            rentEquipmentCost,
+            purchaseItemsCost,
+            disposalCost,
+            discount,
+            subtotal,
+            tax,
+            total
+        };
+    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery]);
 
     const planName = plan?.name || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
 
     const contactAddress = bookingData?.contactAddress || {};
     
-    // Task implementation: Custom location logic for review step
     const isDumpsterService = plan?.id === 2 && !deliveryService;
     const displayLocation = isDumpsterService 
         ? "South Saratoga Springs" 
         : (contactAddress.city || bookingData?.city || 'City not provided');
 
-    const basePriceAmount = plan?.price !== undefined ? plan.price : (basePrice || 0);
-    const deliveryFeeFlat = addonsData?.deliveryFee || 0;
-    const tripMileageCost = addonsData?.mileageCharge || 0;
-    
-    let subtotal = basePriceAmount + deliveryFeeFlat + tripMileageCost;
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <div className="text-white">Loading price breakdown...</div>
+            </div>
+        );
+    }
 
-    if (addonsData?.insurance === 'accept') subtotal += insurancePrice;
-    if ((plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
-    
-    if (addonsData?.equipment?.length > 0) {
-        addonsData.equipment.forEach(item => {
-            const eq = equipmentList.find(e => e.id === item.id);
-            if (eq) subtotal += (eq.price * item.quantity);
+    // Prepare category items
+    const serviceItems = [];
+    if (calculatedTotals.basePriceAmount > 0) {
+        serviceItems.push({ label: 'Base Rental', amount: calculatedTotals.basePriceAmount });
+    }
+    if (calculatedTotals.deliveryFeeFlat > 0) {
+        serviceItems.push({ label: 'Base Delivery Fee', amount: calculatedTotals.deliveryFeeFlat });
+    }
+    if (calculatedTotals.tripMileageCost > 0) {
+        serviceItems.push({ 
+            label: 'Mileage Charge', 
+            amount: calculatedTotals.tripMileageCost,
+            sublabel: addonsData?.distanceFeeDisplay 
         });
     }
 
-    if (addonsData?.mattressDisposal > 0) subtotal += (addonsData.mattressDisposal * 25);
-    if (addonsData?.tvDisposal > 0) subtotal += (addonsData.tvDisposal * 15);
-    if (addonsData?.applianceDisposal > 0) subtotal += (addonsData.applianceDisposal * 35);
+    const protectionItems = [];
+    if (calculatedTotals.insuranceCost > 0) {
+        protectionItems.push({ label: 'Rental Insurance', amount: calculatedTotals.insuranceCost });
+    }
+    if (calculatedTotals.drivewayProtectionCost > 0) {
+        protectionItems.push({ label: 'Driveway Protection', amount: calculatedTotals.drivewayProtectionCost });
+    }
 
-    const discountAmount = addonsData?.coupon?.isValid 
-        ? (addonsData.coupon.discountType === 'fixed' ? (addonsData.coupon.discountValue || 0) : (subtotal * (addonsData.coupon.discountValue / 100))) 
-        : 0;
+    const rentEquipmentItems = [];
+    if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
+        addonsData.equipment.forEach(item => {
+            const equipmentId = item.equipment_id || item.dbId || item.id;
+            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3) return;
+            
+            const price = Number(equipmentPrices[equipmentId] || 0);
+            const quantity = Number(item.quantity || 1);
+            const itemName = equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`;
+            
+            rentEquipmentItems.push({ 
+                label: `${itemName} (x${quantity})`, 
+                amount: price * quantity 
+            });
+        });
+    }
 
-    const displayTotal = subtotal - discountAmount;
+    const purchaseItems = [];
+    if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
+        const glovesItem = addonsData.equipment.find(item => {
+            const id = item.equipment_id || item.dbId || item.id;
+            return id === 3;
+        });
+        
+        if (glovesItem) {
+            const price = Number(equipmentPrices[3] || 0);
+            const quantity = Number(glovesItem.quantity || 1);
+            purchaseItems.push({ 
+                label: `Working Gloves (Pair) (x${quantity})`, 
+                amount: price * quantity 
+            });
+        }
+    }
+
+    const disposalItems = [];
+    if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
+        const price = Number(equipmentPrices[4] || 25);
+        disposalItems.push({ 
+            label: `Mattress Disposal (x${addonsData.mattressDisposal})`, 
+            amount: price * addonsData.mattressDisposal 
+        });
+    }
+    if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
+        const price = Number(equipmentPrices[5] || 15);
+        disposalItems.push({ 
+            label: `TV Disposal (x${addonsData.tvDisposal})`, 
+            amount: price * addonsData.tvDisposal 
+        });
+    }
+    if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
+        const price = Number(equipmentPrices[6] || 35);
+        disposalItems.push({ 
+            label: `Appliance Disposal (x${addonsData.applianceDisposal})`, 
+            amount: price * addonsData.applianceDisposal 
+        });
+    }
+
+    const discountItems = [];
+    if (calculatedTotals.discount > 0) {
+        discountItems.push({ 
+            label: `Coupon (${addonsData.coupon?.code || 'Applied'})`, 
+            amount: -calculatedTotals.discount, 
+            highlight: true 
+        });
+    }
+
+    const isDeliveryServiceForFees = plan?.id === 1 || plan?.id === 4 || (plan?.id === 2 && deliveryService);
 
     return (
         <motion.div
@@ -136,99 +305,84 @@ export const BookingSummaryReview = ({
 
                     <div className="bg-black/20 p-6 rounded-xl border border-white/10">
                         <h3 className="text-xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Price Breakdown</h3>
-                        <div className="space-y-3 text-gray-200">
-                            <div className="flex justify-between">
-                                <span>Base Rental Price</span>
-                                <span>${basePriceAmount.toFixed(2)}</span>
+                        
+                        <div className="max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                            {/* 1. Service Costs */}
+                            <PriceBreakdownCategory
+                                icon="📦"
+                                title="Service Costs"
+                                items={serviceItems}
+                            />
+
+                            {/* 2. Protection Options */}
+                            <PriceBreakdownCategory
+                                icon="🛡️"
+                                title="Protection Options"
+                                items={protectionItems}
+                                showInfoButton={true}
+                                infoTitle="Protection Options"
+                                infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
+                            />
+
+                            {/* 3. Rent Equipment */}
+                            <PriceBreakdownCategory
+                                icon="🚚"
+                                title="Rent Equipment"
+                                items={rentEquipmentItems}
+                            />
+
+                            {/* 4. Items for Purchase */}
+                            <PriceBreakdownCategory
+                                icon="🛒"
+                                title="Items for Purchase"
+                                items={purchaseItems}
+                            />
+
+                            {/* 5. Disposal Items */}
+                            <PriceBreakdownCategory
+                                icon="♻️"
+                                title="Disposal Items"
+                                items={disposalItems}
+                                showInfoButton={true}
+                                infoTitle="Disposal Items"
+                                infoDescription="Special disposal fees for materials that require certified waste facility processing (mattresses, TVs, appliances)."
+                            />
+
+                            {/* 6. Discounts */}
+                            <PriceBreakdownCategory
+                                icon="🏷️"
+                                title="Discounts"
+                                items={discountItems}
+                            />
+
+                            {/* 7. Totals */}
+                            <div className="border-t border-white/20 pt-4 space-y-2 mt-4">
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-blue-200 font-semibold">Subtotal</span>
+                                    <span className="text-white font-bold">${calculatedTotals.subtotal.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-blue-200 font-semibold">Tax (7%)</span>
+                                    <span className="text-white font-bold">${calculatedTotals.tax.toFixed(2)}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-lg pt-2 border-t border-white/10">
+                                    <span className="text-white font-bold">Total</span>
+                                    <span className="text-green-400 font-bold">${calculatedTotals.total.toFixed(2)}</span>
+                                </div>
                             </div>
 
-                            {deliveryFeeFlat > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Delivery Fee (Flat)</span>
-                                    <span>${deliveryFeeFlat.toFixed(2)}</span>
-                                </div>
-                            )}
-
-                            {tripMileageCost > 0 && (
-                                <div className="flex flex-col">
-                                    <div className="flex justify-between text-blue-300">
-                                        <span>Mileage Charge</span>
-                                        <span>${tripMileageCost.toFixed(2)}</span>
-                                    </div>
-                                    {addonsData.distanceFeeDisplay && (
-                                        <div className="text-[11px] text-cyan-300/70 mt-0.5">
-                                            {addonsData.distanceFeeDisplay}
+                            {/* 8. Landfill/Disposal Fees */}
+                            {isDeliveryServiceForFees && (
+                                <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mt-4">
+                                    <div className="flex items-start">
+                                        <span className="text-xl mr-2">🏗️</span>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-semibold text-yellow-400">Landfill/Disposal Fees (TBD)</p>
+                                            <p className="text-xs text-yellow-200 mt-1">Pending dump fees will be calculated based on actual waste processed</p>
                                         </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {addonsData?.equipment?.length > 0 && addonsData.equipment.map(item => {
-                                const eq = equipmentList.find(e => e.id === item.id);
-                                if (!eq) return null;
-                                return (
-                                    <div key={item.id} className="flex justify-between text-blue-300">
-                                        <span>{eq.label} (x{item.quantity})</span>
-                                        <span>${(eq.price * item.quantity).toFixed(2)}</span>
                                     </div>
-                                );
-                            })}
-                            
-                            {(addonsData?.mattressDisposal || 0) > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Mattress Disposal (x{addonsData.mattressDisposal})</span>
-                                    <span>${(addonsData.mattressDisposal * 25).toFixed(2)}</span>
                                 </div>
                             )}
-
-                            {(addonsData?.tvDisposal || 0) > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>TV Disposal (x{addonsData.tvDisposal})</span>
-                                    <span>${(addonsData.tvDisposal * 15).toFixed(2)}</span>
-                                </div>
-                            )}
-
-                            {(addonsData?.applianceDisposal || 0) > 0 && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Appliance Disposal (x{addonsData.applianceDisposal})</span>
-                                    <span>${(addonsData.applianceDisposal * 35).toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {addonsData?.insurance === 'accept' && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Rental Insurance</span>
-                                    <span>${insurancePrice.toFixed(2)}</span>
-                                </div>
-                            )}
-                            
-                            {(plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' && (
-                                <div className="flex justify-between text-blue-300">
-                                    <span>Driveway Protection</span>
-                                    <span>${addonPrices.drivewayProtection.toFixed(2)}</span>
-                                </div>
-                            )}
-
-                            <div className="border-t border-white/20 pt-2 mt-2">
-                                <div className="flex justify-between font-semibold text-gray-300">
-                                    <span>Subtotal</span>
-                                    <span>${subtotal.toFixed(2)}</span>
-                                </div>
-                            </div>
-
-                            {discountAmount > 0 && (
-                                <div className="flex justify-between text-green-400 font-semibold mt-2">
-                                    <span>Discount ({addonsData.coupon.code || 'Applied'})</span>
-                                    <span>-${discountAmount.toFixed(2)}</span>
-                                </div>
-                            )}
-
-                            <div className="border-t border-white/20 pt-4 mt-4">
-                                <div className="flex justify-between items-center text-xl font-bold text-white">
-                                    <span>Estimated Total</span>
-                                    <span className="text-green-400">${displayTotal.toFixed(2)} <span className="text-sm text-gray-400 font-normal">(plus tax)</span></span>
-                                </div>
-                            </div>
                         </div>
                     </div>
 

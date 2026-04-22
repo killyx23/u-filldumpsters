@@ -1,166 +1,224 @@
 
-import React, { useEffect } from 'react';
-import { Shield, HardHat } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import React, { useState } from 'react';
+import { Shield, Truck, Info } from 'lucide-react';
 import { AddonSection } from './AddonSection';
-import { cn } from '@/lib/utils';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
-import { motion } from 'framer-motion';
+import { RadioGroup } from '@/components/ui/radio-group';
+import { RadioCard } from './RadioCard';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
-export const ProtectionSection = ({ addonsData, handleInsuranceChange, handleDrivewayProtectionChange, plan, addonPrices, isDelivery }) => {
-    const { insurancePrice } = useInsurancePricing();
+/**
+ * Protection Section Component
+ * Displays insurance and driveway protection options with info buttons
+ */
+export const ProtectionSection = ({ 
+    addonsData, 
+    handleInsuranceChange, 
+    handleDrivewayProtectionChange, 
+    plan, 
+    addonPrices,
+    isDelivery 
+}) => {
+    const [showInsuranceAcceptInfo, setShowInsuranceAcceptInfo] = useState(false);
+    const [showInsuranceDeclineInfo, setShowInsuranceDeclineInfo] = useState(false);
+    const [showDrivewayInfo, setShowDrivewayInfo] = useState(false);
 
-    // Default to 'accept' if no choice has been made yet
-    useEffect(() => {
-        if (!addonsData.insurance || (addonsData.insurance !== 'accept' && addonsData.insurance !== 'decline')) {
-            handleInsuranceChange('accept');
-        }
-    }, [addonsData.insurance, handleInsuranceChange]);
-
-    // Visually treat it as accepted immediately on mount, even before the state update completes
-    const isInsuranceAccepted = !addonsData.insurance || addonsData.insurance === 'accept';
-    const isInsuranceDeclined = addonsData.insurance === 'decline';
-
-    const insuranceTooltip = (
-        <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-3 -mr-3 [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-gray-800 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-500 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-400">
-            <p className="font-bold text-base border-b border-gray-700 pb-1">Hardware Protection For Only ${insurancePrice.toFixed(2)}</p>
-            <p className="text-sm">Just for a small fee. Gain peace of mind for our premium Sure-Trac equipment. Our hardware protection reduces your liability for accidental damage to critical systems.</p>
-            
-            <div>
-                <p className="font-semibold text-sm mb-1">How it Works:</p>
-                <ul className="list-disc list-inside text-xs space-y-1 text-gray-200">
-                    <li>Provides up to a $500 credit toward repair or replacement costs.</li>
-                    <li>Significantly reduces your out-of-pocket expenses for accidental hardware damage.</li>
-                </ul>
-            </div>
-
-            <div>
-                <p className="font-semibold text-sm mb-1">What's Covered:</p>
-                <ul className="list-disc list-inside text-xs space-y-1 text-gray-200">
-                    <li>Auto-Tarping System</li>
-                    <li>Wireless Remote System</li>
-                    <li>Hydraulic Lift System</li>
-                    <li>Winch & Lighting</li>
-                </ul>
-            </div>
-
-            <div>
-                <p className="font-semibold text-sm mb-1 text-red-400">ZERO COVERAGE for Misuse or Negligence:</p>
-                <ul className="list-disc list-inside text-xs space-y-1 text-gray-200">
-                    <li>Overloading beyond the trailer's rated capacity</li>
-                    <li>Improper Tarping procedures leading to mechanical failure</li>
-                    <li>Gross Negligence, reckless operation, or intentional damage</li>
-                </ul>
-            </div>
-
-            <p className="text-xs text-blue-300 italic pt-1 border-t border-gray-700">
-                Note: This protection strictly covers only the listed hardware stated above. It does not cover tire damage due to negligence or misuse. Also, any wear and tear that is beyond expected normal wear, along with any cosmetic scratches, dings, or dents. Including large dents or improper use causing damage to hinges or the doors, Etc. Coverage applies strictly to the roll-off trailer itself. It does not cover your tow vehicle, personal property, or driveway, Etc.
-            </p>
-        </div>
-    );
-
-    const drivewayTooltip = (
-        <div>
-            <p className="font-bold mb-2">Advanced Driveway Protection System</p>
-            <p className="mb-2">Protect your property with our advanced driveway protection system. Specially engineered, environmentally friendly pads are placed under the dumpster's contact points to distribute weight evenly and create a protective barrier between the heavy steel container and your driveway surface.</p>
-            <ul className="list-disc list-inside mb-2 text-sm space-y-1">
-                <li>Vastly superior to standard wood planks.</li>
-                <li>Dramatically reduces pressure to prevent cracks and scrapes.</li>
-                <li>Effective on concrete, asphalt, gravel, and even turf.</li>
-            </ul>
-            <p className="text-xs text-yellow-300">Disclaimer: This is an added preventative measure to significantly reduce the risk of damage. While highly effective, it does not constitute a guarantee against all potential driveway damage. U-Fill Dumpsters LLC is not responsible for any driveway damage if this protection is declined.</p>
-        </div>
-    );
+    const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && isDelivery) || plan?.id === 4;
+    const showDrivewayProtection = isDeliveryRequired;
+    
+    // Use insurance price from addonPrices (loaded from database via hook)
+    const insurancePrice = addonPrices?.insurance || 20;
+    const drivewayPrice = addonPrices?.drivewayProtection || 15;
 
     return (
         <>
-            <AddonSection
-                title="Rental Insurance"
-                icon={<Shield />}
-                tooltipContent={insuranceTooltip}
-            >
-                <p className="text-sm text-blue-200 mb-4">
-                    For just ${insurancePrice.toFixed(2)}, get peace of mind. Declining means you accept full responsibility for any damage to the rental unit during your rental period.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                    {/* Decline button moved to the LEFT */}
-                    <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                        <Button
-                            onClick={() => handleInsuranceChange('decline')}
-                            variant="default"
-                            className={cn(
-                                "h-12 w-full text-lg transition-all font-semibold active:bg-red-900 border",
-                                isInsuranceDeclined 
-                                    ? 'bg-red-800 text-white hover:bg-red-900 border-red-800 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                    : 'bg-red-700 text-black hover:bg-red-800 border-red-700'
-                            )}
+            <AddonSection icon={<Shield className="h-6 w-6" />} title="Protection Options">
+                <div className="space-y-4">
+                    {/* Rental Insurance */}
+                    <div>
+                        <h4 className="text-lg font-semibold text-white mb-3">Rental Insurance</h4>
+                        <RadioGroup 
+                            value={addonsData?.insurance || 'decline'} 
+                            onValueChange={handleInsuranceChange}
+                            className="grid grid-cols-1 md:grid-cols-2 gap-3"
                         >
-                            {isInsuranceDeclined ? 'Declined' : 'Decline'}
-                        </Button>
-                    </motion.div>
+                            <div className="relative">
+                                <RadioCard
+                                    id="insurance-accept"
+                                    value="accept"
+                                    checked={addonsData?.insurance === 'accept'}
+                                    onChange={() => handleInsuranceChange('accept')}
+                                    title="Accept Insurance"
+                                    price={insurancePrice}
+                                    description="Protect yourself from damage liability"
+                                    recommended
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowInsuranceAcceptInfo(true)}
+                                    className="absolute top-2 right-2 text-blue-400 hover:text-yellow-400 transition-colors z-10 bg-gray-800/80 rounded-full p-1"
+                                    title="Learn more about insurance coverage"
+                                >
+                                    <Info className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="relative">
+                                <RadioCard
+                                    id="insurance-decline"
+                                    value="decline"
+                                    checked={addonsData?.insurance === 'decline'}
+                                    onChange={() => handleInsuranceChange('decline')}
+                                    title="Decline Insurance"
+                                    price={0}
+                                    description="You assume full liability"
+                                    warning
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowInsuranceDeclineInfo(true)}
+                                    className="absolute top-2 right-2 text-blue-400 hover:text-yellow-400 transition-colors z-10 bg-gray-800/80 rounded-full p-1"
+                                    title="Understand the risks"
+                                >
+                                    <Info className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </RadioGroup>
+                    </div>
 
-                    {/* Accept button moved to the RIGHT */}
-                    <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                        <Button
-                            onClick={() => handleInsuranceChange('accept')}
-                            variant={isInsuranceAccepted ? 'default' : 'outline'}
-                            className={cn(
-                                "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
-                                isInsuranceAccepted 
-                                    ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                    : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
-                            )}
-                        >
-                            {isInsuranceAccepted ? 'Accepted' : `Accept (+$${insurancePrice.toFixed(2)})`}
-                        </Button>
-                    </motion.div>
+                    {/* Driveway Protection - Only show for delivery services */}
+                    {showDrivewayProtection && (
+                        <div>
+                            <h4 className="text-lg font-semibold text-white mb-3 flex items-center">
+                                <Truck className="h-5 w-5 mr-2 text-blue-400" />
+                                Driveway Protection
+                            </h4>
+                            <RadioGroup 
+                                value={addonsData?.drivewayProtection || 'decline'} 
+                                onValueChange={handleDrivewayProtectionChange}
+                                className="grid grid-cols-1 md:grid-cols-2 gap-3"
+                            >
+                                <div className="relative">
+                                    <RadioCard
+                                        id="driveway-accept"
+                                        value="accept"
+                                        checked={addonsData?.drivewayProtection === 'accept'}
+                                        onChange={() => handleDrivewayProtectionChange('accept')}
+                                        title="Accept Protection"
+                                        price={drivewayPrice}
+                                        description="Protect your driveway from potential damage"
+                                        recommended
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowDrivewayInfo(true)}
+                                        className="absolute top-2 right-2 text-blue-400 hover:text-yellow-400 transition-colors z-10 bg-gray-800/80 rounded-full p-1"
+                                        title="Learn about driveway protection"
+                                    >
+                                        <Info className="h-4 w-4" />
+                                    </button>
+                                </div>
+                                <RadioCard
+                                    id="driveway-decline"
+                                    value="decline"
+                                    checked={addonsData?.drivewayProtection === 'decline'}
+                                    onChange={() => handleDrivewayProtectionChange('decline')}
+                                    title="Decline Protection"
+                                    price={0}
+                                    description="You assume responsibility for any damage"
+                                    warning
+                                />
+                            </RadioGroup>
+                        </div>
+                    )}
                 </div>
             </AddonSection>
 
-            {(plan.id === 1 || isDelivery) && (
-                <AddonSection
-                    title="Driveway Protection"
-                    icon={<HardHat />}
-                    tooltipContent={drivewayTooltip}
-                >
-                    <p className="text-sm text-blue-200 mb-4">
-                        For ${addonPrices.drivewayProtection.toFixed(2)}, we'll use protective devices to prevent scratches or cracks. Declining means you accept responsibility for any driveway damage.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                        {/* Decline button moved to the LEFT */}
-                        <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                            <Button
-                                onClick={() => handleDrivewayProtectionChange('decline')}
-                                variant={addonsData.drivewayProtection === 'decline' ? 'destructive' : 'outline'}
-                                className={cn(
-                                    "h-12 w-full text-lg transition-all font-semibold active:bg-red-900",
-                                    addonsData.drivewayProtection === 'decline' 
-                                        ? 'bg-red-800 text-white hover:bg-red-900 border-red-800 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                        : 'border-red-500/50 text-red-500 hover:bg-red-500/10'
-                                )}
-                            >
-                                {addonsData.drivewayProtection === 'decline' ? 'Declined' : 'Decline'}
-                            </Button>
-                        </motion.div>
-
-                        {/* Accept button moved to the RIGHT */}
-                        <motion.div whileTap={{ scale: 0.95, y: 2 }}>
-                            <Button
-                                onClick={() => handleDrivewayProtectionChange('accept')}
-                                variant={addonsData.drivewayProtection === 'accept' ? 'default' : 'outline'}
-                                className={cn(
-                                    "h-12 w-full text-lg transition-all font-semibold active:bg-yellow-700",
-                                    addonsData.drivewayProtection === 'accept' 
-                                        ? 'bg-yellow-600 text-black hover:bg-yellow-700 border-yellow-700 shadow-[inset_0_4px_8px_rgba(0,0,0,0.6)]' 
-                                        : 'border-yellow-400/50 text-yellow-400 hover:bg-yellow-400/10'
-                                )}
-                            >
-                                {addonsData.drivewayProtection === 'accept' ? 'Accepted' : `Accept (+$${addonPrices.drivewayProtection.toFixed(2)})`}
-                            </Button>
-                        </motion.div>
+            {/* Insurance Accept Info Dialog */}
+            <Dialog open={showInsuranceAcceptInfo} onOpenChange={setShowInsuranceAcceptInfo}>
+                <DialogContent className="bg-gray-900 border-blue-500 text-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-blue-400 text-xl flex items-center">
+                            <Shield className="mr-2 h-6 w-6" />
+                            Rental Insurance Coverage
+                        </DialogTitle>
+                    </DialogHeader>
+                    <DialogDescription className="text-blue-100 space-y-3">
+                        <p className="font-semibold text-white">Comprehensive coverage protects you from damage liability.</p>
+                        <ul className="list-disc list-inside space-y-2 text-sm">
+                            <li>Covers accidental damage to the rental unit</li>
+                            <li>Protection against theft and vandalism</li>
+                            <li>Peace of mind during your rental period</li>
+                            <li>No out-of-pocket repair costs for covered incidents</li>
+                        </ul>
+                        <p className="text-xs text-gray-400 mt-3">
+                            Insurance is highly recommended to protect yourself from unexpected repair costs.
+                        </p>
+                    </DialogDescription>
+                    <div className="flex justify-end mt-4">
+                        <Button onClick={() => setShowInsuranceAcceptInfo(false)} className="bg-blue-600 hover:bg-blue-700">
+                            Got it
+                        </Button>
                     </div>
-                </AddonSection>
-            )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Insurance Decline Info Dialog */}
+            <Dialog open={showInsuranceDeclineInfo} onOpenChange={setShowInsuranceDeclineInfo}>
+                <DialogContent className="bg-gray-900 border-red-500 text-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-400 text-xl flex items-center">
+                            <Shield className="mr-2 h-6 w-6" />
+                            Declining Insurance
+                        </DialogTitle>
+                    </DialogHeader>
+                    <DialogDescription className="text-red-100 space-y-3">
+                        <p className="font-semibold text-white">You assume full liability for any damage.</p>
+                        <ul className="list-disc list-inside space-y-2 text-sm">
+                            <li>You are responsible for all repair costs</li>
+                            <li>No coverage for accidental damage</li>
+                            <li>No protection against theft or vandalism</li>
+                            <li>Repair costs can be substantial</li>
+                        </ul>
+                        <p className="text-xs text-gray-400 mt-3 bg-red-900/20 p-2 rounded border border-red-500/30">
+                            ⚠️ <strong>Not recommended:</strong> Declining insurance means you're fully responsible for any damage during your rental period.
+                        </p>
+                    </DialogDescription>
+                    <div className="flex justify-end mt-4">
+                        <Button onClick={() => setShowInsuranceDeclineInfo(false)} variant="outline" className="border-red-500 text-red-400 hover:bg-red-900/20">
+                            I Understand
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Driveway Protection Info Dialog */}
+            <Dialog open={showDrivewayInfo} onOpenChange={setShowDrivewayInfo}>
+                <DialogContent className="bg-gray-900 border-green-500 text-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-green-400 text-xl flex items-center">
+                            <Truck className="mr-2 h-6 w-6" />
+                            Driveway Protection
+                        </DialogTitle>
+                    </DialogHeader>
+                    <DialogDescription className="text-green-100 space-y-3">
+                        <p className="font-semibold text-white">Protects your driveway from damage during delivery.</p>
+                        <ul className="list-disc list-inside space-y-2 text-sm">
+                            <li>Protective covering placed during delivery</li>
+                            <li>Pre-delivery and post-delivery inspection</li>
+                            <li>Protection against cracks, scratches, and stains</li>
+                            <li>Peace of mind for your property</li>
+                        </ul>
+                        <p className="text-xs text-gray-400 mt-3">
+                            Recommended for driveways with decorative surfaces, new pavement, or sealed/stained concrete.
+                        </p>
+                    </DialogDescription>
+                    <div className="flex justify-end mt-4">
+                        <Button onClick={() => setShowDrivewayInfo(false)} className="bg-green-600 hover:bg-green-700">
+                            Got it
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </>
     );
 };

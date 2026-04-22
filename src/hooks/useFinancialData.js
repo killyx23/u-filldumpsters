@@ -2,18 +2,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 
-/**
- * Hook for fetching and caching financial data
- * @param {Object} options - Fetch options
- * @returns {Object} Financial data and methods
- */
 export const useFinancialData = (options = {}) => {
   const {
     dateRangeStart = null,
     dateRangeEnd = null,
     autoRefresh = false,
-    refreshInterval = 30000, // 30 seconds
+    refreshInterval = 30000,
   } = options;
 
   const [data, setData] = useState({
@@ -22,6 +18,7 @@ export const useFinancialData = (options = {}) => {
     bookings: [],
     equipment: [],
     categories: [],
+    equipmentPricing: [],
   });
 
   const [loading, setLoading] = useState(true);
@@ -32,17 +29,7 @@ export const useFinancialData = (options = {}) => {
       setLoading(true);
       setError(null);
 
-      // Build date filter
-      let dateFilter = {};
-      if (dateRangeStart && dateRangeEnd) {
-        dateFilter = {
-          date: `gte.${dateRangeStart}`,
-          date: `lte.${dateRangeEnd}`,
-        };
-      }
-
-      // Fetch all data in parallel
-      const [incomeRes, expensesRes, bookingsRes, equipmentRes, categoriesRes] = 
+      const [incomeRes, expensesRes, bookingsRes, equipmentRes, categoriesRes, pricingRes] = 
         await Promise.all([
           supabase
             .from('financial_income')
@@ -56,7 +43,7 @@ export const useFinancialData = (options = {}) => {
           
           supabase
             .from('bookings')
-            .select('*, customers(name)')
+            .select('*, customers(name), plan:services(*)')
             .order('created_at', { ascending: false }),
           
           supabase
@@ -68,14 +55,19 @@ export const useFinancialData = (options = {}) => {
             .from('financial_categories')
             .select('*')
             .order('name'),
+
+          supabase
+            .from('equipment_pricing')
+            .select('*')
+            .order('equipment_id')
         ]);
 
-      // Check for errors
       if (incomeRes.error) throw incomeRes.error;
       if (expensesRes.error) throw expensesRes.error;
       if (bookingsRes.error) throw bookingsRes.error;
       if (equipmentRes.error) throw equipmentRes.error;
       if (categoriesRes.error) throw categoriesRes.error;
+      if (pricingRes.error) throw pricingRes.error;
 
       setData({
         income: incomeRes.data || [],
@@ -83,6 +75,7 @@ export const useFinancialData = (options = {}) => {
         bookings: bookingsRes.data || [],
         equipment: equipmentRes.data || [],
         categories: categoriesRes.data || [],
+        equipmentPricing: pricingRes.data || [],
       });
 
     } catch (err) {
@@ -98,12 +91,10 @@ export const useFinancialData = (options = {}) => {
     }
   }, [dateRangeStart, dateRangeEnd]);
 
-  // Initial fetch
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Auto-refresh
   useEffect(() => {
     if (!autoRefresh) return;
 
@@ -111,7 +102,6 @@ export const useFinancialData = (options = {}) => {
     return () => clearInterval(interval);
   }, [autoRefresh, refreshInterval, fetchData]);
 
-  // Real-time subscriptions
   useEffect(() => {
     const channel = supabase
       .channel('financial-data-changes')
@@ -129,6 +119,11 @@ export const useFinancialData = (options = {}) => {
         event: '*', 
         schema: 'public', 
         table: 'bookings' 
+      }, () => fetchData())
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'equipment_pricing' 
       }, () => fetchData())
       .subscribe();
 
