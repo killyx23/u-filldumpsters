@@ -6,6 +6,11 @@ import { ServiceDescriptionModal } from './ServiceDescriptionModal';
 import { safeExtractString, safeExtractNumber } from '@/utils/stringExtractors';
 
 export const RescheduleServiceSelectionSection = ({ currentServiceId, selectedService, onSelectService, availableServices = [] }) => {
+    // Safety check: provide default empty function if callback not provided
+    const handleSelectService = onSelectService || (() => {
+        console.warn('RescheduleServiceSelectionSection: onSelectService callback not provided');
+    });
+
     const [infoModalService, setInfoModalService] = useState(null);
 
     return (
@@ -39,7 +44,14 @@ export const RescheduleServiceSelectionSection = ({ currentServiceId, selectedSe
                                     : 'bg-gray-900 border-gray-800 hover:border-gold/50 hover:bg-gray-800/80 hover:shadow-xl'
                                 }
                             `}
-                            onClick={() => onSelectService(service)}
+                            onClick={() => {
+                                // Safety check before calling callback
+                                if (handleSelectService && typeof handleSelectService === 'function') {
+                                    handleSelectService(service);
+                                } else {
+                                    console.warn('RescheduleServiceSelectionSection: onSelectService is not a function');
+                                }
+                            }}
                         >
                             {isCurrent && (
                                 <div className="absolute top-0 right-0 bg-gray-800/90 backdrop-blur-md text-white text-[10px] font-black px-4 py-1.5 rounded-bl-xl z-10 flex items-center border-b border-l border-gray-700 shadow-sm">

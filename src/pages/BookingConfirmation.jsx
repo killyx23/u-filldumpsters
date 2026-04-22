@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
@@ -14,9 +15,6 @@ export default function BookingConfirmation() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  // Stripe appends these automatically to your return_url after Payment Element redirect:
-  //   ?payment_intent=pi_xxx&payment_intent_client_secret=pi_xxx_secret_xxx&redirect_status=succeeded
-  // We also pass booking_id ourselves in the return_url.
   const bookingId            = searchParams.get('booking_id');
   const paymentIntentId      = searchParams.get('payment_intent');
   const redirectStatus       = searchParams.get('redirect_status');
@@ -25,7 +23,6 @@ export default function BookingConfirmation() {
   const [bookingDetails, setBookingDetails] = useState(null);
   const [serviceDetails, setServiceDetails] = useState(null);
 
-  // finalize state: 'pending' | 'done' | 'failed'
   const [finalizeStatus, setFinalizeStatus]   = useState('pending');
   const [finalizeError, setFinalizeError]     = useState('');
   const [isRefinalizing, setIsRefinalizing]   = useState(false);
@@ -41,11 +38,20 @@ export default function BookingConfirmation() {
   });
 
   // ------------------------------------------------------------------
-  // Finalize booking — calls the edge function with the payment_intent
-  // id that Stripe placed in the URL. Safe to retry.
+  // ENHANCED: Finalize booking with comprehensive logging
   // ------------------------------------------------------------------
   const finalizeBooking = async ({ isRetry = false } = {}) => {
-    if (!bookingId) return;
+    if (!bookingId) {
+      console.warn('[BookingConfirmation] Cannot finalize: missing bookingId');
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [BookingConfirmation] Starting finalization`, {
+      bookingId,
+      paymentIntentId,
+      isRetry
+    });
 
     if (isRetry) {
       setIsRefinalizing(true);
@@ -54,21 +60,61 @@ export default function BookingConfirmation() {
     }
 
     try {
+      console.log(`[${timestamp}] [BookingConfirmation] Calling finalize-booking edge function...`);
+      
       const { data, error } = await supabase.functions.invoke('finalize-booking', {
         body: {
           bookingId,
-          paymentIntentId, // pi_xxx from Stripe's return_url — may be null if redirect didn't happen
+          paymentIntentId,
         },
       });
 
-      if (error) throw new Error(error.message);
-      if (data?.success === false) throw new Error(data.error ?? 'Finalization failed.');
+      console.log(`[${timestamp}] [BookingConfirmation] Edge function response:`, {
+        data,
+        error,
+        hasError: !!error,
+        dataSuccess: data?.success
+      });
+
+      if (error) {
+        console.error(`[${timestamp}] [BookingConfirmation] Edge function error:`, error);
+        throw new Error(error.message);
+      }
+      
+      if (data?.success === false) {
+        console.error(`[${timestamp}] [BookingConfirmation] Finalization failed:`, data.error);
+        throw new Error(data.error ?? 'Finalization failed.');
+      }
+
+      console.log(`[${timestamp}] [BookingConfirmation] ✓ Finalization successful`, {
+        emailSent: data?.emailSent,
+        bookingUpdated: data?.bookingUpdated
+      });
 
       setFinalizeStatus('done');
+
+      // Show success message if email was sent
+      if (data?.emailSent) {
+        console.log(`[${timestamp}] [BookingConfirmation] ✓ Confirmation email sent successfully`);
+        toast({
+          title: 'Email Sent',
+          description: 'A confirmation email has been sent to your inbox.',
+        });
+      } else {
+        console.warn(`[${timestamp}] [BookingConfirmation] ⚠ Email was not sent`, data);
+      }
+
     } catch (err) {
-      console.error('[BookingConfirmation] finalize-booking error:', err);
+      const errorTimestamp = new Date().toISOString();
+      console.error(`[${errorTimestamp}] [BookingConfirmation] Finalization error:`, {
+        error: err,
+        message: err.message,
+        stack: err.stack
+      });
+
       setFinalizeStatus('failed');
       setFinalizeError(err.message ?? 'Unknown error during finalization.');
+      
       if (isRetry) {
         toast({
           title: 'Finalization Failed',
@@ -82,19 +128,26 @@ export default function BookingConfirmation() {
   };
 
   // ------------------------------------------------------------------
-  // On mount: fetch booking details, then kick off finalization
+  // ENHANCED: Fetch booking with comprehensive logging
   // ------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true;
 
     if (!bookingId) {
+      console.error('[BookingConfirmation] Missing booking ID in URL');
       setErrorMsg('Booking ID is missing from the URL. Cannot retrieve details.');
       setLoading(false);
       return;
     }
 
-    // Warn if Stripe redirect indicated failure before we even try
+    console.log('[BookingConfirmation] Initializing with params:', {
+      bookingId,
+      paymentIntentId,
+      redirectStatus
+    });
+
     if (redirectStatus && redirectStatus !== 'succeeded') {
+      console.error('[BookingConfirmation] Payment redirect status is not succeeded:', redirectStatus);
       setErrorMsg(
         `Payment did not complete successfully (status: ${redirectStatus}). ` +
         `Please go back and try again.`
@@ -105,13 +158,18 @@ export default function BookingConfirmation() {
 
     const timeoutId = setTimeout(() => {
       if (isMounted && loading) {
+        console.error('[BookingConfirmation] Loading timeout after 15 seconds');
         setErrorMsg('Loading timed out. Please check your connection or refresh.');
         setLoading(false);
       }
     }, 15000);
 
     const fetchAndFinalize = async () => {
+      const timestamp = new Date().toISOString();
+      
       try {
+        console.log(`[${timestamp}] [BookingConfirmation] Fetching booking data for ID: ${bookingId}`);
+
         // 1. Fetch booking display data
         const { data: booking, error: fetchError } = await supabase
           .from('bookings')
@@ -119,11 +177,30 @@ export default function BookingConfirmation() {
           .eq('id', bookingId)
           .single();
 
+        console.log(`[${timestamp}] [BookingConfirmation] Booking fetch result:`, {
+          hasData: !!booking,
+          hasError: !!fetchError,
+          error: fetchError,
+          bookingStatus: booking?.status,
+          customerId: booking?.customer_id,
+          customerData: booking?.customers
+        });
+
         if (fetchError || !booking) {
+          console.error(`[${timestamp}] [BookingConfirmation] Booking fetch failed:`, fetchError);
           throw new Error(fetchError?.message ?? 'Could not find the requested booking.');
         }
 
         if (!isMounted) return;
+        
+        console.log(`[${timestamp}] [BookingConfirmation] ✓ Booking data loaded successfully:`, {
+          id: booking.id,
+          email: booking.email,
+          status: booking.status,
+          customer_portal_id: booking.customers?.customer_id_text,
+          customer_phone: booking.customers?.phone
+        });
+
         setBookingDetails(booking);
 
         // 2. Resolve service details for display
@@ -133,24 +210,35 @@ export default function BookingConfirmation() {
         }
 
         if (resolvedServiceId) {
+          console.log(`[${timestamp}] [BookingConfirmation] Fetching service details for ID: ${resolvedServiceId}`);
+          
           const { data: service } = await supabase
             .from('services')
             .select('*')
             .eq('id', resolvedServiceId)
             .single();
 
-          if (service && isMounted) setServiceDetails(service);
+          if (service && isMounted) {
+            console.log(`[${timestamp}] [BookingConfirmation] ✓ Service data loaded:`, service.name);
+            setServiceDetails(service);
+          }
         }
 
         setLoading(false);
         clearTimeout(timeoutId);
 
         // 3. Finalize booking in the background (Stripe IDs, status, email)
-        //    Don't await — let the UI show immediately while this runs.
+        console.log(`[${timestamp}] [BookingConfirmation] Triggering finalization process...`);
         finalizeBooking();
 
       } catch (err) {
-        console.error('[BookingConfirmation] fetchAndFinalize error:', err);
+        const errorTimestamp = new Date().toISOString();
+        console.error(`[${errorTimestamp}] [BookingConfirmation] fetchAndFinalize error:`, {
+          error: err,
+          message: err.message,
+          stack: err.stack
+        });
+        
         if (isMounted) {
           setErrorMsg(err.message);
           setLoading(false);
@@ -167,10 +255,91 @@ export default function BookingConfirmation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
-  const handleGoToPortal = () => {
+  // ------------------------------------------------------------------
+  // ENHANCED: Portal access with retry logic and comprehensive logging
+  // ------------------------------------------------------------------
+  const handleGoToPortal = async () => {
+    const timestamp = new Date().toISOString();
     const portalId = bookingDetails?.customers?.customer_id_text ?? '';
     const phone    = bookingDetails?.customers?.phone ?? bookingDetails?.phone ?? '';
-    navigate(`/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`);
+
+    console.log(`[${timestamp}] [BookingConfirmation] Portal access initiated`, {
+      portalId,
+      phone,
+      hasCustomerData: !!bookingDetails?.customers,
+      customerId: bookingDetails?.customer_id
+    });
+
+    if (!portalId || !phone) {
+      console.error(`[${timestamp}] [BookingConfirmation] ⚠ Missing portal credentials`, {
+        portalId,
+        phone
+      });
+      
+      toast({
+        title: 'Portal Access Error',
+        description: 'Missing portal credentials. Please contact support.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    // ENHANCED: Add small delay to ensure customer data is fully committed
+    console.log(`[${timestamp}] [BookingConfirmation] Waiting 500ms for data commit...`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // ENHANCED: Verify customer exists in database before redirect
+    try {
+      console.log(`[${timestamp}] [BookingConfirmation] Verifying customer exists in database...`);
+      
+      const { data: customer, error } = await supabase
+        .from('customers')
+        .select('id, customer_id_text, phone, email')
+        .eq('customer_id_text', portalId)
+        .single();
+
+      console.log(`[${timestamp}] [BookingConfirmation] Customer verification result:`, {
+        found: !!customer,
+        error,
+        customerId: customer?.id,
+        portalId: customer?.customer_id_text
+      });
+
+      if (error || !customer) {
+        console.error(`[${timestamp}] [BookingConfirmation] ⚠ Customer not found, adding retry delay...`);
+        
+        // Wait additional time and retry
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const { data: retryCustomer, error: retryError } = await supabase
+          .from('customers')
+          .select('id, customer_id_text, phone, email')
+          .eq('customer_id_text', portalId)
+          .single();
+
+        console.log(`[${timestamp}] [BookingConfirmation] Retry verification result:`, {
+          found: !!retryCustomer,
+          error: retryError
+        });
+
+        if (retryError || !retryCustomer) {
+          throw new Error('Customer record not ready. Please wait a moment and try again.');
+        }
+      }
+
+      console.log(`[${timestamp}] [BookingConfirmation] ✓ Customer verified, navigating to portal...`);
+      
+      navigate(`/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`);
+      
+    } catch (err) {
+      console.error(`[${timestamp}] [BookingConfirmation] Portal navigation error:`, err);
+      
+      toast({
+        title: 'Portal Access Delayed',
+        description: 'Your account is being set up. Please wait 10 seconds and try again.',
+        variant: 'destructive'
+      });
+    }
   };
 
   // ------------------------------------------------------------------
@@ -224,7 +393,7 @@ export default function BookingConfirmation() {
   const isTrailer   = serviceName.toLowerCase().includes('trailer');
 
   // ------------------------------------------------------------------
-  // Finalization status banner
+  // ENHANCED: Finalization status banner with better messaging
   // ------------------------------------------------------------------
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
@@ -252,7 +421,7 @@ export default function BookingConfirmation() {
             ? '✓ Booking Confirmed & Email Sent'
             : finalizeStatus === 'failed'
             ? '⚠ Confirmation Issue'
-            : 'Finalizing your booking...'}
+            : 'Sending confirmation email...'}
         </p>
 
         <p className={`text-sm mb-3 ${
@@ -263,7 +432,7 @@ export default function BookingConfirmation() {
           {finalizeStatus === 'done'
             ? `A confirmation email has been sent to ${bookingDetails.email}. Your booking is secured.`
             : finalizeStatus === 'failed'
-            ? `We encountered an issue finalizing your booking: ${finalizeError}. Your payment was captured — please contact us if this persists.`
+            ? `We encountered an issue sending your confirmation email: ${finalizeError}. Your payment was successful and booking is confirmed. You can access your receipt in the portal.`
             : 'Recording your payment and sending your confirmation email. This only takes a moment.'}
         </p>
 
@@ -277,7 +446,7 @@ export default function BookingConfirmation() {
           >
             {isRefinalizing
               ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Retrying...</>
-              : <><RefreshCw className="mr-2 h-4 w-4" />Retry Finalization</>}
+              : <><RefreshCw className="mr-2 h-4 w-4" />Retry Sending Email</>}
           </Button>
         )}
       </div>

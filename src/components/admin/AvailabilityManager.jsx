@@ -28,6 +28,16 @@ const TimeRangeSelector = ({ label, startValue, endValue, onStartChange, onEndCh
     </div>
 );
 
+const SingleTimeSelector = ({ label, value, onChange, options }) => (
+    <div>
+        <Label className="text-blue-200 font-semibold mb-2 block">{label}</Label>
+        <select value={value || ''} onChange={(e) => onChange(e.target.value)} className="bg-gray-800 border border-gray-600 rounded-md px-2 py-1.5 text-sm text-white focus:ring-yellow-500 focus:border-yellow-500 w-full">
+            <option value="">Select Time</option>
+            {options.map(option => <option key={`${label}-${option.value}`} value={option.value}>{option.label}</option>)}
+        </select>
+    </div>
+);
+
 const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, weeklyRules, clipboard, setClipboard, isSaving }) => {
     const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -60,11 +70,9 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                 delivery_start_time: dateRule?.delivery_start_time ?? weeklyRule?.delivery_start_time,
                 delivery_end_time: dateRule?.delivery_end_time ?? weeklyRule?.delivery_end_time,
                 pickup_start_time: dateRule?.pickup_start_time ?? weeklyRule?.pickup_start_time,
-                pickup_end_time: dateRule?.pickup_end_time ?? weeklyRule?.pickup_end_time,
-                delivery_pickup_start_time: dateRule?.delivery_pickup_start_time ?? weeklyRule?.delivery_pickup_start_time,
-                delivery_pickup_end_time: dateRule?.delivery_pickup_end_time ?? weeklyRule?.delivery_pickup_end_time,
-                return_start_time: dateRule?.return_start_time ?? weeklyRule?.return_start_time,
-                return_end_time: dateRule?.return_end_time ?? weeklyRule?.return_end_time,
+                delivery_pickup_start_time: dateRule?.delivery_pickup_start_time ?? weeklyRule?.delivery_pickup_window_start_time,
+                delivery_pickup_end_time: dateRule?.delivery_pickup_end_time ?? weeklyRule?.delivery_pickup_window_end_time,
+                return_by_time: dateRule?.return_by_time ?? weeklyRule?.return_by_time,
             };
         });
         setRules(initialRules);
@@ -88,14 +96,12 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
             date: format(date, 'yyyy-MM-dd'),
             service_id: rule.service_id,
             is_available: Boolean(rule.is_available),
-            delivery_start_time: rule.delivery_start_time,
-            delivery_end_time: rule.delivery_end_time,
-            pickup_start_time: rule.pickup_start_time,
-            pickup_end_time: rule.pickup_end_time,
-            delivery_pickup_start_time: rule.delivery_pickup_start_time,
-            delivery_pickup_end_time: rule.delivery_pickup_end_time,
-            return_start_time: rule.return_start_time,
-            return_end_time: rule.return_end_time
+            delivery_start_time: rule.delivery_start_time || null,
+            delivery_end_time: rule.delivery_end_time || null,
+            pickup_start_time: rule.pickup_start_time || null,
+            delivery_pickup_start_time: rule.delivery_pickup_start_time || null,
+            delivery_pickup_end_time: rule.delivery_pickup_end_time || null,
+            return_by_time: rule.return_by_time || null
         }));
         onSave(payload);
     };
@@ -200,17 +206,17 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                                 <div className="space-y-4 pt-3 border-t border-white/10">
                                     {service.id === 1 || service.id === 4 ? ( 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Delivery" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
-                                            <TimeRangeSelector label="Delivery Pickup" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Delivery (Pickup Window)" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
                                         </div>
                                     ) : service.id === 2 ? ( 
                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Pickup" startValue={rule.pickup_start_time} endValue={rule.pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'pickup_end_time', v)} options={options} />
-                                            <TimeRangeSelector label="Return" startValue={rule.return_start_time} endValue={rule.return_end_time} onStartChange={v => handleRuleChange(service.id, 'return_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'return_end_time', v)} options={options} />
+                                            <SingleTimeSelector label="Pickup Start Time" value={rule.pickup_start_time} onChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} options={options} />
+                                            <SingleTimeSelector label="Return by Time" value={rule.return_by_time} onChange={v => handleRuleChange(service.id, 'return_by_time', v)} options={options} />
                                         </div>
                                     ) : service.id === 3 ? ( 
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Delivery" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
                                         </div>
                                     ) : null}
                                 </div>
@@ -337,14 +343,12 @@ export const AvailabilityManager = () => {
                 date: format(date, 'yyyy-MM-dd'),
                 service_id: rule.service_id,
                 is_available: Boolean(rule.is_available),
-                delivery_start_time: rule.delivery_start_time,
-                delivery_end_time: rule.delivery_end_time,
-                pickup_start_time: rule.pickup_start_time,
-                pickup_end_time: rule.pickup_end_time,
-                delivery_pickup_start_time: rule.delivery_pickup_start_time,
-                delivery_pickup_end_time: rule.delivery_pickup_end_time,
-                return_start_time: rule.return_start_time,
-                return_end_time: rule.return_end_time
+                delivery_start_time: rule.delivery_start_time || null,
+                delivery_end_time: rule.delivery_end_time || null,
+                pickup_start_time: rule.pickup_start_time || null,
+                delivery_pickup_start_time: rule.delivery_pickup_start_time || null,
+                delivery_pickup_end_time: rule.delivery_pickup_end_time || null,
+                return_by_time: rule.return_by_time || null
             }))
         );
 

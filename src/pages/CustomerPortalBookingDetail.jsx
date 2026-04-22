@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Loader2, DollarSign, Package, Info, AlertTriangle, Navigation, RefreshCw } from 'lucide-react';

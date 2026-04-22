@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useGooglePlacesAutocomplete } from '@/hooks/useGooglePlacesAutocomplete';
 import { Home, MapPin, Loader2, X, AlertCircle, Edit2 } from 'lucide-react';

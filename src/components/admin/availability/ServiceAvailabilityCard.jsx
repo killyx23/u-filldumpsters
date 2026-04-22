@@ -21,8 +21,8 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
                 delivery_end_time: existing?.delivery_end_time,
                 pickup_start_time: existing?.pickup_start_time,
                 pickup_end_time: existing?.pickup_end_time,
-                delivery_pickup_start_time: existing?.delivery_pickup_start_time,
-                delivery_pickup_end_time: existing?.delivery_pickup_end_time,
+                delivery_pickup_start_time: existing?.delivery_pickup_window_start_time,
+                delivery_pickup_end_time: existing?.delivery_pickup_window_end_time,
                 return_start_time: existing?.return_start_time,
                 return_end_time: existing?.return_end_time,
             };
@@ -46,8 +46,8 @@ export const ServiceAvailabilityCard = ({ service, availability, onSaveChanges }
             delivery_end_time: day.delivery_end_time,
             pickup_start_time: day.pickup_start_time,
             pickup_end_time: day.pickup_end_time,
-            delivery_pickup_start_time: day.delivery_pickup_start_time,
-            delivery_pickup_end_time: day.delivery_pickup_end_time,
+            delivery_pickup_window_start_time: day.delivery_pickup_start_time,
+            delivery_pickup_window_end_time: day.delivery_pickup_end_time,
             return_start_time: day.return_start_time,
             return_end_time: day.return_end_time,
         }));
