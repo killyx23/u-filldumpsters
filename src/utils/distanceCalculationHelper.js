@@ -63,6 +63,14 @@ export const calculateDistanceViaGoogleMaps = async (origin, destination) => {
             return reject(new Error("Google Maps API is loaded but DistanceMatrixService is unavailable."));
         }
 
+        let settled = false;
+        const timeoutMs = 25000;
+        const timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error(`Google Distance Matrix timed out after ${timeoutMs / 1000}s`));
+        }, timeoutMs);
+
         const service = new window.google.maps.DistanceMatrixService();
         
         service.getDistanceMatrix({
@@ -75,6 +83,9 @@ export const calculateDistanceViaGoogleMaps = async (origin, destination) => {
                 trafficModel: 'bestguess'
             }
         }, (response, status) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
             if (status !== window.google.maps.DistanceMatrixStatus.OK) {
                 return reject(new Error(`Google Maps API call failed: ${status}`));
             }
@@ -128,6 +139,14 @@ export const calculateRoundTripDistance = async (customerAddressStr) => {
             return reject(new Error("Google Maps API is unavailable."));
         }
 
+        let settled = false;
+        const timeoutMs = 25000;
+        const timeoutId = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error(`Google Distance Matrix timed out after ${timeoutMs / 1000}s`));
+        }, timeoutMs);
+
         const service = new window.google.maps.DistanceMatrixService();
         
         service.getDistanceMatrix({
@@ -136,6 +155,9 @@ export const calculateRoundTripDistance = async (customerAddressStr) => {
             travelMode: window.google.maps.TravelMode.DRIVING,
             unitSystem: window.google.maps.UnitSystem.IMPERIAL,
         }, (response, status) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
             if (status !== window.google.maps.DistanceMatrixStatus.OK) {
                 console.error("[DistanceHelper] Matrix API failed:", status);
                 return reject(new Error(`Google Maps API call failed: ${status}`));

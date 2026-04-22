@@ -17,6 +17,7 @@ export default function CustomerPortalBookingDetail() {
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
 
   const fetchBookingAndDistance = async () => {
+    let fetchedBooking = null;
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -26,30 +27,41 @@ export default function CustomerPortalBookingDetail() {
         .single();
 
       if (error) throw error;
+      fetchedBooking = data;
       setBooking(data);
-
-      const address = data.delivery_address?.formatted_address || `${data.street}, ${data.city}, ${data.state} ${data.zip}`;
-      if (address) {
-        try {
-          const origin = await getBusinessAddress();
-          const res = await calculateDistanceViaGoogleMaps(origin, address);
-          const estimatedTravelTime = res.travelTime || Math.round(res.distance * 2);
-          setDistanceInfo({
-            distance: res.distance,
-            travelTime: estimatedTravelTime,
-            loading: false,
-            error: null
-          });
-        } catch (distError) {
-          setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "Failed to calculate distance" });
-        }
-      } else {
-          setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "No address provided" });
-      }
     } catch (error) {
       console.error('Error fetching booking details:', error);
+      setBooking(null);
     } finally {
+      // Do not block the whole page on Google Distance Matrix (no timeout in SDK callback).
       setLoading(false);
+    }
+
+    if (!fetchedBooking) {
+      setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: null });
+      return;
+    }
+
+    setDistanceInfo({ distance: 0, travelTime: 0, loading: true, error: null });
+    const address =
+      fetchedBooking.delivery_address?.formatted_address ||
+      `${fetchedBooking.street}, ${fetchedBooking.city}, ${fetchedBooking.state} ${fetchedBooking.zip}`;
+    if (address) {
+      try {
+        const origin = await getBusinessAddress();
+        const res = await calculateDistanceViaGoogleMaps(origin, address);
+        const estimatedTravelTime = res.travelTime || Math.round(res.distance * 2);
+        setDistanceInfo({
+          distance: res.distance,
+          travelTime: estimatedTravelTime,
+          loading: false,
+          error: null
+        });
+      } catch (distError) {
+        setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "Failed to calculate distance" });
+      }
+    } else {
+      setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "No address provided" });
     }
   };
 
