@@ -1,384 +1,398 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { parse } from '@babel/parser';
 import traverseBabel from '@babel/traverse';
-import generate from '@babel/generator';
 import * as t from '@babel/types';
 import fs from 'fs';
+import { 
+	validateFilePath, 
+	parseFileToAST, 
+	findJSXElementAtPosition,
+	generateCode,
+	generateSourceWithMap,
+	VITE_PROJECT_ROOT
+} from '../utils/ast-utils.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const VITE_PROJECT_ROOT = path.resolve(__dirname, '../..');
-const EDITABLE_HTML_TAGS = ["a", "Button", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
+const EDITABLE_JSX_TAGS = ["a", "Link", "button", "Button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "label", "Label", "img"];
 
 function parseEditId(editId) {
-  const parts = editId.split(':');
+	const parts = editId.split(':');
 
-  if (parts.length < 3) {
-    return null;
-  }
+	if (parts.length < 3) {
+		return null;
+	}
 
-  const column = parseInt(parts.at(-1), 10);
-  const line = parseInt(parts.at(-2), 10);
-  const filePath = parts.slice(0, -2).join(':');
+	const column = parseInt(parts.at(-1), 10);
+	const line = parseInt(parts.at(-2), 10);
+	const filePath = parts.slice(0, -2).join(':');
 
-  if (!filePath || isNaN(line) || isNaN(column)) {
-    return null;
-  }
+	if (!filePath || isNaN(line) || isNaN(column)) {
+		return null;
+	}
 
-  return { filePath, line, column };
+	return { filePath, line, column };
 }
 
-function checkTagNameEditable(openingElementNode, editableTagsList) {
-    if (!openingElementNode || !openingElementNode.name) return false;
-    const nameNode = openingElementNode.name;
+function checkTagNameEditable(openingElementNode, editableTagsList = EDITABLE_JSX_TAGS) {
+	if (!openingElementNode || !openingElementNode.name) return false;
+	const nameNode = openingElementNode.name;
 
-    // Check 1: Direct name (for <p>, <Button>)
-    if (nameNode.type === 'JSXIdentifier' && editableTagsList.includes(nameNode.name)) {
-        return true;
-    }
+	// Check 1: Direct name (for <p>, <Button>)
+	if (nameNode.type === 'JSXIdentifier' && editableTagsList.includes(nameNode.name)) {
+		return true;
+	}
 
-    // Check 2: Property name of a member expression (for <motion.h1>, check if "h1" is in editableTagsList)
-    if (nameNode.type === 'JSXMemberExpression' && nameNode.property && nameNode.property.type === 'JSXIdentifier' && editableTagsList.includes(nameNode.property.name)) {
-        return true;
-    }
+	// Check 2: Property name of a member expression (for <motion.h1>, check if "h1" is in editableTagsList)
+	if (nameNode.type === 'JSXMemberExpression' && nameNode.property && nameNode.property.type === 'JSXIdentifier' && editableTagsList.includes(nameNode.property.name)) {
+		return true;
+	}
 
-    return false;
+	return false;
 }
 
 function validateImageSrc(openingNode) {
-    if (!openingNode || !openingNode.name || openingNode.name.name !== 'img') {
-        return { isValid: true, reason: null }; // Not an image, skip validation
-    }
+	if (!openingNode || !openingNode.name || ( openingNode.name.name !== 'img' && openingNode.name.property?.name !== 'img')) {
+		return { isValid: true, reason: null }; // Not an image, skip validation
+	}
 
-    const hasPropsSpread = openingNode.attributes.some(attr =>
-        t.isJSXSpreadAttribute(attr) &&
-        attr.argument &&
-        t.isIdentifier(attr.argument) &&
-        attr.argument.name === 'props'
-    );
+	const hasPropsSpread = openingNode.attributes.some(attr =>
+		t.isJSXSpreadAttribute(attr) &&
+		attr.argument &&
+		t.isIdentifier(attr.argument) &&
+		attr.argument.name === 'props'
+	);
 
-    if (hasPropsSpread) {
-        return { isValid: false, reason: 'props-spread' };
-    }
+	if (hasPropsSpread) {
+		return { isValid: false, reason: 'props-spread' };
+	}
 
-    const srcAttr = openingNode.attributes.find(attr =>
-        t.isJSXAttribute(attr) &&
-        attr.name &&
-        attr.name.name === 'src'
-    );
+	const srcAttr = openingNode.attributes.find(attr =>
+		t.isJSXAttribute(attr) &&
+		attr.name &&
+		attr.name.name === 'src'
+	);
 
-    if (!srcAttr) {
-        return { isValid: false, reason: 'missing-src' };
-    }
+	if (!srcAttr) {
+		return { isValid: false, reason: 'missing-src' };
+	}
 
-    if (!t.isStringLiteral(srcAttr.value)) {
-        return { isValid: false, reason: 'dynamic-src' };
-    }
+	if (!t.isStringLiteral(srcAttr.value)) {
+		return { isValid: false, reason: 'dynamic-src' };
+	}
 
-    if (!srcAttr.value.value || srcAttr.value.value.trim() === '') {
-        return { isValid: false, reason: 'empty-src' };
-    }
+	if (!srcAttr.value.value || srcAttr.value.value.trim() === '') {
+		return { isValid: false, reason: 'empty-src' };
+	}
 
-    return { isValid: true, reason: null };
+	return { isValid: true, reason: null };
 }
 
 export default function inlineEditPlugin() {
-  return {
-    name: 'vite-inline-edit-plugin',
-    enforce: 'pre',
+	return {
+		name: 'vite-inline-edit-plugin',
+		enforce: 'pre',
 
-    transform(code, id) {
-      if (!/\.(jsx|tsx)$/.test(id) || !id.startsWith(VITE_PROJECT_ROOT) || id.includes('node_modules')) {
-        return null;
-      }
+		transform(code, id) {
+			if (!/\.(jsx|tsx)$/.test(id) || !id.startsWith(VITE_PROJECT_ROOT) || id.includes('node_modules')) {
+				return null;
+			}
 
-      const relativeFilePath = path.relative(VITE_PROJECT_ROOT, id);
-      const webRelativeFilePath = relativeFilePath.split(path.sep).join('/');
+			const relativeFilePath = path.relative(VITE_PROJECT_ROOT, id);
+			const webRelativeFilePath = relativeFilePath.split(path.sep).join('/');
 
-      try {
-        const babelAst = parse(code, {
-          sourceType: 'module',
-          plugins: ['jsx', 'typescript'],
-          errorRecovery: true
-        });
+			try {
+				const babelAst = parse(code, {
+					sourceType: 'module',
+					plugins: ['jsx', 'typescript'],
+					errorRecovery: true
+				});
 
-        let attributesAdded = 0;
+				let attributesAdded = 0;
 
-        traverseBabel.default(babelAst, {
-          enter(path) {
-            if (path.isJSXOpeningElement()) {
-              const openingNode = path.node;
-              const elementNode = path.parentPath.node; // The JSXElement itself
+				traverseBabel.default(babelAst, {
+					enter(path) {
+						if (path.isJSXOpeningElement()) {
+							const openingNode = path.node;
+							const elementNode = path.parentPath.node; // The JSXElement itself
 
-              if (!openingNode.loc) {
-                return;
-              }
+							if (!openingNode.loc) {
+								return;
+							}
 
-              const alreadyHasId = openingNode.attributes.some(
-                (attr) => t.isJSXAttribute(attr) && attr.name.name === 'data-edit-id'
-              );
+							const alreadyHasId = openingNode.attributes.some(
+								(attr) => t.isJSXAttribute(attr) && attr.name.name === 'data-edit-id'
+							);
 
-              if (alreadyHasId) {
-                return;
-              }
+							if (alreadyHasId) {
+								return;
+							}
 
-              // Condition 1: Is the current element tag type editable?
-              const isCurrentElementEditable = checkTagNameEditable(openingNode, EDITABLE_HTML_TAGS);
-              if (!isCurrentElementEditable) {
-                return;
-              }
+							// Condition 1: Is the current element tag type editable?
+							const isCurrentElementEditable = checkTagNameEditable(openingNode, EDITABLE_JSX_TAGS);
+							if (!isCurrentElementEditable) {
+								return;
+							}
 
-              const imageValidation = validateImageSrc(openingNode);
-              if (!imageValidation.isValid) {
-                const disabledAttribute = t.jsxAttribute(
-                  t.jsxIdentifier('data-edit-disabled'),
-                  t.stringLiteral('true')
-                );
-                openingNode.attributes.push(disabledAttribute);
-                attributesAdded++;
-                return;
-              }
+							const imageValidation = validateImageSrc(openingNode);
+							if (!imageValidation.isValid) {
+								const disabledAttribute = t.jsxAttribute(
+									t.jsxIdentifier('data-edit-disabled'),
+									t.stringLiteral('true')
+								);
+								openingNode.attributes.push(disabledAttribute);
+								attributesAdded++;
+								return;
+							}
 
-              let shouldBeDisabledDueToChildren = false;
+							let shouldBeDisabledDueToChildren = false;
 
-              // Condition 2: Does the element have dynamic or editable children
-              if (t.isJSXElement(elementNode) && elementNode.children) {
-                // Check if element has {...props} spread attribute - disable editing if it does
-                const hasPropsSpread = openingNode.attributes.some(attr => t.isJSXSpreadAttribute(attr)
-                && attr.argument
-                && t.isIdentifier(attr.argument)
-                && attr.argument.name === 'props'
-                );
+							// Condition 2: Does the element have dynamic or editable children
+							if (t.isJSXElement(elementNode) && elementNode.children) {
+								// Check if element has {...props} spread attribute - disable editing if it does
+								const hasPropsSpread = openingNode.attributes.some(attr => t.isJSXSpreadAttribute(attr)
+									&& attr.argument
+									&& t.isIdentifier(attr.argument)
+									&& attr.argument.name === 'props'
+								);
 
-                const hasDynamicChild = elementNode.children.some(child =>
-                  t.isJSXExpressionContainer(child)
-                );
+								const hasDynamicChild = elementNode.children.some(child =>
+									t.isJSXExpressionContainer(child)
+								);
 
-                if (hasDynamicChild || hasPropsSpread) {
-                  shouldBeDisabledDueToChildren = true;
-                }
-              }
+								if (hasDynamicChild || hasPropsSpread) {
+									shouldBeDisabledDueToChildren = true;
+								}
+							}
 
-              if (!shouldBeDisabledDueToChildren && t.isJSXElement(elementNode) && elementNode.children) {
-                const hasEditableJsxChild = elementNode.children.some(child => {
-                  if (t.isJSXElement(child)) {
-                    return checkTagNameEditable(child.openingElement, EDITABLE_HTML_TAGS);
-                  }
+							if (!shouldBeDisabledDueToChildren && t.isJSXElement(elementNode) && elementNode.children) {
+								const hasEditableJsxChild = elementNode.children.some(child => {
+									if (t.isJSXElement(child)) {
+										return checkTagNameEditable(child.openingElement, EDITABLE_JSX_TAGS);
+									}
 
-                  return false;
-                });
+									return false;
+								});
 
-                if (hasEditableJsxChild) {
-                  shouldBeDisabledDueToChildren = true;
-                }
-              }
+								if (hasEditableJsxChild) {
+									shouldBeDisabledDueToChildren = true;
+								}
+							}
 
-              if (shouldBeDisabledDueToChildren) {
-                const disabledAttribute = t.jsxAttribute(
-                  t.jsxIdentifier('data-edit-disabled'),
-                  t.stringLiteral('true')
-                );
+							if (shouldBeDisabledDueToChildren) {
+								const disabledAttribute = t.jsxAttribute(
+									t.jsxIdentifier('data-edit-disabled'),
+									t.stringLiteral('true')
+								);
 
-                openingNode.attributes.push(disabledAttribute);
-                attributesAdded++;
-                return;
-              }
+								openingNode.attributes.push(disabledAttribute);
+								attributesAdded++;
+								return;
+							}
 
-              // Condition 3: Parent is non-editable if AT LEAST ONE child JSXElement is a non-editable type.
-              if (t.isJSXElement(elementNode) && elementNode.children && elementNode.children.length > 0) {
-                  let hasNonEditableJsxChild = false;
-                  for (const child of elementNode.children) {
-                      if (t.isJSXElement(child)) {
-                          if (!checkTagNameEditable(child.openingElement, EDITABLE_HTML_TAGS)) {
-                              hasNonEditableJsxChild = true;
-                              break;
-                          }
-                      }
-                  }
-                  if (hasNonEditableJsxChild) {
-                      const disabledAttribute = t.jsxAttribute(
-                        t.jsxIdentifier('data-edit-disabled'),
-                        t.stringLiteral("true")
-                      );
-                      openingNode.attributes.push(disabledAttribute);
-                      attributesAdded++;
-                      return;
-                  }
-              }
+							// Condition 3: Parent is non-editable if it has non-editable, non-icon JSX children.
+							if (t.isJSXElement(elementNode) && elementNode.children && elementNode.children.length > 0) {
+								let hasTextContent = false;
+								let hasNonEditableJsxChild = false;
+								let hasNonSelfClosingChild = false;
 
-              // Condition 4: Is any ancestor JSXElement also editable?
-              let currentAncestorCandidatePath = path.parentPath.parentPath;
-              while (currentAncestorCandidatePath) {
-                  const ancestorJsxElementPath = currentAncestorCandidatePath.isJSXElement()
-                      ? currentAncestorCandidatePath
-                      : currentAncestorCandidatePath.findParent(p => p.isJSXElement());
+								for (const child of elementNode.children) {
+									if (t.isJSXText(child)) {
+										if (child.value.trim().length > 0) hasTextContent = true;
+										continue;
+									}
+								if (t.isJSXElement(child)) {
+									const childNode = child.openingElement;
+									if (childNode.selfClosing) {
+										const childName = childNode.name?.name || '';
+										if (!/^[A-Z]/.test(childName) && !checkTagNameEditable(childNode, EDITABLE_JSX_TAGS)) {
+											hasNonEditableJsxChild = true;
+										}
+										continue;
+									}
+									hasNonSelfClosingChild = true;
+									if (!checkTagNameEditable(childNode, EDITABLE_JSX_TAGS)) {
+										hasNonEditableJsxChild = true;
+									}
+								}
+								}
 
-                  if (!ancestorJsxElementPath) {
-                      break;
-                  }
+								if (!hasTextContent && !hasNonSelfClosingChild) return;
 
-                  if (checkTagNameEditable(ancestorJsxElementPath.node.openingElement, EDITABLE_HTML_TAGS)) {
-                      return;
-                  }
-                  currentAncestorCandidatePath = ancestorJsxElementPath.parentPath;
-              }
+								if (hasNonEditableJsxChild) {
+									const disabledAttribute = t.jsxAttribute(
+										t.jsxIdentifier('data-edit-disabled'),
+										t.stringLiteral("true")
+									);
+									openingNode.attributes.push(disabledAttribute);
+									attributesAdded++;
+									return;
+								}
+							}
 
-              const line = openingNode.loc.start.line;
-              const column = openingNode.loc.start.column + 1;
-              const editId = `${webRelativeFilePath}:${line}:${column}`;
+							// Condition 4: Is any ancestor JSXElement also editable?
+							let currentAncestorCandidatePath = path.parentPath.parentPath;
+							while (currentAncestorCandidatePath) {
+								const ancestorJsxElementPath = currentAncestorCandidatePath.isJSXElement()
+									? currentAncestorCandidatePath
+									: currentAncestorCandidatePath.findParent(p => p.isJSXElement());
 
-              const idAttribute = t.jsxAttribute(
-                t.jsxIdentifier('data-edit-id'),
-                t.stringLiteral(editId)
-              );
+								if (!ancestorJsxElementPath) {
+									break;
+								}
 
-              openingNode.attributes.push(idAttribute);
-              attributesAdded++;
-            }
-          }
-        });
+								if (checkTagNameEditable(ancestorJsxElementPath.node.openingElement, EDITABLE_JSX_TAGS)) {
+									return;
+								}
+								currentAncestorCandidatePath = ancestorJsxElementPath.parentPath;
+							}
 
-        if (attributesAdded > 0) {
-          const generateFunction = generate.default || generate;
-          const output = generateFunction(babelAst, {
-            sourceMaps: true,
-            sourceFileName: webRelativeFilePath
-          }, code);
+							const line = openingNode.loc.start.line;
+							const column = openingNode.loc.start.column + 1;
+							const editId = `${webRelativeFilePath}:${line}:${column}`;
 
-          return { code: output.code, map: output.map };
-        }
+							const idAttribute = t.jsxAttribute(
+								t.jsxIdentifier('data-edit-id'),
+								t.stringLiteral(editId)
+							);
 
-        return null;
-      } catch (error) {
-        console.error(`[vite][visual-editor] Error transforming ${id}:`, error);
-        return null;
-      }
-    },
+							openingNode.attributes.push(idAttribute);
+							attributesAdded++;
+						}
+					}
+				});
+
+				if (attributesAdded > 0) {
+					const output = generateSourceWithMap(babelAst, webRelativeFilePath, code);
+					return { code: output.code, map: output.map };
+				}
+
+				return null;
+			} catch (error) {
+				console.error(`[vite][visual-editor] Error transforming ${id}:`, error);
+				return null;
+			}
+		},
 
 
-    // Updates source code based on the changes received from the client
-    configureServer(server) {
-      server.middlewares.use('/api/apply-edit', async (req, res, next) => {
-        if (req.method !== 'POST') return next();
+		// Updates source code based on the changes received from the client
+		configureServer(server) {
+			server.middlewares.use('/api/apply-edit', async (req, res, next) => {
+				if (req.method !== 'POST') return next();
 
-        let body = '';
-        req.on('data', chunk => { body += chunk.toString(); });
+				let body = '';
+				req.on('data', chunk => { body += chunk.toString(); });
 
-        req.on('end', async () => {
-          let absoluteFilePath = '';
-          try {
-            const { editId, newFullText } = JSON.parse(body);
+				req.on('end', async () => {
+					let absoluteFilePath = '';
+					try {
+						const { editId, newFullText } = JSON.parse(body);
 
-            if (!editId || typeof newFullText === 'undefined') {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              return res.end(JSON.stringify({ error: 'Missing editId or newFullText' }));
-            }
+						if (!editId || typeof newFullText === 'undefined') {
+								res.writeHead(400, { 'Content-Type': 'application/json' });
+							return res.end(JSON.stringify({ error: 'Missing editId or newFullText' }));
+							}
 
-            const parsedId = parseEditId(editId);
-            if (!parsedId) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              return res.end(JSON.stringify({ error: 'Invalid editId format (filePath:line:column)' }));
-            }
+							const parsedId = parseEditId(editId);
+							if (!parsedId) {
+								res.writeHead(400, { 'Content-Type': 'application/json' });
+								return res.end(JSON.stringify({ error: 'Invalid editId format (filePath:line:column)' }));
+							}
 
-            const { filePath, line, column } = parsedId;
+						const { filePath, line, column } = parsedId;
 
-            absoluteFilePath = path.resolve(VITE_PROJECT_ROOT, filePath);
-            if (filePath.includes('..') || !absoluteFilePath.startsWith(VITE_PROJECT_ROOT) || absoluteFilePath.includes('node_modules')) {
-              res.writeHead(400, { 'Content-Type': 'application/json' });
-              return res.end(JSON.stringify({ error: 'Invalid path' }));
-            }
+						// Validate file path
+						const validation = validateFilePath(filePath);
+						if (!validation.isValid) {
+							res.writeHead(400, { 'Content-Type': 'application/json' });
+							return res.end(JSON.stringify({ error: validation.error }));
+						}
+						absoluteFilePath = validation.absolutePath;
 
-            const originalContent = fs.readFileSync(absoluteFilePath, 'utf-8');
+						// Parse AST
+						const originalContent = fs.readFileSync(absoluteFilePath, 'utf-8');
+						const babelAst = parseFileToAST(absoluteFilePath);
 
-            const babelAst = parse(originalContent, {
-              sourceType: 'module',
-              plugins: ['jsx', 'typescript'],
-              errorRecovery: true
-            });
+						// Find target node (note: apply-edit uses column+1)
+						const targetNodePath = findJSXElementAtPosition(babelAst, line, column + 1);
 
-            let targetNodePath = null;
-            const visitor = {
-              JSXOpeningElement(path) {
-                const node = path.node;
-                if (node.loc && node.loc.start.line === line && node.loc.start.column + 1 === column) {
-                  targetNodePath = path;
-                  path.stop();
-                }
-              }
-            };
-            traverseBabel.default(babelAst, visitor);
+						if (!targetNodePath) {
+							res.writeHead(404, { 'Content-Type': 'application/json' });
+							return res.end(JSON.stringify({ error: 'Target node not found by line/column', editId }));
+						}
 
-            if (!targetNodePath) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              return res.end(JSON.stringify({ error: 'Target node not found by line/column', editId }));
-            }
+						const targetOpeningElement = targetNodePath.node;
+						const parentElementNode = targetNodePath.parentPath?.node;
 
-            const generateFunction = generate.default || generate;
-            const targetOpeningElement = targetNodePath.node;
-            const parentElementNode = targetNodePath.parentPath?.node;
+						const isImageElement = targetOpeningElement.name && targetOpeningElement.name.name === 'img';
 
-            const isImageElement = targetOpeningElement.name && targetOpeningElement.name.name === 'img';
+						let beforeCode = '';
+						let afterCode = '';
+						let modified = false;
 
-            let beforeCode = '';
-            let afterCode = '';
-            let modified = false;
+						if (isImageElement) {
+							// Handle image src attribute update
+							beforeCode = generateCode(targetOpeningElement);
 
-            if (isImageElement) {
-              // Handle image src attribute update
-              const beforeOutput = generateFunction(targetOpeningElement, {});
-              beforeCode = beforeOutput.code;
+							const srcAttr = targetOpeningElement.attributes.find(attr =>
+								t.isJSXAttribute(attr) && attr.name && attr.name.name === 'src'
+							);
 
-              const srcAttr = targetOpeningElement.attributes.find(attr =>
-                t.isJSXAttribute(attr) && attr.name && attr.name.name === 'src'
-              );
+							if (srcAttr && t.isStringLiteral(srcAttr.value)) {
+								srcAttr.value = t.stringLiteral(newFullText);
+								modified = true;
+								afterCode = generateCode(targetOpeningElement);
+							}
+						} else {
+							if (parentElementNode && t.isJSXElement(parentElementNode)) {
+								beforeCode = generateCode(parentElementNode);
 
-              if (srcAttr && t.isStringLiteral(srcAttr.value)) {
-                srcAttr.value = t.stringLiteral(newFullText);
-                modified = true;
+								let textReplaced = false;
+								parentElementNode.children = parentElementNode.children.reduce((acc, child) => {
+									if (t.isJSXText(child)) {
+										if (!textReplaced && child.value.trim().length > 0 && newFullText && newFullText.trim() !== '') {
+											const leading = child.value.match(/^(\s*)/)[0];
+											const trailing = child.value.match(/(\s*)$/)[0];
+											acc.push(t.jsxText(leading + newFullText.trim() + trailing));
+											textReplaced = true;
+										} else {
+											acc.push(child);
+										}
+										return acc;
+									}
+									acc.push(child);
+									return acc;
+								}, []);
+								if (!textReplaced && newFullText && newFullText.trim() !== '') {
+									parentElementNode.children.push(t.jsxText(newFullText));
+								}
 
-                const afterOutput = generateFunction(targetOpeningElement, {});
-                afterCode = afterOutput.code;
-              }
-            } else {
-              if (parentElementNode && t.isJSXElement(parentElementNode)) {
-                const beforeOutput = generateFunction(parentElementNode, {});
-                beforeCode = beforeOutput.code;
+								modified = true;
+								afterCode = generateCode(parentElementNode);
+							}
+						}
 
-                parentElementNode.children = [];
-                if (newFullText && newFullText.trim() !== '') {
-                  const newTextNode = t.jsxText(newFullText);
-                  parentElementNode.children.push(newTextNode);
-                }
-                modified = true;
+						if (!modified) {
+							res.writeHead(409, { 'Content-Type': 'application/json' });
+							return res.end(JSON.stringify({ error: 'Could not apply changes to AST.' }));
+						}
 
-                const afterOutput = generateFunction(parentElementNode, {});
-                afterCode = afterOutput.code;
-              }
-            }
+						const webRelativeFilePath = path.relative(VITE_PROJECT_ROOT, absoluteFilePath).split(path.sep).join('/');
+						const output = generateSourceWithMap(babelAst, webRelativeFilePath, originalContent);
+						const newContent = output.code;
 
-            if (!modified) {
-              res.writeHead(409, { 'Content-Type': 'application/json' });
-              return res.end(JSON.stringify({ error: 'Could not apply changes to AST.' }));
-            }
+						res.writeHead(200, { 'Content-Type': 'application/json' });
+						res.end(JSON.stringify({
+							success: true,
+							newFileContent: newContent,
+							beforeCode,
+							afterCode,
+						}));
 
-            const output = generateFunction(babelAst, {});
-            const newContent = output.code;
-
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                success: true,
-                newFileContent: newContent,
-                beforeCode,
-                afterCode,
-            }));
-
-          } catch (error) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Internal server error during edit application.' }));
-          }
-        });
-      });
-    }
-  };
+					} catch (error) {
+						res.writeHead(500, { 'Content-Type': 'application/json' });
+						res.end(JSON.stringify({ error: 'Internal server error during edit application.' }));
+					}
+				});
+			});
+		}
+	};
 }
