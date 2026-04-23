@@ -1,324 +1,450 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import { Loader2, Save, Ban, AlertTriangle, Truck, Settings, Sun, Cloud, CloudRain, Snowflake } from 'lucide-react';
-import { format, startOfDay, formatISO, parseISO, isSameDay, isBefore, endOfToday, endOfMonth, isWithinInterval, startOfMonth } from 'date-fns';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { Loader2, AlertTriangle, Copy, ClipboardPaste, CopyCheck, X, Save } from 'lucide-react';
+import { format, parseISO, startOfDay, isSameDay, getDay } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { generateTimeSlotOptions } from '@/components/admin/availability/time-helpers';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-const services = [
-    { id: 1, name: "16yd Dumpster Rental" },
-    { id: 2, name: "Dump Loader Trailer Rental Service" },
-];
+const TimeRangeSelector = ({ label, startValue, endValue, onStartChange, onEndChange, options }) => (
+    <div>
+        <Label className="text-blue-200 font-semibold mb-2 block">{label}</Label>
+        <div className="grid grid-cols-2 gap-4">
+             <select value={startValue || ''} onChange={(e) => onStartChange(e.target.value)} className="bg-gray-800 border border-gray-600 rounded-md px-2 py-1.5 text-sm text-white focus:ring-yellow-500 focus:border-yellow-500 w-full">
+                <option value="">Start Time</option>
+                {options.map(option => <option key={`start-${label}-${option.value}`} value={option.value}>{option.label}</option>)}
+            </select>
+            <select value={endValue || ''} onChange={(e) => onEndChange(e.target.value)} className="bg-gray-800 border border-gray-600 rounded-md px-2 py-1.5 text-sm text-white focus:ring-yellow-500 focus:border-yellow-500 w-full">
+                <option value="">End Time</option>
+                {options.map(option => <option key={`end-${label}-${option.value}`} value={option.value}>{option.label}</option>)}
+            </select>
+        </div>
+    </div>
+);
 
-const WeatherIcon = ({ condition }) => {
-    if (!condition) return null;
-    const text = condition.toLowerCase();
-    if (text.includes('snow') || text.includes('ice') || text.includes('blizzard')) return <Snowflake className="h-4 w-4 text-cyan-300" />;
-    if (text.includes('rain') || text.includes('drizzle') || text.includes('shower')) return <CloudRain className="h-4 w-4 text-blue-300" />;
-    if (text.includes('cloud') || text.includes('overcast')) return <Cloud className="h-4 w-4 text-gray-400" />;
-    if (text.includes('sun') || text.includes('clear')) return <Sun className="h-4 w-4 text-yellow-300" />;
-    return null;
-};
+const SingleTimeSelector = ({ label, value, onChange, options }) => (
+    <div>
+        <Label className="text-blue-200 font-semibold mb-2 block">{label}</Label>
+        <select value={value || ''} onChange={(e) => onChange(e.target.value)} className="bg-gray-800 border border-gray-600 rounded-md px-2 py-1.5 text-sm text-white focus:ring-yellow-500 focus:border-yellow-500 w-full">
+            <option value="">Select Time</option>
+            {options.map(option => <option key={`${label}-${option.value}`} value={option.value}>{option.label}</option>)}
+        </select>
+    </div>
+);
 
-const ServiceAvailabilityCard = ({ service, availability, onAvailabilityChange, onSaveChanges }) => {
-    const daysOfWeek = useMemo(() => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], []);
-    const serviceAvail = availability.filter(a => a.service_id === service.id);
+const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, weeklyRules, clipboard, setClipboard, isSaving }) => {
+    const [rules, setRules] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [copiedAll, setCopiedAll] = useState(false);
+    
+    const timeOptions = {
+        1: generateTimeSlotOptions(120), // Service 1: 2 hours
+        2: generateTimeSlotOptions(60),  // Service 2: 1 hour
+        3: generateTimeSlotOptions(120), // Service 3: 2 hours
+        4: generateTimeSlotOptions(120), // Service 4: 2 hours
+    };
+
+    useEffect(() => {
+        if (!services || !weeklyRules || !date) {
+            setLoading(true);
+            return;
+        }
+        
+        const dayOfWeek = getDay(date);
+
+        const initialRules = services.map(service => {
+            const dateRule = existingRule?.find(r => r.service_id === service.id);
+            const weeklyRule = weeklyRules?.find(wr => wr.service_id === service.id && wr.day_of_week === dayOfWeek);
+
+            const isAvailable = dateRule?.is_available ?? weeklyRule?.is_available ?? true;
+
+            return {
+                service_id: service.id,
+                is_available: Boolean(isAvailable),
+                delivery_start_time: dateRule?.delivery_start_time ?? weeklyRule?.delivery_start_time,
+                delivery_end_time: dateRule?.delivery_end_time ?? weeklyRule?.delivery_end_time,
+                pickup_start_time: dateRule?.pickup_start_time ?? weeklyRule?.pickup_start_time,
+                delivery_pickup_start_time: dateRule?.delivery_pickup_start_time ?? weeklyRule?.delivery_pickup_window_start_time,
+                delivery_pickup_end_time: dateRule?.delivery_pickup_end_time ?? weeklyRule?.delivery_pickup_window_end_time,
+                return_by_time: dateRule?.return_by_time ?? weeklyRule?.return_by_time,
+            };
+        });
+        setRules(initialRules);
+        setLoading(false);
+    }, [date, services, existingRule, weeklyRules]);
+
+    const handleRuleChange = (service_id, field, value) => {
+        setRules(prev => prev.map(r => {
+            if (r.service_id === service_id) {
+                return { 
+                    ...r, 
+                    [field]: field === 'is_available' ? Boolean(value) : (value || null) 
+                };
+            }
+            return r;
+        }));
+    };
+
+    const handleSaveClick = () => {
+        const payload = rules.map(rule => ({
+            date: format(date, 'yyyy-MM-dd'),
+            service_id: rule.service_id,
+            is_available: Boolean(rule.is_available),
+            delivery_start_time: rule.delivery_start_time || null,
+            delivery_end_time: rule.delivery_end_time || null,
+            pickup_start_time: rule.pickup_start_time || null,
+            delivery_pickup_start_time: rule.delivery_pickup_start_time || null,
+            delivery_pickup_end_time: rule.delivery_pickup_end_time || null,
+            return_by_time: rule.return_by_time || null
+        }));
+        onSave(payload);
+    };
+
+    const handleCopy = (service_id) => {
+        const ruleToCopy = rules.find(r => r.service_id === service_id);
+        if (ruleToCopy) {
+            setClipboard({ type: 'single', data: ruleToCopy });
+            toast({ title: "Copied!", description: "Service times copied to clipboard." });
+        }
+    };
+
+    const handlePaste = (service_id) => {
+        if (clipboard?.type === 'single') {
+            const { data } = clipboard;
+            setRules(prev => prev.map(r => r.service_id === service_id ? { ...r, ...data, service_id: r.service_id } : r));
+            toast({ title: "Pasted!", description: "Service times have been pasted." });
+        } else {
+            toast({ title: "Nothing to paste", description: "Copy a single service's times first.", variant: "destructive" });
+        }
+    };
+
+    const handleCopyAll = () => {
+        setClipboard({ type: 'all', data: rules });
+        setCopiedAll(true);
+        toast({ title: "Copied All!", description: "All service settings for this day have been copied. You can now select multiple dates on the calendar to paste." });
+        setTimeout(() => setCopiedAll(false), 2000);
+        onCancel();
+    };
+
+    const handlePasteAll = () => {
+        if (clipboard?.type === 'all') {
+            const pastedRules = clipboard.data.map((copiedRule, index) => ({
+                ...rules[index],
+                ...copiedRule,
+                service_id: rules[index].service_id,
+            }));
+            setRules(pastedRules);
+            toast({ title: "Pasted All!", description: "All copied settings have been applied." });
+        } else {
+            toast({ title: "Nothing to paste", description: "Use 'Copy All' on another day first.", variant: "destructive" });
+        }
+    };
 
     return (
-        <div className="bg-white/5 p-6 rounded-2xl shadow-lg border border-white/10 h-full flex flex-col">
-            <div className="flex items-center mb-4">
-                <Truck className="h-6 w-6 text-yellow-400" />
-                <h3 className="text-xl font-bold text-yellow-400 ml-3">{service.name}</h3>
+        <DialogContent className="bg-gray-900 text-white border-yellow-400 max-w-4xl">
+            <DialogHeader>
+                <DialogTitle>Edit Availability for {date ? format(date, 'PPP') : '...'}</DialogTitle>
+                <DialogDescription>
+                    Use 'Copy All' to enter paste-mode on the calendar, or copy/paste individual service times below.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center gap-2 my-4 p-3 bg-gray-800 rounded-lg">
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="sm" onClick={handleCopyAll}>
+                                {copiedAll ? <CopyCheck className="h-4 w-4 mr-2 text-green-400" /> : <Copy className="h-4 w-4 mr-2" />}
+                                Copy All & Close
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Copy all settings and enter multi-day paste mode.</p>
+                        </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="sm" onClick={handlePasteAll} disabled={!clipboard || clipboard.type !== 'all'}>
+                                <ClipboardPaste className="h-4 w-4 mr-2" />
+                                Paste All
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Paste settings copied from another day.</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
             </div>
-            <div className="flex-grow space-y-4 overflow-y-auto pr-2">
-                {daysOfWeek.map((dayName, index) => {
-                    const dayData = serviceAvail.find(d => d.day_of_week === index) || {
-                        day_of_week: index, is_available: false, delivery_start_time: '08:00', delivery_end_time: '10:00',
-                        pickup_start_time: '08:00', pickup_end_time: '10:00',
-                    };
+            <div className="py-4 space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+                {loading && <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin text-yellow-400" /> <span className="ml-2">Loading services...</span></div>}
+
+                {!loading && services && services.length > 0 ? services.map(service => {
+                    const rule = rules.find(r => r.service_id === service.id);
+                    if (!rule) return null;
+                    const options = timeOptions[service.id] || generateTimeSlotOptions(120);
+
                     return (
-                        <div key={index} className="bg-white/10 p-3 rounded-md">
-                            <div className="flex items-center justify-between">
-                                <Label className="text-lg font-semibold">{dayName}</Label>
+                        <div key={service.id} className="p-4 bg-white/5 rounded-lg">
+                            <div className="flex justify-between items-center mb-3">
+                                <h4 className="font-bold text-lg text-yellow-400">{service.name}</h4>
                                 <div className="flex items-center gap-2">
-                                    <Switch id={`available-${service.id}-${index}`} checked={dayData.is_available} onCheckedChange={(c) => onAvailabilityChange(service.id, index, 'is_available', c)} />
-                                    <Label htmlFor={`available-${service.id}-${index}`}>{dayData.is_available ? "Open" : "Closed"}</Label>
+                                    <Button variant="ghost" size="sm" onClick={() => handleCopy(service.id)}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
+                                    <Button variant="ghost" size="sm" onClick={() => handlePaste(service.id)} disabled={!clipboard || clipboard.type !== 'single'}><ClipboardPaste className="h-4 w-4 mr-2" /> Paste</Button>
+                                    <Label className={!rule.is_available ? 'text-red-400 font-bold' : 'text-gray-400'}>Closed</Label>
+                                    <Switch 
+                                        checked={!rule.is_available} 
+                                        onCheckedChange={checked => handleRuleChange(service.id, 'is_available', !checked)} 
+                                    />
                                 </div>
                             </div>
-                            {dayData.is_available && (
-                                <div className="mt-4 space-y-3 text-sm">
-                                    <p className="font-semibold text-blue-200">Delivery/Pickup Window</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <Input type="time" value={dayData.delivery_start_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_start_time', e.target.value)} className="bg-white/20"/>
-                                        <Input type="time" value={dayData.delivery_end_time || ''} onChange={e => onAvailabilityChange(service.id, index, 'delivery_end_time', e.target.value)} className="bg-white/20"/>
-                                    </div>
-                                    <div className="text-right mt-2">
-                                        <Button onClick={() => onSaveChanges(dayData)} size="sm"><Save className="mr-2 h-4 w-4" /> Save</Button>
-                                    </div>
+                            {rule.is_available && (
+                                <div className="space-y-4 pt-3 border-t border-white/10">
+                                    {service.id === 1 || service.id === 4 ? ( 
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                            <TimeRangeSelector label="Delivery (Pickup Window)" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
+                                        </div>
+                                    ) : service.id === 2 ? ( 
+                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <SingleTimeSelector label="Pickup Start Time" value={rule.pickup_start_time} onChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} options={options} />
+                                            <SingleTimeSelector label="Return by Time" value={rule.return_by_time} onChange={v => handleRuleChange(service.id, 'return_by_time', v)} options={options} />
+                                        </div>
+                                    ) : service.id === 3 ? ( 
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                        </div>
+                                    ) : null}
                                 </div>
                             )}
                         </div>
-                    )
-                })}
+                    );
+                }) : !loading && <p>Could not load services. Please try again.</p>}
             </div>
-        </div>
+            <DialogFooter className="mt-4">
+                <Button variant="outline" onClick={onCancel} disabled={isSaving}>Cancel</Button>
+                <Button onClick={handleSaveClick} disabled={isSaving}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Changes
+                </Button>
+            </DialogFooter>
+        </DialogContent>
     );
 };
 
 export const AvailabilityManager = () => {
-    const [availability, setAvailability] = useState([]);
-    const [bookings, setBookings] = useState([]);
-    const [weather, setWeather] = useState({});
+    const [services, setServices] = useState([]);
+    const [weeklyRules, setWeeklyRules] = useState([]);
+    const [dateSpecificRules, setDateSpecificRules] = useState([]);
+    const [globalUnavailable, setGlobalUnavailable] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [unavailableDates, setUnavailableDates] = useState([]);
-    const [showDateModal, setShowDateModal] = useState(false);
-    const [selectedDateInfo, setSelectedDateInfo] = useState(null);
-    const [viewDate, setViewDate] = useState(new Date());
-    const navigate = useNavigate();
+    const [isSaving, setIsSaving] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(null);
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
+    const [clipboard, setClipboard] = useState(null);
+    const [pasteDates, setPasteDates] = useState([]);
+    const [isPasting, setIsPasting] = useState(false);
 
-    const fetchInitialData = useCallback(async (date) => {
+    const isPasteMode = clipboard?.type === 'all';
+    
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const monthStart = startOfMonth(date);
-            const monthEnd = endOfMonth(date);
-            const monthStartISO = formatISO(monthStart, { representation: 'date' });
-            const monthEndISO = formatISO(monthEnd, { representation: 'date' });
-
-            const [availRes, unavailRes, weatherRes, bookingRes] = await Promise.all([
-                supabase.from('service_availability').select('*').order('service_id, day_of_week'),
-                supabase.from('unavailable_dates').select('*'),
-                supabase.functions.invoke('get-weather', { body: { startDate: monthStartISO, endDate: monthEndISO } }),
-                supabase
-                    .from('bookings')
-                    .select('*, customers!inner(name)')
-                    .gte('drop_off_date', monthStartISO)
-                    .lte('drop_off_date', monthEndISO)
+            const [servicesRes, weeklyRes, dateSpecificRes] = await Promise.all([
+                supabase.from('services').select('*').order('id'),
+                supabase.from('service_availability').select('*'),
+                supabase.from('date_specific_availability').select('*'),
             ]);
 
-            if (availRes.error) throw availRes.error;
-            setAvailability(availRes.data || []);
+            if (servicesRes.error) throw servicesRes.error;
+            setServices(servicesRes.data);
 
-            if (unavailRes.error) throw unavailRes.error;
-            setUnavailableDates(unavailRes.data || []);
+            if (weeklyRes.error) throw weeklyRes.error;
+            setWeeklyRules(weeklyRes.data);
+
+            if (dateSpecificRes.error) throw dateSpecificRes.error;
+            setDateSpecificRules(dateSpecificRes.data);
             
-            if (weatherRes.data) setWeather(prev => ({...prev, ...weatherRes.data.forecast}));
+            const dateMap = {};
+            dateSpecificRes.data.forEach(rule => {
+                if (!dateMap[rule.date]) dateMap[rule.date] = [];
+                dateMap[rule.date].push(rule);
+            });
             
-            if (bookingRes.error) throw bookingRes.error;
-            setBookings(bookingRes.data || []);
+            const completelyUnavailableDates = Object.keys(dateMap)
+                .filter(date => {
+                    const rulesForDate = dateMap[date];
+                    return rulesForDate.length === servicesRes.data.length && rulesForDate.every(r => r.is_available === false);
+                })
+                .map(d => parseISO(d));
+                
+            setGlobalUnavailable(completelyUnavailableDates);
 
         } catch (error) {
+            console.error("Error fetching availability data:", error);
             toast({ title: 'Error fetching data', description: error.message, variant: 'destructive' });
-            setAvailability([]);
-            setBookings([]);
         } finally {
             setLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        fetchInitialData(viewDate);
-    }, [fetchInitialData, viewDate]);
-    
-    const handleMonthChange = (info) => {
-        const newDate = info.view.currentStart;
-        setViewDate(newDate);
-    };
+        fetchData();
+    }, [fetchData]);
 
-    const handleAvailabilityChange = (serviceId, dayOfWeek, field, value) => {
-        setAvailability(prev => {
-            const exists = prev.some(d => d.service_id === serviceId && d.day_of_week === dayOfWeek);
-            if (exists) {
-                return prev.map(day => (day.service_id === serviceId && day.day_of_week === dayOfWeek) ? { ...day, [field]: value } : day);
-            }
-            const newDay = { service_id: serviceId, day_of_week: dayOfWeek, is_available: false, delivery_start_time: '08:00', delivery_end_time: '10:00', pickup_start_time: '08:00', pickup_end_time: '10:00', [field]: value };
-            return [...prev, newDay];
-        });
-    };
+    const handleDateSelect = (date) => {
+        if (!date) return;
 
-    const handleSaveChanges = async (day) => {
-        const { error } = await supabase.from('service_availability').upsert({
-            service_id: day.service_id, day_of_week: day.day_of_week, is_available: day.is_available,
-            delivery_start_time: day.delivery_start_time, delivery_end_time: day.delivery_end_time,
-            pickup_start_time: day.pickup_start_time, pickup_end_time: day.pickup_end_time,
-            updated_at: new Date().toISOString()
-        }, { onConflict: 'service_id, day_of_week' });
-
-        if (error) toast({ title: `Failed to update settings`, description: error.message, variant: 'destructive' });
-        else {
-            toast({ title: `Settings updated successfully` });
-            fetchInitialData(viewDate);
-        }
-    };
-    
-    const calendarEvents = useMemo(() => {
-        const unavailEvents = unavailableDates.map(d => ({
-            id: `unavail-${d.id}`, title: d.service_id ? `Blocked: ${services.find(s => s.id === d.service_id)?.name}` : 'Blocked: All Services',
-            start: d.date, allDay: true, backgroundColor: '#ef4444', borderColor: '#ef4444', classNames: ['cursor-pointer']
-        }));
-
-        const getEventColor = (status) => {
-            if (status === 'pending_payment') return '#ef4444'; // Red
-            if (status === 'Confirmed') return '#facc15'; // Yellow
-            if (status === 'Completed') return '#22c55e'; // Green
-            if (status === 'flagged') return '#f97316'; // Orange
-            return '#3b82f6'; // Blue for others like 'Delivered'
-        };
-
-        const bookingEvents = bookings.map(booking => ({
-            id: booking.id, title: `${booking.customers.name}`, start: parseISO(booking.drop_off_date), end: endOfToday(parseISO(booking.pickup_date)),
-            allDay: true, backgroundColor: getEventColor(booking.status), borderColor: getEventColor(booking.status),
-            extendedProps: { customerId: booking.customer_id, type: 'booking' }
-        }));
-
-        return [...unavailEvents, ...bookingEvents];
-    }, [unavailableDates, bookings]);
-
-    const handleDateClick = (arg) => {
-        const clickedDate = startOfDay(arg.date);
-        if (isBefore(clickedDate, startOfDay(new Date()))) {
-            toast({ title: "Past Date", description: "Cannot change availability for past dates.", variant: 'destructive' });
-            return;
-        }
-        const existingGlobalUnavailable = unavailableDates.find(d => isSameDay(parseISO(d.date), clickedDate) && !d.service_id);
-        setSelectedDateInfo({ date: clickedDate, isUnavailable: !!existingGlobalUnavailable, id: existingGlobalUnavailable?.id });
-        setShowDateModal(true);
-    };
-
-    const handleEventClick = (clickInfo) => {
-        if (clickInfo.event.extendedProps.type === 'booking') {
-            navigate(`/admin/customer/${clickInfo.event.extendedProps.customerId}`);
+        if (isPasteMode) {
+            const newPasteDates = pasteDates.some(d => isSameDay(d, date))
+                ? pasteDates.filter(d => !isSameDay(d, date))
+                : [...pasteDates, date];
+            setPasteDates(newPasteDates);
         } else {
-            handleDateClick(clickInfo.event);
+            setSelectedDate(date);
+            setIsEditorOpen(true);
         }
     };
 
-    const handleToggleDateAvailability = async () => {
-        if (!selectedDateInfo) return;
-        if (selectedDateInfo.isUnavailable) {
-            const { error } = await supabase.from('unavailable_dates').delete().match({ id: selectedDateInfo.id });
-            if (error) toast({ title: 'Failed to make date available', description: error.message, variant: 'destructive' });
-            else toast({ title: 'Date is now available for all services' });
-        } else {
-            const formattedDate = formatISO(selectedDateInfo.date, { representation: 'date' });
-            const { error } = await supabase.from('unavailable_dates').insert({ date: formattedDate, service_id: null });
-            if (error) toast({ title: 'Failed to mark date as unavailable', description: error.message, variant: 'destructive' });
-            else toast({ title: 'Date marked as unavailable for all services' });
+    const handleSaveDateSpecific = async (payload) => {
+        setIsSaving(true);
+        try {
+            const cleanPayload = payload.map(p => ({
+                ...p,
+                is_available: Boolean(p.is_available)
+            }));
+            
+            const { error } = await supabase.from('date_specific_availability').upsert(cleanPayload, { onConflict: 'date, service_id' });
+            
+            if (error) throw error;
+            
+            toast({ title: 'Availability updated!', description: "The changes have been saved successfully." });
+            setIsEditorOpen(false);
+            setSelectedDate(null);
+            fetchData();
+        } catch (error) {
+            console.error("Upsert error:", error);
+            toast({ title: 'Failed to save availability', description: error.message || 'An unexpected error occurred.', variant: 'destructive' });
+        } finally {
+            setIsSaving(false);
         }
-        setShowDateModal(false);
-        setSelectedDateInfo(null);
-        fetchInitialData(viewDate);
     };
 
-    const renderDayCellContent = (dayRenderInfo) => {
-        const dateStr = format(dayRenderInfo.date, 'yyyy-MM-dd');
-        const dayEvents = calendarEvents.filter(event => {
-            const eventStart = startOfDay(parseISO(event.start));
-            const eventEnd = event.end ? endOfToday(parseISO(event.end)) : eventStart;
-            return isWithinInterval(dayRenderInfo.date, { start: eventStart, end: eventEnd });
-        }).sort((a, b) => a.title.localeCompare(b.title));
+    const handleBulkPaste = async () => {
+        if (!isPasteMode || pasteDates.length === 0) return;
+        setIsPasting(true);
 
-        return (
-            <Popover>
-                <PopoverTrigger asChild>
-                    <div className="fc-daygrid-day-frame-custom">
-                        <div className="fc-daygrid-day-top-custom">
-                            <WeatherIcon condition={weather[dateStr]} />
-                            <div className="fc-daygrid-day-number-custom">{dayRenderInfo.dayNumberText}</div>
-                        </div>
-                        <div className="fc-daygrid-day-events-custom">
-                            {dayEvents.slice(0, 2).map(event => (
-                                <div key={event.id} className="fc-event-custom" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
-                                </div>
-                            ))}
-                            {dayEvents.length > 2 && (
-                                <div className="fc-event-more-custom">+ {dayEvents.length - 2} more</div>
-                            )}
-                        </div>
-                    </div>
-                </PopoverTrigger>
-                {dayEvents.length > 0 && (
-                    <PopoverContent className="w-80 bg-gray-800 border-yellow-400 text-white">
-                        <div className="font-bold text-lg mb-2">{format(dayRenderInfo.date, 'PPP')}</div>
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {dayEvents.map(event => (
-                                <div key={event.id} className="p-2 rounded-md" style={{ backgroundColor: event.backgroundColor }}>
-                                    {event.title}
-                                </div>
-                            ))}
-                        </div>
-                    </PopoverContent>
-                )}
-            </Popover>
+        const payload = pasteDates.flatMap(date => 
+            clipboard.data.map(rule => ({
+                date: format(date, 'yyyy-MM-dd'),
+                service_id: rule.service_id,
+                is_available: Boolean(rule.is_available),
+                delivery_start_time: rule.delivery_start_time || null,
+                delivery_end_time: rule.delivery_end_time || null,
+                pickup_start_time: rule.pickup_start_time || null,
+                delivery_pickup_start_time: rule.delivery_pickup_start_time || null,
+                delivery_pickup_end_time: rule.delivery_pickup_end_time || null,
+                return_by_time: rule.return_by_time || null
+            }))
         );
+
+        try {
+            const { error } = await supabase.from('date_specific_availability').upsert(payload, { onConflict: 'date, service_id' });
+            
+            if (error) throw error;
+            
+            toast({ title: `Settings applied to ${pasteDates.length} dates!`, description: "Bulk update successful." });
+            setClipboard(null);
+            setPasteDates([]);
+            fetchData();
+        } catch (error) {
+            console.error("Bulk upsert error:", error);
+            toast({ title: 'Failed to paste settings', description: error.message || 'Unknown error', variant: 'destructive' });
+        } finally {
+            setIsPasting(false);
+        }
+    };
+
+    const cancelPasteMode = () => {
+        setClipboard(null);
+        setPasteDates([]);
     };
 
     if (loading) return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
-    
-    if (!loading && !availability.length) {
-        return (
-            <div className="flex flex-col items-center justify-center h-64 bg-red-900/20 text-red-300 rounded-lg p-4">
-                <AlertTriangle className="h-16 w-16 mb-4" />
-                <h2 className="text-2xl font-bold">Failed to Load Availability Data</h2>
-                <p>Could not connect to the database. Please check your connection and refresh.</p>
-            </div>
-        );
-    }
 
     return (
-        <>
-        <Dialog open={showDateModal} onOpenChange={setShowDateModal}>
-            <DialogContent className="bg-gray-900 text-white border-yellow-400">
-                <DialogHeader><DialogTitle>Manage Global Availability for {selectedDateInfo?.date ? format(selectedDateInfo.date, 'PPP') : ''}</DialogTitle></DialogHeader>
-                <div className="py-4">
-                    <p className="mb-4">This will mark the selected date as available or unavailable for <strong className="text-yellow-400">ALL</strong> services.</p>
-                     <Button onClick={handleToggleDateAvailability} className={`w-full ${selectedDateInfo?.isUnavailable ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
-                        <Ban className="mr-2 h-4 w-4" />
-                        {selectedDateInfo?.isUnavailable ? "Make Globally Available" : "Make Globally Unavailable"}
+        <div className="space-y-6">
+            <div className="bg-yellow-900/20 border border-yellow-700 p-4 rounded-lg flex items-start gap-4">
+                <AlertTriangle className="h-8 w-8 text-yellow-400 mt-1" />
+                <div>
+                    <h3 className="font-bold text-yellow-300">Date Specific Availability Manager</h3>
+                    <p className="text-sm text-yellow-200">
+                        {isPasteMode 
+                            ? `PASTE MODE: Select dates on the calendar to apply the copied schedule. Click "Paste to Selected Days" when done.`
+                            : `Click a date to edit its specific hours or toggle unavailability. Use "Copy All" inside the editor to enter paste mode.`
+                        }
+                    </p>
+                </div>
+            </div>
+
+            {isPasteMode && (
+                <div className="p-4 bg-blue-900/50 rounded-lg flex items-center justify-center gap-4">
+                    <Button onClick={handleBulkPaste} disabled={pasteDates.length === 0 || isPasting}>
+                        {isPasting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ClipboardPaste className="h-4 w-4 mr-2" />}
+                        Paste to {pasteDates.length} Selected Day(s)
+                    </Button>
+                    <Button variant="destructive" onClick={cancelPasteMode}>
+                        <X className="h-4 w-4 mr-2" />
+                        Cancel Paste Mode
                     </Button>
                 </div>
-                <DialogFooter><DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose></DialogFooter>
-            </DialogContent>
-        </Dialog>
+            )}
 
-        <div className="space-y-8">
-            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 calendar-container">
-                <div className="flex flex-wrap gap-4 justify-between items-center mb-4">
-                    <h2 className="text-2xl font-bold">Booking & Availability Calendar</h2>
-                    <div className="flex items-center gap-2 text-sm text-yellow-300 bg-yellow-500/10 p-2 rounded-md">
-                       <p>Click a date to block it out, or click a booking to view details.</p>
-                    </div>
-                </div>
-                 <FullCalendar
-                    plugins={[dayGridPlugin, interactionPlugin]}
-                    initialView="dayGridMonth"
-                    dateClick={handleDateClick}
-                    eventClick={handleEventClick}
-                    events={calendarEvents}
-                    headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth' }}
-                    height="auto"
-                    validRange={{ start: formatISO(new Date(), { representation: 'date' }) }}
-                    eventDisplay="block"
-                    datesSet={handleMonthChange}
-                    dayCellContent={renderDayCellContent}
-                    eventContent={() => null}
-                />
+            <div className="bg-white/10 p-6 rounded-2xl">
+                 <Calendar
+                    mode={isPasteMode ? "multiple" : "single"}
+                    selected={isPasteMode ? pasteDates : selectedDate}
+                    onSelect={isPasteMode ? setPasteDates : handleDateSelect}
+                    className="p-0"
+                    numberOfMonths={1}
+                    disabled={{ before: startOfDay(new Date()) }}
+                    modifiers={{
+                        unavailable: globalUnavailable,
+                        hasRule: dateSpecificRules.map(r => parseISO(r.date))
+                    }}
+                    modifiersClassNames={{
+                        unavailable: 'day-unavailable',
+                        hasRule: 'day-has-rule'
+                    }}
+                 />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {services.map(service => (
-                    <ServiceAvailabilityCard key={service.id} service={service} availability={availability} onAvailabilityChange={handleAvailabilityChange} onSaveChanges={handleSaveChanges} />
-                ))}
-            </div>
+            {isEditorOpen && selectedDate && (
+                <Dialog open={isEditorOpen} onOpenChange={(isOpen) => {
+                    if (!isOpen) {
+                      setIsEditorOpen(false);
+                      setSelectedDate(null);
+                    }
+                }}>
+                    <DateSpecificEditor 
+                        date={selectedDate}
+                        services={services}
+                        existingRule={dateSpecificRules.filter(r => isSameDay(parseISO(r.date), selectedDate))}
+                        weeklyRules={weeklyRules}
+                        onSave={handleSaveDateSpecific}
+                        onCancel={() => {
+                            setIsEditorOpen(false);
+                            setSelectedDate(null);
+                        }}
+                        clipboard={clipboard}
+                        setClipboard={setClipboard}
+                        isSaving={isSaving}
+                    />
+                </Dialog>
+            )}
         </div>
-        </>
     );
 };

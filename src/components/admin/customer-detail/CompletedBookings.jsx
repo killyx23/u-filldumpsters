@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, Paperclip } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin } from 'lucide-react';
+import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -20,31 +21,69 @@ const IssueItem = ({ title, details }) => (
     </div>
 );
 
+const DistanceWarning = ({ booking }) => {
+    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || null);
+    const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || null);
+
+    useEffect(() => {
+        if (!distance && booking) {
+            const address = booking.delivery_address?.formatted_address || `${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`;
+            if(address && address.length > 10) {
+                getBusinessAddress().then(origin => {
+                    calculateDistanceViaGoogleMaps(origin, address).then(res => {
+                        setDistance(res.distance);
+                        setTravelTime(res.travelTime);
+                    }).catch(e => console.error("Distance calculation error:", e));
+                });
+            }
+        }
+    }, [booking, distance]);
+
+    if (!distance || distance <= 30) return null;
+
+    return (
+        <div className="mt-4 p-3 bg-red-900/40 border border-red-500/50 rounded-lg text-sm flex flex-col gap-1 text-red-300">
+            <span className="font-semibold flex items-center"><AlertTriangle className="mr-1 h-4 w-4" /> Extended Delivery Red Flag</span>
+            <div className="flex gap-4 text-xs text-red-200 mt-1">
+                <span className="flex items-center"><MapPin className="mr-1 h-3 w-3 text-red-400" /> {Number(distance).toFixed(1)} mi</span>
+                <span className="flex items-center"><Clock className="mr-1 h-3 w-3 text-red-400" /> {travelTime} mins</span>
+            </div>
+        </div>
+    );
+};
+
 export const CompletedBookings = ({ bookings, equipment }) => {
     if (!bookings || bookings.length === 0) return null;
 
     return (
-        <div className="space-y-8">
-            <h3 className="text-2xl font-bold text-yellow-400">Completed Rentals</h3>
+        <div className="space-y-8 mt-8">
+            <h3 className="text-2xl font-bold text-yellow-400">Completed & Cancelled Rentals</h3>
             {bookings.map(booking => {
                  const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
                  const returnIssues = booking.return_issues || {};
                  const fees = booking.fees || {};
+                 const refundDetails = booking.refund_details || null;
+
+                 const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
+                 const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
 
                  return (
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h4 className="text-xl font-bold text-white">{booking.plan.name}</h4>
-                                <p className="text-sm text-blue-200">Booked on {format(parseISO(booking.created_at), 'PPP')}</p>
+                                <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
                             </div>
                             <StatusBadge status={booking.status} />
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <DistanceWarning booking={booking} />
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                              <DetailItem icon={<Clock />} label="Start Date" value={format(parseISO(booking.drop_off_date), 'PPP')} />
                              <DetailItem icon={<Clock />} label="End Date" value={format(parseISO(booking.pickup_date), 'PPP')} />
                              <DetailItem icon={<DollarSign />} label="Final Price" value={`$${booking.total_price.toFixed(2)}`} />
+                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
                              {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
@@ -56,6 +95,15 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                                 <ul className="list-disc list-inside text-white pl-4">
                                     {relevantEquipment.map(e => <li key={e.id}>{e.equipment.name} (x{e.quantity})</li>)}
                                 </ul>
+                            </div>
+                        )}
+
+                        {refundDetails && (
+                            <div className="mt-4 border-t border-red-400/50 pt-4 space-y-2">
+                                <h5 className="font-bold text-red-300 flex items-center"><XCircle className="mr-2 h-5 w-5" />Cancellation & Refund Details</h5>
+                                <p className="text-red-200"><strong>Reason:</strong> {refundDetails.reason}</p>
+                                <p className="text-red-200"><strong>Amount Refunded:</strong> <span className="font-bold">${refundDetails.amount.toFixed(2)}</span></p>
+                                <p className="text-xs text-gray-400">Refund ID: {refundDetails.refund_id}</p>
                             </div>
                         )}
                         

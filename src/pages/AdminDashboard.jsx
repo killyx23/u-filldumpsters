@@ -1,44 +1,287 @@
 
-import React from 'react';
-import { motion } from 'framer-motion';
-import { MessageSquare, Settings, Users, Package } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/customSupabaseClient';
+import { toast } from '@/components/ui/use-toast';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
 import { BookingsManager } from '@/components/admin/BookingsManager';
-import { AvailabilityManager } from '@/components/admin/AvailabilityManager';
 import { CustomersManager } from '@/components/admin/CustomersManager';
+import { PricingManager } from '@/components/admin/PricingManager';
+import { AvailabilityManager } from '@/components/admin/AvailabilityManager';
 import { EquipmentManager } from '@/components/admin/EquipmentManager';
+import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
+import { ReviewsManager } from '@/components/admin/ReviewsManager';
+import { FaqsManager } from '@/components/admin/FaqsManager';
+import { PendingVerificationsManager } from '@/components/admin/PendingVerificationsManager';
+import { SettingsManager } from '@/components/admin/SettingsManager';
+import { ResourceManagement } from '@/components/admin/ResourceManagement';
+import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X } from 'lucide-react';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
+import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
 
 const AdminDashboard = () => {
+    const { user, signOut } = useAuth();
+    const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || "action-items");
+    
+    const [bookings, setBookings] = useState([]);
+    const [customersWithUnreadNotes, setCustomersWithUnreadNotes] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [pricingHealth, setPricingHealth] = useState(null);
+    const [showPricingAlert, setShowPricingAlert] = useState(false);
+    const [runningMigration, setRunningMigration] = useState(false);
+
+    const fetchDashboardData = useCallback(async (showLoading = true) => {
+        if(showLoading) setLoading(true);
+        try {
+            const bookingsPromise = supabase
+                .from('bookings')
+                .select('*, customers!inner(*)');
+
+            const unreadNotesPromise = supabase
+                .from('customers')
+                .select('*')
+                .eq('has_unread_notes', true);
+
+            const [{ data: bookingsData, error: bookingsError }, { data: unreadNotesData, error: unreadNotesError }] = await Promise.all([bookingsPromise, unreadNotesPromise]);
+
+            if (bookingsError) throw bookingsError;
+            if (unreadNotesError) throw unreadNotesError;
+
+            setBookings(bookingsData || []);
+            setCustomersWithUnreadNotes(unreadNotesData || []);
+
+        } catch (error) {
+            toast({
+                title: "Error fetching dashboard data",
+                description: error.message,
+                variant: "destructive",
+            });
+        } finally {
+            if(showLoading) setLoading(false);
+        }
+    }, []);
+
+    const checkPricingHealth = useCallback(async () => {
+        const health = await checkEquipmentPricingHealth();
+        setPricingHealth(health);
+        
+        if (health.issues_found > 0) {
+          setShowPricingAlert(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchDashboardData();
+        checkPricingHealth();
+    }, [fetchDashboardData, checkPricingHealth]);
+    
+    useEffect(() => {
+        const handleCustomerUpdate = (payload) => {
+            if(payload.new.has_unread_notes) {
+                setCustomersWithUnreadNotes(prev => {
+                    if (!prev.find(c => c.id === payload.new.id)) {
+                       return [...prev, payload.new];
+                    }
+                    return prev;
+                });
+            } else {
+                setCustomersWithUnreadNotes(prev => prev.filter(c => c.id !== payload.new.id));
+            }
+        };
+
+        const handleNewNote = (payload) => {
+            if(payload.new.author_type === 'customer') {
+                supabase.from('customers').select('id, name, has_unread_notes').eq('id', payload.new.customer_id).single().then(({data: customer}) => {
+                    if(customer && customer.has_unread_notes) {
+                         setCustomersWithUnreadNotes(prev => {
+                            if (!prev.find(c => c.id === customer.id)) {
+                               return [...prev, customer];
+                            }
+                            return prev;
+                        });
+                         toast({
+                            title: "New Customer Message",
+                            description: `A new message has been received from ${customer.name || 'a customer'}.`,
+                            action: <Bell className="h-5 w-5 text-yellow-400" />,
+                        });
+                    }
+                });
+            }
+        };
+
+        const subscription = supabase.channel('admin-dashboard-realtime')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchDashboardData(false))
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers' }, handleCustomerUpdate)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'customer_notes' }, handleNewNote)
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(subscription);
+        };
+    }, [fetchDashboardData]);
+
+    const handleSignOut = async () => {
+        await signOut();
+    };
+
+    const handleTabChange = (value) => {
+        setActiveTab(value);
+        setSearchParams({ tab: value });
+    };
+
+    const handleRunMigration = async () => {
+      setRunningMigration(true);
+      
+      const result = await runEquipmentPricingMigration();
+      
+      if (result.success) {
+        toast({
+          title: 'Migration Successful',
+          description: `Created ${result.created_records} pricing records, updated ${result.updated_records} records.`
+        });
+        
+        // Refresh health check
+        await checkPricingHealth();
+      } else {
+        toast({
+          title: 'Migration Completed with Errors',
+          description: `${result.errors} errors occurred. Check console for details.`,
+          variant: 'destructive'
+        });
+      }
+      
+      setRunningMigration(false);
+    };
+
+    const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
+    const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged', 'pending_payment'].includes(b.status) && !b.pending_address_verification).length) + customersWithUnreadNotes.length;
+
     return (
-        <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
-            className="container mx-auto py-8 px-4 relative"
-        >
-            <h1 className="text-4xl font-bold mb-8 text-yellow-400">Admin Dashboard</h1>
-            
-            <Tabs defaultValue="bookings" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 bg-white/10 text-white mb-4">
-                    <TabsTrigger value="bookings"><MessageSquare className="mr-2 h-4 w-4" />Bookings</TabsTrigger>
-                    <TabsTrigger value="customers"><Users className="mr-2 h-4 w-4" />Customers</TabsTrigger>
-                    <TabsTrigger value="equipment"><Package className="mr-2 h-4 w-4" />Equipment</TabsTrigger>
-                    <TabsTrigger value="availability"><Settings className="mr-2 h-4 w-4" />Availability</TabsTrigger>
-                </TabsList>
-                <TabsContent value="bookings">
-                    <BookingsManager />
-                </TabsContent>
-                <TabsContent value="customers">
-                    <CustomersManager />
-                </TabsContent>
-                <TabsContent value="equipment">
-                    <EquipmentManager />
-                </TabsContent>
-                <TabsContent value="availability">
-                    <AvailabilityManager />
-                </TabsContent>
-            </Tabs>
-        </motion.div>
+        <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
+            <div className="container mx-auto">
+                <div className="flex flex-wrap justify-between items-center mb-8">
+                    <h1 className="text-3xl font-bold text-yellow-400">Admin Dashboard</h1>
+                    {user && (
+                        <div className="flex items-center gap-4">
+                            <span className="text-sm text-gray-400 hidden sm:inline">{user.email}</span>
+                            <button onClick={handleSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                                Sign Out
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {showPricingAlert && pricingHealth && pricingHealth.issues_found > 0 && (
+                  <div className="bg-orange-900/20 border border-orange-500/30 rounded-lg p-4 mb-6">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 flex-1">
+                        <AlertCircle className="h-5 w-5 text-orange-400 mt-0.5" />
+                        <div>
+                          <h3 className="font-bold text-orange-300 mb-2">
+                            Equipment Pricing Issues Detected
+                          </h3>
+                          <p className="text-sm text-orange-200 mb-3">
+                            {pricingHealth.issues_found} equipment record(s) have pricing configuration issues.
+                          </p>
+                          <div className="space-y-1 text-sm text-orange-100 mb-3">
+                            {pricingHealth.missing_pricing.length > 0 && (
+                              <p>• {pricingHealth.missing_pricing.length} missing pricing records</p>
+                            )}
+                            {pricingHealth.null_item_types.length > 0 && (
+                              <p>• {pricingHealth.null_item_types.length} records with null item_type</p>
+                            )}
+                            {pricingHealth.invalid_prices.length > 0 && (
+                              <p>• {pricingHealth.invalid_prices.length} records with invalid prices</p>
+                            )}
+                            {pricingHealth.price_mismatches.length > 0 && (
+                              <p>• {pricingHealth.price_mismatches.length} price mismatches</p>
+                            )}
+                          </div>
+                          <Button 
+                            onClick={handleRunMigration}
+                            disabled={runningMigration}
+                            className="bg-orange-600 hover:bg-orange-700"
+                          >
+                            {runningMigration ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Fixing Issues...
+                              </>
+                            ) : (
+                              'Fix All Issues'
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setShowPricingAlert(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+                    <TabsList className="flex flex-wrap justify-start mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">
+                        <TabsTrigger value="action-items" className="relative py-2">
+                            <AlertTriangle className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Action Items</span>
+                            {actionItemCount > 0 && (
+                                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs text-white shadow">
+                                    {actionItemCount}
+                                </span>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="pending-address" className="relative py-2 bg-orange-900/20 data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                            <MapPin className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Verify Address</span>
+                            {pendingAddressCount > 0 && (
+                                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-5 w-5 items-center justify-center rounded-full bg-orange-500 text-xs text-white shadow border border-gray-900">
+                                    {pendingAddressCount}
+                                </span>
+                            )}
+                        </TabsTrigger>
+                        <TabsTrigger value="financial" className="py-2 bg-green-900/20 data-[state=active]:bg-green-600 data-[state=active]:text-white">
+                            <Calculator className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Financial Books</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="bookings" className="py-2"><Truck className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Bookings</span></TabsTrigger>
+                        <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
+                        <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
+                        <TabsTrigger value="pricing" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Pricing</span></TabsTrigger>
+                        <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
+                        <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
+                        <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
+                        <TabsTrigger value="resources" className="py-2"><BookOpen className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Resources</span></TabsTrigger>
+                        <TabsTrigger value="settings" className="py-2"><Settings className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Settings</span></TabsTrigger>
+                    </TabsList>
+                    
+                    {loading ? (
+                        <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>
+                    ) : (
+                        <>
+                            <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
+                            <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
+                            <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
+                            <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
+                            <TabsContent value="customers"><CustomersManager /></TabsContent>
+                            <TabsContent value="availability"><AvailabilityManager /></TabsContent>
+                            <TabsContent value="pricing"><PricingManager /></TabsContent>
+                            <TabsContent value="equipment"><EquipmentManager /></TabsContent>
+                            <TabsContent value="reviews"><ReviewsManager /></TabsContent>
+                            <TabsContent value="faqs"><FaqsManager /></TabsContent>
+                            <TabsContent value="resources"><ResourceManagement /></TabsContent>
+                            <TabsContent value="settings"><SettingsManager /></TabsContent>
+                        </>
+                    )}
+                </Tabs>
+            </div>
+        </div>
     );
 };
 

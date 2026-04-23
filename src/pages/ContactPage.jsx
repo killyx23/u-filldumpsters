@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { Label } from '@/components/ui/label';
+import BackButton from '@/components/BackButton';
 
 const ContactPage = () => {
     const { toast } = useToast();
@@ -19,9 +20,11 @@ const ContactPage = () => {
         e.preventDefault();
         setIsLoading(true);
 
-        const { error } = await supabase
-            .from('contact_messages')
-            .insert([{ name, email, message }]);
+        const { error } = await supabase.rpc('handle_contact_form', {
+            contact_name: name,
+            contact_email: email,
+            contact_message: message
+        });
 
         setIsLoading(false);
 
@@ -29,12 +32,12 @@ const ContactPage = () => {
             toast({
                 variant: "destructive",
                 title: "Uh oh! Something went wrong.",
-                description: "There was a problem sending your message. Please try again.",
+                description: "There was a problem sending your message. " + error.message,
             });
         } else {
             toast({
                 title: "Message Sent!",
-                description: "Thanks for reaching out. We'll get back to you soon.",
+                description: "Thanks for reaching out. We've logged your message and will get back to you soon.",
             });
             setName('');
             setEmail('');
@@ -48,65 +51,71 @@ const ContactPage = () => {
                 <title>Contact Us - U-Fill Dumpsters</title>
                 <meta name="description" content="Get in touch with U-Fill Dumpsters for any questions about our services, bookings, or support. We're here to help." />
             </Helmet>
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="container mx-auto max-w-2xl py-16 px-4"
-            >
-                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl">
-                    <div className="text-center mb-8">
-                        <h1 className="text-4xl font-bold text-yellow-400 mb-2">Contact Us</h1>
-                        <p className="text-lg text-blue-200">Have a question? We'd love to hear from you.</p>
-                    </div>
+            <div className="relative">
+                 <BackButton className="absolute top-4 left-4 z-20" />
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="container mx-auto max-w-2xl py-16 px-4"
+                >
+                    <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl">
+                        <div className="text-center mb-8">
+                            <h1 className="text-4xl font-bold text-yellow-400 mb-2">Contact Us</h1>
+                            <p className="text-lg text-blue-200">Have a question? We'd love to hear from you.</p>
+                             <p className="text-sm text-blue-300 mt-4 bg-blue-900/30 p-3 rounded-lg">
+                               For the fastest response, please use the contact form below. This ensures your message is logged in our system. If you prefer, you can email <a href="mailto:support@u-filldumpsters.com" className="font-bold text-yellow-300 hover:underline">support@u-filldumpsters.com</a> directly, but please note that response times may take up to 48 hours.
+                            </p>
+                        </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
-                        <div>
-                            <Label htmlFor="name" className="text-white">Full Name</Label>
-                            <Input
-                                id="name"
-                                type="text"
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                                placeholder="John Doe"
-                                required
-                                className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
-                            />
-                        </div>
-                        <div>
-                            <Label htmlFor="email" className="text-white">Email Address</Label>
-                            <Input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="you@example.com"
-                                required
-                                className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
-                            />
-                        </div>
-                        <div>
-                            <Label htmlFor="message" className="text-white">Message</Label>
-                            <Textarea
-                                id="message"
-                                value={message}
-                                onChange={(e) => setMessage(e.target.value)}
-                                placeholder="How can we help you today?"
-                                required
-                                rows={6}
-                                className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
-                            />
-                        </div>
-                        <Button
-                            type="submit"
-                            disabled={isLoading}
-                            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold py-3 text-lg"
-                        >
-                            {isLoading ? 'Sending...' : 'Send Message'}
-                        </Button>
-                    </form>
-                </div>
-            </motion.div>
+                        <form onSubmit={handleSubmit} className="space-y-6">
+                            <div>
+                                <Label htmlFor="name" className="text-white">Full Name</Label>
+                                <Input
+                                    id="name"
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    placeholder="John Doe"
+                                    required
+                                    className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="email" className="text-white">Email Address</Label>
+                                <Input
+                                    id="email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="you@example.com"
+                                    required
+                                    className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
+                                />
+                            </div>
+                            <div>
+                                <Label htmlFor="message" className="text-white">Message</Label>
+                                <Textarea
+                                    id="message"
+                                    value={message}
+                                    onChange={(e) => setMessage(e.target.value)}
+                                    placeholder="How can we help you today?"
+                                    required
+                                    rows={6}
+                                    className="bg-white/5 border-white/20 text-white placeholder:text-gray-400"
+                                />
+                            </div>
+                            <Button
+                                type="submit"
+                                disabled={isLoading}
+                                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold py-3 text-lg"
+                            >
+                                {isLoading ? 'Sending...' : 'Send Message'}
+                            </Button>
+                        </form>
+                    </div>
+                </motion.div>
+            </div>
         </>
     );
 };

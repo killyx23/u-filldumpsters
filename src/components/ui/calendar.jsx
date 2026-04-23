@@ -37,7 +37,7 @@ function Calendar({
           "h-9 w-9 p-0 font-normal aria-selected:opacity-100"
         ),
         day_selected:
-          "bg-stone-900 text-stone-50 hover:bg-stone-900 hover:text-stone-50 focus:bg-stone-900 focus:text-stone-50 dark:bg-stone-50 dark:text-stone-900 dark:hover:bg-stone-50 dark:hover:text-stone-900 dark:focus:bg-stone-50 dark:focus:text-stone-900",
+          "bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black focus:bg-yellow-600 focus:text-black dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500 dark:hover:text-black dark:focus:bg-yellow-500 dark:focus:text-black",
         day_today: "bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-50",
         day_outside: "text-stone-500 opacity-50 dark:text-stone-400",
         day_disabled: "text-stone-500 opacity-50 dark:text-stone-400",
