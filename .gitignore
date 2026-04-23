@@ -5,3 +5,4 @@ supabase/.env
  *:Zone.Identifier
 dist/
 supabase/backups/
+.env.local
