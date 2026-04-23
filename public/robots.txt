@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://u-filldumpsters.com/sitemap.xml

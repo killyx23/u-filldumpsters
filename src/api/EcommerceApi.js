@@ -1,5 +1,5 @@
 const ECOMMERCE_API_URL = "https://api-ecommerce.hostinger.com";
-const ECOMMERCE_STORE_ID = "store_01K1FXYT44PK94YYZGXRPRA00Z";
+const ECOMMERCE_STORE_ID = "store_01KNRJJFTA08KY9XXYCB294R0V";
 
 export const formatCurrency = (priceInCents, currencyInfo) => {
 	if (!currencyInfo || priceInCents === null || priceInCents === undefined) {
@@ -53,8 +53,9 @@ const extractVariants = (variants) => {
 			price_in_cents,
 			sale_price_in_cents,
 			currency,
-			price_in_cents_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
-			sale_price_in_cents_formatted: formatCurrency(sale_price_in_cents, v?.prices?.[0]?.currency),
+			currency_info: v?.prices?.[0]?.currency,
+			price_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
+			sale_price_formatted: formatCurrency(sale_price_in_cents, v?.prices?.[0]?.currency),
 			manage_inventory: v?.manage_inventory || false, // track stock only if this flag is true
 			weight: v?.weight || null,
 			options: extractVariantOptions(v?.options),
@@ -141,7 +142,10 @@ const getProductPrice = (product) => {
  * @property {number} price_in_cents - Price in cents in smallest currency unit (e.g., cents for USD)
  * @property {number|null} sale_price_in_cents - Discounted price in cents in smallest currency unit, if applicable
  * @property {string} currency - Currency code (e.g., "USD", "EUR")
- * @property {boolean} manage_inventory - Whether inventory is managed for product and/or variant. When true, stock should be tracked
+ * @property {Object} currency_info - Currency information object from prices array
+ * @property {string} price_formatted - Formatted price string (e.g., "$10.99")
+ * @property {string|null} sale_price_formatted - Formatted sale price string, null if no sale
+ * @property {boolean} manage_inventory - Whether inventory is managed for this variant. When true, stock should be tracked
  * @property {number|null} weight - Product weight in specified units
  * @property {Array<{id: string, option_id: string, variant_id: string, value: string}>} options - Variant-specific options
  * @property {number|null} inventory_quantity - Current inventory quantity for this variant. Track only if manage_inventory=true
@@ -276,6 +280,24 @@ const getProductPrice = (product) => {
  */
 
 /**
+ * @typedef {Object} Category
+ * @property {string} id - Unique category identifier
+ * @property {string} title - Category name/title
+ * @property {string|null} image_url - Category image URL
+ * @property {string} store_id - Store identifier
+ * @property {string} created_at - Creation timestamp
+ * @property {string} updated_at - Last update timestamp
+ * @property {string|null} deleted_at - Deletion timestamp
+ * @property {Object|null} metadata - Category metadata
+ */
+
+/**
+ * @typedef {Object} GetCategoriesResponse
+ * @property {Category[]} categories - Array of category objects
+ * @property {number} count - Total number of categories
+ */
+
+/**
  * @typedef {Object} CheckoutItemCustomFieldValue
  * @property {string} custom_field_id - Custom field identifier (required if custom_field_values provided)
  * @property {string} value - Custom field value for this item (required if custom_field_values provided)
@@ -339,7 +361,7 @@ export async function getProducts({ids, offset, limit, order, sort_by, is_hidden
 	}
 
 	if (order) {
-		queryParams.append("order", String(order));
+		queryParams.append("order", String(order).toUpperCase());
 	}
 
 	if (sort_by) {
@@ -535,6 +557,67 @@ export async function getProductQuantities({fields, product_ids}) {
 }
 
 /**
+ * GET /store/{store_id}/collections - Get Categories Endpoint
+ * @function getCategories
+ * @static
+ * @operationId GetCategories
+ * @summary Retrieve Categories
+ * @description Retrieve all categories (collections) for filtering products. Each product has a collection_id that can be matched against these categories.
+ * @group Category
+ *
+ * @returns {Promise<GetCategoriesResponse>} Response object with categories array and count
+ *
+ * @example
+ * // Use categories to filter products by checking product.collections[].collection_id
+ */
+export async function getCategories() {
+	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/collections`;
+
+	const response = await fetch(url, {
+		method: "GET",
+		headers: {
+			"Content-Type": "application/json",
+		},
+	});
+
+	if (!response.ok) {
+		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+	}
+
+	const data = await response.json();
+
+	return {
+		categories: (data.collections || []).map((collection) => ({
+			id: collection.id,
+			title: collection.title,
+			image_url: collection.image_url,
+			store_id: collection.store_id,
+			created_at: collection.created_at,
+			updated_at: collection.updated_at,
+			deleted_at: collection.deleted_at,
+			metadata: collection.metadata,
+		})),
+		count: data.count,
+	};
+}
+
+async function getCheckoutLanguage() {
+	const response = await fetch(`${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/settings`, {
+		method: "GET",
+		headers: {
+			"Content-Type": "application/json",
+		},
+	});
+
+	if (!response.ok) {
+		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+	}
+
+	const data = await response.json();
+	return data.store_owner?.language;
+}
+
+/**
  * POST /store/{store_id}/checkout - Initialize Checkout Endpoint
  * @function initializeCheckout
  * @static
@@ -574,8 +657,8 @@ export async function getProductQuantities({fields, product_ids}) {
  */
 export async function initializeCheckout({items, successUrl, cancelUrl, locale}) {
 	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/checkout`;
-
-	const response = await fetch(url, {
+	
+	const checkoutInitPromise = fetch(url, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
@@ -589,11 +672,14 @@ export async function initializeCheckout({items, successUrl, cancelUrl, locale})
 		}),
 	});
 
+	const [response, language] = await Promise.all([checkoutInitPromise, getCheckoutLanguage().catch(() => "en")]);
+
 	if (!response.ok) {
 		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 	}
 
 	const data = await response.json();
+	const checkoutRedirectUrl = `${data.url}&lang=${language?.toLowerCase() || "en"}`;
 
-	return { url: data.url };
+	return { url: checkoutRedirectUrl };
 }

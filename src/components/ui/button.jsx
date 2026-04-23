@@ -4,19 +4,19 @@ import { cva } from 'class-variance-authority';
 import React from 'react';
 
 const buttonVariants = cva(
-	'inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+	'inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
 	{
 		variants: {
 			variant: {
-				default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+				default: 'bg-yellow-500 text-black hover:bg-yellow-600 shadow-md',
 				destructive:
-          'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+          'bg-red-600 text-red-50 hover:bg-red-700 shadow-md',
 				outline:
-          'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
+          'border border-white/30 bg-white/10 hover:bg-white/20 text-white',
 				secondary:
-          'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-				ghost: 'hover:bg-accent hover:text-accent-foreground',
-				link: 'text-primary underline-offset-4 hover:underline',
+          'bg-blue-500 text-white hover:bg-blue-600 shadow-md',
+				ghost: 'hover:bg-white/20 text-white',
+				link: 'text-yellow-400 underline-offset-4 hover:underline',
 			},
 			size: {
 				default: 'h-10 px-4 py-2',
