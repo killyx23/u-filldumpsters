@@ -1,5 +1,4 @@
-
-    import React from 'react';
+import React from 'react';
     import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
     import { Info } from 'lucide-react';
 
@@ -24,4 +23,3 @@
             {children}
         </div>
     );
-  

@@ -151,7 +151,8 @@ function main() {
   let pages = [];
   
   if (!fs.existsSync(pagesDir)) {
-    pages.push(processPageFile(appJsxPath, []));
+    pages.push(processPageFile(appJsxPath, []))
+    pages = pages.filter(Boolean);
   } else {
     const routes = extractRoutes(appJsxPath);
     const reactFiles = findReactFiles(pagesDir);
@@ -159,11 +160,11 @@ function main() {
     pages = reactFiles
       .map(filePath => processPageFile(filePath, routes))
       .filter(Boolean);
-    
-    if (pages.length === 0) {
-      console.error('❌ No pages with Helmet components found!');
-      process.exit(1);
-    }
+  }
+
+  if (pages.length === 0) {
+    console.error('❌ No pages with Helmet components found!');
+    process.exit(1);
   }
 
 

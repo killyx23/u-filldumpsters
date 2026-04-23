@@ -12,6 +12,10 @@ import { supabase } from '@/lib/customSupabaseClient';
 
 const formatTime = (timeString) => {
     if (!timeString) return 'N/A';
+    // Handle delivery service time windows
+    if (timeString === '06:00') return '6:00 AM - 8:00 AM';
+    if (timeString === '22:00') return '10:00 PM - 11:30 PM';
+    
     try {
         const [hour, minute] = timeString.split(':');
         const date = new Date(0);
@@ -31,14 +35,14 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
     
     const handleExtendRental = async () => {
         setIsExtending(true);
-        const dailyRate = booking.plan.id === 1 ? 50 : 150;
+        const dailyRate = booking.plan?.id === 1 ? 50 : 150;
         
         const { error: functionError } = await supabase.functions.invoke('extend-rental', {
             body: { 
-                customerId: booking.customers.stripe_customer_id, 
+                customerId: booking.customers?.stripe_customer_id, 
                 days: extendDays, 
                 pricePerDay: dailyRate,
-                planName: booking.plan.name
+                planName: booking.plan?.name
             }
         });
         
@@ -55,13 +59,22 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                  toast({ title: 'Invoice sent, but failed to update booking date', variant: 'destructive'});
             } else {
                 toast({ title: 'Rental Extended!', description: `Invoice for ${extendDays} day(s) sent.` });
-                onRentalExtended();
+                onRentalExtended && onRentalExtended();
             }
         }
         setIsExtending(false);
         setShowExtendModal(false);
     };
+
+    const isDeliveryService = booking.plan?.id === 2 && booking.addons?.distanceInfo?.deliveryService;
     
+    // Safely extract Stripe Charge ID
+    const stripeChargeId = 
+        (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) || 
+        booking.payment_intent || 
+        booking.client_secret || 
+        'N/A';
+
     return (
         <>
         <Dialog open={showExtendModal} onOpenChange={setShowExtendModal}>
@@ -95,11 +108,13 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 <DetailItem label="Email" value={booking.email} />
                 <DetailItem label="Phone" value={booking.phone} />
                 <DetailItem label="Address" value={`${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`} />
-                <DetailItem label="Service" value={booking.plan.name} />
-                <DetailItem label="Drop-off" value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
+                <DetailItem label="Service" value={booking.plan?.name || 'N/A'} />
+                {isDeliveryService && <DetailItem label="Service Type" value="Delivery Service" />}
+                <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
                 <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
-                <DetailItem label="Total" value={`$${booking.total_price.toFixed(2)}`} />
-                <DetailItem label="Stripe Payment ID" value={booking.stripe_payment_intent_id || 'N/A'} />
+                <DetailItem label="Total" value={`$${Number(booking.total_price || 0).toFixed(2)}`} />
+                {isDeliveryService && booking.addons?.distanceInfo?.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
+                <DetailItem label="Stripe Charge ID" value={stripeChargeId} />
                 {booking.delivered_at && <DetailItem label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}
                 {booking.picked_up_at && <DetailItem label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
                 {booking.notes && <div className="pt-2"><p className="font-semibold text-blue-200">Notes:</p><p className="text-white bg-white/5 p-2 rounded-md mt-1 whitespace-pre-wrap">{booking.notes}</p></div>}

@@ -24,6 +24,73 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
     --radius: 0.5rem;
+
+    /* Status Colors */
+    --status-scheduled: 217 91% 60%;
+    --status-in-transit: 38 92% 50%;
+    --status-delivered: 160 84% 39%;
+    --status-pending: 45 93% 58%;
+    --status-cancelled: 0 84% 60%;
+
+    /* Premium / Gold Accents */
+    --gold: 45 93% 58%;
+    --gold-light: 45 93% 70%;
+    --gold-dark: 45 93% 35%;
+
+    /* Financial Dashboard Colors */
+    --finance-revenue: 142 76% 36%;
+    --finance-revenue-light: 142 76% 45%;
+    --finance-expense: 0 84% 60%;
+    --finance-expense-light: 0 84% 70%;
+    --finance-profit: 217 91% 60%;
+    --finance-profit-light: 217 91% 70%;
+    --finance-neutral: 215 16% 47%;
+    --finance-accent: 45 93% 58%;
+    
+    /* Chart Colors */
+    --chart-1: 142 76% 36%;
+    --chart-2: 217 91% 60%;
+    --chart-3: 45 93% 58%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 263 70% 50%;
+    --chart-6: 340 82% 52%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+
+    /* Premium / Gold Accents */
+    --gold: 45 93% 58%;
+    --gold-light: 45 93% 70%;
+    --gold-dark: 45 93% 35%;
+
+    /* Financial Dashboard Colors */
+    --finance-revenue: 142 76% 36%;
+    --finance-revenue-light: 142 76% 45%;
+    --finance-expense: 0 84% 60%;
+    --finance-expense-light: 0 84% 70%;
+    --finance-profit: 217 91% 60%;
+    --finance-profit-light: 217 91% 70%;
+    --finance-neutral: 215 16% 47%;
+    --finance-accent: 45 93% 58%;
   }
 }
 
@@ -32,70 +99,157 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  h1 { @apply text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight; }
+  h2 { @apply text-3xl md:text-4xl font-bold tracking-tight; }
+  h3 { @apply text-2xl md:text-3xl font-semibold tracking-tight; }
+  p { @apply leading-relaxed; }
+}
+
+@layer components {
+  /* Price Breakdown Components */
+  .price-breakdown-category {
+    @apply mb-4;
+  }
+
+  .category-separator {
+    @apply w-full h-px bg-gradient-to-r from-transparent via-white/20 to-transparent;
+  }
+
+  .price-breakdown-container {
+    @apply bg-white/5 rounded-xl p-6 border border-white/10;
+  }
+
+  .price-breakdown-scrollable {
+    @apply max-h-[60vh] overflow-y-auto pr-2;
+  }
+
+  /* Scrollbar Styling */
+  .scrollbar-thin::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-white/20 rounded-full;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/30;
+  }
+
+  /* Financial Dashboard Specific Styles */
+  .financial-metric-card {
+    @apply rounded-lg p-6 border shadow-lg transition-all hover:shadow-xl;
+  }
+
+  .financial-revenue-card {
+    @apply bg-gradient-to-br from-green-900/40 to-green-800/20 border-green-700/50;
+  }
+
+  .financial-expense-card {
+    @apply bg-gradient-to-br from-red-900/40 to-red-800/20 border-red-700/50;
+  }
+
+  .financial-profit-card {
+    @apply bg-gradient-to-br from-blue-900/40 to-blue-800/20 border-blue-700/50;
+  }
+
+  .financial-table {
+    @apply w-full border-collapse;
+  }
+
+  .financial-table thead th {
+    @apply text-left py-3 px-4 bg-gray-800/50 text-gray-300 font-semibold border-b border-gray-700;
+  }
+
+  .financial-table tbody td {
+    @apply py-3 px-4 border-b border-gray-700/50;
+  }
+
+  .financial-table tbody tr:hover {
+    @apply bg-gray-700/30;
+  }
+
+  /* Reschedule Dialog Specific Layout */
+  .reschedule-dialog-wide {
+    @apply w-[95vw] md:min-w-[900px] max-w-[1200px] h-[95vh] md:h-[90vh] max-h-[90vh] overflow-hidden flex flex-col p-0 gap-0 bg-gray-950 border-gray-800 shadow-2xl rounded-2xl sm:rounded-3xl;
+  }
+  
+  .reschedule-content-area {
+    @apply flex-1 overflow-y-auto px-5 sm:px-8 md:px-12 py-10 bg-gray-950 hide-scrollbar;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .pricing-row {
+    @apply flex justify-between items-start py-2.5 border-b border-gray-800/50 text-sm;
+  }
+
+  .agreement-checkbox-wrapper {
+    @apply flex items-start space-x-3 p-4 rounded-xl border border-gray-800 bg-gray-900/50 transition-colors hover:bg-gray-800 hover:border-gray-700;
+  }
+
+  .modal-backdrop-blur {
+    @apply backdrop-blur-xl bg-black/80;
+  }
+
+  /* Custom Calendar Sizing in Reschedule Dialog */
+  .custom-calendar-wrapper .rdp {
+    @apply m-0;
+  }
+  .custom-calendar-wrapper .rdp-months {
+    @apply justify-center flex-col md:flex-row gap-6;
+  }
+  .custom-calendar-wrapper .rdp-day_selected, 
+  .custom-calendar-wrapper .rdp-day_selected:focus-visible, 
+  .custom-calendar-wrapper .rdp-day_selected:hover {
+    @apply bg-gold text-gray-950 font-bold;
   }
 }
 
-.calendar-container .fc {
-    --fc-border-color: rgba(255, 255, 255, 0.2);
-    --fc-daygrid-event-dot-width: 8px;
-    --fc-today-bg-color: rgba(250, 204, 21, 0.15); /* yellow-400 with opacity */
-    --fc-button-text-color: #ffffff;
-    --fc-button-bg-color: rgba(255, 255, 255, 0.1);
-    --fc-button-border-color: rgba(255, 255, 255, 0.2);
-    --fc-button-hover-bg-color: rgba(255, 255, 255, 0.2);
-    --fc-button-hover-border-color: rgba(255, 255, 255, 0.3);
-    --fc-button-active-bg-color: rgba(255, 255, 255, 0.25);
-    --fc-button-active-border-color: rgba(255, 255, 255, 0.3);
-    --fc-event-bg-color: #3b82f6;
-    --fc-event-border-color: #3b82f6;
-    --fc-event-text-color: #ffffff;
-}
+@layer utilities {
+  .text-gold {
+    color: hsl(var(--gold));
+  }
+  .text-gold-light {
+    color: hsl(var(--gold-light));
+  }
+  .bg-gold {
+    background-color: hsl(var(--gold));
+  }
+  .border-gold {
+    border-color: hsl(var(--gold));
+  }
+  .shadow-gold {
+    box-shadow: 0 0 20px hsla(var(--gold), 0.4);
+  }
 
-.calendar-container .fc .fc-daygrid-day.fc-day-today {
-    background-color: var(--fc-today-bg-color);
-}
-
-.calendar-container .fc .fc-toolbar-title {
-    color: #facc15; /* yellow-400 */
-}
-
-.calendar-container .fc .fc-daygrid-day-number {
-    color: #d1d5db; /* gray-300 */
-}
-
-.calendar-container .fc .fc-col-header-cell-cushion {
-    color: #9ca3af; /* gray-400 */
-}
-
-.fc-daygrid-day-frame-custom {
-    @apply flex flex-col p-1 h-full w-full cursor-pointer;
-}
-
-.fc-daygrid-day-top-custom {
-    @apply flex items-center justify-between w-full;
-}
-
-.fc-daygrid-day-number-custom {
-    @apply text-sm font-medium text-gray-300;
-}
-
-.fc-daygrid-day-events-custom {
-    @apply mt-1 space-y-1 overflow-hidden;
-}
-
-.fc-event-custom {
-    @apply text-xs text-white px-1.5 py-0.5 rounded truncate;
-}
-
-.fc-event-more-custom {
-    @apply text-xs text-yellow-300 mt-1;
-}
-
-.calendar-container .fc-day-past .fc-daygrid-day-frame-custom {
-    @apply opacity-50;
-}
-
-.calendar-container .fc-daygrid-day-events {
-    display: none;
+  /* Financial Utilities */
+  .text-finance-revenue {
+    color: hsl(var(--finance-revenue));
+  }
+  .text-finance-expense {
+    color: hsl(var(--finance-expense));
+  }
+  .text-finance-profit {
+    color: hsl(var(--finance-profit));
+  }
+  .bg-finance-revenue {
+    background-color: hsl(var(--finance-revenue));
+  }
+  .bg-finance-expense {
+    background-color: hsl(var(--finance-expense));
+  }
 }
