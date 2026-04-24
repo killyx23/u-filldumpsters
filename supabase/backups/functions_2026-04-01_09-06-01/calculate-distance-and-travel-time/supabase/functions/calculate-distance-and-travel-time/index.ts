@@ -7,7 +7,7 @@ Deno.serve(async (req)=>{
   }
   try {
     const body = await req.json();
-    console.log("[Distance API] Received request body:", body);
+    console.log("[Distance API] Received request body floppy:", body);
     const { customerAddress, businessLat, businessLng } = body;
     if (!customerAddress || typeof customerAddress !== 'string') {
       console.error("[Distance API] Missing or invalid customerAddress");
