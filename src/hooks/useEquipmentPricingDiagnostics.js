@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import { diagnoseEquipmentPricing, verifyEquipmentPricingIntegrity } from '@/utils/equipmentPricingDiagnostics';
 import { logDiagnosticReport } from '@/utils/equipmentPricingDiagnosticsFormatter';

@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { eachDayOfInterval, format, isValid, parseISO } from 'date-fns';
 import { rescheduleDebugLogger } from './rescheduleDebugLogger';

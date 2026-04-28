@@ -1,4 +1,3 @@
-
 export const formatTo12Hour = (time24) => {
     if (!time24) return '';
     // Handle formats like "14:30:00" or "14:30"

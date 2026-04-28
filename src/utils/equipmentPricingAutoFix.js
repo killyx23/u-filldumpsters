@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { diagnoseEquipmentPricing } from './equipmentPricingDiagnostics';
 import { runEquipmentPricingMigration } from './equipmentPricingMigration';

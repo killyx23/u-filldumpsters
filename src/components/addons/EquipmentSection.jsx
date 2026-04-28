@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { AddonSection } from './AddonSection';
@@ -22,11 +21,17 @@ export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, eq
                     // Use price from item metadata (loaded from equipment_pricing in parent)
                     const itemPrice = Number(item.price || 0);
                     
+                    // For Working Gloves (equipment_id 3), append price to label
+                    const isPurchaseItem = item.dbId === 3;
+                    const displayLabel = isPurchaseItem && itemPrice > 0 
+                        ? `${item.label} - $${itemPrice.toFixed(2)}`
+                        : item.label;
+                    
                     return (
                         <EquipmentItem 
                             key={item.id} 
                             id={item.id} 
-                            label={item.label} 
+                            label={displayLabel} 
                             price={itemPrice}
                             icon={item.icon}
                             hasQuantitySelector={item.quantity}

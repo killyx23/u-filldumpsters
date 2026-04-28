@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2, Send, Truck, CheckCircle, PlusCircle, Loader2 } from 'lucide-react';
@@ -32,6 +33,55 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
     const [showExtendModal, setShowExtendModal] = useState(false);
     const [extendDays, setExtendDays] = useState(1);
     const [isExtending, setIsExtending] = useState(false);
+    const [disposalFees, setDisposalFees] = useState({
+        mattressFee: null,
+        tvFee: null,
+        applianceFee: null
+    });
+    const [loadingFees, setLoadingFees] = useState(true);
+    
+    // Fetch disposal fees from equipment_pricing table
+    useEffect(() => {
+        const fetchDisposalFees = async () => {
+            setLoadingFees(true);
+            try {
+                const { data, error } = await supabase
+                    .from('equipment_pricing')
+                    .select('equipment_id, base_price')
+                    .in('equipment_id', [4, 5, 6]);
+
+                if (error) {
+                    console.error('[BookingDetails] Error fetching disposal fees:', error);
+                    // Set fallback values on error
+                    setDisposalFees({
+                        mattressFee: 25,
+                        tvFee: 15,
+                        applianceFee: 35
+                    });
+                } else if (data && data.length > 0) {
+                    const fees = {};
+                    data.forEach(item => {
+                        if (item.equipment_id === 4) fees.mattressFee = Number(item.base_price);
+                        if (item.equipment_id === 5) fees.tvFee = Number(item.base_price);
+                        if (item.equipment_id === 6) fees.applianceFee = Number(item.base_price);
+                    });
+                    setDisposalFees(fees);
+                }
+            } catch (err) {
+                console.error('[BookingDetails] Exception fetching disposal fees:', err);
+                // Set fallback values on exception
+                setDisposalFees({
+                    mattressFee: 25,
+                    tvFee: 15,
+                    applianceFee: 35
+                });
+            } finally {
+                setLoadingFees(false);
+            }
+        };
+
+        fetchDisposalFees();
+    }, []);
     
     const handleExtendRental = async () => {
         setIsExtending(true);
@@ -106,10 +156,28 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
                 <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
                 <DetailItem label="Total" value={`$${booking.total_price.toFixed(2)}`} />
-                 {isDeliveryService && booking.addons.distanceInfo.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
+                {isDeliveryService && booking.addons.distanceInfo.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
                 <DetailItem label="Stripe Payment ID" value={booking.stripe_payment_intent_id || 'N/A'} />
                 {booking.delivered_at && <DetailItem label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}
                 {booking.picked_up_at && <DetailItem label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
+                
+                {/* Prohibited Materials Section with Dynamic Disposal Fees */}
+                <div className="pt-2">
+                    <p className="font-semibold text-blue-200">Prohibited Materials:</p>
+                    <p className="text-white bg-white/5 p-2 rounded-md mt-1">
+                        {loadingFees ? (
+                            <span className="flex items-center">
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                Loading disposal fees...
+                            </span>
+                        ) : (
+                            <>
+                                Mattresses and TVs can be taken to the dump, but they require an extra ${disposalFees.mattressFee || 'N/A'} for each mattress and ${disposalFees.tvFee || 'N/A'} for each TV. Appliances require ${disposalFees.applianceFee || 'N/A'} for each appliance. Please refer to our user agreement for a complete list of restricted items.
+                            </>
+                        )}
+                    </p>
+                </div>
+                
                 {booking.notes && <div className="pt-2"><p className="font-semibold text-blue-200">Notes:</p><p className="text-white bg-white/5 p-2 rounded-md mt-1 whitespace-pre-wrap">{booking.notes}</p></div>}
             </div>
             <div className="mt-6 space-y-2">

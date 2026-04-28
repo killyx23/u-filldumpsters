@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { getOrCreateEquipmentPricing } from './equipmentPricingIntegration';
 import { isValidEquipmentId } from './equipmentIdValidator';

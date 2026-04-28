@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';

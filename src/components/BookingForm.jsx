@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck } from 'lucide-react';
@@ -17,6 +16,7 @@ import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
+import { formatCurrency } from '@/api/EcommerceApi';
 
 export const BookingForm = ({
   plan,
@@ -41,6 +41,14 @@ export const BookingForm = ({
   const [currentDeliveryFee, setCurrentDeliveryFee] = useState(0);
   const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(false);
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
+  
+  // Disposal fees state
+  const [mattressFee, setMattressFee] = useState(null);
+  const [tvFee, setTvFee] = useState(null);
+  const [applianceFee, setApplianceFee] = useState(null);
+  const [feesLoading, setFeesLoading] = useState(true);
+  const [feesError, setFeesError] = useState(null);
+  
   const isDelivery = plan?.id === 2 && deliveryService;
   const { getFeeForService } = useDumpFees();
 
@@ -55,6 +63,68 @@ export const BookingForm = ({
     if (isDelivery) return allPlans.find(p => p.id === 4) || null;
     return allPlans.find(p => p.id === plan?.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
+
+  // Fetch disposal fees from equipment_pricing table
+  useEffect(() => {
+    const fetchDisposalFees = async () => {
+      console.log('[BookingForm] Fetching disposal fees from equipment_pricing table');
+      setFeesLoading(true);
+      setFeesError(null);
+      
+      try {
+        const { data, error } = await supabase
+          .from('equipment_pricing')
+          .select('equipment_id, base_price')
+          .in('equipment_id', [4, 5, 6]);
+
+        if (error) {
+          console.error('[BookingForm] Error fetching disposal fees:', error);
+          setFeesError('Failed to load disposal fees');
+          // Set fallback values
+          setMattressFee(25);
+          setTvFee(15);
+          setApplianceFee(35);
+        } else if (data && data.length > 0) {
+          console.log('[BookingForm] Disposal fees fetched successfully:', data);
+          
+          data.forEach(item => {
+            const price = Number(item.base_price);
+            if (item.equipment_id === 4) {
+              setMattressFee(price);
+            } else if (item.equipment_id === 5) {
+              setTvFee(price);
+            } else if (item.equipment_id === 6) {
+              setApplianceFee(price);
+            }
+          });
+          
+          console.log('[BookingForm] ✓ Disposal fees loaded:', {
+            mattress: data.find(d => d.equipment_id === 4)?.base_price,
+            tv: data.find(d => d.equipment_id === 5)?.base_price,
+            appliance: data.find(d => d.equipment_id === 6)?.base_price
+          });
+        } else {
+          console.warn('[BookingForm] No disposal fees found in database');
+          setFeesError('No disposal fees found');
+          // Set fallback values
+          setMattressFee(25);
+          setTvFee(15);
+          setApplianceFee(35);
+        }
+      } catch (err) {
+        console.error('[BookingForm] Exception fetching disposal fees:', err);
+        setFeesError('Error loading disposal fees');
+        // Set fallback values
+        setMattressFee(25);
+        setTvFee(15);
+        setApplianceFee(35);
+      } finally {
+        setFeesLoading(false);
+      }
+    };
+
+    fetchDisposalFees();
+  }, []);
 
   // Helper function to format time to "h:mm a" format
   const formatTimeToAmPm = (timeStr) => {
@@ -190,23 +260,6 @@ export const BookingForm = ({
       let mergedAvailability = {};
       if (!error && !data?.error) {
         mergedAvailability = { ...data.availability };
-      }
-      
-      const dailyOverrides = await AvailabilityService.getAvailabilityForDateRange(targetServiceId, startDate, endDate);
-      if (dailyOverrides && dailyOverrides.length > 0) {
-        dailyOverrides.forEach(override => {
-          if (!mergedAvailability[override.date]) {
-            mergedAvailability[override.date] = { available: override.is_available };
-          } else {
-            mergedAvailability[override.date].available = override.is_available;
-            if (!override.is_available) {
-              mergedAvailability[override.date].deliverySlots = [];
-              mergedAvailability[override.date].pickupSlots = [];
-              mergedAvailability[override.date].returnSlots = [];
-              mergedAvailability[override.date].hourlySlots = [];
-            }
-          }
-        });
       }
       
       setAvailability(prev => ({ ...prev, ...mergedAvailability }));
@@ -462,6 +515,7 @@ export const BookingForm = ({
     return { dropOff: dropOffSlots, pickup: pickupSlots };
   }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery, fetchedPickupWindows]);
   
+  // TASK 1: 24-hour rental logic for delivery services (plan.id === 3 or 4)
   const handleDateSelect = async (field, date) => {
     const newDate = date ? startOfDay(date) : null;
     if (newDate) {
@@ -474,13 +528,41 @@ export const BookingForm = ({
       }
       console.log('[BookingForm] Date selected:', field, dateStr);
     }
+    
     setBookingData(prev => {
       const state = {
         ...prev,
         [field]: newDate,
         ...(currentPlan?.id !== 2 || isDelivery ? { [`${field.replace('Date', '')}TimeSlot`]: '' } : {})
       };
-      if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3) {
+
+      // TASK 1: For delivery services (plan.id === 3 or 4), enforce 24-hour minimum rental
+      if (field === 'dropOffDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
+        // Automatically set pickup date to next day (24-hour minimum)
+        const nextDay = addDays(newDate, 1);
+        state.pickupDate = nextDay;
+        state.pickupTimeSlot = ''; // Clear time slot to force reselection
+        
+        console.log('[BookingForm] 24-hour rental: pickup date set to next day', {
+          deliveryDate: format(newDate, 'yyyy-MM-dd'),
+          pickupDate: format(nextDay, 'yyyy-MM-dd')
+        });
+      } else if (field === 'pickupDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
+        // Validate pickup is at least 24 hours after delivery
+        if (prev.dropOffDate) {
+          const minPickupDate = addDays(startOfDay(prev.dropOffDate), 1);
+          if (isBefore(newDate, minPickupDate)) {
+            console.warn('[BookingForm] Pickup date less than 24 hours after delivery - resetting to minimum');
+            state.pickupDate = minPickupDate;
+            toast({
+              title: "24-Hour Minimum Rental",
+              description: "Pickup must be at least 24 hours after delivery. Date adjusted to next day.",
+              variant: "destructive"
+            });
+          }
+        }
+      } else if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3 && currentPlan?.id !== 4) {
+        // Existing logic for other services
         if (!prev.pickupDate || isBefore(startOfDay(prev.pickupDate), newDate)) {
           state.pickupDate = newDate;
           if (currentPlan?.id !== 2 || isDelivery) {
@@ -488,6 +570,7 @@ export const BookingForm = ({
           }
         }
       }
+      
       return state;
     });
   };
@@ -537,13 +620,30 @@ export const BookingForm = ({
       const dropOff = startOfDay(new Date(bookingData.dropOffDate));
       const pickup = currentPlan.id === 3 ? dropOff : startOfDay(new Date(bookingData.pickupDate));
       if (isValid(dropOff) && isValid(pickup) && !isBefore(pickup, dropOff)) {
-        const dayDiff = differenceInDays(pickup, dropOff) + 1;
+        // TASK 1 FIX: Correct rental day calculation for delivery services
+        let dayDiff;
+        
+        // For delivery services (plan.id === 3 or 4), calculate rental days without adding +1
+        // because the difference already represents the correct number of rental days
+        if (currentPlan.id === 3 || currentPlan.id === 4) {
+          dayDiff = differenceInDays(pickup, dropOff);
+          // If same day delivery/pickup, count as 1 day minimum
+          if (dayDiff === 0) dayDiff = 1;
+        } else {
+          // For all other services, keep existing logic
+          dayDiff = differenceInDays(pickup, dropOff) + 1;
+        }
+        
         if (currentPlan.id === 1) {
           basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
         } else if (currentPlan.id === 2 || currentPlan.id === 4) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
+        } else if (currentPlan.id === 3) {
+          basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         }
+        
         console.log('[BookingForm] Base rental calculation:', {
+          planId: currentPlan.id,
           days: dayDiff,
           basePrice: basePriceCalculation
         });
@@ -567,6 +667,16 @@ export const BookingForm = ({
     if (!currentPlan) return false;
     let baseValid = bookingData.dropOffDate && bookingData.dropOffTimeSlot && bookingData.dropOffTimeSlot !== 'Not available';
     let pickupValid = currentPlan.id === 3 ? true : (bookingData.pickupDate && bookingData.pickupTimeSlot && bookingData.pickupTimeSlot !== 'Not available');
+    
+    // TASK 1: Additional validation for 24-hour minimum rental
+    if ((currentPlan.id === 3 || currentPlan.id === 4) && bookingData.dropOffDate && bookingData.pickupDate) {
+      const minPickupDate = addDays(startOfDay(bookingData.dropOffDate), 1);
+      if (isBefore(startOfDay(bookingData.pickupDate), minPickupDate)) {
+        console.warn('[BookingForm] Form invalid: pickup less than 24 hours after delivery');
+        pickupValid = false;
+      }
+    }
+    
     const cAddress = bookingData.contactAddress;
     const addressValid = cAddress?.street && cAddress?.city && cAddress?.state && cAddress?.zip;
     return baseValid && pickupValid && addressValid;
@@ -660,9 +770,9 @@ export const BookingForm = ({
       case 3:
         return {
           date1: 'Delivery Date',
-          date2: '',
+          date2: 'Pickup Date',
           time1: 'Delivery (Time Window)',
-          time2: ''
+          time2: 'Pickup (Time Window)'
         };
       default:
         return {
@@ -693,10 +803,14 @@ export const BookingForm = ({
 
     if (currentPlan?.id === 4) {
       return (
-        <div className="text-blue-200 mb-6 space-y-4 text-sm leading-relaxed">
+        <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
           <p>
             Experience the ultimate convenience with our Dump Trailer Delivery & Removal Service. Perfect for residential or commercial projects, this service eliminates the need for you to own a towing vehicle.
           </p>
+          <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
+            <p className="font-bold text-yellow-400 mb-1">📅 24-Hour Minimum Rental</p>
+            <p className="text-yellow-100">Pickup is scheduled for the next day after delivery, giving you a full 24 hours to complete your project.</p>
+          </div>
           <div>
             <h4 className="font-bold text-white mb-1">Our Service Process</h4>
             <p>
@@ -763,7 +877,7 @@ export const BookingForm = ({
 
     if (currentPlan?.id === 1) {
       return (
-         <div className="text-blue-200 mb-6 space-y-3 text-sm leading-relaxed">
+         <div className="text-blue-200 space-y-3 text-sm leading-relaxed">
           <p>
             Our <strong>16 Yard Dumpster Rental</strong> is perfect for mid-to-large cleanouts, remodeling projects, and construction debris.
           </p>
@@ -785,7 +899,7 @@ export const BookingForm = ({
         : 'gives you the trailer for a full rental day.';
 
       return (
-        <div className="text-blue-200 mb-6 space-y-4 text-sm leading-relaxed">
+        <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
           <p>
             Our <strong>Dump Loader Trailer Rental</strong> is the heavy-duty solution for DIYers and professionals alike. This versatile 16'x7'x4' trailer empowers you to move materials on your own schedule—saving you time, money, and the hassle of multiple trips.
           </p>
@@ -865,8 +979,36 @@ export const BookingForm = ({
         </div>
       );
     }
+
+    if (currentPlan?.id === 3) {
+      return (
+        <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
+          <p>
+            Our <strong>Material Delivery Service</strong> provides quick, efficient delivery of bulk materials directly to your job site.
+          </p>
+          <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
+            <p className="font-bold text-yellow-400 mb-1">📅 24-Hour Service Window</p>
+            <p className="text-yellow-100">Delivery is made on your selected date, with automatic pickup scheduled 24 hours later.</p>
+          </div>
+          <div className="bg-black/20 p-3 rounded border border-blue-500/20">
+            <p className="font-bold text-white mb-1">Service Details:</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Same-day delivery and next-day pickup</li>
+              <li>Professional material handling</li>
+              <li>Delivery fee based on distance</li>
+            </ul>
+          </div>
+        </div>
+      );
+    }
     
-    return <p className="text-blue-200 mb-6">{currentPlan?.description || plan?.description || ''}</p>;
+    return <p className="text-blue-200">{currentPlan?.description || plan?.description || ''}</p>;
+  };
+  
+  // Helper function to format fees as currency
+  const formatFeeAsCurrency = (fee) => {
+    if (fee === null || fee === undefined) return 'N/A';
+    return `$${Number(fee).toFixed(2)}`;
   };
   
   console.log('[BookingForm] Render complete');
@@ -946,14 +1088,29 @@ export const BookingForm = ({
                       <AlertCircle className="h-6 w-6 text-orange-500 flex-shrink-0" />
                       <span className="font-bold text-orange-400 text-base uppercase tracking-wide">Prohibited Materials</span>
                     </div>
+                    {feesLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="h-6 w-6 animate-spin text-orange-400 mr-2" />
+                        <span className="text-sm text-gray-300">Loading disposal fees...</span>
+                      </div>
+                    ) : feesError ? (
+                      <div className="text-sm text-red-400 bg-red-900/20 p-3 rounded border border-red-500/30">
+                        <strong>Error:</strong> {feesError}. Using default values.
+                      </div>
+                    ) : null}
                     <p className="text-sm text-gray-300 leading-relaxed">
-                      <strong className="text-white">CAUTION:</strong> These Materials are not allowed in the dumpster. Prohibited items include hazardous materials (paint, chemicals, asbestos), tires, and batteries. Mattresses and TVs can be taken to the dump, but they require an extra $25 for each mattress and $15 for each TV. Please refer to our user agreement for a complete list of restricted items. Disposing of these items in the dumpster may result in additional fees.
+                      <strong className="text-white">CAUTION:</strong> These Materials are not allowed in the dumpster. Prohibited items include hazardous materials (paint, chemicals, asbestos), tires, and batteries. Mattresses and TVs can be taken to the dump, but they require an extra {formatFeeAsCurrency(mattressFee)} for each mattress and {formatFeeAsCurrency(tvFee)} for each TV. Appliances require {formatFeeAsCurrency(applianceFee)} for each appliance. Please refer to our user agreement for a complete list of restricted items. Disposing of these items in the dumpster may result in additional fees.
                     </p>
                   </DialogContent>
                 </Dialog>
               )}
             </div>
-            {renderDescription()}
+            
+            {/* Scrollable Description Area */}
+            <div className="max-h-[350px] overflow-y-auto mb-4 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+              {renderDescription()}
+            </div>
+            
             <div className="border-t border-white/20 pt-4">
               <p className="text-white text-lg font-semibold">
                 {currentPlan?.id === 2 && !isDelivery ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}

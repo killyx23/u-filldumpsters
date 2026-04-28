@@ -10,6 +10,8 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
+import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { createTaxRecord } from '@/utils/createTaxRecord';
 
 export default function BookingConfirmation() {
   const [searchParams] = useSearchParams();
@@ -37,9 +39,7 @@ export default function BookingConfirmation() {
     removeAfterPrint: true,
   });
 
-  // ------------------------------------------------------------------
-  // ENHANCED: Finalize booking with comprehensive logging
-  // ------------------------------------------------------------------
+  // Finalize booking with comprehensive logging and tax record creation
   const finalizeBooking = async ({ isRetry = false } = {}) => {
     if (!bookingId) {
       console.warn('[BookingConfirmation] Cannot finalize: missing bookingId');
@@ -91,9 +91,26 @@ export default function BookingConfirmation() {
         bookingUpdated: data?.bookingUpdated
       });
 
+      // Create tax record for audit tracking
+      if (data?.bookingData) {
+        console.log(`[${timestamp}] [BookingConfirmation] Creating tax record...`);
+        
+        const taxResult = await createTaxRecord(
+          bookingId,
+          data.bookingData.tax_amount,
+          data.bookingData.tax_rate_used,
+          data.bookingData.subtotal_before_tax
+        );
+
+        if (taxResult.success) {
+          console.log(`[${timestamp}] [BookingConfirmation] ✓ Tax record created:`, taxResult.taxRecord.id);
+        } else {
+          console.warn(`[${timestamp}] [BookingConfirmation] ⚠ Tax record creation failed:`, taxResult.error);
+        }
+      }
+
       setFinalizeStatus('done');
 
-      // Show success message if email was sent
       if (data?.emailSent) {
         console.log(`[${timestamp}] [BookingConfirmation] ✓ Confirmation email sent successfully`);
         toast({
@@ -127,9 +144,7 @@ export default function BookingConfirmation() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // ENHANCED: Fetch booking with comprehensive logging
-  // ------------------------------------------------------------------
+  // Fetch booking with comprehensive logging
   useEffect(() => {
     let isMounted = true;
 
@@ -170,7 +185,6 @@ export default function BookingConfirmation() {
       try {
         console.log(`[${timestamp}] [BookingConfirmation] Fetching booking data for ID: ${bookingId}`);
 
-        // 1. Fetch booking display data
         const { data: booking, error: fetchError } = await supabase
           .from('bookings')
           .select('*, customers(*)')
@@ -183,7 +197,8 @@ export default function BookingConfirmation() {
           error: fetchError,
           bookingStatus: booking?.status,
           customerId: booking?.customer_id,
-          customerData: booking?.customers
+          customerData: booking?.customers,
+          hasTaxData: !!(booking?.tax_amount && booking?.tax_rate_used)
         });
 
         if (fetchError || !booking) {
@@ -197,13 +212,15 @@ export default function BookingConfirmation() {
           id: booking.id,
           email: booking.email,
           status: booking.status,
+          tax_amount: booking.tax_amount,
+          tax_rate_used: booking.tax_rate_used,
+          subtotal_before_tax: booking.subtotal_before_tax,
           customer_portal_id: booking.customers?.customer_id_text,
           customer_phone: booking.customers?.phone
         });
 
         setBookingDetails(booking);
 
-        // 2. Resolve service details for display
         let resolvedServiceId = booking.plan?.service_id || booking.plan?.id;
         if (booking.addons?.deliveryService && resolvedServiceId === 2) {
           resolvedServiceId = 4;
@@ -227,7 +244,6 @@ export default function BookingConfirmation() {
         setLoading(false);
         clearTimeout(timeoutId);
 
-        // 3. Finalize booking in the background (Stripe IDs, status, email)
         console.log(`[${timestamp}] [BookingConfirmation] Triggering finalization process...`);
         finalizeBooking();
 
@@ -255,9 +271,7 @@ export default function BookingConfirmation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
-  // ------------------------------------------------------------------
-  // ENHANCED: Portal access with retry logic and comprehensive logging
-  // ------------------------------------------------------------------
+  // Portal access with retry logic and comprehensive logging
   const handleGoToPortal = async () => {
     const timestamp = new Date().toISOString();
     const portalId = bookingDetails?.customers?.customer_id_text ?? '';
@@ -284,11 +298,9 @@ export default function BookingConfirmation() {
       return;
     }
 
-    // ENHANCED: Add small delay to ensure customer data is fully committed
     console.log(`[${timestamp}] [BookingConfirmation] Waiting 500ms for data commit...`);
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    // ENHANCED: Verify customer exists in database before redirect
     try {
       console.log(`[${timestamp}] [BookingConfirmation] Verifying customer exists in database...`);
       
@@ -308,7 +320,6 @@ export default function BookingConfirmation() {
       if (error || !customer) {
         console.error(`[${timestamp}] [BookingConfirmation] ⚠ Customer not found, adding retry delay...`);
         
-        // Wait additional time and retry
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         const { data: retryCustomer, error: retryError } = await supabase
@@ -342,9 +353,6 @@ export default function BookingConfirmation() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Loading / error states
-  // ------------------------------------------------------------------
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-16 flex flex-col items-center justify-center min-h-[60vh] no-print">
@@ -374,9 +382,6 @@ export default function BookingConfirmation() {
     );
   }
 
-  // ------------------------------------------------------------------
-  // Helpers
-  // ------------------------------------------------------------------
   const deliveryAddress  = bookingDetails.delivery_address || bookingDetails.contact_address || {};
   const formattedAddress = `${deliveryAddress.street || bookingDetails.street || 'N/A'}, ${deliveryAddress.city || bookingDetails.city || 'N/A'}, ${deliveryAddress.state || bookingDetails.state || 'N/A'} ${deliveryAddress.zip || bookingDetails.zip || 'N/A'}`;
 
@@ -390,11 +395,24 @@ export default function BookingConfirmation() {
   };
 
   const serviceName = serviceDetails?.name || bookingDetails.plan?.name || 'N/A';
-  const isTrailer   = serviceName.toLowerCase().includes('trailer');
+  const isDelivery = bookingDetails.addons?.deliveryService || bookingDetails.addons?.isDelivery;
+  
+  // Time window formatting options
+  const showTimeWindow = shouldShowTimeWindow(bookingDetails.plan, isDelivery);
+  const isSelfService = isSelfServiceTrailer(bookingDetails.plan, isDelivery);
+  const timeOptions = {
+    isWindow: showTimeWindow,
+    isSelfService: isSelfService,
+    serviceType: bookingDetails.plan?.service_type
+  };
 
-  // ------------------------------------------------------------------
-  // ENHANCED: Finalization status banner with better messaging
-  // ------------------------------------------------------------------
+  // Get tax information from booking record
+  const taxRateUsed = bookingDetails.tax_rate_used || 7.45;
+  const taxAmount = bookingDetails.tax_amount || 0;
+  const subtotalBeforeTax = bookingDetails.subtotal_before_tax || 0;
+  const totalPaid = bookingDetails.total_price || 0;
+
+  // Finalization status banner
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
       finalizeStatus === 'done'
@@ -453,9 +471,6 @@ export default function BookingConfirmation() {
     </div>
   );
 
-  // ------------------------------------------------------------------
-  // Main render
-  // ------------------------------------------------------------------
   return (
     <>
       <div className="container mx-auto px-4 py-16 flex flex-col items-center no-print">
@@ -472,10 +487,8 @@ export default function BookingConfirmation() {
             Thank you for choosing U-Fill Dumpsters. Your order #{bookingDetails.id} is secured.
           </p>
 
-          {/* Finalization status banner */}
           <FinalizeBanner />
 
-          {/* Booking details — always visible once loaded */}
           <div className="bg-black/40 p-6 rounded-xl mb-8 text-left space-y-4 shadow-lg border border-white/10">
             <h3 className="text-xl font-bold text-white border-b border-white/10 pb-3 mb-4 flex items-center">
               Booking Summary
@@ -505,8 +518,16 @@ export default function BookingConfirmation() {
                   {serviceName}
                 </p>
                 <p className="text-white mb-2">
-                  <span className="text-blue-300/80 font-semibold w-24 inline-block">Total Paid:</span>
-                  <span className="font-bold text-green-400">${(bookingDetails.total_price || 0).toFixed(2)}</span>
+                  <span className="text-blue-300/80 font-semibold w-32 inline-block">Subtotal:</span>
+                  <span className="font-bold">${subtotalBeforeTax.toFixed(2)}</span>
+                </p>
+                <p className="text-white mb-2">
+                  <span className="text-blue-300/80 font-semibold w-32 inline-block">Tax ({taxRateUsed.toFixed(2)}%):</span>
+                  <span className="font-bold">${taxAmount.toFixed(2)}</span>
+                </p>
+                <p className="text-white mb-2">
+                  <span className="text-blue-300/80 font-semibold w-32 inline-block">Total Paid:</span>
+                  <span className="font-bold text-green-400">${totalPaid.toFixed(2)}</span>
                 </p>
               </div>
             </div>
@@ -515,13 +536,13 @@ export default function BookingConfirmation() {
               <p className="text-white flex items-start mb-3">
                 <Calendar className="h-5 w-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" />
                 <span>
-                  <strong className="text-blue-100">{isTrailer ? 'Pickup Start:' : 'Delivery Date:'}</strong>{' '}
-                  {formatDate(bookingDetails.drop_off_date)} ({bookingDetails.drop_off_time_slot || 'Anytime'})<br />
-                  <strong className="text-blue-100">{isTrailer ? 'Return Deadline:' : 'Pickup Date:'}</strong>{' '}
-                  {formatDate(bookingDetails.pickup_date)} ({bookingDetails.pickup_time_slot || 'Anytime'})
+                  <strong className="text-blue-100">{isSelfService ? 'Pickup Start:' : 'Delivery Date:'}</strong>{' '}
+                  {formatDate(bookingDetails.drop_off_date)} ({formatTimeWindow(bookingDetails.drop_off_time_slot, timeOptions)})<br />
+                  <strong className="text-blue-100">{isSelfService ? 'Return Deadline:' : 'Pickup Date:'}</strong>{' '}
+                  {formatDate(bookingDetails.pickup_date)} ({formatTimeWindow(bookingDetails.pickup_time_slot, timeOptions)})
                 </span>
               </p>
-              {!isTrailer && (
+              {!isSelfService && (
                 <p className="text-white flex items-start">
                   <MapPin className="h-5 w-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" />
                   <span className="break-words">
@@ -532,7 +553,6 @@ export default function BookingConfirmation() {
             </div>
           </div>
 
-          {/* Portal credentials */}
           <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
             <h3 className="text-xl font-bold text-yellow-400 mb-2 flex items-center">
               <Key className="mr-2 h-5 w-5" /> Secure Customer Portal
@@ -556,7 +576,6 @@ export default function BookingConfirmation() {
             </div>
           </div>
 
-          {/* Action buttons */}
           <div className="flex flex-col sm:flex-row gap-4 w-full mt-10">
             <Button
               onClick={handleGoToPortal}
