@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';

@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';

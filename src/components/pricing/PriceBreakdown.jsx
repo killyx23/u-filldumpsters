@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';

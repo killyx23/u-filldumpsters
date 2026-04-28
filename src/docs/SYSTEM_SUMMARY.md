@@ -1,4 +1,3 @@
-
 # Equipment Pricing System - Complete Summary
 
 ## 🚨 Problem Statement

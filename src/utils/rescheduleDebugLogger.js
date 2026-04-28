@@ -1,4 +1,3 @@
-
 /**
  * Comprehensive logging utility to verify Supabase data connections 
  * and pricing calculations for the rescheduling flow.

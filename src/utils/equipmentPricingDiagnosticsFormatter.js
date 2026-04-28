@@ -1,4 +1,3 @@
-
 /**
  * Equipment Pricing Diagnostics Console Formatter
  * Provides professional, well-formatted console output for diagnostic reports

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { AlertTriangle, X, Eye, RefreshCw, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';

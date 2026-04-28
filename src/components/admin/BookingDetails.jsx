@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -75,6 +76,11 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
         booking.client_secret || 
         'N/A';
 
+    // Get tax information
+    const taxRateUsed = booking.tax_rate_used || 7.45;
+    const taxAmount = booking.tax_amount || 0;
+    const subtotalBeforeTax = booking.subtotal_before_tax || 0;
+
     return (
         <>
         <Dialog open={showExtendModal} onOpenChange={setShowExtendModal}>
@@ -112,7 +118,15 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 {isDeliveryService && <DetailItem label="Service Type" value="Delivery Service" />}
                 <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
                 <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
-                <DetailItem label="Total" value={`$${Number(booking.total_price || 0).toFixed(2)}`} />
+                
+                {/* Tax Information */}
+                <div className="pt-3 border-t border-white/10">
+                    <p className="font-semibold text-blue-200 mb-2">Payment Breakdown:</p>
+                    <DetailItem label="Subtotal (before tax)" value={`$${subtotalBeforeTax.toFixed(2)}`} />
+                    <DetailItem label={`Tax (${taxRateUsed.toFixed(2)}%)`} value={`$${taxAmount.toFixed(2)}`} />
+                    <DetailItem label="Total Paid" value={`$${Number(booking.total_price || 0).toFixed(2)}`} />
+                </div>
+                
                 {isDeliveryService && booking.addons?.distanceInfo?.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
                 <DetailItem label="Stripe Charge ID" value={stripeChargeId} />
                 {booking.delivered_at && <DetailItem label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}

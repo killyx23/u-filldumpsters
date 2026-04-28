@@ -1,4 +1,3 @@
-
 /**
  * Generate PDF from HTML content
  * Note: This is a basic implementation. For production, consider using jsPDF with html2canvas
