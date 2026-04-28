@@ -4,33 +4,63 @@ set -e
 source ./supabase/.env
 
 BACKUP_DIR="supabase/backups"
+DB_BACKUP_DIR="supabase/backups/db"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 
 #please run this from command line before running this script at root directory of the project:
 #npx supabase login
 #npx supabase link --project-ref <PROJECT_REF> see .env for PROJECT_REF
 # Login to Supabase CLI (will prompt once if not logged in)
+# On db pull — run it once manually to sync migrations folder:
+# npx supabase db pull --linked
 
 mkdir -p $BACKUP_DIR
+mkdir -p $DB_BACKUP_DIR
 echo "🚀 Starting Supabase backup for project: $PROJECT_REF"
 
-# Ensure Supabase CLI is logged in (one-time interactive login required)
-# if ! npx supabase status >/dev/null 2>&1;then 
-#   echo "🔑 Logging in to Supabase..."
-#   npx supabase login 
-# fi
 
-# Dump the database schema using Supabase CLI (avoids direct IPv6 connections) 
-echo "🗄 Dumping latest database schema..." 
-npx supabase db dump --linked --file "$BACKUP_DIR/schema_$DATE.sql"
+rm -rf supabase/.temp
+npx supabase link --project-ref "$PROJECT_REF"
+sleep 2  # let the link settle
 
-# Save auth policies / TypeScript types
+# Dump the database schema using Supabase CLI (avoids direct IPv6 connections) echo "🗄 Dumping latest database schema..."
+#npx supabase db dump --linked > "$DB_BACKUP_DIR/schema_$DATE.sql"
+# npx supabase db dump \
+#   --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
+#   --file "$DB_BACKUP_DIR/schema_$DATE.sql"
+
+for attempt in 1 2 3; do
+  npx supabase db dump --linked > "$DB_BACKUP_DIR/schema_$DATE.sql" && break
+  echo "⚠ Dump attempt $attempt failed, retrying..."
+  sleep 3
+done
+
+
+# ---------------------------------------------------------------------------
+# Database delta (changes since last migration)
+# ---------------------------------------------------------------------------
+echo "🔍 Generating database diff (delta changes)..."
+DIFF_FILE="$DB_BACKUP_DIR/db_${DATE}_changes.sql"
+npx supabase db diff --linked > "$DIFF_FILE" 2>/dev/null || true
+
+# Check if diff produced any content
+if [[ -f "$DIFF_FILE" && -s "$DIFF_FILE" ]]; then
+  echo "✅ Schema changes detected and saved to: $DIFF_FILE"
+else
+  echo "ℹ️  No schema changes detected since last migration — diff file skipped."
+  rm -f "$DIFF_FILE"
+fi
+
+
+# ---------------------------------------------------------------------------
+# Save TypeScript types
+# ---------------------------------------------------------------------------
 echo "📑 Saving auth policies and types..."
-npx supabase gen types typescript --linked > $BACKUP_DIR/types_$DATE.ts
+npx supabase gen types typescript --linked > "$DB_BACKUP_DIR/types_$DATE.ts"
 
-# # ----------------------------
-# # Edge Functions
-# # ----------------------------
+# ---------------------------------------------------------------------------
+# Edge Functions
+# ---------------------------------------------------------------------------
 echo "⚡ Backing up Edge Functions..."
 mkdir -p $BACKUP_DIR/functions_$DATE
 
@@ -49,19 +79,16 @@ while read -r fn; do
     fi
 done <<< "$FUNCTIONS"
 
-# ----------------------------
-# ----------------------------
-# Consolidate All Edge Functions into One File
-# ----------------------------
+# ---------------------------------------------------------------------------
+# Consolidate all Edge Functions into one file
+# ---------------------------------------------------------------------------
 echo "🧩 Consolidating all Edge Functions into a single file..."
 ALL_FUNCTIONS_FILE="$BACKUP_DIR/all_edge_functions_$DATE.ts"
 
-# Create or clear consolidated file (no timestamp inside)
 echo "// Consolidated Edge Functions Backup" > "$ALL_FUNCTIONS_FILE"
 echo "// Each function is separated by headers for clarity" >> "$ALL_FUNCTIONS_FILE"
 echo "" >> "$ALL_FUNCTIONS_FILE"
 
-# Iterate again over each function to concatenate their contents
 while read -r fn; do
   if [ -n "$fn" ]; then
     FUNC_PATH="$BACKUP_DIR/functions_$DATE/$fn"
@@ -82,3 +109,4 @@ done <<< "$FUNCTIONS"
 
 echo "✅ Edge Functions backed up and consolidated into $ALL_FUNCTIONS_FILE"
 echo "✅ Backup completed. Files saved in $BACKUP_DIR"
+echo "✅ Database files saved in $DB_BACKUP_DIR"

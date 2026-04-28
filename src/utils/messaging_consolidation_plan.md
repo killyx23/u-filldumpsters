@@ -1,4 +1,3 @@
-
 # Messaging System Consolidation Plan
 
 ## Task 1: Audit and Consolidate

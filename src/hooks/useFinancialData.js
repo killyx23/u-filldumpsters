@@ -1,141 +1,119 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { toast } from '@/components/ui/use-toast';
-import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 
-export const useFinancialData = (options = {}) => {
-  const {
-    dateRangeStart = null,
-    dateRangeEnd = null,
-    autoRefresh = false,
-    refreshInterval = 30000,
-  } = options;
-
+export const useFinancialData = ({ autoRefresh = false, refreshInterval = 30000 } = {}) => {
   const [data, setData] = useState({
-    income: [],
-    expenses: [],
     bookings: [],
+    expenses: [],
+    income: [],
     equipment: [],
-    categories: [],
-    equipmentPricing: [],
+    categories: []
   });
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchFinancialData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [incomeRes, expensesRes, bookingsRes, equipmentRes, categoriesRes, pricingRes] = 
-        await Promise.all([
-          supabase
-            .from('financial_income')
-            .select('*, customers(name), bookings(id)')
-            .order('date', { ascending: false }),
-          
-          supabase
-            .from('financial_expenses')
-            .select('*, equipment_inventory(name), financial_categories(name)')
-            .order('date', { ascending: false }),
-          
-          supabase
-            .from('bookings')
-            .select('*, customers(name), plan:services(*)')
-            .order('created_at', { ascending: false }),
-          
-          supabase
-            .from('equipment_inventory')
-            .select('*')
-            .order('name'),
-          
-          supabase
-            .from('financial_categories')
-            .select('*')
-            .order('name'),
+      // Fetch bookings with customer and service information
+      const { data: bookingsData, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          customers (
+            id,
+            name,
+            email,
+            customer_id_text
+          )
+        `)
+        .in('status', ['Confirmed', 'Completed', 'Delivered', 'Picked Up']);
 
-          supabase
-            .from('equipment_pricing')
-            .select('*')
-            .order('equipment_id')
-        ]);
+      if (bookingsError) throw bookingsError;
 
-      if (incomeRes.error) throw incomeRes.error;
-      if (expensesRes.error) throw expensesRes.error;
-      if (bookingsRes.error) throw bookingsRes.error;
-      if (equipmentRes.error) throw equipmentRes.error;
-      if (categoriesRes.error) throw categoriesRes.error;
-      if (pricingRes.error) throw pricingRes.error;
+      // Fetch service details separately to avoid relationship issues
+      const { data: servicesData, error: servicesError } = await supabase
+        .from('services')
+        .select('*');
+
+      if (servicesError) throw servicesError;
+
+      // Map service data to bookings
+      const bookingsWithServices = (bookingsData || []).map(booking => {
+        const planData = booking.plan || {};
+        const serviceId = planData.service_id || planData.id;
+        const service = servicesData?.find(s => s.id === serviceId);
+
+        return {
+          ...booking,
+          service_name: service?.name || planData.name || 'Unknown Service',
+          service_type: service?.service_type || 'unknown'
+        };
+      });
+
+      // Fetch expenses
+      const { data: expensesData, error: expensesError } = await supabase
+        .from('financial_expenses')
+        .select('*, financial_categories(*), equipment_inventory(name)')
+        .order('date', { ascending: false });
+
+      if (expensesError) throw expensesError;
+
+      // Fetch income
+      const { data: incomeData, error: incomeError } = await supabase
+        .from('financial_income')
+        .select('*, customers(name, email), bookings(id)')
+        .order('date', { ascending: false });
+
+      if (incomeError) throw incomeError;
+
+      // Fetch equipment
+      const { data: equipmentData, error: equipmentError } = await supabase
+        .from('equipment_inventory')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (equipmentError) throw equipmentError;
+
+      // Fetch categories
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('financial_categories')
+        .select('*')
+        .order('name');
+
+      if (categoriesError) throw categoriesError;
 
       setData({
-        income: incomeRes.data || [],
-        expenses: expensesRes.data || [],
-        bookings: bookingsRes.data || [],
-        equipment: equipmentRes.data || [],
-        categories: categoriesRes.data || [],
-        equipmentPricing: pricingRes.data || [],
+        bookings: bookingsWithServices || [],
+        expenses: expensesData || [],
+        income: incomeData || [],
+        equipment: equipmentData || [],
+        categories: categoriesData || []
       });
-
     } catch (err) {
-      console.error('Error fetching financial data:', err);
+      console.error('[useFinancialData] Error fetching data:', err);
       setError(err.message);
-      toast({
-        title: 'Error Loading Financial Data',
-        description: err.message,
-        variant: 'destructive',
-      });
     } finally {
       setLoading(false);
     }
-  }, [dateRangeStart, dateRangeEnd]);
+  };
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchFinancialData();
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-
-    const interval = setInterval(fetchData, refreshInterval);
-    return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, fetchData]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel('financial-data-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'financial_income' 
-      }, () => fetchData())
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'financial_expenses' 
-      }, () => fetchData())
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'bookings' 
-      }, () => fetchData())
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'equipment_pricing' 
-      }, () => fetchData())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchData]);
+    if (autoRefresh) {
+      const interval = setInterval(fetchFinancialData, refreshInterval);
+      return () => clearInterval(interval);
+    }
+  }, [autoRefresh, refreshInterval]);
 
   return {
     data,
     loading,
     error,
-    refresh: fetchData,
+    refetch: fetchFinancialData
   };
 };

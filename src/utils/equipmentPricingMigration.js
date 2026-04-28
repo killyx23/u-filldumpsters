@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { getOrCreateEquipmentPricing } from './equipmentPricingIntegration';
 

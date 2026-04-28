@@ -1,3 +1,4 @@
+
 import React, { Suspense } from 'react';
 import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -24,6 +25,8 @@ import ProductShowcasePage from '@/pages/ProductShowcasePage';
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
+import CustomerPortalLogin from '@/pages/CustomerPortalLogin';
+import CustomerPortalDashboard from '@/pages/CustomerPortalDashboard';
 import EquipmentDataVerificationPage from '@/pages/EquipmentDataVerificationPage';
 import EquipmentPriceSyncPage from '@/pages/EquipmentPriceSyncPage';
 import SystemHealthCheckPage from '@/pages/SystemHealthCheckPage';
@@ -105,7 +108,7 @@ function AppContent() {
               <Route path="/admin/system-health" element={<SystemHealthCheckPage />} />
             </Route>
 
-            {/* Customer Portal Routes */}
+            {/* Customer Portal Routes (Authenticated) */}
             <Route element={<CustomerLayout />}>
               <Route path="/portal" element={<CustomerPortal />} />
               <Route path="/login" element={<CustomerLogin />} />
@@ -125,6 +128,11 @@ function AppContent() {
                 </CustomerPortalGuard>
               } />
             </Route>
+
+            {/* Customer Rental Portal Routes (Session-based, No Auth Required) */}
+            <Route path="/customer-portal" element={<CustomerPortalLogin />} />
+            <Route path="/customer-portal/login" element={<CustomerPortalLogin />} />
+            <Route path="/customer-portal/dashboard" element={<CustomerPortalDashboard />} />
 
             {/* Other Public Routes */}
             <Route path="/confirmation" element={<BookingConfirmation />} />

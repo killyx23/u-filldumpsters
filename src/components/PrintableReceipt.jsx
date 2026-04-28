@@ -1,30 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { format, parseISO, isValid, differenceInDays, addHours } from 'date-fns';
-import { Key, Repeat, FileSignature, Clock, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { format, parseISO, isValid, differenceInDays } from 'date-fns';
+import { Key, Repeat, FileSignature, ShieldCheck } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-
-const formatTime = (timeString, isWindow = false, isSelfService = false) => {
-    if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) return 'N/A';
-    try {
-        const date = parseISO(`1970-01-01T${timeString}`);
-        if (!isValid(date)) return 'N/A';
-
-        if (isSelfService) {
-            if (timeString.startsWith('08:00')) return `after ${format(date, 'h:mm a')}`;
-            if (timeString.startsWith('22:00')) return `by ${format(date, 'h:mm a')}`;
-        }
-
-        if (isWindow) {
-            const endTime = addHours(date, 2);
-            return `between ${format(date, 'h:mm a')} - ${format(endTime, 'h:mm a')}`;
-        }
-        return format(date, 'h:mm a');
-    } catch (e) {
-        return 'N/A';
-    }
-};
+import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 const AgreementText = ({ booking }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
@@ -98,8 +79,15 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     
     const currentPlan = addons?.plan || plan;
     const serviceName = currentPlan.name;
-    const isSelfServiceTrailer = currentPlan.service_type === 'hourly' && !isDelivery;
-    const isWindowService = currentPlan.service_type === 'window' || currentPlan.service_type === 'material_delivery';
+
+    // Time window formatting options
+    const showTimeWindow = shouldShowTimeWindow(currentPlan, isDelivery);
+    const isSelfService = isSelfServiceTrailer(currentPlan, isDelivery);
+    const timeOptions = {
+        isWindow: showTimeWindow,
+        isSelfService: isSelfService,
+        serviceType: currentPlan?.service_type
+    };
 
     const displayName = (first_name && last_name) ? `${first_name} ${last_name}` : name;
     const fullAddress = street && city ? `${street}, ${city}, ${state} ${zip}` : "N/A";
@@ -199,8 +187,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     }
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
-    const tax = subtotal * 0.07; // 7% tax
-    const calculatedTotal = subtotal + tax;
+    
+    // Use tax rate from booking record if available, otherwise calculate
+    const taxRateUsed = booking.tax_rate_used || 7.45;
+    const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
+    const calculatedTotal = subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
@@ -244,7 +235,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     <p><strong>Phone Number:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{phone}</span></p>
                 </section>
 
-                {isSelfServiceTrailer && !isCancelledAndRefunded && (
+                {isSelfService && !isCancelledAndRefunded && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
                         {isPendingReview ? (
@@ -268,12 +259,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
-                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_drop_off_time, isWindowService, isSelfServiceTrailer)}</p>
-                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTime(reschedule_history[0].from_pickup_time, isWindowService, isSelfServiceTrailer)}</p>
+                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTimeWindow(reschedule_history[0].from_drop_off_time, timeOptions)}</p>
+                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
                             </div>
                         )}
-                        <p className="text-sm text-gray-600 mt-1">{isWindowService ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTime(drop_off_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>
-                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfServiceTrailer ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTime(pickup_time_slot, isWindowService, isSelfServiceTrailer)}`}</p>}
+                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTimeWindow(drop_off_time_slot, timeOptions)}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTimeWindow(pickup_time_slot, timeOptions)}`}</p>}
                     </div>
 
                     {/* 8-Category Breakdown */}
@@ -409,8 +400,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <td className="text-right py-2 pr-3 font-bold">${subtotal.toFixed(2)}</td>
                             </tr>
                             <tr>
-                                <td className="py-1 px-3 font-semibold">Tax (7%)</td>
-                                <td className="text-right py-1 pr-3 font-semibold">${tax.toFixed(2)}</td>
+                                <td className="py-1 px-3 font-semibold">Tax ({taxRateUsed.toFixed(2)}%)</td>
+                                <td className="text-right py-1 pr-3 font-semibold">${taxAmount.toFixed(2)}</td>
                             </tr>
                             <tr className="border-t-2 border-gray-400 bg-gray-100">
                                 <td className="py-2 px-3 font-bold text-lg">Total</td>
@@ -442,7 +433,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
                     {hasReturnIssues && (
                         <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
-                            <h4 className="font-bold text-lg mb-2 text-red-800 flex items-center"><AlertTriangle className="mr-2 h-5 w-5"/> Post-Rental Issues</h4>
+                            <h4 className="font-bold text-lg mb-2 text-red-800 flex items-center">Post-Rental Issues</h4>
                             <ul className="list-disc list-inside text-red-700">
                                 {Object.entries(return_issues).map(([key, value]) => <li key={key} className="capitalize">{key.replace(/_/g, ' ')}: {value.status.replace(/_/g, ' ')}</li>)}
                             </ul>

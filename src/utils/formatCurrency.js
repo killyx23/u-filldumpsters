@@ -1,4 +1,3 @@
-
 /**
  * Format a number as currency with proper localization
  * @param {number} amount - The amount to format

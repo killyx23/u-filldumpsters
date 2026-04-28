@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { initializeEquipmentPricing } from '@/utils/initializeEquipmentPricing';

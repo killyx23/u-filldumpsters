@@ -1,4 +1,3 @@
-
 # Equipment Pricing System - Health Check Guide
 
 ## Table of Contents
@@ -15,4 +14,3 @@
 ### Method 1: Admin Dashboard (Recommended)
 
 1. **Navigate to System Health Page:**
-   

@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { runHealthCheck } from './equipmentPricingHealthCheck';
 import { runAllVerificationTests } from './equipmentDataVerification';

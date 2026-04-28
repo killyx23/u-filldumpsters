@@ -1,4 +1,3 @@
-
 import { useState, useMemo, useCallback } from 'react';
 import { useFinancialData } from './useFinancialData';
 import { supabase } from '@/lib/customSupabaseClient';

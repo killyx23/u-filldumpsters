@@ -1,4 +1,3 @@
-
 # Equipment Pricing System - Technical Documentation
 
 ## Table of Contents
