@@ -1,4 +1,3 @@
-
 /**
  * Centralized Equipment ID Debug Logger
  * Provides consistent logging functions for equipment ID validation and debugging

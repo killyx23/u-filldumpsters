@@ -1,4 +1,3 @@
-
 /**
  * Calculate equipment depreciation using various methods
  */

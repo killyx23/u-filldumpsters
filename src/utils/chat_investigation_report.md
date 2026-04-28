@@ -1,4 +1,3 @@
-
 # Comprehensive Audit: Real-Time Chat Messaging System
 
 ## Part 1: Database Table Verification
@@ -30,4 +29,4 @@ The RLS policies restrict customer access based on `customer_id`. The standard `
 - **CommunicationHub.jsx**: Correctly passes `customer.id` to `useRealTimeChat(customer.id)`. Customer messages are inserted with the correct `customer_id`.
 - **useRealTimeChat.js**: The subscription is correctly filtering by `conversation_id=eq.${conversationId}`. 
 
-**Summary:** The application code is structurally sound and bidirectional communication logic is correct. The "one-way" issue is strictly caused by Supabase Realtime failing to resolve the subquery in the `SELECT` RLS policy during the WAL broadcast. 
+**Summary:** The application code is structurally sound and bidirectional communication logic is correct. The "one-way" issue is strictly caused by Supabase Realtime failing to resolve the subquery in the `SELECT` RLS policy during the WAL broadcast.

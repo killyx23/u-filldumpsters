@@ -1,4 +1,3 @@
-
 /**
  * Export data to CSV file
  * @param {Array} data - Array of objects to export

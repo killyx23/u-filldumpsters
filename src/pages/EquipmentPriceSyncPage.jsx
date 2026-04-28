@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Activity, CheckCircle, XCircle, AlertTriangle, Loader2, Play, Download, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';

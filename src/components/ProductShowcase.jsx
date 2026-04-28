@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,21 +12,21 @@ const ProductShowcase = ({ onOpenModal }) => {
       title: "16-Yard Roll-Off",
       description: "Perfect for major renovations and construction.",
       capacity: "Up to 4 Tons",
-      image: "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
+      image: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
     },
     {
       id: "service-10-yard",
       title: "10-Yard Roll-Off",
       description: "Ideal for medium cleanouts and roofing projects.",
       capacity: "Up to 2 Tons",
-      image: "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
+      image: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
     },
     {
       id: "service-6-yard",
       title: "6-Yard Roll-Off",
       description: "Great for small yard waste or garage cleanups.",
       capacity: "Up to 1 Ton",
-      image: "https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
+      image: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg"
     }
   ];
 

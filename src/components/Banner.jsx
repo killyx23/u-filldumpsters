@@ -6,7 +6,7 @@ export const Banner = () => {
     <div className="relative w-full h-[200px] md:h-[300px] overflow-hidden">
       {/* Background Image */}
       <img 
-        src="https://horizons-cdn.hostinger.com/084723fe-37cf-40b6-bc10-548f6485382e/8524e4e335a6a5924956a3d49db2e487.png" 
+        src="https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/8524e4e335a6a5924956a3d49db2e487.png" 
         alt="Mountain Lake Landscape" 
         className="absolute inset-0 w-full h-full object-cover"
       />

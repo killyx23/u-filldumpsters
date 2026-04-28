@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { CheckCircle, Loader2, Package, Star, Info } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';

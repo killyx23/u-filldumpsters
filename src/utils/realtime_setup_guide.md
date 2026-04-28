@@ -1,4 +1,3 @@
-
 # Supabase Realtime Setup Guide
 
 ## Task 8: Verify Supabase real-time publication configuration

@@ -1,4 +1,3 @@
-
 # Equipment Pricing System - Quick Start Guide
 
 ## 📋 What Was Fixed

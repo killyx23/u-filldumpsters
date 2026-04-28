@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Save, Plus, Edit, Trash2 } from 'lucide-react';
+import { Loader2, Save, Plus, Edit, Trash2, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
 
 const ServicePricingCard = ({ service, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
@@ -203,6 +205,195 @@ const InsurancePricingCard = () => {
                     {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Price</>}
                 </Button>
             </div>
+        </div>
+    );
+};
+
+const TaxConfigurationCard = () => {
+    const [loading, setLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [taxState, setTaxState] = useState('4.85');
+    const [taxCounty, setTaxCounty] = useState('2.0');
+    const [taxCity, setTaxCity] = useState('0.6');
+    const [effectiveDate, setEffectiveDate] = useState('2026-04-23');
+
+    useEffect(() => {
+        loadTaxConfig();
+    }, []);
+
+    const loadTaxConfig = async () => {
+        try {
+            const config = await getTaxRate();
+            setTaxState(config.tax_state.toString());
+            setTaxCounty(config.tax_county.toString());
+            setTaxCity(config.tax_city.toString());
+            setEffectiveDate(config.tax_effective_date);
+        } catch (error) {
+            console.error('[TaxConfigurationCard] Error loading tax config:', error);
+            toast({
+                title: 'Error Loading Tax Configuration',
+                description: 'Using default values',
+                variant: 'destructive'
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            const state = parseFloat(taxState);
+            const county = parseFloat(taxCounty);
+            const city = parseFloat(taxCity);
+            const totalRate = state + county + city;
+
+            const { error } = await supabase
+                .from('business_settings')
+                .update({
+                    tax_state: state,
+                    tax_county: county,
+                    tax_city: city,
+                    tax_rate: totalRate,
+                    tax_effective_date: effectiveDate
+                })
+                .eq('id', 1);
+
+            if (error) throw error;
+
+            // Invalidate cache to force reload
+            invalidateTaxRateCache();
+
+            toast({
+                title: 'Tax Configuration Updated',
+                description: `New total tax rate: ${totalRate.toFixed(2)}%`
+            });
+        } catch (error) {
+            console.error('[TaxConfigurationCard] Error saving tax config:', error);
+            toast({
+                title: 'Error Saving Tax Configuration',
+                description: error.message,
+                variant: 'destructive'
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex justify-center items-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
+            </div>
+        );
+    }
+
+    const totalRate = (parseFloat(taxState) || 0) + (parseFloat(taxCounty) || 0) + (parseFloat(taxCity) || 0);
+
+    return (
+        <div className="bg-white/5 p-6 rounded-lg border border-white/10 space-y-4">
+            <div className="flex items-center justify-between mb-4">
+                <div>
+                    <h3 className="text-xl font-bold text-white flex items-center">
+                        <Calculator className="mr-2 h-5 w-5 text-blue-400" />
+                        Current Tax Configuration
+                    </h3>
+                    <p className="text-sm text-gray-400 mt-1">Saratoga Springs, Utah</p>
+                </div>
+                <div className="text-right">
+                    <p className="text-3xl font-bold text-green-400">{totalRate.toFixed(2)}%</p>
+                    <p className="text-xs text-gray-400">Total Tax Rate</p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                    <Label className="text-white">Utah State Tax (%)</Label>
+                    <Input
+                        type="number"
+                        step="0.01"
+                        value={taxState}
+                        onChange={(e) => setTaxState(e.target.value)}
+                        className="bg-white/10 text-white border-white/20"
+                        disabled={isSaving}
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-white">Utah County Tax (%)</Label>
+                    <Input
+                        type="number"
+                        step="0.01"
+                        value={taxCounty}
+                        onChange={(e) => setTaxCounty(e.target.value)}
+                        className="bg-white/10 text-white border-white/20"
+                        disabled={isSaving}
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-white">City/Transit Tax (%)</Label>
+                    <Input
+                        type="number"
+                        step="0.01"
+                        value={taxCity}
+                        onChange={(e) => setTaxCity(e.target.value)}
+                        className="bg-white/10 text-white border-white/20"
+                        disabled={isSaving}
+                    />
+                </div>
+
+                <div className="space-y-2">
+                    <Label className="text-white">Effective Date</Label>
+                    <Input
+                        type="date"
+                        value={effectiveDate}
+                        onChange={(e) => setEffectiveDate(e.target.value)}
+                        className="bg-white/10 text-white border-white/20 [color-scheme:dark]"
+                        disabled={isSaving}
+                    />
+                </div>
+            </div>
+
+            <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-blue-300 mb-2">Tax Breakdown</h4>
+                <div className="space-y-1 text-sm text-blue-100">
+                    <div className="flex justify-between">
+                        <span>Utah State Tax:</span>
+                        <span className="font-mono">{parseFloat(taxState || 0).toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>Utah County Tax:</span>
+                        <span className="font-mono">{parseFloat(taxCounty || 0).toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>City/Transit Tax:</span>
+                        <span className="font-mono">{parseFloat(taxCity || 0).toFixed(2)}%</span>
+                    </div>
+                    <div className="flex justify-between pt-2 border-t border-blue-500/30 font-bold">
+                        <span>Total Combined Rate:</span>
+                        <span className="font-mono text-green-400">{totalRate.toFixed(2)}%</span>
+                    </div>
+                </div>
+            </div>
+
+            <Button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+            >
+                {isSaving ? (
+                    <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving Tax Configuration...
+                    </>
+                ) : (
+                    <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save Tax Configuration
+                    </>
+                )}
+            </Button>
         </div>
     );
 };
@@ -418,6 +609,12 @@ export const PricingManager = () => {
                         );
                     })}
                 </div>
+            </div>
+
+            <div className="bg-white/10 p-6 rounded-2xl border border-white/20">
+                <h2 className="text-2xl font-bold mb-4 text-white">Tax Calculations</h2>
+                <p className="text-blue-200 mb-4 text-sm">Configure sales tax rates for Saratoga Springs, Utah. Changes will apply to all new bookings.</p>
+                <TaxConfigurationCard />
             </div>
 
             <div className="bg-white/10 p-6 rounded-2xl border border-white/20">

@@ -7,6 +7,11 @@ import { format, parseISO, isValid } from 'date-fns';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
+import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount, calculateTotalWithTax } from '@/utils/calculateTaxAmount';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -21,6 +26,12 @@ export const BookingSummaryReview = ({
     const isDelivery = plan?.id === 2 && deliveryService;
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loading, setLoading] = useState(true);
+    const [availabilityTimes, setAvailabilityTimes] = useState({
+        pickupStartTime: 'Time not specified',
+        returnByTime: 'Time not specified'
+    });
+
+    const { taxRate, loading: loadingTaxRate } = useTaxRate();
 
     // Load equipment prices from database
     useEffect(() => {
@@ -46,6 +57,35 @@ export const BookingSummaryReview = ({
         loadPrices();
     }, []);
 
+    // Load availability times for Dump Loader Trailer (plan.id === 2) without delivery
+    useEffect(() => {
+        const loadAvailabilityTimes = async () => {
+            // Only fetch for self-service Dump Loader Trailer (plan.id === 2 without delivery)
+            if (plan?.id === 2 && !deliveryService) {
+                try {
+                    const dropOffDate = bookingData?.dropOffDate;
+                    const pickupDate = bookingData?.pickupDate;
+
+                    if (dropOffDate) {
+                        const dropOffTimes = await getFormattedServiceTimes(2, dropOffDate);
+                        const pickupTimes = pickupDate 
+                            ? await getFormattedServiceTimes(2, pickupDate)
+                            : dropOffTimes;
+
+                        setAvailabilityTimes({
+                            pickupStartTime: dropOffTimes.pickupStartTime,
+                            returnByTime: pickupTimes.returnByTime
+                        });
+                    }
+                } catch (error) {
+                    console.error('[BookingSummaryReview] Error loading availability times:', error);
+                }
+            }
+        };
+
+        loadAvailabilityTimes();
+    }, [plan?.id, deliveryService, bookingData?.dropOffDate, bookingData?.pickupDate]);
+
     const formatDate = date => {
         if (!date) return 'N/A';
         try {
@@ -54,19 +94,6 @@ export const BookingSummaryReview = ({
             return format(parsedDate, 'MMM d, yyyy');
         } catch (e) {
             return "Invalid Date";
-        }
-    };
-
-    const formatTime = (timeString) => {
-        if (!timeString) return 'N/A';
-        try {
-            const [hours, minutes] = timeString.split(':');
-            const date = new Date();
-            date.setHours(parseInt(hours, 10));
-            date.setMinutes(parseInt(minutes || '0', 10));
-            return isValid(date) ? format(date, 'h:mm a') : timeString;
-        } catch (e) {
-            return typeof timeString === 'string' ? timeString : 'N/A';
         }
     };
 
@@ -129,9 +156,10 @@ export const BookingSummaryReview = ({
         }
 
         const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        const tax = subtotal * 0.07; // 7% tax
-        const total = subtotal + tax;
-
+        
+        // Use dynamic tax rate from database
+        const taxCalc = calculateTotalWithTax(subtotal, taxRate);
+        
         return {
             basePriceAmount,
             deliveryFeeFlat,
@@ -142,11 +170,12 @@ export const BookingSummaryReview = ({
             purchaseItemsCost,
             disposalCost,
             discount,
-            subtotal,
-            tax,
-            total
+            subtotal: taxCalc.subtotal,
+            tax: taxCalc.tax,
+            taxRate: taxRate,
+            total: taxCalc.total
         };
-    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery]);
+    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate]);
 
     const planName = plan?.name || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
@@ -158,7 +187,30 @@ export const BookingSummaryReview = ({
         ? "South Saratoga Springs" 
         : (contactAddress.city || bookingData?.city || 'City not provided');
 
-    if (loading) {
+    // Time window formatting options
+    const showTimeWindow = shouldShowTimeWindow(plan, isDelivery);
+    const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+    const timeOptions = {
+        isWindow: showTimeWindow,
+        isSelfService: isSelfService,
+        serviceType: plan?.service_type
+    };
+
+    // Get service-specific labels
+    const dropoffLabel = getServiceSpecificDateLabel(plan, isDelivery, 'dropoff');
+    const pickupLabel = getServiceSpecificDateLabel(plan, isDelivery, 'pickup');
+
+    // Format times based on whether this is self-service Dump Loader Trailer
+    const getDisplayTime = (timeSlot, isDropOff) => {
+        // For self-service Dump Loader Trailer (plan.id === 2 without delivery)
+        if (plan?.id === 2 && !deliveryService) {
+            return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
+        }
+        // For all other services, use the standard formatTimeWindow
+        return formatTimeWindow(timeSlot, timeOptions);
+    };
+
+    if (loading || loadingTaxRate) {
         return (
             <div className="flex justify-center items-center h-64">
                 <div className="text-white">Loading price breakdown...</div>
@@ -289,15 +341,17 @@ export const BookingSummaryReview = ({
                                 <p className="font-semibold text-white text-lg">{displayLocation}</p>
                             </div>
                             <div>
-                                <p className="text-sm text-gray-400">{isDelivery ? 'Delivery' : 'Drop-off'}</p>
+                                <p className="text-sm text-gray-400">{dropoffLabel}</p>
                                 <p className="font-semibold text-white">{formatDate(bookingData?.dropOffDate)}</p>
-                                <p className="text-sm">{formatTime(bookingData?.dropOffTimeSlot)}</p>
+                                {isSelfService && <p className="text-sm">Pickup Start Time: {getDisplayTime(bookingData?.dropOffTimeSlot, true)}</p>}
+                                {!isSelfService && <p className="text-sm">{getDisplayTime(bookingData?.dropOffTimeSlot, true)}</p>}
                             </div>
                             {bookingData?.pickupDate && (
                                 <div>
-                                    <p className="text-sm text-gray-400">{isDelivery ? 'Pickup' : 'Return'}</p>
+                                    <p className="text-sm text-gray-400">{pickupLabel}</p>
                                     <p className="font-semibold text-white">{formatDate(bookingData.pickupDate)}</p>
-                                    <p className="text-sm">{formatTime(bookingData.pickupTimeSlot)}</p>
+                                    {isSelfService && <p className="text-sm">Return by Time: {getDisplayTime(bookingData.pickupTimeSlot, false)}</p>}
+                                    {!isSelfService && <p className="text-sm">{getDisplayTime(bookingData.pickupTimeSlot, false)}</p>}
                                 </div>
                             )}
                         </div>
@@ -314,7 +368,7 @@ export const BookingSummaryReview = ({
                                 items={serviceItems}
                             />
 
-                            {/* 2. Protection Options */}
+                            {/* 2. Protection Options - NOW WITH SERVICE NAME */}
                             <PriceBreakdownCategory
                                 icon="🛡️"
                                 title="Protection Options"
@@ -322,6 +376,7 @@ export const BookingSummaryReview = ({
                                 showInfoButton={true}
                                 infoTitle="Protection Options"
                                 infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
+                                serviceName={plan?.name}
                             />
 
                             {/* 3. Rent Equipment */}
@@ -362,7 +417,7 @@ export const BookingSummaryReview = ({
                                     <span className="text-white font-bold">${calculatedTotals.subtotal.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center text-sm">
-                                    <span className="text-blue-200 font-semibold">Tax (7%)</span>
+                                    <span className="text-blue-200 font-semibold">Tax ({calculatedTotals.taxRate.toFixed(2)}%)</span>
                                     <span className="text-white font-bold">${calculatedTotals.tax.toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center text-lg pt-2 border-t border-white/10">

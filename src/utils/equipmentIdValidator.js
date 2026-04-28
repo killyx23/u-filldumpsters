@@ -1,4 +1,3 @@
-
 /**
  * Equipment ID Validation Utility
  * Validates equipment IDs to ensure they are valid numeric IDs (1-7)

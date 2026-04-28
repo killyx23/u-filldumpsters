@@ -1,4 +1,3 @@
-
 # Equipment Pricing System Verification Checklist
 
 ## How to Use This Checklist

@@ -1,9 +1,11 @@
+
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Calendar, MapPin, AlertTriangle, Truck, CheckCircle, Star, ChevronRight, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 
 export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
   const [data, setData] = useState([]);
@@ -92,6 +94,15 @@ export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
 
   const renderItemContent = (item) => {
     const planName = item.plan?.name || 'Custom Rental';
+    const isDelivery = item.addons?.deliveryService || item.addons?.isDelivery;
+    const showWindow = shouldShowTimeWindow(item.plan, isDelivery);
+    const isSelfService = isSelfServiceTrailer(item.plan, isDelivery);
+    
+    const timeOptions = {
+      isWindow: showWindow,
+      isSelfService: isSelfService,
+      serviceType: item.plan?.service_type
+    };
     
     switch (type) {
       case 'active':
@@ -107,7 +118,7 @@ export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
               <p className="text-sm text-gray-300 mt-1">{planName}</p>
               <div className="flex items-center text-xs text-gray-400 mt-2">
                 <Calendar className="h-3 w-3 mr-1" />
-                Start: {format(parseISO(item.drop_off_date), 'MMM d, yyyy')}
+                Start: {format(parseISO(item.drop_off_date), 'MMM d, yyyy')} ({formatTimeWindow(item.drop_off_time_slot, timeOptions)})
               </div>
             </div>
             <ChevronRight className="h-5 w-5 text-gray-500 group-hover:text-white transition-colors" />
@@ -140,7 +151,7 @@ export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
               <div className="flex flex-col gap-1 mt-2 text-xs text-gray-400">
                 <span className="flex items-center text-blue-300">
                   <Calendar className="h-3 w-3 mr-1" />
-                  Delivery: {format(parseISO(item.drop_off_date), 'MMM d, yyyy')} {item.drop_off_time_slot && `at ${item.drop_off_time_slot}`}
+                  Delivery: {format(parseISO(item.drop_off_date), 'MMM d, yyyy')} ({formatTimeWindow(item.drop_off_time_slot, timeOptions)})
                 </span>
                 <span className="flex items-center">
                   <MapPin className="h-3 w-3 mr-1" />

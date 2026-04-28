@@ -1,4 +1,3 @@
-
 # Availability Standardization Audit & Data Flow Verification
 
 This document outlines the standardisation of availability times per service type across the frontend and backend components.

@@ -1,4 +1,3 @@
-
 import { format, parse, set, addMinutes, isBefore } from 'date-fns';
 
 export const formatTimeForDisplay = (timeString, outputFormat = 'h:mm a') => {

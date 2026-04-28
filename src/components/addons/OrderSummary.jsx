@@ -12,6 +12,8 @@ import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 export const OrderSummary = ({
     plan,
@@ -32,8 +34,26 @@ export const OrderSummary = ({
     
     const { insurancePrice } = useInsurancePricing();
     const { drivewayPrice } = useDrivewayProtectionPrice();
+    const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
+    const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
+
+    // Detect if this is a dump loader service
+    const isDumpLoaderService = plan?.name && 
+                                (plan.name.toLowerCase().includes('dump loader') ||
+                                 plan.name.toLowerCase().includes('dump trailer') ||
+                                 plan.name.toLowerCase().includes('loader trailer')) &&
+                                !plan.name.toLowerCase().includes('16 yard') &&
+                                !plan.name.toLowerCase().includes('dumpster');
+
+    // Service-specific Protection Options info text
+    const getProtectionOptionsInfoText = () => {
+        if (isDumpLoaderService) {
+            return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";
+        }
+        return "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
+    };
 
     // Load equipment prices from equipment_pricing table
     useEffect(() => {
@@ -181,7 +201,7 @@ export const OrderSummary = ({
             insuranceCost = Number(insurancePrice || 20);
         }
 
-        if (addons?.drivewayProtection === 'accept' && isDeliveryRequired) {
+        if (addons?.drivewayProtection === 'accept' && showDrivewayProtection) {
             drivewayProtectionCost = Number(drivewayPrice || 15);
         }
 
@@ -236,11 +256,11 @@ export const OrderSummary = ({
             }
         }
 
-        // Subtotal after discount
+        // Subtotal after discount (before tax)
         const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
         
-        // Tax: 7% of subtotal after discount
-        const tax = subtotal * 0.07;
+        // Tax: use dynamic tax rate from database
+        const tax = calculateTaxAmount(subtotal, taxRate);
         
         // Total: subtotal + tax
         const total = subtotal + tax;
@@ -257,9 +277,10 @@ export const OrderSummary = ({
             discount,
             subtotal,
             tax,
+            taxRate,
             total
         };
-    }, [plan, addons, appliedCoupon, isDeliveryRequired, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice]);
+    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate]);
 
     const handleProceedClick = () => {
         if (!isDeliveryRequired) {
@@ -280,7 +301,7 @@ export const OrderSummary = ({
         onProceed(calculatedTotals.deliveryFee, calculatedTotals.mileageCharge);
     };
 
-    if (loadingPrices) {
+    if (loadingPrices || loadingTaxRate) {
         return (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 sticky top-8">
                 <div className="flex items-center justify-center h-64">
@@ -399,14 +420,15 @@ export const OrderSummary = ({
                     items={serviceItems}
                 />
 
-                {/* 2. Protection Options */}
+                {/* 2. Protection Options - Service-specific info text */}
                 <PriceBreakdownCategory
                     icon="🛡️"
                     title="Protection Options"
                     items={protectionItems}
                     showInfoButton={true}
                     infoTitle="Protection Options"
-                    infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
+                    infoDescription={getProtectionOptionsInfoText()}
+                    serviceName={plan?.name}
                 />
 
                 {/* 3. Rent Equipment */}
@@ -447,7 +469,7 @@ export const OrderSummary = ({
                         <span className="text-white font-bold">${calculatedTotals.subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
-                        <span className="text-blue-200 font-semibold">Tax (7%)</span>
+                        <span className="text-blue-200 font-semibold">Tax ({calculatedTotals.taxRate.toFixed(2)}%)</span>
                         <span className="text-white font-bold">${calculatedTotals.tax.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between items-center text-lg pt-2 border-t border-white/10">

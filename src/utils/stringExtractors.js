@@ -1,4 +1,3 @@
-
 export const safeExtractString = (val, fallback = '') => {
     if (val === null || val === undefined) return fallback;
     if (typeof val === 'object') {

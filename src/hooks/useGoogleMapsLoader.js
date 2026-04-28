@@ -23,31 +23,19 @@ export const loadGoogleMaps = () => {
         // Check if script is already injected by another library (e.g. @react-google-maps/api)
         const existingScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
         if (existingScript) {
-            if (window.google && window.google.maps) {
+            existingScript.addEventListener('load', () => {
                 clearTimeout(timeoutId);
-                resolve(window.google.maps);
-                return;
-            }
-            const onLoad = () => {
-                clearTimeout(timeoutId);
-                existingScript.removeEventListener('load', onLoad);
-                existingScript.removeEventListener('error', onError);
                 if (window.google && window.google.maps) {
                     resolve(window.google.maps);
                 } else {
-                    googleMapsPromise = null;
                     reject(new Error("Google Maps loaded but window.google.maps is unavailable."));
                 }
-            };
-            const onError = () => {
+            });
+            existingScript.addEventListener('error', () => {
                 clearTimeout(timeoutId);
-                existingScript.removeEventListener('load', onLoad);
-                existingScript.removeEventListener('error', onError);
                 googleMapsPromise = null;
                 reject(new Error("Failed to load existing Google Maps script."));
-            };
-            existingScript.addEventListener('load', onLoad);
-            existingScript.addEventListener('error', onError);
+            });
             return;
         }
 

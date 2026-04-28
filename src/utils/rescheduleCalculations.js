@@ -1,4 +1,3 @@
-
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
 import { getPriceForEquipment, getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
 

@@ -1,4 +1,3 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { getPriceForEquipment } from './equipmentPricingIntegration';
 import { getConnectionStatus, getActiveSubscriptionCount } from './equipmentPriceSyncManager';

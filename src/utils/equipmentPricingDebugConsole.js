@@ -1,4 +1,3 @@
-
 /**
  * Equipment Pricing Debug Console
  * Provides browser console access to diagnostic tools
