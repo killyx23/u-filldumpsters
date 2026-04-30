@@ -1,83 +1,111 @@
-
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
-import { Loader2, Lock, AlertTriangle, LogOut, Video, Calendar, Clock, Key } from 'lucide-react';
+import { Loader2, LogOut, Home, Key, Calendar, Clock, Info, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import QRCode from 'qrcode.react';
-import { format } from 'date-fns';
+import { format, parseISO, isPast } from 'date-fns';
 
-export const CustomerPortalDashboard = () => {
+const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
-  const [session, setSession] = useState(null);
-  const [accessCode, setAccessCode] = useState(null);
   const [booking, setBooking] = useState(null);
+  const [accessCode, setAccessCode] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    validateSession();
+    checkSessionAndFetchData();
   }, []);
 
-  const validateSession = async () => {
+  const checkSessionAndFetchData = async () => {
     try {
-      // Get session from localStorage
-      const sessionData = localStorage.getItem('rental_portal_session');
-      
-      if (!sessionData) {
-        throw new Error('No active session');
+      setLoading(true);
+      setError(null);
+
+      // Check for session in localStorage
+      const sessionStr = localStorage.getItem('rental_portal_session');
+      const orderId = localStorage.getItem('customerPortalOrderId');
+      const urlOrderId = searchParams.get('order_id');
+
+      // Determine which order ID to use
+      let targetOrderId = null;
+      if (urlOrderId) {
+        targetOrderId = parseInt(urlOrderId);
+      } else if (orderId) {
+        targetOrderId = parseInt(orderId);
+      } else if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          targetOrderId = session.order_id;
+        } catch (e) {
+          console.error('[Dashboard] Failed to parse session:', e);
+        }
       }
 
-      const parsedSession = JSON.parse(sessionData);
-
-      // Check expiration
-      if (new Date(parsedSession.expires_at) < new Date()) {
-        localStorage.removeItem('rental_portal_session');
-        throw new Error('Session expired');
+      // If no order ID found, redirect to login
+      if (!targetOrderId) {
+        toast({
+          title: 'Session Expired',
+          description: 'Your session has expired. Please log in again.',
+          variant: 'destructive'
+        });
+        navigate('/customer-portal/login');
+        return;
       }
 
-      setSession(parsedSession);
-
-      // Fetch full booking details
+      // Fetch booking data
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
         .select('*')
-        .eq('id', parsedSession.order_id)
+        .eq('id', targetOrderId)
         .single();
 
-      if (bookingError) throw bookingError;
+      if (bookingError || !bookingData) {
+        throw new Error('Booking not found. Please check your Order ID.');
+      }
+
+      // Check if this is a Dump Loader Trailer Rental
+      const isDumpLoaderRental = 
+        bookingData.plan?.name?.toLowerCase().includes('dump loader') ||
+        bookingData.plan?.name?.toLowerCase().includes('trailer') ||
+        parseInt(bookingData.plan?.id) === 2;
+
+      if (!isDumpLoaderRental) {
+        setError('This service does not require an access code.');
+        setBooking(bookingData);
+        setLoading(false);
+        return;
+      }
 
       setBooking(bookingData);
 
-      // Fetch access code from rental_access_codes
-      const { data: codeData, error: codeError } = await supabase
+      // Fetch access code
+      const { data: accessCodeData, error: accessCodeError } = await supabase
         .from('rental_access_codes')
         .select('*')
-        .eq('order_id', parsedSession.order_id)
-        .eq('status', 'active')
+        .eq('order_id', targetOrderId)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
 
-      if (codeError && codeError.code !== 'PGRST116') {
-        console.error('[CustomerPortalDashboard] Access code error:', codeError);
+      if (accessCodeError && accessCodeError.code !== 'PGRST116') {
+        console.error('[Dashboard] Access code fetch error:', accessCodeError);
       }
 
-      setAccessCode(codeData);
+      setAccessCode(accessCodeData || null);
 
-    } catch (error) {
-      console.error('[CustomerPortalDashboard] Session validation error:', error);
+    } catch (err) {
+      console.error('[Dashboard] Error:', err);
+      setError(err.message);
       toast({
-        title: 'Session Invalid',
-        description: 'Please log in again',
+        title: 'Error',
+        description: err.message,
         variant: 'destructive'
       });
-      navigate('/customer-portal/login');
     } finally {
       setLoading(false);
     }
@@ -85,219 +113,296 @@ export const CustomerPortalDashboard = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('rental_portal_session');
+    localStorage.removeItem('customerPortalOrderId');
+    localStorage.removeItem('customerPortalPhone');
     toast({
       title: 'Logged Out',
-      description: 'You have been logged out successfully'
+      description: 'You have been logged out successfully.'
     });
-    navigate('/customer-portal/login');
+    navigate('/');
   };
 
-  const generateMagicLink = () => {
-    if (!session) return '';
-    const baseUrl = window.location.origin;
-    const token = btoa(`${session.order_id}:${session.phone}:${new Date().toISOString().split('T')[0]}`);
-    return `${baseUrl}/customer-portal/login?order_id=${session.order_id}&phone=${session.phone}&token=${token}`;
+  const formatDateTime = (dateStr, timeSlot) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = parseISO(dateStr);
+      const dateFormatted = format(date, 'MMM dd, yyyy');
+      return `${dateFormatted}${timeSlot ? ` at ${timeSlot}` : ''}`;
+    } catch (e) {
+      return dateStr;
+    }
   };
 
-  const isActiveRental = () => {
-    if (!accessCode) return false;
-    const now = new Date();
-    const start = new Date(accessCode.start_time);
-    const end = new Date(accessCode.end_time);
-    return now >= start && now <= end;
+  const isRentalExpired = () => {
+    if (!accessCode?.end_time) return false;
+    try {
+      return isPast(parseISO(accessCode.end_time));
+    } catch {
+      return false;
+    }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 flex items-center justify-center">
-        <Loader2 className="h-12 w-12 text-yellow-400 animate-spin" />
-      </div>
+      <>
+        <Helmet>
+          <title>Loading - Customer Portal</title>
+        </Helmet>
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 flex items-center justify-center p-4">
+          <div className="text-center space-y-4">
+            <Loader2 className="h-12 w-12 text-yellow-400 animate-spin mx-auto" />
+            <p className="text-white text-lg font-medium">Loading your rental information...</p>
+          </div>
+        </div>
+      </>
     );
   }
 
-  if (!session || !booking) {
-    return null;
+  if (error && !booking) {
+    return (
+      <>
+        <Helmet>
+          <title>Error - Customer Portal</title>
+        </Helmet>
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 p-4">
+          <div className="container mx-auto max-w-2xl py-8">
+            <Card className="bg-white/10 backdrop-blur-lg border-white/20">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <AlertCircle className="h-6 w-6 text-red-400" />
+                  Error
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-white">{error}</p>
+                <div className="flex gap-2">
+                  <Button onClick={() => navigate('/customer-portal/login')} variant="outline">
+                    Back to Login
+                  </Button>
+                  <Button onClick={() => navigate('/')} className="bg-yellow-400 hover:bg-yellow-500 text-blue-900">
+                    Go Home
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
     <>
       <Helmet>
-        <title>My Rental Dashboard - U-Fill Dumpsters</title>
-        <meta name="description" content="View your trailer rental details and access code" />
+        <title>Your Rental Access - Customer Portal</title>
+        <meta name="description" content="View your trailer rental access code and booking details" />
       </Helmet>
 
-      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 py-8 px-4">
-        <div className="container mx-auto max-w-4xl">
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900 p-4">
+        <div className="container mx-auto max-w-4xl py-8">
+          {/* Header Navigation */}
           <div className="flex justify-between items-center mb-8">
-            <motion.h1
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="text-3xl font-bold text-white"
+            <Link 
+              to="/" 
+              className="flex items-center gap-2 text-blue-200 hover:text-white transition-colors"
             >
-              My Rental Dashboard
-            </motion.h1>
-            <Button
+              <Home className="h-5 w-5" />
+              <span className="font-medium">Back to Home</span>
+            </Link>
+            <Button 
               onClick={handleLogout}
               variant="outline"
-              className="text-white border-white/30 hover:bg-white/10"
+              className="border-white/30 text-white hover:bg-white/10"
             >
-              <LogOut className="mr-2 h-4 w-4" />
+              <LogOut className="h-4 w-4 mr-2" />
               Logout
             </Button>
           </div>
 
-          <div className="space-y-6">
-            {/* Access Code Display - HERO CARD */}
-            {accessCode && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <Card className="bg-gradient-to-br from-yellow-400 to-orange-500 border-0 shadow-2xl">
-                  <CardHeader className="text-center pb-4">
-                    <div className="flex justify-center mb-4">
-                      <div className="bg-white/20 backdrop-blur-sm p-4 rounded-full">
-                        <Key className="h-12 w-12 text-white" />
-                      </div>
-                    </div>
-                    <CardTitle className="text-3xl font-bold text-white">
-                      Your Trailer Access Code
-                    </CardTitle>
-                    <CardDescription className="text-white/90 text-lg">
-                      Use this PIN to unlock the trailer
-                    </CardDescription>
-                  </CardHeader>
+          {/* Page Title */}
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-8"
+          >
+            <h1 className="text-4xl font-bold text-white mb-2">Your Rental Access</h1>
+            <p className="text-blue-200">Access code for your trailer rental</p>
+          </motion.div>
 
-                  <CardContent className="text-center space-y-6">
-                    {/* PIN Display */}
-                    <div className="bg-white/20 backdrop-blur-sm rounded-2xl p-8">
-                      <p className="text-8xl font-black text-white tracking-widest mb-4 font-mono">
-                        {accessCode.access_pin}
-                      </p>
-                      <p className="text-white/90 font-semibold">
-                        {isActiveRental() ? '✓ ACTIVE NOW' : '⏱ Not Yet Active'}
-                      </p>
-                    </div>
-
-                    {/* Validity Period Warning */}
-                    <Alert className="bg-white/10 border-white/30 text-white">
-                      <AlertTriangle className="h-5 w-5" />
-                      <AlertDescription className="text-left">
-                        <strong className="block mb-2">IMPORTANT:</strong>
-                        This access code is valid only during your scheduled rental period from{' '}
-                        <strong>{format(new Date(accessCode.start_time), 'MMM d, yyyy h:mm a')}</strong> to{' '}
-                        <strong>{format(new Date(accessCode.end_time), 'MMM d, yyyy h:mm a')}</strong>.
-                        The code will not work before or after these times. Please ensure you access the trailer within your rental window.
-                      </AlertDescription>
-                    </Alert>
-
-                    {/* QR Codes */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                      <div className="bg-white p-4 rounded-lg">
-                        <p className="text-sm font-bold text-gray-900 mb-2">Quick Access Link</p>
-                        <QRCode value={generateMagicLink()} size={150} className="mx-auto" />
-                        <p className="text-xs text-gray-600 mt-2">Scan to log in instantly</p>
-                      </div>
-                      <div className="bg-white p-4 rounded-lg">
-                        <p className="text-sm font-bold text-gray-900 mb-2">Safety Video</p>
-                        <QRCode 
-                          value={`${window.location.origin}/customer-portal/resources`} 
-                          size={150} 
-                          className="mx-auto" 
-                        />
-                        <p className="text-xs text-gray-600 mt-2">How-To & Guides</p>
-                      </div>
-                    </div>
-
-                    <Button
-                      onClick={() => navigate('/customer-portal/resources')}
-                      className="w-full bg-white text-orange-600 hover:bg-gray-100 font-bold py-6 text-lg"
-                    >
-                      <Video className="mr-2 h-5 w-5" />
-                      View Safety Videos & Guides
-                    </Button>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Rental Details Card */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <Card className="bg-white/10 backdrop-blur-lg border-white/20">
-                <CardHeader>
-                  <CardTitle className="text-white flex items-center">
-                    <Calendar className="mr-2 h-5 w-5 text-yellow-400" />
-                    Rental Details
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-white">
-                    <div>
-                      <p className="text-sm text-blue-200">Order ID</p>
-                      <p className="font-bold text-lg">#{booking.id}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-blue-200">Status</p>
-                      <p className="font-bold text-lg">{booking.status}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-blue-200">Pickup Date</p>
-                      <p className="font-bold">{format(new Date(booking.drop_off_date), 'MMM d, yyyy')}</p>
-                      {booking.drop_off_time_slot && (
-                        <p className="text-sm text-blue-200">{booking.drop_off_time_slot}</p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-sm text-blue-200">Return Date</p>
-                      <p className="font-bold">{format(new Date(booking.pickup_date), 'MMM d, yyyy')}</p>
-                      {booking.pickup_time_slot && (
-                        <p className="text-sm text-blue-200">{booking.pickup_time_slot}</p>
-                      )}
-                    </div>
+          {/* Rental Details */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Card className="bg-white/10 backdrop-blur-lg border-white/20 mb-6">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-yellow-400" />
+                  Rental Details
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-white">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-blue-200">Customer Name</p>
+                    <p className="font-medium text-lg">
+                      {booking?.first_name && booking?.last_name 
+                        ? `${booking.first_name} ${booking.last_name}`
+                        : booking?.name || 'N/A'
+                      }
+                    </p>
                   </div>
+                  <div>
+                    <p className="text-sm text-blue-200">Order ID</p>
+                    <p className="font-medium text-lg">#{booking?.id}</p>
+                  </div>
+                </div>
 
-                  {booking.notes && (
-                    <div className="pt-4 border-t border-white/10">
-                      <p className="text-sm text-blue-200 mb-1">Special Instructions</p>
-                      <p className="text-white">{booking.notes}</p>
-                    </div>
-                  )}
+                <div>
+                  <p className="text-sm text-blue-200">Service Type</p>
+                  <p className="font-medium text-lg">Dump Loader Trailer Rental</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-blue-200 flex items-center gap-1">
+                      <Clock className="h-4 w-4" />
+                      Pickup Date & Time
+                    </p>
+                    <p className="font-medium">
+                      {formatDateTime(booking?.drop_off_date, booking?.drop_off_time_slot)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-blue-200 flex items-center gap-1">
+                      <Clock className="h-4 w-4" />
+                      Return Date & Time
+                    </p>
+                    <p className="font-medium">
+                      {formatDateTime(booking?.pickup_date, booking?.pickup_time_slot)}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* ACCESS PIN DISPLAY - MAIN FEATURE */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            {isRentalExpired() ? (
+              <Card className="bg-red-900/30 backdrop-blur-lg border-red-500/50 mb-6">
+                <CardContent className="p-8 text-center">
+                  <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+                  <h2 className="text-2xl font-bold text-white mb-2">Rental Period Ended</h2>
+                  <p className="text-red-200 text-lg">
+                    This rental period has ended. Your access code is no longer valid.
+                  </p>
                 </CardContent>
               </Card>
-            </motion.div>
-
-            {/* Additional Fees (if any) */}
-            {booking.fees && Object.keys(booking.fees).length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <Card className="bg-orange-900/20 border-orange-500/30">
-                  <CardHeader>
-                    <CardTitle className="text-white flex items-center">
-                      <AlertTriangle className="mr-2 h-5 w-5 text-orange-400" />
-                      Additional Fees
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {Object.entries(booking.fees).map(([key, value]) => (
-                        <div key={key} className="flex justify-between text-white">
-                          <span className="capitalize">{key.replace(/_/g, ' ')}</span>
-                          <span className="font-bold">${parseFloat(value).toFixed(2)}</span>
+            ) : accessCode?.access_pin ? (
+              <>
+                <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl mb-6">
+                  <CardContent className="p-8 md:p-12">
+                    <div className="text-center space-y-6">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold mb-2">
+                          YOUR ACCESS PIN
+                        </p>
+                        <div className="bg-slate-950 rounded-lg p-8 inline-block">
+                          <p className="text-6xl md:text-7xl lg:text-8xl font-bold font-mono text-white tracking-wider">
+                            {accessCode.access_pin}
+                          </p>
                         </div>
-                      ))}
+                        <p className="text-sm text-gray-400 mt-3">
+                          Enter this code at the lock
+                        </p>
+                      </div>
+
+                      {accessCode.start_time && accessCode.end_time && (
+                        <div className="border-t border-white/10 pt-6">
+                          <p className="text-white font-medium">
+                            Valid from:{' '}
+                            <span className="text-yellow-400">
+                              {formatDateTime(accessCode.start_time, null)}
+                            </span>
+                            {' '}to{' '}
+                            <span className="text-yellow-400">
+                              {formatDateTime(accessCode.end_time, null)}
+                            </span>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
-              </motion.div>
+
+                {/* Validity Warning */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                >
+                  <Card className="bg-blue-50/90 backdrop-blur-sm border-blue-200">
+                    <CardContent className="p-6">
+                      <div className="flex gap-4">
+                        <div className="flex-shrink-0">
+                          <div className="bg-blue-100 rounded-full p-2">
+                            <Info className="h-6 w-6 text-blue-600" />
+                          </div>
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-blue-900 mb-2 text-lg">Important Information</h3>
+                          <p className="text-blue-800 text-base leading-relaxed">
+                            ⏰ This access code is valid <strong>ONLY</strong> during your scheduled rental period from{' '}
+                            <strong>{formatDateTime(accessCode.start_time, null)}</strong> to{' '}
+                            <strong>{formatDateTime(accessCode.end_time, null)}</strong>. 
+                            The code will not work before or after these times. Please ensure you access the trailer within your rental window.
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              </>
+            ) : (
+              <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">
+                <CardContent className="p-8 text-center">
+                  <Key className="h-16 w-16 text-yellow-600 mx-auto mb-4" />
+                  <h2 className="text-2xl font-bold text-yellow-900 mb-2">Access Code Generating</h2>
+                  <p className="text-yellow-800 text-lg mb-6">
+                    Your access code is being generated. Please refresh this page in a moment.
+                  </p>
+                  <Button 
+                    onClick={checkSessionAndFetchData}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
+                </CardContent>
+              </Card>
             )}
-          </div>
+          </motion.div>
+
+          {/* Help Section */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="text-center mt-8"
+          >
+            <p className="text-blue-200">
+              Need help?{' '}
+              <Link to="/contact" className="text-yellow-400 hover:underline font-medium">
+                Contact Support
+              </Link>
+            </p>
+          </motion.div>
         </div>
       </div>
     </>

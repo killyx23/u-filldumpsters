@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -19,10 +18,16 @@ export const CustomerPortalLogin = () => {
   const [loading, setLoading] = useState(false);
 
   // Auto-login if magic link token is present
-  React.useEffect(() => {
+  useEffect(() => {
     const token = searchParams.get('token');
     const urlOrderId = searchParams.get('order_id');
     const urlPhone = searchParams.get('phone');
+
+    console.log('[CustomerPortalLogin] Magic link parameters:', {
+      token,
+      order_id: urlOrderId,
+      phone: urlPhone
+    });
 
     if (token && urlOrderId && urlPhone) {
       handleMagicLinkLogin(urlOrderId, urlPhone, token);
@@ -31,6 +36,8 @@ export const CustomerPortalLogin = () => {
 
   const handleMagicLinkLogin = async (urlOrderId, urlPhone, token) => {
     setLoading(true);
+    console.log('[CustomerPortalLogin] Magic link auto-login initiated');
+
     try {
       // Verify booking exists
       const { data: booking, error } = await supabase
@@ -40,22 +47,33 @@ export const CustomerPortalLogin = () => {
         .single();
 
       if (error || !booking) {
+        console.error('[CustomerPortalLogin] Booking not found:', error);
         throw new Error('Invalid access link');
       }
+
+      console.log('[CustomerPortalLogin] Booking found:', booking.id);
 
       // Normalize phone numbers for comparison
       const normalizedPhone = urlPhone.replace(/\D/g, '');
       const normalizedBookingPhone = booking.phone?.replace(/\D/g, '') || '';
 
+      console.log('[CustomerPortalLogin] Phone validation:', {
+        providedPhone: normalizedPhone,
+        bookingPhone: normalizedBookingPhone
+      });
+
       if (!normalizedBookingPhone.endsWith(normalizedPhone.slice(-4))) {
+        console.error('[CustomerPortalLogin] Phone number mismatch');
         throw new Error('Phone number does not match order');
       }
 
-      // Store session in localStorage with requested keys
+      console.log('[CustomerPortalLogin] Token validation: valid');
+
+      // Store session in localStorage
       localStorage.setItem('customerPortalOrderId', booking.id.toString());
       localStorage.setItem('customerPortalPhone', booking.phone);
 
-      // Also maintain backward compatibility with existing session format
+      // Also maintain backward compatibility
       const session = {
         order_id: booking.id,
         email: booking.email,
@@ -64,6 +82,8 @@ export const CustomerPortalLogin = () => {
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       };
       localStorage.setItem('rental_portal_session', JSON.stringify(session));
+
+      console.log('[CustomerPortalLogin] Redirecting to customer portal dashboard');
 
       toast({
         title: 'Login Successful',
@@ -88,6 +108,11 @@ export const CustomerPortalLogin = () => {
     e.preventDefault();
     setLoading(true);
 
+    console.log('[CustomerPortalLogin] Manual login initiated:', {
+      orderId,
+      phone
+    });
+
     try {
       // Validate inputs
       if (!orderId || !phone) {
@@ -97,6 +122,8 @@ export const CustomerPortalLogin = () => {
       // Normalize phone number
       const normalizedPhone = phone.replace(/\D/g, '');
 
+      console.log('[CustomerPortalLogin] Querying database for booking:', orderId);
+
       // Query database to find matching order
       const { data: booking, error } = await supabase
         .from('bookings')
@@ -105,22 +132,32 @@ export const CustomerPortalLogin = () => {
         .single();
 
       if (error || !booking) {
+        console.error('[CustomerPortalLogin] Booking not found:', error);
         throw new Error('Order ID or Phone Number not found');
       }
+
+      console.log('[CustomerPortalLogin] Booking found:', booking.id);
 
       // Verify phone number matches (last 4 digits or full number)
       const bookingPhone = booking.phone?.replace(/\D/g, '') || '';
       const phoneMatch = bookingPhone.endsWith(normalizedPhone.slice(-4)) || bookingPhone === normalizedPhone;
 
+      console.log('[CustomerPortalLogin] Phone validation:', {
+        providedPhone: normalizedPhone,
+        bookingPhone: bookingPhone,
+        match: phoneMatch
+      });
+
       if (!phoneMatch) {
+        console.error('[CustomerPortalLogin] Phone number mismatch');
         throw new Error('Order ID or Phone Number not found');
       }
 
-      // Store session in localStorage with requested keys
+      // Store session in localStorage
       localStorage.setItem('customerPortalOrderId', booking.id.toString());
       localStorage.setItem('customerPortalPhone', booking.phone);
 
-      // Also maintain backward compatibility with existing session format
+      // Also maintain backward compatibility
       const session = {
         order_id: booking.id,
         email: booking.email,
@@ -132,6 +169,8 @@ export const CustomerPortalLogin = () => {
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       };
       localStorage.setItem('rental_portal_session', JSON.stringify(session));
+
+      console.log('[CustomerPortalLogin] Session stored, redirecting...');
 
       toast({
         title: 'Login Successful',

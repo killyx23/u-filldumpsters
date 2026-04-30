@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
@@ -272,6 +271,10 @@ const CheckoutForm = ({
     e.preventDefault();
     setFormError(null);
 
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [PaymentPage] ========== PAYMENT SUBMISSION STARTED ==========`);
+    console.log(`[${timestamp}] [PaymentPage] Booking ID: ${bookingId}`);
+
     if (!stripe || !elements) {
       setFormError("Stripe is still initializing. Please wait a moment and try again.");
       return;
@@ -296,14 +299,21 @@ const CheckoutForm = ({
     setIsProcessing(true);
 
     try {
+      // Step 1: Update delivery location verification if applicable
       if (isDeliveryService && delivery_location_verified) {
-        await supabase.from('bookings').update({ delivery_location_verified: true, delivery_location_verified_at: new Date().toISOString() }).eq('id', bookingId);
+        console.log(`[${timestamp}] [PaymentPage] Updating delivery location verification...`);
+        await supabase.from('bookings').update({ 
+          delivery_location_verified: true, 
+          delivery_location_verified_at: new Date().toISOString() 
+        }).eq('id', bookingId);
       }
 
-      const { error } = await stripe.confirmPayment({
+      // Step 2: Confirm payment with Stripe (WITHOUT return_url for manual control)
+      console.log(`[${timestamp}] [PaymentPage] Confirming payment with Stripe...`);
+
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/confirmation?booking_id=${bookingId}`,
           payment_method_data: {
             billing_details: {
               name: customerFullName,
@@ -319,17 +329,54 @@ const CheckoutForm = ({
             }
           }
         },
+        redirect: 'if_required', // Only redirect if 3D Secure or additional auth needed
       });
 
-      if (error) {
-        console.error(`[${new Date().toISOString()}] confirmPayment error:`, error);
-        setFormError(error.message || "An unexpected error occurred processing your payment. Please try again.");
-        toast({ title: "Payment Failed", description: error.message || "An unexpected error occurred.", variant: "destructive" });
+      if (stripeError) {
+        console.error(`[${timestamp}] [PaymentPage] ❌ Stripe payment error:`, stripeError);
+        setFormError(stripeError.message || "An unexpected error occurred processing your payment. Please try again.");
+        toast({ 
+          title: "Payment Failed", 
+          description: stripeError.message || "An unexpected error occurred.", 
+          variant: "destructive" 
+        });
         setIsProcessing(false);
+        return;
       }
+
+      // Step 3: Payment succeeded - now handle PIN generation
+      console.log(`[${timestamp}] [PaymentPage] ✅ Payment succeeded!`);
+      console.log(`[${timestamp}] [PaymentPage] Payment Intent ID: ${paymentIntent?.id}`);
+      console.log(`[${timestamp}] [PaymentPage] Payment Status: ${paymentIntent?.status}`);
+
+     
+      // Step 4: Redirect to confirmation page
+      console.log(`[${timestamp}] [PaymentPage] Redirecting to confirmation page...`);
+      const confirmationUrl = `${window.location.origin}/confirmation?booking_id=${bookingId}&payment_intent=${paymentIntent?.id}`;
+      console.log(`[${timestamp}] [PaymentPage] Confirmation URL: ${confirmationUrl}`);
+      
+      // Add a small delay to ensure toast notifications are visible
+      setTimeout(() => {
+        window.location.href = confirmationUrl;
+      }, 1500);
+
     } catch (err) {
+      const errorTimestamp = new Date().toISOString();
+      console.error(`[${errorTimestamp}] [PaymentPage] ❌ UNEXPECTED ERROR:`, {
+        error: err,
+        message: err.message,
+        stack: err.stack,
+        name: err.name
+      });
+      
       setIsProcessing(false);
       setFormError("An error occurred during payment processing.");
+      
+      toast({
+        title: 'Payment Error',
+        description: err.message || 'An unexpected error occurred.',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -527,7 +574,7 @@ const CheckoutForm = ({
           {!canProceedWithPayment && !isProcessing && isDeliveryService && !delivery_location_verified && <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">Please verify delivery location to continue</div>}
           {!canProceedWithPayment && !isProcessing && taxUpdateStatus !== 'success' && <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">Finalizing tax calculation...</div>}
           <Button type="submit" disabled={isProcessing || !canProceedWithPayment} className={`w-full py-6 text-xl font-bold transition-all duration-300 ${isProcessing || !canProceedWithPayment ? 'bg-white/10 text-white/50 cursor-not-allowed border border-white/10' : 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-xl shadow-green-900/40 border border-green-400/30 active:scale-[0.98]'}`}>
-            {isProcessing ? <><Loader2 className="mr-3 h-6 w-6 animate-spin" />Processing...</> : <><CreditCard className="mr-3 h-6 w-6" />Pay {formatMoney(totalPrice)}</>}
+            {isProcessing ? <><Loader2 className="mr-3 h-6 w-6 animate-spin" />Processing Payment...</> : <><CreditCard className="mr-3 h-6 w-6" />Pay {formatMoney(totalPrice)}</>}
           </Button>
           <p className="text-xs text-gray-400 mt-4 flex items-center justify-center"><Lock className="h-3 w-3 mr-1.5 text-blue-400" /> Secure 256-bit SSL Encrypted Payment</p>
         </form>

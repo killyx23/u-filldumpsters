@@ -20,6 +20,7 @@ import { CommunicationHub } from '@/components/customer-portal/CommunicationHub'
 import { VerificationManager } from '@/components/customer-portal/VerificationManager';
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
+import AccessCodesPage from '@/pages/AccessCodesPage';
 
 export default function CustomerPortal() {
     const { user, signOut, loading: authLoading, session } = useAuth();
@@ -43,6 +44,67 @@ export default function CustomerPortal() {
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
+
+    // Magic link handler
+    useEffect(() => {
+        const handleMagicLink = async () => {
+            const token = searchParams.get('token');
+            
+            if (token && !user && !authLoading) {
+                console.log('[CustomerPortal] Magic link token detected, validating...');
+                
+                try {
+                    const { data, error } = await supabase.functions.invoke('validate-magic-link-token', {
+                        body: { token }
+                    });
+
+                    if (error || !data?.valid) {
+                        throw new Error(data?.error || 'Invalid or expired link');
+                    }
+
+                    console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
+
+                    // Use customer-portal-login to create session
+                    const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
+                        body: {
+                            portal_number: data.customer.customer_id_text,
+                            phone: data.customer.phone
+                        }
+                    });
+
+                    if (loginError || loginData?.error) {
+                        throw new Error(loginData?.error || 'Failed to create session');
+                    }
+
+                    if (loginData?.session) {
+                        await supabase.auth.setSession(loginData.session);
+                        
+                        // Remove token from URL and set tab to access-codes
+                        setSearchParams({ tab: 'access-codes' });
+                        setActiveTab('access-codes');
+                        
+                        toast({
+                            title: 'Login Successful',
+                            description: 'Welcome! Redirecting to your access codes...'
+                        });
+                    }
+
+                } catch (err) {
+                    console.error('[CustomerPortal] Magic link error:', err);
+                    toast({
+                        title: 'Invalid Link',
+                        description: err.message || 'This link has expired or is invalid. Please log in manually.',
+                        variant: 'destructive'
+                    });
+                    
+                    // Clear invalid token from URL
+                    setSearchParams({});
+                }
+            }
+        };
+
+        handleMagicLink();
+    }, [searchParams, user, authLoading]);
 
     // Initialization & Params logic
     useEffect(() => {
@@ -409,6 +471,10 @@ export default function CustomerPortal() {
                         lastUpdated={lastUpdated} 
                         onRefresh={() => fetchData(true)} 
                     />
+                )}
+
+                {activeTab === 'access-codes' && (
+                    <AccessCodesPage customerData={customerData} />
                 )}
                 
                 {activeTab === 'bookings' && (

@@ -1,4 +1,3 @@
-
 import React, { Suspense } from 'react';
 import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -30,10 +29,14 @@ import CustomerPortalDashboard from '@/pages/CustomerPortalDashboard';
 import EquipmentDataVerificationPage from '@/pages/EquipmentDataVerificationPage';
 import EquipmentPriceSyncPage from '@/pages/EquipmentPriceSyncPage';
 import SystemHealthCheckPage from '@/pages/SystemHealthCheckPage';
+import IgloohomeDebugPage from '@/pages/IgloohomeDebugPage';
 import { CartProvider } from '@/hooks/useCart';
 import AuthErrorBoundary from '@/components/AuthErrorBoundary';
 import { useEquipmentPricingInit } from '@/hooks/useEquipmentPricingInit';
 import { Loader2 } from 'lucide-react';
+
+// Import debug utilities
+import '@/utils/debugIgloohomeHelper';
 
 // Loading fallback component
 const AuthLoadingFallback = () => (
@@ -106,6 +109,7 @@ function AppContent() {
               <Route path="/admin/equipment-verification" element={<EquipmentDataVerificationPage />} />
               <Route path="/admin/equipment-sync" element={<EquipmentPriceSyncPage />} />
               <Route path="/admin/system-health" element={<SystemHealthCheckPage />} />
+              <Route path="/debug/igloohome-test" element={<IgloohomeDebugPage />} />
             </Route>
 
             {/* Customer Portal Routes (Authenticated) */}

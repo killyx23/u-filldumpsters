@@ -11,11 +11,11 @@ const ServiceCard = ({
   // Common visual layout for ID 1 (16 Yard Dumpster), ID 2 (Dump Loader Trailer), and ID 3 (Rock Mulch and Gravel)
   let imageUrl = "";
   if (id === 1) {
-    imageUrl = "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
+    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
   } else if (id === 2) {
-    imageUrl = "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/71ba93b0b17b71051b7ab08600b18632.jpg";
+    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/71ba93b0b17b71051b7ab08600b18632.jpg";
   } else if (id === 3) {
-    imageUrl = "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
+    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
   }
   return <motion.div initial={{
     opacity: 0,

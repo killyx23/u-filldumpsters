@@ -1,9 +1,8 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle, Home, AlertTriangle, Calendar, MapPin,
-  Mail, Loader2, RefreshCw, Key, Printer
+  Mail, Loader2, RefreshCw, Key, Printer, Copy, ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -29,6 +28,9 @@ export default function BookingConfirmation() {
   const [finalizeError, setFinalizeError]     = useState('');
   const [isRefinalizing, setIsRefinalizing]   = useState(false);
 
+  const [magicLinkUrl, setMagicLinkUrl] = useState('');
+  const [generatingMagicLink, setGeneratingMagicLink] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState(null);
 
   const receiptRef = useRef();
@@ -38,6 +40,72 @@ export default function BookingConfirmation() {
     documentTitle: `Receipt-Booking-${bookingId}`,
     removeAfterPrint: true,
   });
+
+  // Generate magic link token for access codes
+  const generateMagicLink = async (customerId, customerPhone) => {
+    const timestamp = new Date().toISOString();
+    
+    console.log(`[${timestamp}] [BookingConfirmation] Generating magic link token for customer:`, {
+      customer_id: customerId,
+      phone: customerPhone
+    });
+
+    setGeneratingMagicLink(true);
+
+    try {
+      console.log(`[${timestamp}] [BookingConfirmation] Calling generate-magic-link-token edge function...`);
+      
+      const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
+        body: {
+          customer_id: customerId,
+          phone: customerPhone
+        }
+      });
+
+      console.log(`[${timestamp}] [BookingConfirmation] Magic link token response:`, {
+        success: !!data,
+        error,
+        hasToken: !!data?.token
+      });
+
+      if (error) {
+        console.error(`[${timestamp}] [BookingConfirmation] Magic link generation error:`, error);
+        throw error;
+      }
+
+      if (data?.token) {
+        const baseUrl = window.location.origin;
+        const url = `${baseUrl}/customer-portal?token=${data.token}&order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
+        
+        console.log(`[${timestamp}] [BookingConfirmation] Magic link created:`, url);
+        
+        setMagicLinkUrl(url);
+      }
+
+    } catch (err) {
+      console.error(`[${timestamp}] [BookingConfirmation] Failed to generate magic link:`, {
+        error: err.message,
+        stack: err.stack
+      });
+      
+      // Fallback to direct link
+      const fallbackUrl = `${window.location.origin}/customer-portal?order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
+      console.log(`[${timestamp}] [BookingConfirmation] Using fallback URL:`, fallbackUrl);
+      setMagicLinkUrl(fallbackUrl);
+      
+    } finally {
+      setGeneratingMagicLink(false);
+    }
+  };
+
+  // Copy magic link to clipboard
+  const copyMagicLink = () => {
+    navigator.clipboard.writeText(magicLinkUrl);
+    toast({
+      title: 'Link Copied',
+      description: 'Access code link copied to clipboard'
+    });
+  };
 
   // Finalize booking with comprehensive logging and tax record creation
   const finalizeBooking = async ({ isRetry = false } = {}) => {
@@ -241,6 +309,18 @@ export default function BookingConfirmation() {
           }
         }
 
+        // Generate magic link for access codes if Dump Loader Trailer
+        const serviceName = booking.plan?.name || '';
+        const isDumpLoaderRental = 
+          serviceName.toLowerCase().includes('dump loader') ||
+          serviceName.toLowerCase().includes('trailer') ||
+          parseInt(booking.plan?.id) === 2;
+
+        if (isDumpLoaderRental && booking.customers?.id && booking.customers?.phone) {
+          console.log(`[${timestamp}] [BookingConfirmation] This is Dump Loader Trailer - generating magic link`);
+          await generateMagicLink(booking.customers.id, booking.customers.phone);
+        }
+
         setLoading(false);
         clearTimeout(timeoutId);
 
@@ -397,6 +477,12 @@ export default function BookingConfirmation() {
   const serviceName = serviceDetails?.name || bookingDetails.plan?.name || 'N/A';
   const isDelivery = bookingDetails.addons?.deliveryService || bookingDetails.addons?.isDelivery;
   
+  // Check if this is Dump Loader Trailer rental
+  const isDumpLoaderRental = 
+    serviceName.toLowerCase().includes('dump loader') ||
+    serviceName.toLowerCase().includes('trailer') ||
+    parseInt(bookingDetails.plan?.id) === 2;
+  
   // Time window formatting options
   const showTimeWindow = shouldShowTimeWindow(bookingDetails.plan, isDelivery);
   const isSelfService = isSelfServiceTrailer(bookingDetails.plan, isDelivery);
@@ -488,6 +574,50 @@ export default function BookingConfirmation() {
           </p>
 
           <FinalizeBanner />
+
+          {/* Magic Link Section for Dump Loader Trailer */}
+          {isDumpLoaderRental && magicLinkUrl && (
+            <div className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 border border-blue-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
+              <h3 className="text-xl font-bold text-blue-400 mb-3 flex items-center">
+                <Key className="mr-2 h-5 w-5" /> View Your Access Code
+              </h3>
+              <p className="text-blue-100/80 text-sm mb-4">
+                Click the link below to view your trailer access code. You can also access it anytime from your customer portal.
+              </p>
+              
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  asChild
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
+                >
+                  <a href={magicLinkUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    View Access Code
+                  </a>
+                </Button>
+                
+                <Button
+                  onClick={copyMagicLink}
+                  variant="outline"
+                  className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy Link
+                </Button>
+              </div>
+              
+              <div className="mt-4 p-3 bg-black/30 rounded border border-blue-700/30">
+                <p className="text-xs text-blue-300 break-all font-mono">{magicLinkUrl}</p>
+              </div>
+            </div>
+          )}
+
+          {isDumpLoaderRental && generatingMagicLink && (
+            <div className="bg-blue-950/40 border border-blue-500/30 p-4 rounded-xl mb-8 flex items-center">
+              <Loader2 className="h-5 w-5 text-blue-400 animate-spin mr-3" />
+              <p className="text-blue-200 text-sm">Generating your access code link...</p>
+            </div>
+          )}
 
           <div className="bg-black/40 p-6 rounded-xl mb-8 text-left space-y-4 shadow-lg border border-white/10">
             <h3 className="text-xl font-bold text-white border-b border-white/10 pb-3 mb-4 flex items-center">

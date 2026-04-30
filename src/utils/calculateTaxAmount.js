@@ -1,4 +1,3 @@
-
 /**
  * Calculates tax amount based on subtotal and tax rate
  * @param {number} subtotal - The subtotal amount before tax

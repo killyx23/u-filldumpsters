@@ -1,4 +1,3 @@
-
 /**
  * Time Window Formatter Utility
  * Standardizes time window formatting across the entire website

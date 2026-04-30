@@ -1,11 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 import { format, parseISO, isValid, differenceInDays } from 'date-fns';
-import { Key, Repeat, FileSignature, ShieldCheck } from 'lucide-react';
+import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { supabase } from '@/lib/customSupabaseClient';
+import QRCodeComponent from 'qrcode.react';
 
 const AgreementText = ({ booking }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
@@ -43,6 +44,7 @@ const AgreementText = ({ booking }) => {
 export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loading, setLoading] = useState(true);
+    const [magicLinkToken, setMagicLinkToken] = useState(null);
 
     // Load equipment prices from database
     useEffect(() => {
@@ -67,6 +69,35 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             loadPrices();
         }
     }, [booking]);
+
+    // Generate magic link token for QR code
+    useEffect(() => {
+        const generateToken = async () => {
+            if (!booking?.customers) return;
+
+            try {
+                const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
+                    body: {
+                        customer_id: booking.customers.id,
+                        phone: booking.customers.phone
+                    }
+                });
+
+                if (error) {
+                    console.error('[PrintableReceipt] Error generating magic link:', error);
+                    return;
+                }
+
+                setMagicLinkToken(data.token);
+            } catch (err) {
+                console.error('[PrintableReceipt] Token generation error:', err);
+            }
+        };
+
+        if (booking?.customers) {
+            generateToken();
+        }
+    }, [booking]);
     
     if (!booking || !booking.customers || !booking.plan || loading) {
         return <div className="p-8">Loading receipt...</div>;
@@ -79,6 +110,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     
     const currentPlan = addons?.plan || plan;
     const serviceName = currentPlan.name;
+
+    // Check if this is a Dump Loader Trailer rental
+    const isDumpLoaderRental = 
+        currentPlan.name?.toLowerCase().includes('dump loader') ||
+        currentPlan.name?.toLowerCase().includes('trailer') ||
+        parseInt(currentPlan.id) === 2;
 
     // Time window formatting options
     const showTimeWindow = shouldShowTimeWindow(currentPlan, isDelivery);
@@ -186,17 +223,35 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }
 
-    const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
-    
-    // Use tax rate from booking record if available, otherwise calculate
+    // ------------------------------------------------------------------
+    // Source of truth:
+    // - Booking confirmation page uses DB fields: subtotal_before_tax, tax_amount, total_price
+    // - This printable receipt previously recalculated totals from plan/addons which can drift
+    //   (multi-day rules, mileage field names, rounding, etc.)
+    // Prefer DB values when present so portal Documents always matches confirmation.
+    // ------------------------------------------------------------------
+    const computedSubtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+
+    const hasDbSubtotal = booking?.subtotal_before_tax != null && Number(booking.subtotal_before_tax) > 0;
+    const hasDbTax = booking?.tax_amount != null && Number(booking.tax_amount) >= 0;
+    const hasDbTotal = booking?.total_price != null && Number(booking.total_price) > 0;
+
     const taxRateUsed = booking.tax_rate_used || 7.45;
-    const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
-    const calculatedTotal = subtotal + taxAmount;
+    const subtotal = hasDbSubtotal ? Number(booking.subtotal_before_tax) : computedSubtotal;
+    const taxAmount = hasDbTax ? Number(booking.tax_amount) : calculateTaxAmount(subtotal, taxRateUsed);
+    const calculatedTotal = hasDbTotal ? Number(booking.total_price) : (subtotal + taxAmount);
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
     const totalMiles = addons.distanceInfo?.miles || addons.distanceInfo?.roundTripMiles || addons.deliveryDistance || 0;
     const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
+
+    // QR Code URLs
+    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ufilldumpsters.com';
+    const magicLinkUrl = magicLinkToken 
+        ? `${siteUrl}/portal/access-codes?token=${magicLinkToken}`
+        : '';
+    const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
 
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -227,6 +282,63 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         {isRescheduled && <p className="font-bold text-blue-600 flex items-center justify-end"><Repeat className="mr-2 h-4 w-4"/> Status: Rescheduled</p>}
                     </div>
                 </section>
+                
+                {/* QR Codes Section - For Dump Loader Trailer Rentals Only */}
+                {isDumpLoaderRental && !isCancelledAndRefunded && magicLinkUrl && (
+                    <section className="mb-6 p-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg" style={{ pageBreakInside: 'avoid' }}>
+                        <div className="flex items-center gap-3 mb-4 pb-3 border-b border-blue-200">
+                            <QrCode className="h-8 w-8 text-blue-600" />
+                            <div>
+                                <h3 className="font-bold text-xl text-blue-900">Quick Access QR Codes</h3>
+                                <p className="text-sm text-blue-700">Scan for instant access to your rental information</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-6 mb-4">
+                            {/* Access Code QR */}
+                            <div className="bg-white p-4 rounded-lg border border-blue-200 text-center">
+                                <div className="bg-yellow-100 rounded-full p-2 w-fit mx-auto mb-3">
+                                    <Key className="h-6 w-6 text-yellow-700" />
+                                </div>
+                                <h4 className="font-bold text-blue-900 mb-2">Access Code</h4>
+                                <div className="bg-white p-3 rounded inline-block border border-gray-200">
+                                    <QRCodeComponent value={magicLinkUrl} size={150} level="H" />
+                                </div>
+                                <p className="text-xs text-gray-600 mt-2 italic">
+                                    Scan to view your PIN
+                                </p>
+                            </div>
+
+                            {/* Safety Video QR */}
+                            <div className="bg-white p-4 rounded-lg border border-blue-200 text-center">
+                                <div className="bg-green-100 rounded-full p-2 w-fit mx-auto mb-3">
+                                    <ShieldCheck className="h-6 w-6 text-green-700" />
+                                </div>
+                                <h4 className="font-bold text-blue-900 mb-2">Safety Instructions</h4>
+                                <div className="bg-white p-3 rounded inline-block border border-gray-200">
+                                    <QRCodeComponent value={safetyVideoUrl} size={150} level="H" />
+                                </div>
+                                <p className="text-xs text-gray-600 mt-2 italic">
+                                    Scan for safety videos
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Warning Notice */}
+                        <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="font-bold text-red-900 mb-1">⚠️ PRIVATE INFORMATION</p>
+                                    <p className="text-sm text-red-800 leading-relaxed">
+                                        These QR codes contain your personal rental information. Keep this receipt secure and do not share with others. 
+                                        The first QR code provides quick access to your PIN at the trailer. The second links to safety instructions.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                )}
                 
                 <section className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                     <h3 className="font-bold text-lg mb-2 text-yellow-800 flex items-center"><Key className="mr-2 h-5 w-5"/> Customer Portal Login Information</h3>
