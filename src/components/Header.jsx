@@ -85,7 +85,7 @@ export const Header = () => {
              <Link to="/" className="flex items-center group">
                 <div className="relative p-0 transition-transform duration-300 group-hover:scale-105 bg-white rounded-xl">
                   <img 
-                    src="https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/00af43e68ac466a2878fcb597f791339.png" 
+                    src="https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/00af43e68ac466a2878fcb597f791339.png" 
                     alt="U-Fill Dumpsters Logo" 
                     className="h-[120px] md:h-[160px] lg:h-[180px] w-auto object-contain"
                   />
