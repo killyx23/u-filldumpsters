@@ -69,7 +69,7 @@ export const checkBookingDetails = async (bookingId) => {
   try {
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, plan, drop_off_date, pickup_date, access_pin, email, phone, status')
+      .select('id, plan, drop_off_date, pickup_date, pin_generated_at, pin_notification_sent_at, email, phone, status')
       .eq('id', bookingId)
       .single();
 
@@ -84,8 +84,8 @@ export const checkBookingDetails = async (bookingId) => {
       serviceName: data.plan?.name,
       dropOffDate: data.drop_off_date,
       pickupDate: data.pickup_date,
-      hasAccessPin: !!data.access_pin,
-      accessPin: data.access_pin,
+      pinGeneratedAt: data.pin_generated_at,
+      pinNotificationSentAt: data.pin_notification_sent_at,
       status: data.status
     });
 
