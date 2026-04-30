@@ -44,13 +44,15 @@ Deno.serve(async (req)=>{
       throw new Error(`Igloohome API error: ${errorText}`);
     }
     const pinData = await igloohomeResponse.json();
-    // Save to rental_access_codes table
+    // Save to rental_access_codes table (single source of truth for PIN)
     const { data: accessCodeData, error: accessCodeError } = await supabaseClient.from('rental_access_codes').insert({
       order_id: booking_id,
       customer_email,
       customer_phone: customer_phone || '',
       access_pin: pinData.pin_code,
-      algo_pin_id: pinData.id,
+      pin_id: pinData.id,
+      pin_type: 'algopin',
+      lock_id: LOCK_ID,
       start_time: rental_start_time,
       end_time: endTimeWithBuffer.toISOString(),
       status: 'active'
@@ -59,9 +61,9 @@ Deno.serve(async (req)=>{
       console.error('[generate-access-code] Database error:', accessCodeError);
       throw new Error(`Database error: ${accessCodeError.message}`);
     }
-    // Update bookings table with access_pin
+    // Update booking PIN tracking columns (no PIN stored on bookings anymore)
     const { error: updateError } = await supabaseClient.from('bookings').update({
-      access_pin: pinData.pin_code
+      pin_generated_at: new Date().toISOString()
     }).eq('id', booking_id);
     if (updateError) {
       console.error('[generate-access-code] Booking update error:', updateError);
@@ -76,12 +78,12 @@ Deno.serve(async (req)=>{
     });
     console.log('[generate-access-code] ✓ Success:', {
       pin: pinData.pin_code,
-      algo_pin_id: pinData.id
+      pin_id: pinData.id
     });
     return new Response(JSON.stringify({
       success: true,
       access_pin: pinData.pin_code,
-      algo_pin_id: pinData.id,
+      pin_id: pinData.id,
       start_time: rental_start_time,
       end_time: endTimeWithBuffer.toISOString()
     }), {

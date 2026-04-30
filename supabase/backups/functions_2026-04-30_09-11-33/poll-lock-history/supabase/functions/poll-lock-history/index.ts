@@ -15,13 +15,36 @@ Deno.serve(async (req)=>{
     const supabaseClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
     console.log('[poll-lock-history] Starting lock history poll...');
     // Get all active rentals (status not 'Returned' or 'Cancelled')
-    const { data: activeRentals, error: rentalsError } = await supabaseClient.from('bookings').select('id, email, phone, drop_off_date, pickup_date, status, access_pin').not('status', 'in', '("Returned","Cancelled")').not('access_pin', 'is', null);
+    const { data: activeRentals, error: rentalsError } = await supabaseClient
+      .from('bookings')
+      .select('id, email, phone, drop_off_date, pickup_date, status')
+      .not('status', 'in', '("Returned","Cancelled")');
     if (rentalsError) throw rentalsError;
     console.log(`[poll-lock-history] Found ${activeRentals?.length || 0} active rentals`);
     const processedEvents = [];
     const overdueRentals = [];
     for (const rental of activeRentals || []){
       try {
+        // Load the latest active access code for this rental (PIN source of truth)
+        const { data: accessCode, error: accessCodeError } = await supabaseClient
+          .from('rental_access_codes')
+          .select('access_pin')
+          .eq('order_id', rental.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (accessCodeError) {
+          console.error(`[poll-lock-history] Error loading access code for order ${rental.id}:`, accessCodeError.message);
+          continue;
+        }
+
+        if (!accessCode?.access_pin) {
+          // No active PIN — nothing to poll for this booking
+          continue;
+        }
+
         // Get last sync timestamp for this order
         const { data: lastLog } = await supabaseClient.from('rental_tracking_logs').select('api_sync_timestamp').eq('order_id', rental.id).not('api_sync_timestamp', 'is', null).order('api_sync_timestamp', {
           ascending: false
@@ -46,7 +69,7 @@ Deno.serve(async (req)=>{
         const historyData = await response.json();
         const events = historyData.events || [];
         // Filter events for this rental's PIN
-        const rentalEvents = events.filter((e)=>e.pin_code === rental.access_pin);
+        const rentalEvents = events.filter((e)=>e.pin_code === accessCode.access_pin);
         for (const event of rentalEvents){
           const eventType = event.action === 'unlock' ? 'unlock' : 'lock';
           // Save to rental_tracking_logs
