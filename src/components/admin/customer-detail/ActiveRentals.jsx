@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
+import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import { toast } from '@/components/ui/use-toast';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import { format, parseISO } from 'date-fns';
@@ -342,6 +343,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
     };
     
     const handleManualStatusChange = async (bookingId, newStatus) => {
+        const booking = bookings.find((b) => b.id === bookingId);
+        const previousStatus = booking?.status ?? null;
+
         let updates = { status: newStatus };
         switch (newStatus) {
             case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null }; break;
@@ -359,9 +363,19 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             default: break;
         }
 
+        if (newStatus === 'Confirmed') {
+            Object.assign(updates, reinstatePinTrackingPatch(previousStatus, 'Confirmed'));
+        }
+
         const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
         if (error) toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
-        else { toast({ title: 'Booking status updated successfully!' }); onUpdate(); }
+        else {
+            if (newStatus === 'Confirmed' && previousStatus === 'pending_review') {
+                await expireActiveRentalAccessCodesForOrder(bookingId);
+            }
+            toast({ title: 'Booking status updated successfully!' });
+            onUpdate();
+        }
     };
 
     return (

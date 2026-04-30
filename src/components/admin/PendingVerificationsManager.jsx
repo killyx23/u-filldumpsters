@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
+import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
 export const PendingVerificationsManager = () => {
     const { user } = useAuth();
@@ -45,18 +46,24 @@ export const PendingVerificationsManager = () => {
         setActionLoading(true);
         try {
             const adminEmail = user?.email || 'admin';
-            
+            const prevStatus = selectedBooking.status;
+
             const { error: updateError } = await supabase
                 .from('bookings')
                 .update({ 
                     pending_address_verification: false,
                     address_verified_by_admin: adminEmail,
                     address_verified_date: new Date().toISOString(),
-                    status: 'Confirmed'
+                    status: 'Confirmed',
+                    ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
                 })
                 .eq('id', selectedBooking.id);
 
             if (updateError) throw updateError;
+
+            if (prevStatus === 'pending_review') {
+                await expireActiveRentalAccessCodesForOrder(selectedBooking.id);
+            }
 
             await supabase.from('customer_notes').insert({
                 customer_id: selectedBooking.customer_id,
