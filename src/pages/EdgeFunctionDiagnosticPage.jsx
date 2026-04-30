@@ -156,7 +156,7 @@ const EdgeFunctionDiagnosticPage = () => {
       // Check bookings table access
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
-        .select('id, access_pin')
+        .select('id, pin_generated_at, pin_notification_sent_at')
         .eq('id', testPayload.booking_id)
         .single();
 
@@ -164,7 +164,8 @@ const EdgeFunctionDiagnosticPage = () => {
         accessible: !bookingError,
         error: bookingError?.message,
         bookingExists: !!bookingData,
-        currentAccessPin: bookingData?.access_pin || null
+        pinGeneratedAt: bookingData?.pin_generated_at || null,
+        pinNotificationSentAt: bookingData?.pin_notification_sent_at || null
       };
 
       console.log(`[${timestamp}] [EdgeFunctionDiagnostic] bookings check:`, results.bookingsTable);
@@ -175,10 +176,12 @@ const EdgeFunctionDiagnosticPage = () => {
         customer_email: 'diagnostic@test.com',
         customer_phone: '',
         access_pin: 'TEST-DIAGNOSTIC',
-        algo_pin_id: 'test-id',
+        pin_id: 'test-id',
+        pin_type: 'bridge_proxied',
+        lock_id: 'diagnostic-lock',
         start_time: new Date().toISOString(),
         end_time: new Date().toISOString(),
-        status: 'test'
+        status: 'active'
       };
 
       const { data: insertData, error: insertError } = await supabase
@@ -208,7 +211,7 @@ const EdgeFunctionDiagnosticPage = () => {
       // Test UPDATE permission on bookings
       const { error: updateError } = await supabase
         .from('bookings')
-        .update({ access_pin: 'DIAGNOSTIC-TEST' })
+        .update({ pin_generated_at: new Date().toISOString() })
         .eq('id', testPayload.booking_id);
 
       results.updatePermission = {
@@ -287,8 +290,6 @@ const EdgeFunctionDiagnosticPage = () => {
           found: !!booking,
           data: booking,
           error: bookingError?.message,
-          hasAccessPin: !!booking?.access_pin,
-          accessPin: booking?.access_pin,
           status: booking?.status,
           plan: booking?.plan,
           email: booking?.email,
