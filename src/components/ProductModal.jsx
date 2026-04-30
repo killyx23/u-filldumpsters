@@ -11,43 +11,43 @@ const ProductModal = ({ isOpen, onClose }) => {
 
   const productImages = [
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg",
       title: "Feature Diagram"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/2873b0d0a82a61c4a19b11ff87b0d54c.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/2873b0d0a82a61c4a19b11ff87b0d54c.jpg",
       title: "Side View"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/51c03cb59f65a3a6de7e2c0cea6cd0a1.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/51c03cb59f65a3a6de7e2c0cea6cd0a1.jpg",
       title: "Full Cart View"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/5b3a6c7df3e8e054e99ea5c91fefff17.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/5b3a6c7df3e8e054e99ea5c91fefff17.jpg",
       title: "Loaded Cart"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/606a27ef6d5ac3f6a4be89ca68aaa94d.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/606a27ef6d5ac3f6a4be89ca68aaa94d.jpg",
       title: "Dumping Action"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/7b85d85c6fd89eaed3a5a0db42e8dc7a.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/7b85d85c6fd89eaed3a5a0db42e8dc7a.jpg",
       title: "Detail Shot"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/b64e3c53e93abec19efa6a7cc2085d98.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/b64e3c53e93abec19efa6a7cc2085d98.jpg",
       title: "Frame Construction"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/d3ebe77a4f0a97c0c7e6f5d48c8c0ba8.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/d3ebe77a4f0a97c0c7e6f5d48c8c0ba8.jpg",
       title: "Wheel Assembly"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/d65e88a5d16e84fdec8b9da7e5cc95f9.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/d65e88a5d16e84fdec8b9da7e5cc95f9.jpg",
       title: "Handle Detail"
     },
     {
-      url: "https://horizons-cdn.hostinger.com/60916c58-e19b-40f7-9844-691e3aca9ab9/e39f62cc6fa2a31f8bc98a3ab60c8f20.jpg",
+      url: "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/e39f62cc6fa2a31f8bc98a3ab60c8f20.jpg",
       title: "In Use"
     }
   ];

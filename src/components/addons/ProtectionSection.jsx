@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Shield, Truck, Info } from 'lucide-react';
 import { AddonSection } from './AddonSection';

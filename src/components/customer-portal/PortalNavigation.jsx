@@ -9,7 +9,8 @@ import {
   MessageSquare, 
   ShieldCheck,
   BookOpen,
-  Menu
+  Menu,
+  Key
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -17,6 +18,7 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, hasPendingVerifications }) => {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'access-codes', label: 'Access Codes', icon: Key },
     { id: 'bookings', label: 'Bookings', icon: List },
     { id: 'tracking', label: 'Tracking', icon: Map },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
