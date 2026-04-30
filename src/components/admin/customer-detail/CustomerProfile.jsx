@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { calculateAndSaveDistanceFrontend, formatFullAddress } from '@/utils/distanceCalculationHelper';
 import { useGoogleMapsLoader } from '@/hooks/useGoogleMapsLoader';
+import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
 const InfoRow = ({ icon, label, value, href }) => {
     const content = href && value !== 'N/A' && value !== 'Not Available' ? (
@@ -185,13 +186,32 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                 setIsSaving(false);
             } else {
                 if (!forceSave && isValidAddress) {
+                    const { data: reinstated, error: reinstateErr } = await supabase
+                        .from('bookings')
+                        .update({
+                            status: 'Confirmed',
+                            pin_generated_at: null,
+                            pin_notification_sent_at: null,
+                        })
+                        .eq('customer_id', customer.id)
+                        .eq('status', 'pending_review')
+                        .select('id');
+
+                    if (reinstateErr) {
+                        console.warn('Could not reinstate pending_review bookings:', reinstateErr);
+                    } else if (reinstated?.length) {
+                        for (const row of reinstated) {
+                            await expireActiveRentalAccessCodesForOrder(row.id);
+                        }
+                    }
+
                     const { error: bookingError } = await supabase
                         .from('bookings')
                         .update({ status: 'Confirmed' })
                         .eq('customer_id', customer.id)
-                        .in('status', ['pending_verification', 'pending_review']);
-                    
-                    if (bookingError) console.warn("Could not update related bookings:", bookingError);
+                        .eq('status', 'pending_verification');
+
+                    if (bookingError) console.warn('Could not confirm pending_verification bookings:', bookingError);
                 }
                 setCustomer(data);
                 setIsEditing(false);
