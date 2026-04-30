@@ -159,49 +159,7 @@ Deno.serve(async (req)=>{
     }
     log("Booking status updated", finalStatus);
     // ----------------------------------------------------------------
-    // Step 6: Generate Igloohome PIN (trailer rental only)
-    // ----------------------------------------------------------------
-    const planName = updatedBooking.plan?.name ?? updatedBooking.service_name ?? "";
-    const serviceType = updatedBooking.plan?.service_type ?? updatedBooking.service_type ?? "";
-    const isTrailerRental = serviceType === "trailer_rental" || planName.toLowerCase().includes("dump loader") || planName.toLowerCase().includes("trailer");
-    if (isTrailerRental) {
-      log("Trailer rental detected — generating Igloohome PIN…");
-      try {
-        const supabaseUrl = Deno.env.get("SUPABASE_URL");
-        const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-        const generatePinUrl = `${supabaseUrl}/functions/v1/generate-igloohome-pin`;
-        const pinRes = await fetch(generatePinUrl, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${supabaseServiceKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            booking_id: updatedBooking.id,
-            order_id: updatedBooking.id,
-            customer_email: updatedBooking.email,
-            customer_phone: updatedBooking.phone || "",
-            start_time: `${updatedBooking.drop_off_date}T00:00:00Z`,
-            end_time: `${updatedBooking.pickup_date}T23:59:59Z`
-          })
-        });
-        const pinResponse = await pinRes.json();
-        log("generate-igloohome-pin response:", pinResponse);
-        if (!pinRes.ok || pinResponse.success === false) {
-          // Non-fatal — log the failure but continue so email still sends
-          console.error("[finalize-booking] Igloohome PIN generation failed:", pinResponse);
-        } else {
-          log("✓ Access PIN generated successfully:", pinResponse.access_code);
-        }
-      } catch (pinErr) {
-        // Non-fatal — don't block booking confirmation over a PIN error
-        console.error("[finalize-booking] Igloohome PIN generation exception:", pinErr);
-      }
-    } else {
-      log("Not a trailer rental — skipping Igloohome PIN generation.");
-    }
-    // ----------------------------------------------------------------
-    // Step 7: Insert equipment rental records
+    // Step 6: Insert equipment rental records
     // ----------------------------------------------------------------
     const addons = updatedBooking.addons ?? {};
     if (addons.equipment?.length > 0) {
@@ -247,7 +205,7 @@ Deno.serve(async (req)=>{
       }
     }
     // ----------------------------------------------------------------
-    // Step 8: Create customer account
+    // Step 7: Create customer account
     // ----------------------------------------------------------------
     log("Invoking handle-booking-account-creation…");
     const { error: accountError } = await supabase.functions.invoke("handle-booking-account-creation", {

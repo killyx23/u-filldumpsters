@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy_functions.sh
+# push_backups.sh
 #
 # Usage:
-#   ./deploy_functions.sh <datetime> [function1 function2 ...]
+#   ./push_backups.sh <datetime> [function1 function2 ...]
 #
 # Examples:
 #   # Deploy ALL functions from a backup snapshot
-#   ./deploy_functions.sh 2026-03-27_00-17-26
+#   ./push_backups.sh 2026-03-27_00-17-26
 #
 #   # Deploy specific functions from a backup snapshot
-#   ./deploy_functions.sh 2026-03-27_00-17-26 finalize-booking send-booking-confirmation
+#   ./push_backups.sh 2026-03-27_00-17-26 finalize-booking send-booking-confirmation
 #
 # The datetime argument must match a folder under supabase/backups/
 # in the format: functions_YYYY-MM-DD_HH-MM-SS

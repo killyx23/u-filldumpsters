@@ -174,7 +174,9 @@ Deno.serve(async (req)=>{
       customer_email: email,
       customer_phone: phone,
       access_pin: access_code,
-      algo_pin_id: code_id ?? "",
+      pin_id: code_id ?? "",
+      pin_type: "algopin",
+      lock_id: bluetooth_id,
       start_time: body.start_time,
       end_time: body.end_time,
       created_at: new Date().toISOString(),
@@ -193,7 +195,7 @@ Deno.serve(async (req)=>{
       });
     }
     await supabase.from("bookings").update({
-      access_pin: access_code
+      pin_generated_at: new Date().toISOString()
     }).eq("id", booking_id);
     return new Response(JSON.stringify({
       success: true,
