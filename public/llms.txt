@@ -1,13 +1,16 @@
 ## Pages
 - [- Our Store](/productdetail): No description available
 - [| U-Fill Dumpsters](/resourcedetail): No description available
+- [Access Codes - Customer Portal](/accesscodes): View your trailer rental access codes and instructions
 - [Booking Receipt - U-Fill Dumpsters](/receipt): Your U-Fill Dumpsters booking receipt with complete details.
 - [Contact Us - U-Fill Dumpsters](/contact): Get in touch with U-Fill Dumpsters for any questions about our services, bookings, or support. We
 - [Customer Portal Login - U-Fill Dumpsters](/customerlogin): Access your U-Fill Dumpsters customer portal to manage your bookings and view your history.
 - [Customer Portal Login - U-Fill Dumpsters](/customerportallogin): Access your rental information and trailer access code
 - [Customer Reviews - U-Fill Dumpsters](/reviews): Read honest reviews from our satisfied customers. See why we
+- [Edge Function Diagnostics - Igloohome Integration](/edgefunctiondiagnostic): No description available
 - [FAQ - U-Fill Dumpsters](/faq): Find answers to frequently asked questions about our dumpster rental services, pricing, allowed materials, and booking process.
 - [Gorilla Heavy-Duty Dump Cart - Product Showcase | U-Fill Dumpsters](/productshowcase): Explore the Gorilla Heavy-Duty Dump Cart - a professional-grade material handling solution with 1,200 lb capacity, patented quick-release dumping system, and all-terrain capability.
-- [My Rental Dashboard - U-Fill Dumpsters](/customerportaldashboard): View your trailer rental details and access code
+- [Igloohome OAuth Diagnostic - Admin](/igloohomedebug): No description available
+- [Loading - Customer Portal](/customerportaldashboard): No description available
 - [Resource Library | U-Fill Dumpsters](/resourcelibrary): Access our library of helpful guides, videos, and documents to make your dumpster rental experience seamless.
 - [Verify Email - U-Fill Dumpsters](/verifyemail): Verify your email address for U-Fill Dumpsters securely.
