@@ -233,7 +233,7 @@ Deno.serve(async (req)=>{
     }
     console.log("[generate-igloohome-pin] Access code created successfully");
     const { error: updateError } = await supabase.from("bookings").update({
-      access_pin: accessCode
+      pin_generated_at: new Date().toISOString()
     }).eq("id", booking_id);
     if (updateError) {
       console.error("[generate-igloohome-pin] Booking update failed:", updateError.message);
@@ -243,7 +243,9 @@ Deno.serve(async (req)=>{
       customer_email,
       customer_phone: customer_phone || "",
       access_pin: accessCode,
-      algo_pin_id: codeId || "",
+      pin_id: codeId || "",
+      pin_type: "algopin",
+      lock_id: lockId,
       start_time,
       end_time,
       created_at: new Date().toISOString(),
