@@ -12,6 +12,7 @@ import { updateVerificationStatus } from '@/utils/verificationImageHelper';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
 import { format, parseISO } from 'date-fns';
+import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
@@ -137,12 +138,20 @@ const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
 
             if (paymentInfoError) throw paymentInfoError;
 
+            const prevStatus = booking.status;
             const { error: bookingUpdateError } = await supabase
                 .from('bookings')
-                .update({ status: 'Confirmed' })
+                .update({
+                    status: 'Confirmed',
+                    ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
+                })
                 .eq('id', booking.id);
 
             if (bookingUpdateError) throw bookingUpdateError;
+
+            if (prevStatus === 'pending_review') {
+                await expireActiveRentalAccessCodesForOrder(booking.id);
+            }
 
             toast({ title: "Success", description: "Stripe IDs updated and booking confirmed." });
             onUpdate();
@@ -229,14 +238,23 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     };
     
     const handleApprove = async (booking) => {
+        const prevStatus = booking.status;
         const { error } = await supabase
             .from('bookings')
-            .update({ status: 'Confirmed', verification_notes: 'Admin approved verification.', is_manually_verified: true })
+            .update({
+                status: 'Confirmed',
+                verification_notes: 'Admin approved verification.',
+                is_manually_verified: true,
+                ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
+            })
             .eq('id', booking.id);
             
         if (error) {
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
+            if (prevStatus === 'pending_review') {
+                await expireActiveRentalAccessCodesForOrder(booking.id);
+            }
             const updatedBookingForEmail = { ...booking, customers: customer, status: 'Confirmed' };
             await supabase.functions.invoke('send-booking-confirmation', {
                 body: { booking: updatedBookingForEmail, customMessage: `Your booking #${booking.id} has been approved and is now confirmed.` }

@@ -69,7 +69,7 @@ export const checkBookingDetails = async (bookingId) => {
   try {
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, plan, drop_off_date, pickup_date, access_pin, email, phone, status')
+      .select('id, plan, drop_off_date, pickup_date, pin_generated_at, pin_notification_sent_at, email, phone, status')
       .eq('id', bookingId)
       .single();
 
@@ -84,8 +84,8 @@ export const checkBookingDetails = async (bookingId) => {
       serviceName: data.plan?.name,
       dropOffDate: data.drop_off_date,
       pickupDate: data.pickup_date,
-      hasAccessPin: !!data.access_pin,
-      accessPin: data.access_pin,
+      pinGeneratedAt: data.pin_generated_at,
+      pinNotificationSentAt: data.pin_notification_sent_at,
       status: data.status
     });
 
@@ -215,20 +215,14 @@ export const testPinGeneration = async (orderId) => {
 
     const booking = bookingCheck.data;
 
-    // Prepare payload for PIN generation
     const payload = {
-      booking_id: booking.id,
-      order_id: booking.id,
-      customer_email: booking.email,
-      customer_phone: booking.phone,
-      start_time: booking.drop_off_date,
-      end_time: booking.pickup_date,
-      service_type: booking.plan?.name || 'Unknown'
+      bookingId: booking.id,
+      callerType: 'admin'
     };
 
-    debugLog('debugIgloohomeHelper', 'Calling generate-igloohome-pin with payload:', payload);
+    debugLog('debugIgloohomeHelper', 'Calling generate-pin with payload:', payload);
 
-    const { data, error } = await supabase.functions.invoke('generate-igloohome-pin', {
+    const { data, error } = await supabase.functions.invoke('generate-pin', {
       body: payload
     });
 

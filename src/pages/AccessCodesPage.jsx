@@ -17,6 +17,7 @@ const AccessCodesPage = ({ customerData }) => {
   const [error, setError] = useState(null);
   const [magicLinkToken, setMagicLinkToken] = useState(null);
   const [generatingQR, setGeneratingQR] = useState(false);
+  const [generatingPin, setGeneratingPin] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 5;
 
@@ -99,6 +100,7 @@ const AccessCodesPage = ({ customerData }) => {
         .from('rental_access_codes')
         .select('*')
         .eq('order_id', orderId)
+        .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -121,6 +123,7 @@ const AccessCodesPage = ({ customerData }) => {
           .from('rental_access_codes')
           .select('*')
           .filter('order_id', 'eq', orderId)
+          .eq('status', 'active')
           .order('created_at', { ascending: false })
           .limit(1);
         
@@ -276,6 +279,58 @@ const AccessCodesPage = ({ customerData }) => {
     setRetryCount(prev => prev + 1);
     console.log(`[AccessCodesPage] Retry count: ${retryCount + 1}/${MAX_RETRIES}`);
     fetchAccessCode();
+  };
+
+  const handleGeneratePin = async () => {
+    if (!booking?.id) {
+      toast({
+        title: 'Booking Not Ready',
+        description: 'Please refresh and try again.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      setGeneratingPin(true);
+
+      const { data, error } = await supabase.functions.invoke('generate-pin', {
+        body: {
+          bookingId: booking.id,
+          callerType: 'customer'
+        }
+      });
+
+      if (error) throw error;
+      if (data?.success === false || !data?.pin) {
+        throw new Error(data?.error || 'Failed to generate access PIN');
+      }
+
+      setAccessCode({
+        order_id: booking.id,
+        access_pin: data.pin,
+        pin_id: data.pinId || '',
+        pin_type: data.pinType || '',
+        start_time: `${booking.drop_off_date}T00:00:00Z`,
+        end_time: `${booking.pickup_date}T23:59:59Z`,
+        status: 'active'
+      });
+      setRetryCount(0);
+
+      toast({
+        title: 'Access PIN Generated',
+        description: 'Your access PIN is ready.'
+      });
+    } catch (err) {
+      console.error('[AccessCodesPage] Generate PIN error:', err);
+      toast({
+        title: 'PIN Generation Failed',
+        description: err.message || 'Unable to generate your access PIN. Please try again or contact support.',
+        variant: 'destructive'
+      });
+    } finally {
+      setGeneratingPin(false);
+    }
   };
 
   const formatDateTime = (dateStr, timeSlot) => {
@@ -510,7 +565,7 @@ const AccessCodesPage = ({ customerData }) => {
                 ) : (
                   <>
                     <p className="text-yellow-800 text-lg mb-6">
-                      Your access code is being generated. Click the button below to check for updates.
+                      No active access PIN was found for this rental. Generate one now or check again for updates.
                     </p>
                     {retryCount > 0 && (
                       <p className="text-sm text-yellow-700 mb-4">
@@ -520,18 +575,39 @@ const AccessCodesPage = ({ customerData }) => {
                   </>
                 )}
                 
-                <Button 
-                  onClick={handleRefreshClick}
-                  disabled={retryCount >= MAX_RETRIES}
-                  className={`${
-                    retryCount >= MAX_RETRIES 
-                      ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-yellow-500 hover:bg-yellow-600'
-                  } text-white`}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  {retryCount >= MAX_RETRIES ? 'Max Retries Reached' : 'Refresh Now'}
-                </Button>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <Button 
+                    onClick={handleGeneratePin}
+                    disabled={generatingPin}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                  >
+                    {generatingPin ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Key className="h-4 w-4 mr-2" />
+                        Generate Access PIN
+                      </>
+                    )}
+                  </Button>
+
+                  <Button 
+                    onClick={handleRefreshClick}
+                    disabled={retryCount >= MAX_RETRIES || generatingPin}
+                    variant="outline"
+                    className={`${
+                      retryCount >= MAX_RETRIES 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'border-yellow-600 text-yellow-800 hover:bg-yellow-100'
+                    }`}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    {retryCount >= MAX_RETRIES ? 'Max Retries Reached' : 'Refresh Now'}
+                  </Button>
+                </div>
                 
                 {retryCount < MAX_RETRIES && (
                   <p className="text-xs text-yellow-700 mt-4">
