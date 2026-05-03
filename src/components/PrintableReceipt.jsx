@@ -223,23 +223,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Source of truth:
-    // - Booking confirmation page uses DB fields: subtotal_before_tax, tax_amount, total_price
-    // - This printable receipt previously recalculated totals from plan/addons which can drift
-    //   (multi-day rules, mileage field names, rounding, etc.)
-    // Prefer DB values when present so portal Documents always matches confirmation.
-    // ------------------------------------------------------------------
-    const computedSubtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
-
-    const hasDbSubtotal = booking?.subtotal_before_tax != null && Number(booking.subtotal_before_tax) > 0;
-    const hasDbTax = booking?.tax_amount != null && Number(booking.tax_amount) >= 0;
-    const hasDbTotal = booking?.total_price != null && Number(booking.total_price) > 0;
-
+    const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+    
+    // Use tax rate from booking record if available, otherwise calculate
     const taxRateUsed = booking.tax_rate_used || 7.45;
-    const subtotal = hasDbSubtotal ? Number(booking.subtotal_before_tax) : computedSubtotal;
-    const taxAmount = hasDbTax ? Number(booking.tax_amount) : calculateTaxAmount(subtotal, taxRateUsed);
-    const calculatedTotal = hasDbTotal ? Number(booking.total_price) : (subtotal + taxAmount);
+    const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
+    const calculatedTotal = subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
