@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { PackagePlus, Loader2, Shield, Truck, HardHat, ShoppingCart, Trash2, Tv, Box, Plus, Minus, Info, CheckCircle2 } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';
@@ -53,22 +54,23 @@ export const RescheduleAddonsSection = ({
         console.log('[RescheduleAddons] Fetching original add-ons for booking:', bookingId);
         const originalMap = new Map();
         
-        // Fetch from booking_equipment table (includes disposal services)
+        // Fetch from booking_equipment table (includes disposal services, excludes ID 7)
         const { data: bookingEquip, error: equipErr } = await supabase
           .from('booking_equipment')
           .select('*, equipment(*)')
-          .eq('booking_id', bookingId);
+          .eq('booking_id', bookingId)
+          .neq('equipment_id', 7); // Exclude Premium Insurance (ID 7)
         
         if (equipErr) {
           console.error('[RescheduleAddons] Error fetching booking equipment:', equipErr);
           throw equipErr;
         }
         
-        console.log('[RescheduleAddons] Booking equipment fetched:', bookingEquip);
+        console.log('[RescheduleAddons] Booking equipment fetched (excluding ID 7):', bookingEquip);
         
-        // Add ALL equipment items to map (including disposal services)
+        // Add equipment items to map (excluding ID 7)
         (bookingEquip || []).forEach(be => {
-          if (be.equipment) {
+          if (be.equipment && be.equipment.id !== 7) {
             const equipId = be.equipment.id;
             const equipName = be.equipment.name;
             const equipType = be.equipment.type || 'rental';
@@ -87,16 +89,16 @@ export const RescheduleAddonsSection = ({
           }
         });
         
-        // Check for insurance in addons JSON (if it was on original booking)
+        // Check for insurance in addons JSON (use hook price, not equipment table)
         if (originalBooking.addons && typeof originalBooking.addons === 'object') {
           Object.entries(originalBooking.addons).forEach(([key, val]) => {
             if (key.toLowerCase().includes('insurance')) {
-              const price = typeof val === 'object' ? Number(val.price || 25) : Number(val || 25);
-              console.log('[RescheduleAddons] Original insurance found:', price);
+              // Use insurancePrice from hook (services table)
+              console.log('[RescheduleAddons] Original insurance found, using services table price:', insurancePrice);
               originalMap.set('insurance', {
                 id: 'insurance',
                 name: 'Premium Insurance',
-                price: price,
+                price: insurancePrice,
                 quantity: 1,
                 type: 'service'
               });
@@ -104,10 +106,10 @@ export const RescheduleAddonsSection = ({
           });
         }
         
-        console.log('[RescheduleAddons] Total original items:', originalMap.size);
+        console.log('[RescheduleAddons] Total original items (excluding equipment ID 7):', originalMap.size);
         setOriginalAddonsMap(originalMap);
         
-        // ONLY pre-check items that were on original booking (do NOT auto-add)
+        // ONLY pre-check items that were on original booking
         if (!initialized && (!selectedAddonsList || selectedAddonsList.length === 0)) {
           const originalList = Array.from(originalMap.values());
           console.log('[RescheduleAddons] Initializing with original items:', originalList);
@@ -126,17 +128,20 @@ export const RescheduleAddonsSection = ({
     };
     
     fetchOriginalAddons();
-  }, [bookingId, originalBooking, initialized]);
+  }, [bookingId, originalBooking, initialized, insurancePrice]);
 
-  // Fetch available equipment
+  // Fetch available equipment (excluding ID 7)
   useEffect(() => {
     const fetchEquipment = async () => {
       setLoading(true);
       try {
-        console.log('[RescheduleAddons] Fetching available equipment...');
+        console.log('[RescheduleAddons] Fetching available equipment (excluding ID 7)...');
+        
+        // Exclude equipment ID 7 (Premium Insurance)
         const { data: equipmentData, error: equipErr } = await supabase
           .from('equipment')
           .select('*')
+          .neq('id', 7) // Exclude Premium Insurance
           .order('type', { ascending: true })
           .order('name', { ascending: true });
         
@@ -145,7 +150,7 @@ export const RescheduleAddonsSection = ({
           throw equipErr;
         }
 
-        console.log('[RescheduleAddons] Available equipment fetched:', equipmentData?.length);
+        console.log('[RescheduleAddons] Available equipment fetched (excluding ID 7):', equipmentData?.length);
 
         const equipmentWithIcons = (equipmentData || []).map(eq => ({
           id: eq.id,
@@ -158,17 +163,10 @@ export const RescheduleAddonsSection = ({
           isQuantityControlled: eq.type !== 'service' || isDisposalService(eq.name)
         }));
 
-        const filteredEquipment = equipmentWithIcons.filter(eq => 
-          !eq.name.toLowerCase().includes('premium insurance')
-        );
-
-        const insuranceItem = equipmentWithIcons.find(eq => 
-          eq.name.toLowerCase().includes('premium insurance')
-        );
-
+        // Add Premium Insurance manually (from services table via hook)
         const allAddons = [
           {
-            id: insuranceItem?.id || 'insurance',
+            id: 'insurance',
             name: 'Premium Insurance',
             price: insurancePrice,
             description: 'Complete protection coverage for your rental',
@@ -176,10 +174,10 @@ export const RescheduleAddonsSection = ({
             type: 'service',
             isQuantityControlled: false
           },
-          ...filteredEquipment
+          ...equipmentWithIcons
         ];
 
-        console.log('[RescheduleAddons] Total available add-ons:', allAddons.length);
+        console.log('[RescheduleAddons] Total available add-ons (including Premium Insurance from services):', allAddons.length);
         setAvailableEquipment(allAddons);
       } catch (err) {
         console.error("[RescheduleAddons] Failed to load addons:", err);
@@ -228,7 +226,7 @@ export const RescheduleAddonsSection = ({
 
       setSelectedAddonsList(prev => [...prev, { ...addon, quantity: quantityToAdd }]);
     } else {
-      // Removing item - can always remove, even original items (returns to inventory)
+      // Removing item
       if (addon.type === 'consumable') {
         toast({
           title: "Consumable Item Removed",
@@ -253,7 +251,7 @@ export const RescheduleAddonsSection = ({
   const handleQuantityChange = async (addon, newQuantity) => {
     const qty = Math.max(0, Math.min(99, parseInt(newQuantity) || 0));
     
-    // If quantity is 0, remove the item (can return original items)
+    // If quantity is 0, remove the item
     if (qty === 0) {
       setSelectedAddonsList(prev => prev.filter(a => 
         a.id !== addon.id && 

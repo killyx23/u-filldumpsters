@@ -11,8 +11,12 @@ import { toast } from '@/components/ui/use-toast';
 
 const EdgeFunctionDiagnosticPage = () => {
   const [testPayload, setTestPayload] = useState({
-    bookingId: 1199,
-    callerType: 'admin'
+    booking_id: 1,
+    order_id: 1199,
+    customer_email: 'test@example.com',
+    customer_phone: '3854828842',
+    start_time: '2026-04-27T00:00:00Z',
+    end_time: '2026-04-28T00:00:00Z'
   });
 
   const [loading, setLoading] = useState(false);
@@ -32,7 +36,7 @@ const EdgeFunctionDiagnosticPage = () => {
     try {
       const startTime = Date.now();
 
-      const { data, error } = await supabase.functions.invoke('generate-pin', {
+      const { data, error } = await supabase.functions.invoke('generate-igloohome-pin', {
         body: testPayload
       });
 
@@ -152,16 +156,15 @@ const EdgeFunctionDiagnosticPage = () => {
       // Check bookings table access
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
-        .select('id, pin_generated_at, pin_notification_sent_at')
-        .eq('id', testPayload.bookingId)
+        .select('id, access_pin')
+        .eq('id', testPayload.booking_id)
         .single();
 
       results.bookingsTable = {
         accessible: !bookingError,
         error: bookingError?.message,
         bookingExists: !!bookingData,
-        pinGeneratedAt: bookingData?.pin_generated_at || null,
-        pinNotificationSentAt: bookingData?.pin_notification_sent_at || null
+        currentAccessPin: bookingData?.access_pin || null
       };
 
       console.log(`[${timestamp}] [EdgeFunctionDiagnostic] bookings check:`, results.bookingsTable);
@@ -172,12 +175,10 @@ const EdgeFunctionDiagnosticPage = () => {
         customer_email: 'diagnostic@test.com',
         customer_phone: '',
         access_pin: 'TEST-DIAGNOSTIC',
-        pin_id: 'test-id',
-        pin_type: 'bridge_proxied',
-        lock_id: 'diagnostic-lock',
+        algo_pin_id: 'test-id',
         start_time: new Date().toISOString(),
         end_time: new Date().toISOString(),
-        status: 'active'
+        status: 'test'
       };
 
       const { data: insertData, error: insertError } = await supabase
@@ -207,8 +208,8 @@ const EdgeFunctionDiagnosticPage = () => {
       // Test UPDATE permission on bookings
       const { error: updateError } = await supabase
         .from('bookings')
-        .update({ pin_generated_at: new Date().toISOString() })
-        .eq('id', testPayload.bookingId);
+        .update({ access_pin: 'DIAGNOSTIC-TEST' })
+        .eq('id', testPayload.booking_id);
 
       results.updatePermission = {
         success: !updateError,
@@ -286,6 +287,8 @@ const EdgeFunctionDiagnosticPage = () => {
           found: !!booking,
           data: booking,
           error: bookingError?.message,
+          hasAccessPin: !!booking?.access_pin,
+          accessPin: booking?.access_pin,
           status: booking?.status,
           plan: booking?.plan,
           email: booking?.email,
@@ -348,7 +351,7 @@ const EdgeFunctionDiagnosticPage = () => {
             <Terminal className="h-8 w-8 text-yellow-400" />
             <div>
               <h1 className="text-3xl font-bold text-white">Edge Function Diagnostics</h1>
-              <p className="text-gray-400">Investigate generate-pin failures for trailer rental bookings</p>
+              <p className="text-gray-400">Investigate generate-igloohome-pin failures for orders #1199 & #1198</p>
             </div>
           </div>
 
@@ -361,28 +364,70 @@ const EdgeFunctionDiagnosticPage = () => {
                   Test Edge Function
                 </CardTitle>
                 <CardDescription className="text-blue-200/70">
-                  Invoke generate-pin directly with test payload
+                  Invoke generate-igloohome-pin directly with test payload
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-gray-400 text-xs">Booking ID</Label>
+                    <Input
+                      type="number"
+                      value={testPayload.booking_id}
+                      onChange={(e) => handlePayloadChange('booking_id', parseInt(e.target.value))}
+                      className="bg-black/50 border-gray-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-gray-400 text-xs">Order ID</Label>
+                    <Input
+                      type="number"
+                      value={testPayload.order_id}
+                      onChange={(e) => handlePayloadChange('order_id', parseInt(e.target.value))}
+                      className="bg-black/50 border-gray-700 text-white mt-1"
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <Label className="text-gray-400 text-xs">Booking ID</Label>
+                  <Label className="text-gray-400 text-xs">Customer Email</Label>
                   <Input
-                    type="number"
-                    value={testPayload.bookingId}
-                    onChange={(e) => handlePayloadChange('bookingId', parseInt(e.target.value))}
+                    type="email"
+                    value={testPayload.customer_email}
+                    onChange={(e) => handlePayloadChange('customer_email', e.target.value)}
                     className="bg-black/50 border-gray-700 text-white mt-1"
                   />
                 </div>
 
                 <div>
-                  <Label className="text-gray-400 text-xs">Caller Type</Label>
+                  <Label className="text-gray-400 text-xs">Customer Phone</Label>
                   <Input
-                    type="text"
-                    value={testPayload.callerType}
-                    onChange={(e) => handlePayloadChange('callerType', e.target.value)}
+                    type="tel"
+                    value={testPayload.customer_phone}
+                    onChange={(e) => handlePayloadChange('customer_phone', e.target.value)}
                     className="bg-black/50 border-gray-700 text-white mt-1"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-gray-400 text-xs">Start Time (ISO 8601)</Label>
+                    <Input
+                      type="text"
+                      value={testPayload.start_time}
+                      onChange={(e) => handlePayloadChange('start_time', e.target.value)}
+                      className="bg-black/50 border-gray-700 text-white mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-gray-400 text-xs">End Time (ISO 8601)</Label>
+                    <Input
+                      type="text"
+                      value={testPayload.end_time}
+                      onChange={(e) => handlePayloadChange('end_time', e.target.value)}
+                      className="bg-black/50 border-gray-700 text-white mt-1"
+                    />
+                  </div>
                 </div>
 
                 <Button
@@ -625,7 +670,7 @@ const EdgeFunctionDiagnosticPage = () => {
             <CardContent className="text-xs text-gray-400 space-y-3">
               <div>
                 <p className="font-semibold text-yellow-400 mb-1">Step 1: Test Edge Function</p>
-                <p>Click "Test Edge Function" to invoke generate-pin with the default payload. Check browser console for detailed logs.</p>
+                <p>Click "Test Edge Function" to invoke generate-igloohome-pin with the default payload. Check browser console for detailed logs.</p>
               </div>
               <div>
                 <p className="font-semibold text-yellow-400 mb-1">Step 2: Check Database Permissions</p>
@@ -637,7 +682,7 @@ const EdgeFunctionDiagnosticPage = () => {
               </div>
               <div>
                 <p className="font-semibold text-yellow-400 mb-1">Step 4: Review Supabase Dashboard Logs</p>
-                <p>Navigate to Supabase Dashboard → Edge Functions → generate-pin → Logs to see server-side execution details.</p>
+                <p>Navigate to Supabase Dashboard → Edge Functions → generate-igloohome-pin → Logs to see server-side execution details.</p>
               </div>
               <div className="bg-red-950/30 border border-red-500/30 rounded p-3 mt-4">
                 <p className="font-semibold text-red-400 mb-1">⚠️ Common Issues to Check:</p>

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRight, Tag, Loader2, MapPin } from 'lucide-react';
@@ -54,20 +55,28 @@ export const OrderSummary = ({
         return "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
     };
 
-    // Load equipment prices from equipment_pricing table
+    // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {
         const loadAllPrices = async () => {
             setLoadingPrices(true);
             const prices = {};
 
             try {
-                // Load equipment prices (IDs 1-6)
+                console.log('[OrderSummary] Loading equipment prices (IDs 1-6, excluding Premium Insurance)');
+                
+                // Load equipment prices (IDs 1-6 only)
                 if (addons?.equipment && addons.equipment.length > 0) {
                     for (const item of addons.equipment) {
                         const equipmentId = item.equipment_id || item.dbId || item.id;
                         
                         if (!equipmentId) {
                             console.warn('[OrderSummary] Equipment item missing ID:', item);
+                            continue;
+                        }
+
+                        // Skip equipment ID 7 (Premium Insurance - uses services table)
+                        if (equipmentId === 7) {
+                            console.log('[OrderSummary] Skipping equipment ID 7 (Premium Insurance uses services table)');
                             continue;
                         }
 
@@ -78,6 +87,7 @@ export const OrderSummary = ({
 
                         const price = await getPriceForEquipment(equipmentId);
                         prices[equipmentId] = price;
+                        console.log(`[OrderSummary] Loaded price for equipment ID ${equipmentId}: $${price}`);
                     }
                 }
 
@@ -92,10 +102,12 @@ export const OrderSummary = ({
                     if (addons?.[disposal.key] && addons[disposal.key] > 0) {
                         const price = await getPriceForEquipment(disposal.dbId);
                         prices[disposal.dbId] = price;
+                        console.log(`[OrderSummary] Loaded disposal price for ID ${disposal.dbId}: $${price}`);
                     }
                 }
 
                 setEquipmentPrices(prices);
+                console.log('[OrderSummary] ✓ All equipment prices loaded (no Premium Insurance fetched)');
             } catch (error) {
                 console.error('[OrderSummary] Error loading prices:', error);
                 toast({
@@ -195,21 +207,31 @@ export const OrderSummary = ({
             mileageCharge = Number(feeResult.trip_mileage_cost || 0);
         }
 
-        // Protection Options
+        // Protection Options - Use hook for insurance price (from services table)
         if (addons?.insurance === 'accept') {
-            insuranceCost = Number(insurancePrice || 20);
+            insuranceCost = Number(insurancePrice);
+            console.log('[OrderSummary] Insurance cost (from services table):', insuranceCost);
         }
 
         if (addons?.drivewayProtection === 'accept' && showDrivewayProtection) {
-            drivewayProtectionCost = Number(drivewayPrice || 15);
+            drivewayProtectionCost = Number(drivewayPrice);
         }
 
-        // Equipment (Rent) and Items for Purchase
+        // Equipment (Rent) and Items for Purchase (IDs 1-6 only, excluding ID 7)
         if (addons?.equipment && Array.isArray(addons.equipment)) {
             addons.equipment.forEach(item => {
                 const equipmentId = item.equipment_id || item.dbId || item.id;
                 
-                if (!equipmentId || !isValidEquipmentId(equipmentId)) {
+                // Skip equipment ID 7 (Premium Insurance)
+                if (!equipmentId || equipmentId === 7) {
+                    if (equipmentId === 7) {
+                        console.log('[OrderSummary] Skipping equipment ID 7 in cost calculation (Premium Insurance)');
+                    }
+                    return;
+                }
+                
+                if (!isValidEquipmentId(equipmentId)) {
+                    console.warn('[OrderSummary] Skipping invalid equipment ID:', equipmentId);
                     return;
                 }
 
@@ -226,7 +248,7 @@ export const OrderSummary = ({
             });
         }
 
-        // Disposal costs
+        // Disposal costs (IDs 4-6)
         if (plan?.id !== 2) {
             if (addons?.mattressDisposal && addons.mattressDisposal > 0) {
                 const price = Number(equipmentPrices[4] || 25);
@@ -339,7 +361,11 @@ export const OrderSummary = ({
     if (addons?.equipment && Array.isArray(addons.equipment)) {
         addons.equipment.forEach(item => {
             const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3) return;
+            
+            // Skip equipment ID 7 (Premium Insurance) and invalid IDs
+            if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId) || equipmentId === 3) {
+                return;
+            }
             
             const price = Number(equipmentPrices[equipmentId] || 0);
             const quantity = Number(item.quantity || 1);

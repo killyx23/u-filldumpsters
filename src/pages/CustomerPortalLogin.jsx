@@ -42,7 +42,7 @@ export const CustomerPortalLogin = () => {
       // Verify booking exists
       const { data: booking, error } = await supabase
         .from('bookings')
-        .select('id, email, phone, drop_off_date, pickup_date')
+        .select('id, email, phone, access_pin, drop_off_date, pickup_date')
         .eq('id', urlOrderId)
         .single();
 
@@ -78,7 +78,7 @@ export const CustomerPortalLogin = () => {
         order_id: booking.id,
         email: booking.email,
         phone: booking.phone,
-        access_pin: null,
+        access_pin: booking.access_pin,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       };
       localStorage.setItem('rental_portal_session', JSON.stringify(session));
@@ -127,7 +127,7 @@ export const CustomerPortalLogin = () => {
       // Query database to find matching order
       const { data: booking, error } = await supabase
         .from('bookings')
-        .select('id, email, phone, drop_off_date, pickup_date, status')
+        .select('id, email, phone, access_pin, drop_off_date, pickup_date, status')
         .eq('id', parseInt(orderId))
         .single();
 
@@ -162,7 +162,7 @@ export const CustomerPortalLogin = () => {
         order_id: booking.id,
         email: booking.email,
         phone: booking.phone,
-        access_pin: null,
+        access_pin: booking.access_pin,
         rental_start: booking.drop_off_date,
         rental_end: booking.pickup_date,
         status: booking.status,

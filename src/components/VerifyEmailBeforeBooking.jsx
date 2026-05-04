@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package, Receipt } from 'lucide-react';
@@ -14,6 +15,7 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalPrice, onBack, onComplete, isProcessing }) => {
     const [status, setStatus] = useState('initial');
@@ -27,16 +29,18 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
 
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
+    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
 
-    // Load equipment prices from database
+    // Load equipment prices from database (excluding insurance which comes from hook)
     useEffect(() => {
         const loadPrices = async () => {
             setLoadingPrices(true);
             const prices = {};
 
             try {
-                // Load all equipment prices (IDs 1-7)
-                for (let id = 1; id <= 7; id++) {
+                // Load equipment and disposal prices (IDs 1-6)
+                // Note: ID 7 (Premium Insurance) is loaded via useInsurancePricing hook
+                for (let id = 1; id <= 6; id++) {
                     if (isValidEquipmentId(id)) {
                         prices[id] = await getPriceForEquipment(id);
                     }
@@ -145,15 +149,21 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         return formatTimeWindow(timeSlot, timeOptions);
     };
 
-    // Calculate breakdown using the 8-category format with dynamic tax
+    // Calculate breakdown using the 8-category format with dynamic tax and insurance from hook
     const calculatedTotals = useMemo(() => {
         const basePriceAmount = plan?.price || plan?.base_price || 0;
         const deliveryFeeFlat = addonsData?.deliveryFee || 0;
         const tripMileageCost = addonsData?.mileageCharge || 0;
         
-        // Protection costs
-        const insuranceCost = addonsData?.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+        // Protection costs - Use hook for insurance price
+        const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+
+        console.log('[VerifyEmailBeforeBooking] Insurance calculation:', {
+            addonsInsurance: addonsData?.insurance,
+            insurancePrice: insurancePrice,
+            insuranceCost: insuranceCost
+        });
 
         // Equipment costs
         let rentEquipmentCost = 0;
@@ -224,7 +234,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
             taxRate: taxRate,
             total: taxCalc.total
         };
-    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate]);
+    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
 
     // Prepare category items
     const serviceItems = [];
@@ -316,7 +326,7 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         });
     }
 
-    if (loadingPrices || loadingTaxRate) {
+    if (loadingPrices || loadingTaxRate || loadingInsurancePrice) {
         return (
             <div className="container mx-auto py-16 px-4">
                 <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
