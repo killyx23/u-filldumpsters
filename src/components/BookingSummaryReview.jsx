@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
@@ -11,6 +12,7 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount, calculateTotalWithTax } from '@/utils/calculateTaxAmount';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -31,16 +33,18 @@ export const BookingSummaryReview = ({
     });
 
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
+    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
 
-    // Load equipment prices from database
+    // Load equipment prices from database (excluding insurance which comes from hook)
     useEffect(() => {
         const loadPrices = async () => {
             setLoading(true);
             const prices = {};
 
             try {
-                // Load all equipment prices (IDs 1-7)
-                for (let id = 1; id <= 7; id++) {
+                // Load equipment and disposal prices (IDs 1-6)
+                // Note: ID 7 (Premium Insurance) is loaded via useInsurancePricing hook
+                for (let id = 1; id <= 6; id++) {
                     if (isValidEquipmentId(id)) {
                         prices[id] = await getPriceForEquipment(id);
                     }
@@ -101,9 +105,15 @@ export const BookingSummaryReview = ({
         const deliveryFeeFlat = addonsData?.deliveryFee || 0;
         const tripMileageCost = addonsData?.mileageCharge || 0;
         
-        // Protection costs
-        const insuranceCost = addonsData?.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+        // Protection costs - Use hook for insurance price
+        const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+
+        console.log('[BookingSummaryReview] Insurance calculation:', {
+            addonsInsurance: addonsData?.insurance,
+            insurancePrice: insurancePrice,
+            insuranceCost: insuranceCost
+        });
 
         // Equipment costs
         let rentEquipmentCost = 0;
@@ -174,7 +184,7 @@ export const BookingSummaryReview = ({
             taxRate: taxRate,
             total: taxCalc.total
         };
-    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate]);
+    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
 
     const planName = plan?.name || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
@@ -209,7 +219,7 @@ export const BookingSummaryReview = ({
         return formatTimeWindow(timeSlot, timeOptions);
     };
 
-    if (loading || loadingTaxRate) {
+    if (loading || loadingTaxRate || loadingInsurancePrice) {
         return (
             <div className="flex justify-center items-center h-64">
                 <div className="text-white">Loading price breakdown...</div>
@@ -367,7 +377,7 @@ export const BookingSummaryReview = ({
                                 items={serviceItems}
                             />
 
-                            {/* 2. Protection Options - NOW WITH SERVICE NAME */}
+                            {/* 2. Protection Options */}
                             <PriceBreakdownCategory
                                 icon="🛡️"
                                 title="Protection Options"

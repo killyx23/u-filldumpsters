@@ -88,7 +88,6 @@ const CustomerPortalDashboard = () => {
         .from('rental_access_codes')
         .select('*')
         .eq('order_id', targetOrderId)
-        .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
         .single();

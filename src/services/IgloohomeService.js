@@ -84,9 +84,7 @@ export const generateDurationPIN = async (startTime, endTime, customerEmail, cus
         customer_email: customerEmail,
         customer_phone: customerPhone,
         access_pin: result.pin_code,
-        pin_id: result.id,
-        pin_type: 'algopin',
-        lock_id: LOCK_ID,
+        algo_pin_id: result.id,
         start_time: startTime,
         end_time: endTime,
         status: 'active'
@@ -114,13 +112,13 @@ export const generateDurationPIN = async (startTime, endTime, customerEmail, cus
 
     console.log(`[${timestamp}] [IgloohomeService] ✓ PIN generated successfully:`, {
       pin: result.pin_code,
-      pin_id: result.id,
+      algo_pin_id: result.id,
       record_id: accessCodeData.id
     });
 
     return {
       access_pin: result.pin_code,
-      pin_id: result.id,
+      algo_pin_id: result.id,
       start_time: startTime,
       end_time: endTime,
       record_id: accessCodeData.id

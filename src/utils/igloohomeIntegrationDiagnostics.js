@@ -37,6 +37,7 @@ export async function testIgloohomeRPC(bookingId) {
       phone: booking.phone,
       drop_off_date: booking.drop_off_date,
       pickup_date: booking.pickup_date,
+      access_pin: booking.access_pin,
     });
 
     // Prepare RPC parameters
@@ -79,14 +80,14 @@ export async function testIgloohomeRPC(bookingId) {
     console.log("Verifying booking update...");
     const { data: updatedBooking, error: verifyError } = await supabase
       .from('bookings')
-      .select('pin_generated_at, pin_notification_sent_at')
+      .select('access_pin')
       .eq('id', bookingId)
       .single();
 
     if (verifyError) {
       console.error("Error verifying booking update:", verifyError);
     } else {
-      console.log("Updated booking pin state:", updatedBooking);
+      console.log("Updated booking access_pin:", updatedBooking.access_pin);
     }
 
     // Check rental_access_codes table
@@ -108,7 +109,7 @@ export async function testIgloohomeRPC(bookingId) {
     return {
       success: rpcResponse?.success || false,
       rpc_response: rpcResponse,
-      booking_updated: updatedBooking?.pin_generated_at !== null,
+      booking_updated: updatedBooking?.access_pin !== null,
       access_codes_created: accessCodes?.length || 0,
     };
 
@@ -149,7 +150,7 @@ export async function verifyBookingState(bookingId) {
     // Check bookings table
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
-      .select('id, status, payment_intent, pin_generated_at, pin_notification_sent_at, created_at, email, phone')
+      .select('id, status, payment_intent, access_pin, created_at, email, phone')
       .eq('id', bookingId)
       .single();
 
@@ -180,7 +181,7 @@ export async function verifyBookingState(bookingId) {
       success: true,
       booking: booking,
       access_codes: accessCodes || [],
-      has_pin_generated_at: booking.pin_generated_at !== null,
+      has_access_pin: booking.access_pin !== null,
       has_rental_codes: (accessCodes?.length || 0) > 0,
     };
 

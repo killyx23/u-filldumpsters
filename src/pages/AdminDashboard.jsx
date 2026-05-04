@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -15,7 +16,10 @@ import { PendingVerificationsManager } from '@/components/admin/PendingVerificat
 import { SettingsManager } from '@/components/admin/SettingsManager';
 import { ResourceManagement } from '@/components/admin/ResourceManagement';
 import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X } from 'lucide-react';
+import { AIAssistantMessagesManager } from '@/components/admin/AIAssistantMessagesManager';
+import { AIKnowledgeBaseManager } from '@/components/admin/AIKnowledgeBaseManager';
+import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSectionManager';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
@@ -249,6 +253,9 @@ const AdminDashboard = () => {
                         <TabsTrigger value="financial" className="py-2 bg-green-900/20 data-[state=active]:bg-green-600 data-[state=active]:text-white">
                             <Calculator className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Financial Books</span>
                         </TabsTrigger>
+                        <TabsTrigger value="ai-knowledge" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                            <Brain className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">AI Knowledge</span>
+                        </TabsTrigger>
                         <TabsTrigger value="bookings" className="py-2"><Truck className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Bookings</span></TabsTrigger>
                         <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
                         <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
@@ -267,6 +274,35 @@ const AdminDashboard = () => {
                             <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
                             <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
                             <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
+                            <TabsContent value="ai-knowledge">
+                                <div className="space-y-8">
+                                    <Tabs defaultValue="entries" className="w-full">
+                                        <TabsList className="bg-gray-800">
+                                            <TabsTrigger value="entries" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                                                <Brain className="h-4 w-4 mr-2" />
+                                                Knowledge Entries
+                                            </TabsTrigger>
+                                            <TabsTrigger value="sections" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                                                <Layers className="h-4 w-4 mr-2" />
+                                                Sections
+                                            </TabsTrigger>
+                                            <TabsTrigger value="messages" className="data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                                                <Bell className="h-4 w-4 mr-2" />
+                                                Customer Messages
+                                            </TabsTrigger>
+                                        </TabsList>
+                                        <TabsContent value="entries" className="mt-6">
+                                            <AIKnowledgeBaseManager />
+                                        </TabsContent>
+                                        <TabsContent value="sections" className="mt-6">
+                                            <AIKnowledgeSectionManager />
+                                        </TabsContent>
+                                        <TabsContent value="messages" className="mt-6">
+                                            <AIAssistantMessagesManager />
+                                        </TabsContent>
+                                    </Tabs>
+                                </div>
+                            </TabsContent>
                             <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>

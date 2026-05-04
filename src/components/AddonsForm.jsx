@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
@@ -14,6 +15,7 @@ import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 
+// Equipment metadata (IDs 1-6 only - ID 7 is Premium Insurance service, not equipment)
 const equipmentMeta = [
   { id: 'wheelbarrow', dbId: 1, label: 'Wheelbarrow', price: 0, icon: <ShoppingCart className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
   { id: 'handTruck', dbId: 2, label: 'Hand Truck', price: 0, icon: <Hammer className="h-6 w-6 mr-3 text-yellow-400" />, quantity: false, type: 'rental' },
@@ -53,11 +55,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     }
   }, [addonsData?.insurance, setAddonsData]);
 
-  // Load equipment and disposal prices from database
+  // Load equipment and disposal prices from database (IDs 1-6 only, excluding ID 7)
   useEffect(() => {
     const loadPrices = async () => {
       try {
-        console.log('[AddonsForm] Loading equipment and disposal prices from database');
+        console.log('[AddonsForm] Loading equipment and disposal prices from database (IDs 1-6, excluding Premium Insurance)');
 
         // Load equipment prices (IDs 1-3)
         const updatedEquipmentMeta = await Promise.all(
@@ -79,7 +81,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
         setEquipmentMetaWithPrices(updatedEquipmentMeta);
         setDisposalMetaWithPrices(updatedDisposalMeta);
-        console.log('[AddonsForm] ✓ All prices loaded from database');
+        console.log('[AddonsForm] ✓ All equipment prices loaded from database (no Premium Insurance fetched)');
       } catch (error) {
         console.error('[AddonsForm] Error loading prices:', error);
         toast({
@@ -193,10 +195,10 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         finalTotal += appliedDeliveryFeeFlat || 0;
     }
 
-    // Dynamic insurance price from database (via hook)
+    // Dynamic insurance price from database (via hook - services table ID 7)
     if (addonsData?.insurance === 'accept') {
       finalTotal += insurancePrice;
-      console.log('[AddonsForm] Adding insurance cost:', insurancePrice);
+      console.log('[AddonsForm] Adding insurance cost (from services table):', insurancePrice);
     }
     
     // Dynamic driveway protection price from database (via hook)
@@ -205,7 +207,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       console.log('[AddonsForm] Adding driveway protection cost:', drivewayPrice);
     }
     
-    // Equipment prices from database
+    // Equipment prices from database (IDs 1-6 only)
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
           const meta = equipmentMetaWithPrices.find(e => e.id === item.id);
