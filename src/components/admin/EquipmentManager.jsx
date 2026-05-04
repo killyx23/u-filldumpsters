@@ -1,20 +1,44 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Edit, Trash2, Save, X, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Save, X, Loader2, Package, Wrench, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { EquipmentIdValidation } from './EquipmentIdValidation';
-import { updateEquipmentPrice, getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { updateEquipmentPrice } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+
+const EQUIPMENT_CATEGORIES = {
+  rental: { 
+    label: 'Rental Equipment', 
+    icon: Package, 
+    description: 'Physical rental items like dumpsters and equipment',
+    color: 'blue'
+  },
+  consumable: { 
+    label: 'Consumable Accessories', 
+    icon: Wrench, 
+    description: 'Items consumed or used during rental period',
+    color: 'green'
+  },
+  service: { 
+    label: 'Disposable Services', 
+    icon: FileText, 
+    description: 'One-time services and fees',
+    color: 'yellow'
+  }
+};
 
 export const EquipmentManager = () => {
     const [equipment, setEquipment] = useState([]);
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState(null);
     const [addingNew, setAddingNew] = useState(false);
+    const [addingCategory, setAddingCategory] = useState(null);
     const [formData, setFormData] = useState({
         name: '',
         total_quantity: 0,
@@ -29,7 +53,9 @@ export const EquipmentManager = () => {
             const { data, error } = await supabase
                 .from('equipment')
                 .select('*')
-                .order('id');
+                .in('type', ['rental', 'consumable', 'service'])
+                .order('type', { ascending: true })
+                .order('name', { ascending: true });
 
             if (error) throw error;
             setEquipment(data || []);
@@ -87,8 +113,7 @@ export const EquipmentManager = () => {
                         editingId,
                         parseFloat(formData.price),
                         formData.type === 'consumable' ? 'consumable_item' : 
-                        formData.type === 'service' ? 'service_item' : 
-                        formData.type === 'insurance' ? 'insurance' : 'rental_equipment',
+                        formData.type === 'service' ? 'service_item' : 'rental_equipment',
                         null,
                         'Admin price update via Equipment Manager'
                     );
@@ -119,6 +144,7 @@ export const EquipmentManager = () => {
 
             setEditingId(null);
             setAddingNew(false);
+            setAddingCategory(null);
             setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, description: '' });
             fetchEquipment();
         } catch (error) {
@@ -156,8 +182,20 @@ export const EquipmentManager = () => {
     const handleCancel = () => {
         setEditingId(null);
         setAddingNew(false);
+        setAddingCategory(null);
         setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, description: '' });
     };
+
+    const handleAddInCategory = (categoryType) => {
+        setAddingNew(true);
+        setAddingCategory(categoryType);
+        setFormData({ ...formData, type: categoryType });
+    };
+
+    const groupedEquipment = Object.keys(EQUIPMENT_CATEGORIES).reduce((acc, category) => {
+        acc[category] = equipment.filter(item => (item.type || 'rental') === category);
+        return acc;
+    }, {});
 
     if (loading) {
         return (
@@ -176,62 +214,113 @@ export const EquipmentManager = () => {
             <Card className="bg-gray-800 border-gray-700">
                 <CardHeader>
                     <div className="flex justify-between items-center">
-                        <CardTitle className="text-white">Equipment Inventory</CardTitle>
-                        <Button
-                            onClick={() => setAddingNew(true)}
-                            className="bg-green-600 hover:bg-green-700"
-                            disabled={addingNew}
-                        >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Equipment
-                        </Button>
+                        <div>
+                            <CardTitle className="text-white">Equipment Inventory</CardTitle>
+                            <p className="text-sm text-gray-400 mt-1">Organized by category for easy management</p>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent>
-                    <div className="space-y-3">
-                        {/* Add New Form */}
-                        {addingNew && (
-                            <EquipmentForm
-                                formData={formData}
-                                setFormData={setFormData}
-                                onSave={handleSave}
-                                onCancel={handleCancel}
-                                isNew
-                            />
-                        )}
+                    <Accordion type="multiple" defaultValue={Object.keys(EQUIPMENT_CATEGORIES)} className="space-y-4">
+                        {Object.entries(EQUIPMENT_CATEGORIES).map(([categoryKey, category]) => {
+                            const Icon = category.icon;
+                            const categoryItems = groupedEquipment[categoryKey] || [];
+                            const isAddingInThisCategory = addingNew && addingCategory === categoryKey;
 
-                        {/* Equipment List */}
-                        {equipment.map(item => (
-                            editingId === item.id ? (
-                                <EquipmentForm
-                                    key={item.id}
-                                    formData={formData}
-                                    setFormData={setFormData}
-                                    onSave={handleSave}
-                                    onCancel={handleCancel}
-                                />
-                            ) : (
-                                <EquipmentItem
-                                    key={item.id}
-                                    item={item}
-                                    onEdit={() => handleEdit(item)}
-                                    onDelete={() => handleDelete(item.id)}
-                                />
-                            )
-                        ))}
+                            return (
+                                <AccordionItem 
+                                    key={categoryKey} 
+                                    value={categoryKey}
+                                    className={`equipment-category-section category-${category.color}`}
+                                >
+                                    <AccordionTrigger className="equipment-category-header hover:no-underline">
+                                        <div className="flex items-center justify-between w-full pr-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`category-icon category-icon-${category.color}`}>
+                                                    <Icon className="h-5 w-5" />
+                                                </div>
+                                                <div className="text-left">
+                                                    <h3 className="text-lg font-semibold text-white">{category.label}</h3>
+                                                    <p className="text-xs text-gray-400 mt-0.5">{category.description}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-sm text-gray-400 bg-gray-700/50 px-3 py-1 rounded-full">
+                                                    {categoryItems.length} {categoryItems.length === 1 ? 'item' : 'items'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </AccordionTrigger>
+                                    <AccordionContent className="equipment-category-content">
+                                        <div className="space-y-3 pt-4">
+                                            {/* Add New Button for Category */}
+                                            <div className="flex justify-end mb-3">
+                                                <Button
+                                                    onClick={() => handleAddInCategory(categoryKey)}
+                                                    className={`bg-${category.color}-600 hover:bg-${category.color}-700 text-white`}
+                                                    size="sm"
+                                                    disabled={addingNew}
+                                                >
+                                                    <Plus className="h-4 w-4 mr-2" />
+                                                    Add to {category.label}
+                                                </Button>
+                                            </div>
 
-                        {equipment.length === 0 && !addingNew && (
-                            <p className="text-gray-400 text-center py-8">No equipment found</p>
-                        )}
-                    </div>
+                                            {/* Add New Form */}
+                                            {isAddingInThisCategory && (
+                                                <EquipmentForm
+                                                    formData={formData}
+                                                    setFormData={setFormData}
+                                                    onSave={handleSave}
+                                                    onCancel={handleCancel}
+                                                    isNew
+                                                    category={category}
+                                                />
+                                            )}
+
+                                            {/* Equipment Items */}
+                                            {categoryItems.length === 0 && !isAddingInThisCategory ? (
+                                                <div className="text-center py-8 text-gray-400 bg-gray-900/30 rounded-lg border border-gray-700 border-dashed">
+                                                    <Icon className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                                    <p>No {category.label.toLowerCase()} yet</p>
+                                                    <p className="text-xs mt-1">Click "Add to {category.label}" to create one</p>
+                                                </div>
+                                            ) : (
+                                                categoryItems.map(item => (
+                                                    editingId === item.id ? (
+                                                        <EquipmentForm
+                                                            key={item.id}
+                                                            formData={formData}
+                                                            setFormData={setFormData}
+                                                            onSave={handleSave}
+                                                            onCancel={handleCancel}
+                                                            category={category}
+                                                        />
+                                                    ) : (
+                                                        <EquipmentItem
+                                                            key={item.id}
+                                                            item={item}
+                                                            onEdit={() => handleEdit(item)}
+                                                            onDelete={() => handleDelete(item.id)}
+                                                            category={category}
+                                                        />
+                                                    )
+                                                ))
+                                            )}
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            );
+                        })}
+                    </Accordion>
                 </CardContent>
             </Card>
         </div>
     );
 };
 
-const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew }) => (
-    <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew, category }) => (
+    <div className="equipment-form-container">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Input
                 value={formData.name}
@@ -251,13 +340,14 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew }) => (
                 onValueChange={(value) => setFormData({ ...formData, type: value })}
             >
                 <SelectTrigger className="bg-gray-800 border-gray-600 text-white">
-                    <SelectValue placeholder="Select Type" />
+                    <SelectValue placeholder="Select Category" />
                 </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="rental">Rental</SelectItem>
-                    <SelectItem value="consumable">Consumable</SelectItem>
-                    <SelectItem value="service">Service</SelectItem>
-                    <SelectItem value="insurance">Insurance</SelectItem>
+                <SelectContent className="bg-gray-800 border-gray-700">
+                    {Object.entries(EQUIPMENT_CATEGORIES).map(([key, cat]) => (
+                        <SelectItem key={key} value={key} className="text-white">
+                            {cat.label}
+                        </SelectItem>
+                    ))}
                 </SelectContent>
             </Select>
             <Input
@@ -265,7 +355,7 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew }) => (
                 step="0.01"
                 value={formData.price}
                 onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                placeholder="Price"
+                placeholder="Price ($)"
                 className="bg-gray-800 border-gray-600 text-white"
             />
         </div>
@@ -273,9 +363,9 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew }) => (
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             placeholder="Description (optional)"
-            className="bg-gray-800 border-gray-600 text-white"
+            className="bg-gray-800 border-gray-600 text-white mt-3"
         />
-        <div className="flex gap-2">
+        <div className="flex gap-2 mt-4">
             <Button onClick={onSave} className="bg-green-600 hover:bg-green-700">
                 <Save className="h-4 w-4 mr-2" />
                 Save
@@ -288,25 +378,28 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew }) => (
     </div>
 );
 
-const EquipmentItem = ({ item, onEdit, onDelete }) => (
-    <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors">
+const EquipmentItem = ({ item, onEdit, onDelete, category }) => (
+    <div className={`equipment-item-card category-${category.color}`}>
         <div className="flex items-center justify-between">
             <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
-                    <p className="text-xs text-gray-400">Name</p>
+                    <p className="text-xs text-gray-400 mb-1">Name</p>
                     <p className="text-white font-medium">{item.name}</p>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-400">Type</p>
-                    <p className="text-white capitalize">{item.type || 'rental'}</p>
+                    <p className="text-xs text-gray-400 mb-1">Category</p>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium category-badge category-badge-${category.color}`}>
+                        {React.createElement(category.icon, { className: "h-3 w-3" })}
+                        {category.label}
+                    </span>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-400">Quantity</p>
+                    <p className="text-xs text-gray-400 mb-1">Quantity</p>
                     <p className="text-white">{item.total_quantity}</p>
                 </div>
                 <div>
-                    <p className="text-xs text-gray-400">Price</p>
-                    <p className="text-green-400">${Number(item.price || 0).toFixed(2)}</p>
+                    <p className="text-xs text-gray-400 mb-1">Price</p>
+                    <p className="text-green-400 font-semibold">${Number(item.price || 0).toFixed(2)}</p>
                 </div>
             </div>
             <div className="flex gap-2 ml-4">
@@ -329,8 +422,10 @@ const EquipmentItem = ({ item, onEdit, onDelete }) => (
             </div>
         </div>
         {item.description && (
-            <p className="text-sm text-gray-400 mt-2">{item.description}</p>
+            <p className="text-sm text-gray-400 mt-3 pt-3 border-t border-gray-700">{item.description}</p>
         )}
-        <p className="text-xs text-gray-500 mt-1">ID: {item.id}</p>
+        <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+            <span>ID: {item.id}</span>
+        </div>
     </div>
 );
