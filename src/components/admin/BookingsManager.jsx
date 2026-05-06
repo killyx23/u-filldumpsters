@@ -1,18 +1,18 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { 
-  Edit, 
-  Eye, 
-  Search, 
-  AlertTriangle, 
-  ShieldAlert, 
-  CheckCircle, 
-  PlusCircle, 
-  Trash2, 
-  MapPin, 
-  Clock,
-  CreditCard
+import {
+    Edit,
+    Eye,
+    Search,
+    AlertTriangle,
+    ShieldAlert,
+    CheckCircle,
+    PlusCircle,
+    Trash2,
+    MapPin,
+    Clock,
+    CreditCard
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import { format, parseISO } from 'date-fns';
 import { BookingDetails } from './BookingDetails';
 import { BookingEditForm } from './BookingEditForm';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { deletePinForBooking, shouldDeletePinForStatus } from '@/utils/deletePinForBooking';
+import { expireActiveRentalAccessCodesForOrder, shouldDeletePinForStatus } from '@/utils/bookingPinReinstate';
 
 export const BookingsManager = ({ initialBookings }) => {
     const [bookings, setBookings] = useState(initialBookings);
@@ -46,7 +46,7 @@ export const BookingsManager = ({ initialBookings }) => {
 
             if (error) throw error;
             if (shouldDeletePinForStatus(updatedData.status)) {
-                deletePinForBooking({ ...selectedBooking, ...updatedData }, 'admin');
+                expireActiveRentalAccessCodesForOrder(selectedBooking.id, 'admin');
             }
 
             setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedData } : b));
@@ -94,8 +94,8 @@ export const BookingsManager = ({ initialBookings }) => {
                 b.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 (b.payment_intent || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-            const matchesStatus = statusFilter === 'all' 
-                ? true 
+            const matchesStatus = statusFilter === 'all'
+                ? true
                 : statusFilter === 'pending_address'
                     ? b.pending_address_verification === true
                     : b.status === statusFilter;
@@ -141,7 +141,7 @@ export const BookingsManager = ({ initialBookings }) => {
             );
         }
         if (booking.status === 'Cancelled') {
-             return <span className="text-red-400 bg-red-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Cancelled</span>;
+            return <span className="text-red-400 bg-red-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Cancelled</span>;
         }
         return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">{booking.status}</span>;
     };
@@ -195,8 +195,8 @@ export const BookingsManager = ({ initialBookings }) => {
                     </TableHeader>
                     <TableBody>
                         {filteredBookings.map((booking) => {
-                            const stripeChargeId = 
-                                (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) || 
+                            const stripeChargeId =
+                                (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) ||
                                 booking.payment_intent || 'N/A';
 
                             return (
@@ -274,7 +274,7 @@ export const BookingsManager = ({ initialBookings }) => {
                             {isEditMode ? 'Edit Booking' : 'Booking Details'} #{selectedBooking?.id}
                         </DialogTitle>
                     </DialogHeader>
-                    
+
                     {selectedBooking && (
                         isEditMode ? (
                             <BookingEditForm
@@ -292,7 +292,7 @@ export const BookingsManager = ({ initialBookings }) => {
                 </DialogContent>
             </Dialog>
 
-             <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpne}>
+            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpne}>
                 <DialogContent className="bg-gray-900 border-red-500 text-white">
                     <DialogHeader>
                         <DialogTitle className="text-red-500 flex items-center">
