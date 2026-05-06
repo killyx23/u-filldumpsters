@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
+import { deletePinForBooking } from '@/utils/deletePinForBooking';
 
 export const PendingVerificationsManager = () => {
     const { user } = useAuth();
@@ -89,6 +90,7 @@ export const PendingVerificationsManager = () => {
 
             if (error) throw error;
             if (data?.error) throw new Error(data.error);
+            deletePinForBooking(selectedBooking, 'admin');
 
             const adminEmail = user?.email || 'admin';
             await supabase.from('customer_notes').insert({

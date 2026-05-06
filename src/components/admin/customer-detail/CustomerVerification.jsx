@@ -12,6 +12,7 @@ import { updateVerificationStatus } from '@/utils/verificationImageHelper';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
 import { format, parseISO } from 'date-fns';
+import { deletePinForBooking } from '@/utils/deletePinForBooking';
 
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
@@ -51,6 +52,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
             });
 
             if (refundError) throw refundError;
+            deletePinForBooking(booking, 'admin');
             
             const updatedBookingForEmail = {
                 ...booking, 

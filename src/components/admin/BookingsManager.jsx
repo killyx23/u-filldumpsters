@@ -22,6 +22,7 @@ import { format, parseISO } from 'date-fns';
 import { BookingDetails } from './BookingDetails';
 import { BookingEditForm } from './BookingEditForm';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { deletePinForBooking, shouldDeletePinForStatus } from '@/utils/deletePinForBooking';
 
 export const BookingsManager = ({ initialBookings }) => {
     const [bookings, setBookings] = useState(initialBookings);
@@ -44,6 +45,9 @@ export const BookingsManager = ({ initialBookings }) => {
                 .eq('id', selectedBooking.id);
 
             if (error) throw error;
+            if (shouldDeletePinForStatus(updatedData.status)) {
+                deletePinForBooking({ ...selectedBooking, ...updatedData }, 'admin');
+            }
 
             setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedData } : b));
             toast({ title: 'Success', description: 'Booking updated successfully' });

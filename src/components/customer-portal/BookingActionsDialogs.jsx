@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { RescheduleDialog as ModularRescheduleDialog } from './reschedule/RescheduleDialog';
+import { deletePinForBooking } from '@/utils/deletePinForBooking';
 
 // Re-export the modular RescheduleDialog so the rest of the app uses the new one
 export const RescheduleDialog = ModularRescheduleDialog;
@@ -36,6 +37,7 @@ export const CancelDialog = ({ booking, isOpen, onOpenChange, onUpdate }) => {
 
             // Update status
             await supabase.from('bookings').update({ status: 'cancellation_pending' }).eq('id', booking.id);
+            deletePinForBooking(booking, 'customer');
 
             toast({ title: 'Cancellation Request Submitted', description: 'Your request has been sent for review.' });
             if (onUpdate) onUpdate();
