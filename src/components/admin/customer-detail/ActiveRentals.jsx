@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { deletePinForBooking, shouldDeletePinForStatus } from '@/utils/deletePinForBooking';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -361,7 +362,14 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
 
         const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
         if (error) toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
-        else { toast({ title: 'Booking status updated successfully!' }); onUpdate(); }
+        else {
+            if (shouldDeletePinForStatus(newStatus)) {
+                const booking = bookings.find(b => b.id === bookingId);
+                deletePinForBooking({ ...booking, ...updates }, 'admin');
+            }
+            toast({ title: 'Booking status updated successfully!' });
+            onUpdate();
+        }
     };
 
     return (
