@@ -1,4 +1,5 @@
-export const generateVerificationEmailTemplate = (code, verifyLink) => {
+
+export const generateVerificationEmailTemplate = (code, verifyLink, name) => {
   const currentYear = new Date().getFullYear();
   
   return `
@@ -8,6 +9,11 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Verify Your Email Address</title>
+      <!--[if mso]>
+      <style type="text/css">
+        body, table, td {font-family: Arial, Helvetica, sans-serif !important;}
+      </style>
+      <![endif]-->
       <style>
         body {
           font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -25,7 +31,7 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
         .header {
-          background-color: #1e3a8a; /* Deep professional blue */
+          background-color: #1e3a8a;
           padding: 35px 20px;
           text-align: center;
         }
@@ -92,10 +98,6 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
           font-size: 18px;
           font-weight: 600;
           box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.3);
-          transition: background-color 0.2s;
-        }
-        .btn:hover {
-          background-color: #1d4ed8;
         }
         .notice {
           background-color: #fffbeb;
@@ -126,15 +128,14 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
     <body>
       <div class="container">
         <div class="header">
-          <!-- Placeholder for actual company logo -->
           <h1>U-Fill Dumpsters</h1>
           <p>Reliable Waste Solutions</p>
         </div>
         
         <div class="content">
           <h2>Verify Your Email Address</h2>
-          <p>Hello,</p>
-          <p>Thank you for connecting with U-Fill Dumpsters. To securely access your customer portal, please verify your email address using the code or button below.</p>
+          <p>Hello ${name},</p>
+          <p>Thank you for booking with U-Fill Dumpsters. To complete your booking and receive your access PIN, please verify your email address using the code or button below.</p>
           
           <div class="code-container">
             <div class="label">Your Verification Code</div>
@@ -148,14 +149,14 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
           </div>
           
           <div class="notice">
-            <strong>Note:</strong> This verification code and link will expire in exactly 24 hours for your security.
+            <strong>Note:</strong> This verification code and link will expire in 24 hours for your security.
           </div>
         </div>
         
         <div class="footer">
           <p>&copy; ${currentYear} U-Fill Dumpsters LLC. All rights reserved.</p>
           <p>If you did not request this verification, you can safely ignore this email.</p>
-          <p><a href="https://ufilldumpsters.com/contact">Contact Support</a> | <a href="https://ufilldumpsters.com/faq">FAQ</a></p>
+          <p><a href="https://u-filldumpsters.com/contact">Contact Support</a> | <a href="https://u-filldumpsters.com/faq">FAQ</a></p>
         </div>
       </div>
     </body>

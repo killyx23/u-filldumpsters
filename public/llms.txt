@@ -13,4 +13,5 @@
 - [Igloohome OAuth Diagnostic - Admin](/igloohomedebug): No description available
 - [Loading - Customer Portal](/customerportaldashboard): No description available
 - [Resource Library | U-Fill Dumpsters](/resourcelibrary): Access our library of helpful guides, videos, and documents to make your dumpster rental experience seamless.
-- [Verify Email - U-Fill Dumpsters](/verifyemail): Verify your email address for U-Fill Dumpsters securely.
+- [Supabase Connection Test - U-Fill Dumpsters](/supabaseconnectiontest): No description available
+- [Verify Email - U-Fill Dumpsters](/verifyemail): Verify your email address to complete your booking with U-Fill Dumpsters.
