@@ -20,17 +20,23 @@ export const loadGoogleMaps = () => {
             reject(new Error("Google Maps script loading timed out after 10 seconds."));
         }, 10000);
 
-        // Check if script is already injected by another library (e.g. @react-google-maps/api)
-        const existingScript = document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]');
-        if (existingScript) {
-            existingScript.addEventListener('load', () => {
+        // Reuse any existing Maps JS tag (avoid duplicate loads / mismatched keys).
+        const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com/maps/api/js"]');
+        if (existingScripts.length > 0) {
+            const existingScript = existingScripts[0];
+            const finish = () => {
                 clearTimeout(timeoutId);
                 if (window.google && window.google.maps) {
                     resolve(window.google.maps);
                 } else {
                     reject(new Error("Google Maps loaded but window.google.maps is unavailable."));
                 }
-            });
+            };
+            if (window.google && window.google.maps) {
+                finish();
+                return;
+            }
+            existingScript.addEventListener('load', finish);
             existingScript.addEventListener('error', () => {
                 clearTimeout(timeoutId);
                 googleMapsPromise = null;
