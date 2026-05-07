@@ -4,17 +4,12 @@ import { Button } from '@/components/ui/button';
 import { GooglePlacesAutocomplete } from './GooglePlacesAutocomplete';
 import { toast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { useLoadScript } from '@react-google-maps/api';
+import { useGoogleMapsLoader } from '@/hooks/useGoogleMapsLoader';
 import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
 import { DeliveryServiceInfo } from './DeliveryServiceInfo';
 
-const libraries = ['places'];
-
 export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsData, plan, fetchedMileageRate }) => {
-  const { isLoaded } = useLoadScript({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
-    libraries,
-  });
+  const { isLoaded } = useGoogleMapsLoader();
 
   const mileageRate = fetchedMileageRate !== undefined ? fetchedMileageRate : (plan?.mileage_rate || 20);
 
