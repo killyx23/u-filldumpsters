@@ -73,15 +73,13 @@ export const calculateDistanceViaGoogleMaps = async (origin, destination) => {
 
         const service = new window.google.maps.DistanceMatrixService();
         
+        // No drivingOptions/traffic here: traffic-aware matrix can require extra Maps Platform
+        // setup and is easy to misconfigure vs simple distance+duration.
         service.getDistanceMatrix({
             origins: [origin],
             destinations: [destination],
             travelMode: window.google.maps.TravelMode.DRIVING,
             unitSystem: window.google.maps.UnitSystem.IMPERIAL,
-            drivingOptions: {
-                departureTime: new Date(),
-                trafficModel: 'bestguess'
-            }
         }, (response, status) => {
             if (settled) return;
             settled = true;
