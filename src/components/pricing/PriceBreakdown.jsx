@@ -3,6 +3,8 @@ import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 /**
  * Reusable Price Breakdown Component
@@ -18,6 +20,14 @@ export const PriceBreakdown = ({
 }) => {
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
+
+  // Use delivery type from booking when available, otherwise infer from plan/addons
+  const deliveryType = booking?.delivery_type ?? (
+    (plan?.id === 1 || plan?.id === 4 || (plan?.id === 2 && addons?.deliveryService))
+      ? 'delivery'
+      : 'self_service_trailer'
+  );
+  const { taxRate, loading: loadingTaxRate } = useTaxRate(deliveryType);
 
   // Load equipment prices from database
   useEffect(() => {
@@ -117,7 +127,7 @@ export const PriceBreakdown = ({
     }
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-    const tax = subtotal * 0.07; // 7% tax
+    const tax = calculateTaxAmount(subtotal, taxRate);
     const total = subtotal + tax;
 
     return {
@@ -132,11 +142,12 @@ export const PriceBreakdown = ({
       discount,
       subtotal,
       tax,
-      total
+      total,
+      taxRate,
     };
-  }, [basePrice, plan, booking, addons, equipmentPrices]);
+  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate]);
 
-  if (loading) {
+  if (loading || loadingTaxRate) {
     return <div className="text-center text-gray-400 py-4">Loading price breakdown...</div>;
   }
 
@@ -290,7 +301,7 @@ export const PriceBreakdown = ({
             <span className="text-white font-bold">${calculatedTotals.subtotal.toFixed(2)}</span>
           </div>
           <div className="flex justify-between items-center text-sm">
-            <span className="text-blue-200 font-semibold">Tax (7%)</span>
+            <span className="text-blue-200 font-semibold">Tax ({calculatedTotals.taxRate?.toFixed(2) ?? '7.45'}%)</span>
             <span className="text-white font-bold">${calculatedTotals.tax.toFixed(2)}</span>
           </div>
           <div className="flex justify-between items-center text-lg pt-2 border-t border-white/10">
