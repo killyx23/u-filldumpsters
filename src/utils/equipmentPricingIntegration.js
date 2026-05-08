@@ -76,6 +76,13 @@ function determineItemType(equipment) {
   return 'rental_equipment';
 }
 
+/** equipment_pricing.item_type CHECK allows only rental_equipment | consumable_item | service_item */
+function normalizePricingItemType(itemType) {
+  if (!itemType) return 'rental_equipment';
+  if (itemType === 'insurance') return 'service_item';
+  return itemType;
+}
+
 /**
  * Get or create equipment_pricing record
  * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
@@ -99,10 +106,14 @@ export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) 
       .from('equipment_pricing')
       .select('*')
       .eq('equipment_id', numericId)
-      .not('equipment_id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`) // Exclude ID 7
-      .single();
+      .maybeSingle();
 
-    if (!fetchError && existingRecord) {
+    if (fetchError) {
+      console.error(`[${context}] Error querying equipment_pricing:`, fetchError);
+      return null;
+    }
+
+    if (existingRecord) {
       console.log(`[${context}] ✓ Found existing pricing record`, {
         equipment_id: numericId,
         equipment_name: getEquipmentName(numericId),
@@ -110,11 +121,6 @@ export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) 
         item_type: existingRecord.item_type
       });
       return existingRecord;
-    }
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error(`[${context}] Error querying equipment_pricing:`, fetchError);
-      return null;
     }
 
     // Record doesn't exist, create it
@@ -125,16 +131,15 @@ export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) 
       .from('equipment')
       .select('id, name, price, type')
       .eq('id', numericId)
-      .not('id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`) // Exclude ID 7
-      .single();
+      .maybeSingle();
 
     if (equipError) {
-      console.error(`[${context}] Equipment ${numericId} not found in equipment table:`, equipError);
+      console.error(`[${context}] Error loading equipment ${numericId}:`, equipError);
       return null;
     }
 
     if (!equipment) {
-      console.error(`[${context}] No equipment data returned for ID: ${numericId}`);
+      console.error(`[${context}] Equipment ${numericId} missing from equipment table — run DB seed/migration for addon ids 1–7`);
       return null;
     }
 
@@ -146,7 +151,7 @@ export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) 
     });
 
     // Determine item type
-    const finalItemType = itemType || determineItemType(equipment);
+    const finalItemType = normalizePricingItemType(itemType || determineItemType(equipment));
     const basePrice = Number(equipment.price || 0);
 
     // Create new pricing record
@@ -218,8 +223,7 @@ export async function getPriceForEquipment(equipmentId, date = null) {
           .from('equipment')
           .select('price, name')
           .eq('id', numericId)
-          .not('id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`) // Exclude ID 7
-          .single();
+          .maybeSingle();
 
         if (equipError || !equipment) {
           console.warn(`[${context}] Fallback failed - equipment not found: ${numericId}`);
@@ -281,8 +285,7 @@ export async function getPriceForEquipment(equipmentId, date = null) {
         .from('equipment')
         .select('price')
         .eq('id', numericId)
-        .not('id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`) // Exclude ID 7
-        .single();
+        .maybeSingle();
 
       const finalPrice = Number(equipment?.price || 0);
       console.log(`[${context}] ✓ Final fallback price: ${finalPrice}`);
@@ -331,10 +334,11 @@ export async function updateEquipmentPrice(equipmentId, newPrice, itemType, upda
 
   try {
     const numericId = Number(equipmentId);
+    const dbItemType = normalizePricingItemType(itemType);
     console.log(`[${context}] Updating price for equipment ${numericId} (${getEquipmentName(numericId)}) to ${sanitizedPrice}`);
 
     // Get or create the pricing record
-    const pricingRecord = await getOrCreateEquipmentPricing(numericId, itemType);
+    const pricingRecord = await getOrCreateEquipmentPricing(numericId, dbItemType);
 
     if (!pricingRecord) {
       return { 
@@ -364,7 +368,7 @@ export async function updateEquipmentPrice(equipmentId, newPrice, itemType, upda
       .from('equipment_pricing')
       .update({
         base_price: sanitizedPrice,
-        item_type: itemType,
+        item_type: dbItemType,
         price_history: updatedHistory,
         last_updated: new Date().toISOString(),
         updated_by: updatedBy
