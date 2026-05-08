@@ -538,3 +538,40 @@ export async function getPriceFromSnapshotOrCurrent(equipmentId, snapshot = null
   
   return await getPriceForEquipment(numericId);
 }
+
+/**
+ * Returns both the current price and the is_taxable flag for a single equipment item.
+ * Used by the checkout flow to build per-line-item taxability metadata.
+ *
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
+ * @returns {Promise<{ price: number, is_taxable: boolean }>}
+ */
+export async function getEquipmentPricingMeta(equipmentId) {
+  if (!isValidEquipmentId(equipmentId)) {
+    return { price: 0, is_taxable: true };
+  }
+  const numericId = Number(equipmentId);
+  const record = await getOrCreateEquipmentPricing(numericId);
+  if (!record) {
+    return { price: 0, is_taxable: true };
+  }
+  return {
+    price:      Number(record.base_price ?? 0),
+    is_taxable: record.is_taxable !== false, // default true if column missing (pre-migration)
+  };
+}
+
+/**
+ * Bulk-fetches price and is_taxable for every equipment ID in the provided list.
+ * Returns a map keyed by equipment_id: { price, is_taxable }
+ *
+ * @param {number[]} ids - Array of numeric equipment IDs (1-7)
+ * @returns {Promise<Record<number, { price: number, is_taxable: boolean }>>}
+ */
+export async function getEquipmentPricingMetaMap(ids) {
+  const result = {};
+  for (const id of ids) {
+    result[Number(id)] = await getEquipmentPricingMeta(id);
+  }
+  return result;
+}
