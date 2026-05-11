@@ -19,24 +19,36 @@ export async function getTaxRates() {
   }
 
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('business_settings')
       .select('tax_rate, tax_rate_pickup, tax_rate_delivery, tax_state, tax_county, tax_city, tax_effective_date')
       .eq('id', 1)
       .single();
+
+    // Pre-migration DBs have no tax_rate_pickup / tax_rate_delivery — Postgres 42703
+    if (error && (error.code === '42703' || /does not exist/i.test(error.message || ''))) {
+      const fb = await supabase
+        .from('business_settings')
+        .select('tax_rate, tax_state, tax_county, tax_city, tax_effective_date')
+        .eq('id', 1)
+        .single();
+      data = fb.data;
+      error = fb.error;
+    }
 
     if (error) {
       console.error('[getTaxRates] Error fetching tax configuration:', error);
       return getDefaultRates();
     }
 
+    const combined = data.tax_rate ?? 7.45;
     taxRateCache = {
-      tax_rate:          data.tax_rate          ?? 7.45,
-      tax_rate_pickup:   data.tax_rate_pickup   ?? data.tax_rate ?? 7.45,
-      tax_rate_delivery: data.tax_rate_delivery ?? data.tax_rate ?? 7.45,
-      tax_state:         data.tax_state         ?? 4.85,
-      tax_county:        data.tax_county        ?? 2.0,
-      tax_city:          data.tax_city          ?? 0.6,
+      tax_rate:          combined,
+      tax_rate_pickup:   data.tax_rate_pickup != null ? Number(data.tax_rate_pickup) : combined,
+      tax_rate_delivery: data.tax_rate_delivery != null ? Number(data.tax_rate_delivery) : combined,
+      tax_state:         data.tax_state ?? 4.85,
+      tax_county:        data.tax_county ?? 2.0,
+      tax_city:          data.tax_city ?? 0.6,
       tax_effective_date: data.tax_effective_date ?? '2026-04-23',
     };
     cacheTimestamp = now;

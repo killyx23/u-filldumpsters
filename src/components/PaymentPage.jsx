@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,7 +54,6 @@ const CategoryHeader = ({ icon, title }) => (
 );
 
 const CheckoutForm = ({
-  totalPrice,
   bookingData,
   plan,
   addonsData,
@@ -77,6 +76,7 @@ const CheckoutForm = ({
   const [delivery_location_verified, setDeliveryLocation_Verified] = useState(false);
   const [formError,             setFormError]             = useState(null);
   const [isPaymentElementReady, setIsPaymentElementReady] = useState(false);
+  const [paymentElementLoadError, setPaymentElementLoadError] = useState(null);
 
   // Map of equipmentId → { price, is_taxable }
   const [equipmentMeta,   setEquipmentMeta]   = useState({});
@@ -86,6 +86,16 @@ const CheckoutForm = ({
     returnByTime:    'Time not specified',
   });
   const [taxUpdateStatus, setTaxUpdateStatus] = useState('pending');
+  const piAmountSyncedRef = useRef(false);
+
+  useEffect(() => {
+    piAmountSyncedRef.current = false;
+  }, [bookingId]);
+
+  useEffect(() => {
+    setIsPaymentElementReady(false);
+    setPaymentElementLoadError(null);
+  }, [clientSecret]);
 
   const isDelivery        = plan?.id === 2 && deliveryService;
   const currentPlan       = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : (plan || {});
@@ -232,16 +242,26 @@ const CheckoutForm = ({
       });
 
       try {
-        const { error } = await supabase
-          .from('bookings')
-          .update({
-            delivery_type:       deliveryType,
-            subtotal_before_tax: taxCalc.subtotal,
-            tax_amount:          taxCalc.taxAmount,
-            tax_rate_used:       taxRate,
-            total_price:         calculatedTotal,
-          })
-          .eq('id', bookingId);
+        const basePayload = {
+          subtotal_before_tax: taxCalc.subtotal,
+          tax_amount:          taxCalc.taxAmount,
+          tax_rate_used:       taxRate,
+          total_price:         calculatedTotal,
+        };
+
+        // Persist tax totals first so checkout works even when PostgREST's schema cache
+        // does not yet expose bookings.delivery_type (PGRST204), then best-effort delivery_type.
+        let { error } = await supabase.from('bookings').update(basePayload).eq('id', bookingId);
+
+        if (!error) {
+          const { error: dtError } = await supabase
+            .from('bookings')
+            .update({ delivery_type: deliveryType })
+            .eq('id', bookingId);
+          // Second body is only delivery_type — any PGRST204 means column not in REST schema cache yet.
+          const dtIgnorable = dtError?.code === 'PGRST204';
+          if (dtError && !dtIgnorable) error = dtError;
+        }
 
         if (error) {
           console.error(`[${timestamp}] [PaymentPage] Failed to update booking tax info:`, error);
@@ -258,6 +278,34 @@ const CheckoutForm = ({
 
     updateBookingTaxInfo();
   }, [bookingId, taxCalc.subtotal, taxCalc.taxAmount, taxRate, calculatedTotal, deliveryType, loadingPrices, loadingTaxRate, taxUpdateStatus]);
+
+  // After tax is written to `bookings`, align Stripe PaymentIntent amount with `total_price`.
+  useEffect(() => {
+    if (taxUpdateStatus !== 'success' || !bookingId || !elements || piAmountSyncedRef.current) return;
+    piAmountSyncedRef.current = true;
+
+    (async () => {
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke('create-payment-intent', {
+          body: { booking_id: bookingId, sync_amount_only: true },
+        });
+        if (invokeError) {
+          console.warn('[PaymentPage] PaymentIntent amount sync:', invokeError);
+          return;
+        }
+        if (data?.error) {
+          console.warn('[PaymentPage] PaymentIntent amount sync:', data.error);
+          return;
+        }
+        const fetchUpdates = elements?.fetchUpdates;
+        if (typeof fetchUpdates === 'function') {
+          await fetchUpdates.call(elements);
+        }
+      } catch (e) {
+        console.warn('[PaymentPage] PaymentIntent amount sync failed', e);
+      }
+    })();
+  }, [taxUpdateStatus, bookingId, elements]);
 
   // ── Date formatting helpers ────────────────────────────────────────────────
   const formatDate = (date) => {
@@ -295,6 +343,23 @@ const CheckoutForm = ({
     isConfirmed && stripe && elements && isPaymentElementReady &&
     (!isDeliveryService || delivery_location_verified) &&
     taxUpdateStatus === 'success';
+
+  const paymentBlockers = useMemo(() => {
+    const list = [];
+    if (!isConfirmed) list.push('Check the box confirming your details are correct.');
+    if (!stripe || !elements) list.push('Wait for the payment system to finish loading.');
+    if (paymentElementLoadError) {
+      list.push(`Payment form failed to load: ${paymentElementLoadError}`);
+    } else if (!isPaymentElementReady) {
+      list.push('Wait for the card/payment fields to become ready.');
+    }
+    if (isDeliveryService && !delivery_location_verified) {
+      list.push('Confirm delivery location (checkbox under the map or address section).');
+    }
+    if (taxUpdateStatus === 'pending') list.push('Wait for tax totals to finish saving to your booking.');
+    if (taxUpdateStatus === 'failed') list.push('Tax update failed — try refreshing the page or go back and return to payment.');
+    return list;
+  }, [isConfirmed, stripe, elements, isPaymentElementReady, paymentElementLoadError, isDeliveryService, delivery_location_verified, taxUpdateStatus]);
 
   // ── Payment submission ─────────────────────────────────────────────────────
   const handlePayment = async (e) => {
@@ -492,7 +557,19 @@ const CheckoutForm = ({
         <form onSubmit={handlePayment}>
           <div className="mb-6">
             <PaymentElement
-              onReady={() => setIsPaymentElementReady(true)}
+              onReady={() => {
+                setPaymentElementLoadError(null);
+                setIsPaymentElementReady(true);
+              }}
+              onLoadError={(e) => {
+                const msg = e?.error?.message || String(e?.error || 'unknown error');
+                console.error('[PaymentPage] PaymentElement onLoadError:', e?.error);
+                setPaymentElementLoadError(msg);
+                setFormError(
+                  'Card fields could not load. Try: disable ad blockers for this page, use a private window, or restart dev after a Vite config change. ' +
+                    msg
+                );
+              }}
               options={{ layout: 'tabs', fields: { billingDetails: { name: 'never', email: 'never', phone: 'never', address: 'never' } } }}
             />
           </div>
@@ -505,11 +582,15 @@ const CheckoutForm = ({
             <Checkbox id="confirm-details" checked={isConfirmed} onCheckedChange={setIsConfirmed} disabled={isProcessing} className="border-white/50 data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500" />
             <Label htmlFor="confirm-details" className="text-sm text-blue-100 leading-snug cursor-pointer select-none">I have reviewed all the information above and confirm it is correct.</Label>
           </div>
-          {!canProceedWithPayment && !isProcessing && isDeliveryService && !delivery_location_verified && (
-            <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">Please verify delivery location to continue</div>
-          )}
-          {!canProceedWithPayment && !isProcessing && taxUpdateStatus !== 'success' && (
-            <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">Finalizing tax calculation...</div>
+          {!canProceedWithPayment && !isProcessing && paymentBlockers.length > 0 && (
+            <div className="mb-4 text-left text-orange-200 text-sm bg-orange-950/30 py-3 px-4 rounded border border-orange-500/30">
+              <p className="font-semibold text-orange-300 mb-2">Pay is disabled until:</p>
+              <ul className="list-disc pl-5 space-y-1">
+                {paymentBlockers.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+            </div>
           )}
           <Button
             type="submit"
@@ -518,7 +599,7 @@ const CheckoutForm = ({
           >
             {isProcessing
               ? <><Loader2 className="mr-3 h-6 w-6 animate-spin" />Processing Payment...</>
-              : <><CreditCard className="mr-3 h-6 w-6" />Pay {formatMoney(totalPrice)}</>
+              : <><CreditCard className="mr-3 h-6 w-6" />Pay {formatMoney(calculatedTotal)}</>
             }
           </Button>
           <p className="text-xs text-gray-400 mt-4 flex items-center justify-center">
@@ -530,7 +611,7 @@ const CheckoutForm = ({
   );
 };
 
-export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack, bookingId, deliveryService }) => {
+export const PaymentPage = ({ bookingData, plan, addonsData, onBack, bookingId, deliveryService }) => {
   const [clientSecret, setClientSecret] = useState(null);
   const [error,        setError]        = useState(null);
   const { insurancePrice } = useInsurancePricing();
@@ -581,7 +662,6 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
   return (
     <Elements stripe={stripePromise} options={elementsOptions}>
       <CheckoutForm
-        totalPrice={totalPrice}
         bookingData={bookingData}
         plan={plan}
         addonsData={addonsData}
