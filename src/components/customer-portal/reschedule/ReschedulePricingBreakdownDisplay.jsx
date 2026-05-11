@@ -4,6 +4,7 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle } from 'lucide-react';
 import { differenceInDays } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+import { getEffectiveTaxRate } from '@/utils/getTaxRate';
 
 export const ReschedulePricingBreakdownDisplay = ({ 
     bookingId,
@@ -126,7 +127,8 @@ export const ReschedulePricingBreakdownDisplay = ({
 
                 const addonsCost = addons.reduce((sum, addon) => sum + addon.total, 0);
                 const subtotal = baseRentalCost + deliveryFeeApplied + mileageCharge + addonsCost;
-                const tax = subtotal * 0.07;
+                const taxRate = await getEffectiveTaxRate().catch(() => 7.45);
+                const tax = Math.round(subtotal * (taxRate / 100) * 100) / 100;
                 const total = subtotal + tax;
 
                 return {
@@ -176,9 +178,10 @@ export const ReschedulePricingBreakdownDisplay = ({
         return sum + (Number(addon.price || 0) * Number(addon.quantity || 1));
     }, 0);
 
-    // Recalculate CORRECT original totals
+    // Recalculate CORRECT original totals — use the same DB-sourced rate that was applied to newCosts
+    const displayTaxRate = newCosts?.taxRate ?? 7.45;
     const correctOriginalSubtotal = originalBaseRental + originalDeliveryFee + originalMileageCharge + originalAddonsTotal;
-    const correctOriginalTax = correctOriginalSubtotal * 0.07;
+    const correctOriginalTax = Math.round(correctOriginalSubtotal * (displayTaxRate / 100) * 100) / 100;
     const correctOriginalTotal = correctOriginalSubtotal + correctOriginalTax;
 
     const difference = newCosts.total - correctOriginalTotal;

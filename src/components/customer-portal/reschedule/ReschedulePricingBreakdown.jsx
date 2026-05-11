@@ -6,6 +6,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { calculateDays } from '@/utils/rescheduleCalculations';
 import { calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
 import { Button } from '@/components/ui/button';
+import { getEffectiveTaxRate } from '@/utils/getTaxRate';
 
 export const ReschedulePricingBreakdown = ({ 
     bookingId,
@@ -169,7 +170,8 @@ export const ReschedulePricingBreakdown = ({
 
                 const addonsTotal = allOriginalAddons.reduce((sum, a) => sum + a.total, 0);
                 const originalSubtotal = baseRentalCost + deliveryFeeApplied + originalMileageCharge + addonsTotal;
-                const originalTax = originalSubtotal * 0.07;
+                const taxRate = await getEffectiveTaxRate().catch(() => 7.45);
+                const originalTax = Math.round(originalSubtotal * (taxRate / 100) * 100) / 100;
                 const originalTotal = originalSubtotal + originalTax;
 
                 const originalCostsData = {
@@ -182,8 +184,9 @@ export const ReschedulePricingBreakdown = ({
                     addonsTotal,
                     subtotal: originalSubtotal,
                     tax: originalTax,
+                    taxRate,
                     total: originalTotal,
-                    days: originalDays
+                    days: originalDays,
                 };
 
                 console.log('[ReschedulePricing] Original costs calculated:', originalCostsData);
@@ -289,7 +292,8 @@ export const ReschedulePricingBreakdown = ({
                 const newAddonsTotal = newAddons.reduce((sum, a) => sum + a.total, 0);
 
                 const newSubtotal = newBaseRentalCost + newDeliveryFeeApplied + newMileageCharge + newAddonsTotal;
-                const newTax = newSubtotal * 0.07;
+                // taxRate was fetched above for the original costs; reuse it
+                const newTax = Math.round(newSubtotal * (taxRate / 100) * 100) / 100;
                 const newTotal = newSubtotal + newTax;
 
                 const newCostsData = {
@@ -302,8 +306,9 @@ export const ReschedulePricingBreakdown = ({
                     addonsTotal: newAddonsTotal,
                     subtotal: newSubtotal,
                     tax: newTax,
+                    taxRate,
                     total: newTotal,
-                    days: newDays
+                    days: newDays,
                 };
 
                 console.log('[ReschedulePricing] New costs calculated:', newCostsData);
