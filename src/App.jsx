@@ -30,6 +30,7 @@ import EquipmentDataVerificationPage from '@/pages/EquipmentDataVerificationPage
 import EquipmentPriceSyncPage from '@/pages/EquipmentPriceSyncPage';
 import SystemHealthCheckPage from '@/pages/SystemHealthCheckPage';
 import IgloohomeDebugPage from '@/pages/IgloohomeDebugPage';
+import SupabaseConnectionTest from '@/pages/SupabaseConnectionTest';
 import { CartProvider } from '@/hooks/useCart';
 import AuthErrorBoundary from '@/components/AuthErrorBoundary';
 import { useEquipmentPricingInit } from '@/hooks/useEquipmentPricingInit';
@@ -109,6 +110,7 @@ function AppContent() {
               <Route path="/admin/equipment-verification" element={<EquipmentDataVerificationPage />} />
               <Route path="/admin/equipment-sync" element={<EquipmentPriceSyncPage />} />
               <Route path="/admin/system-health" element={<SystemHealthCheckPage />} />
+              <Route path="/admin/supabase-test" element={<SupabaseConnectionTest />} />
               <Route path="/debug/igloohome-test" element={<IgloohomeDebugPage />} />
             </Route>
 

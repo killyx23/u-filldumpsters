@@ -2,135 +2,138 @@ const ECOMMERCE_API_URL = "https://api-ecommerce.hostinger.com";
 const ECOMMERCE_STORE_ID = "store_01KQ9630JKXMGKDKSNTE9BFKYM";
 
 export const formatCurrency = (priceInCents, currencyInfo) => {
-	if (!currencyInfo || priceInCents === null || priceInCents === undefined) {
-		return '';
-	}
+  if (!currencyInfo || priceInCents === null || priceInCents === undefined) {
+    return "";
+  }
 
-	const { code, symbol, template } = currencyInfo;
-	const currencyDisplay = symbol || code || '€';
-	const amount = (priceInCents / 100).toFixed(2);
+  const { code, symbol, template } = currencyInfo;
+  const currencyDisplay = symbol || code || "€";
+  const amount = (priceInCents / 100).toFixed(2);
 
-	if (template) {
-		return template.replace('$1', amount);
-	}
+  if (template) {
+    return template.replace("$1", amount);
+  }
 
-	return `${currencyDisplay}${amount}`;
+  return `${currencyDisplay}${amount}`;
 };
 
 const extractVariantOptions = (options) => {
-	return (options || []).map((opt) => ({
-		id: opt?.id || "",
-		option_id: opt?.option_id || "",
-		variant_id: opt?.variant_id || "",
-		value: opt?.value || "",
-	}));
+  return (options || []).map((opt) => ({
+    id: opt?.id || "",
+    option_id: opt?.option_id || "",
+    variant_id: opt?.variant_id || "",
+    value: opt?.value || "",
+  }));
 };
 
 const extractProductOptions = (options) => {
-	return (options || []).map((opt) => ({
-		id: opt?.id || "",
-		title: opt?.title || "",
-		values: (opt?.values || []).map((val) => ({
-			id: val?.id || "",
-			option_id: val?.option_id || "",
-			variant_id: val?.variant_id || "",
-			value: val?.value || "",
-		})),
-	}));
+  return (options || []).map((opt) => ({
+    id: opt?.id || "",
+    title: opt?.title || "",
+    values: (opt?.values || []).map((val) => ({
+      id: val?.id || "",
+      option_id: val?.option_id || "",
+      variant_id: val?.variant_id || "",
+      value: val?.value || "",
+    })),
+  }));
 };
 
 const extractVariants = (variants) => {
-	return (variants || []).map((v) => {
-		const price_in_cents = v?.prices?.[0]?.amount || 0;
-		const sale_price_in_cents = v?.prices?.[0]?.sale_amount || null;
-		const currency = v?.prices?.[0]?.currency_code || "eur";
+  return (variants || []).map((v) => {
+    const price_in_cents = v?.prices?.[0]?.amount || 0;
+    const sale_price_in_cents = v?.prices?.[0]?.sale_amount || null;
+    const currency = v?.prices?.[0]?.currency_code || "eur";
 
-		return {
-			id: v?.id || "",
-			title: v?.title || "",
-			image_url: v?.image_url || null,
-			sku: v?.sku || null,
-			price_in_cents,
-			sale_price_in_cents,
-			currency,
-			currency_info: v?.prices?.[0]?.currency,
-			price_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
-			sale_price_formatted: formatCurrency(sale_price_in_cents, v?.prices?.[0]?.currency),
-			manage_inventory: v?.manage_inventory || false, // track stock only if this flag is true
-			weight: v?.weight || null,
-			options: extractVariantOptions(v?.options),
-			inventory_quantity: v?.inventory_quantity || null,
-		};
-	});
+    return {
+      id: v?.id || "",
+      title: v?.title || "",
+      image_url: v?.image_url || null,
+      sku: v?.sku || null,
+      price_in_cents,
+      sale_price_in_cents,
+      currency,
+      currency_info: v?.prices?.[0]?.currency,
+      price_formatted: formatCurrency(price_in_cents, v?.prices?.[0]?.currency),
+      sale_price_formatted: formatCurrency(
+        sale_price_in_cents,
+        v?.prices?.[0]?.currency,
+      ),
+      manage_inventory: v?.manage_inventory || false, // track stock only if this flag is true
+      weight: v?.weight || null,
+      options: extractVariantOptions(v?.options),
+      inventory_quantity: v?.inventory_quantity || null,
+    };
+  });
 };
 
 const extractImages = (images) => {
-	return (images || []).map((img) => ({
-		url: img?.url || "",
-		order: img?.order || 0,
-		type: img?.type || "",
-	}));
+  return (images || []).map((img) => ({
+    url: img?.url || "",
+    order: img?.order || 0,
+    type: img?.type || "",
+  }));
 };
 
 const extractCollections = (collections) => {
-	return (collections || []).map((col) => ({
-		product_id: col?.product_id || "",
-		collection_id: col?.collection_id || "",
-		order: col?.order || 0,
-	}));
+  return (collections || []).map((col) => ({
+    product_id: col?.product_id || "",
+    collection_id: col?.collection_id || "",
+    order: col?.order || 0,
+  }));
 };
 
 const extractAdditionalInfo = (additionalInfo) => {
-	return (additionalInfo || []).map((info) => ({
-		id: info?.id || "",
-		order: info?.order || 0,
-		title: info?.title || "",
-		description: info?.description || "",
-	}));
+  return (additionalInfo || []).map((info) => ({
+    id: info?.id || "",
+    order: info?.order || 0,
+    title: info?.title || "",
+    description: info?.description || "",
+  }));
 };
 
 const extractCustomFields = (customFields) => {
-	return (customFields || []).map((field) => ({
-		id: field?.id || "",
-		title: field?.title || "",
-		is_required: field?.is_required || false,
-	}));
+  return (customFields || []).map((field) => ({
+    id: field?.id || "",
+    title: field?.title || "",
+    is_required: field?.is_required || false,
+  }));
 };
 
 const extractRelatedProducts = (relatedProducts) => {
-	return (relatedProducts || []).map((rel) => ({
-		id: rel?.id || "",
-		section_title: rel?.section_title || "",
-		related_type: rel?.related_type || "",
-		related_id: rel?.related_id || "",
-		position: rel?.position || 0,
-	}));
+  return (relatedProducts || []).map((rel) => ({
+    id: rel?.id || "",
+    section_title: rel?.section_title || "",
+    related_type: rel?.related_type || "",
+    related_id: rel?.related_id || "",
+    position: rel?.position || 0,
+  }));
 };
 
 const getLowestPriceVariant = (product) =>
-	product.variants.reduce((acc, curr) => {
-		const accPrice = acc.prices[0]?.sale_amount || acc.prices[0]?.amount || 0;
-		const currPrice =
-			curr.prices[0]?.sale_amount || curr.prices[0]?.amount || 0;
+  product.variants.reduce((acc, curr) => {
+    const accPrice = acc.prices[0]?.sale_amount || acc.prices[0]?.amount || 0;
+    const currPrice =
+      curr.prices[0]?.sale_amount || curr.prices[0]?.amount || 0;
 
-		return accPrice < currPrice ? acc : curr;
-	});
+    return accPrice < currPrice ? acc : curr;
+  });
 
 const getProductPrice = (product) => {
-	const selectedVariant =
-		product.site_product_selection === "lowest_price_first" ||
-		product.site_product_selection === null
-			? getLowestPriceVariant(product)
-			: product.variants[0];
+  const selectedVariant =
+    product.site_product_selection === "lowest_price_first" ||
+    product.site_product_selection === null
+      ? getLowestPriceVariant(product)
+      : product.variants[0];
 
-	const price_in_cents =
-		selectedVariant?.prices[0]?.sale_amount ||
-		selectedVariant?.prices[0]?.amount ||
-		0;
-	const currency = selectedVariant?.prices[0]?.currency_code || "eur";
+  const price_in_cents =
+    selectedVariant?.prices[0]?.sale_amount ||
+    selectedVariant?.prices[0]?.amount ||
+    0;
+  const currency = selectedVariant?.prices[0]?.currency_code || "eur";
 
-	// price_in_cents is the price value in cents, make sure to convert it to a full price based on decimal_digits
-	return { price_in_cents, currency };
+  // price_in_cents is the price value in cents, make sure to convert it to a full price based on decimal_digits
+  return { price_in_cents, currency };
 };
 
 /**
@@ -299,23 +302,31 @@ const getProductPrice = (product) => {
 
 /**
  * @typedef {Object} CheckoutItemCustomFieldValue
- * @property {string} custom_field_id - Custom field identifier (required if custom_field_values provided)
+ * @property {string} custom_field_id - Custom field id (required if custom_field_values provided)
  * @property {string} value - Custom field value for this item (required if custom_field_values provided)
  */
 
 /**
  * @typedef {Object} CheckoutItem
- * @property {string} variant_id - Product variant identifier (required)
- * @property {number} quantity - Quantity to purchase, minimum 1 (required)
- * @property {CheckoutItemCustomFieldValue[]} [custom_field_values] - Array of custom field values for this item (optional)
+ * @property {string} variant_id - Product variant id
+ * @property {number} quantity - Quantity to purchase (minimum 1)
+ * @property {CheckoutItemCustomFieldValue[]} [custom_field_values] - Array of custom field values for this item
+ */
+
+/**
+ * Associates a checkout session with a PocketBase `users` record.
+ * @typedef {Object} CheckoutCustomer
+ * @property {string} external_id - Primary key of the `users` record
+ * @property {string} [email] - Email on the `users` record (need to be provided when available)
  */
 
 /**
  * @typedef {Object} InitializeCheckoutParams
- * @property {CheckoutItem[]} items - Array of items to checkout
- * @property {string} successUrl - URL for successful payment redirect (required)
- * @property {string} cancelUrl - URL for cancelled payment redirect (required)
- * @property {string} [locale] - Locale for checkout (e.g., "en", "es", "fr") (optional)
+ * @property {CheckoutItem[]} items - Line items
+ * @property {string} successUrl - Success redirect URL
+ * @property {string} cancelUrl - Cancel redirect URL
+ * @property {string} [locale] - Checkout locale (e.g. en, es, fr)
+ * @property {CheckoutCustomer} [customer] - Association with a PocketBase `users` row (see {@link CheckoutCustomer})
  */
 
 /**
@@ -343,87 +354,95 @@ const getProductPrice = (product) => {
  *
  * @returns {Promise<GetProductsResponse>} Response object with paginated products
  */
-export async function getProducts({ids, offset, limit, order, sort_by, is_hidden, to_date} = {}) {
-	const queryParams = new URLSearchParams();
+export async function getProducts({
+  ids,
+  offset,
+  limit,
+  order,
+  sort_by,
+  is_hidden,
+  to_date,
+} = {}) {
+  const queryParams = new URLSearchParams();
 
-	if (ids) {
-		ids.forEach((id) => {
-			queryParams.append("ids[]", id);
-		});
-	}
+  if (ids) {
+    ids.forEach((id) => {
+      queryParams.append("ids[]", id);
+    });
+  }
 
-	if (offset) {
-		queryParams.append("offset", String(offset));
-	}
+  if (offset) {
+    queryParams.append("offset", String(offset));
+  }
 
-	if (limit) {
-		queryParams.append("limit", String(limit));
-	}
+  if (limit) {
+    queryParams.append("limit", String(limit));
+  }
 
-	if (order) {
-		queryParams.append("order", String(order).toUpperCase());
-	}
+  if (order) {
+    queryParams.append("order", String(order).toUpperCase());
+  }
 
-	if (sort_by) {
-		queryParams.append("sort_by", String(sort_by));
-	}
+  if (sort_by) {
+    queryParams.append("sort_by", String(sort_by));
+  }
 
-	if (is_hidden) {
-		queryParams.append("is_hidden", String(is_hidden));
-	}
+  if (is_hidden) {
+    queryParams.append("is_hidden", String(is_hidden));
+  }
 
-	if (to_date) {
-		queryParams.append("to_date", String(to_date));
-	}
+  if (to_date) {
+    queryParams.append("to_date", String(to_date));
+  }
 
-	const queryString = queryParams.toString();
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products${queryString ? `?${queryString}` : ""}`;
+  const queryString = queryParams.toString();
+  const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products${queryString ? `?${queryString}` : ""}`;
 
-	const response = await fetch(url, {
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-	});
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	const data = await response.json();
-	return {
-		count: data.count,
-		offset: data.offset,
-		limit: data.limit,
-		products: data.products.map((product) => {
-			const { price_in_cents, currency } = getProductPrice(product);
+  const data = await response.json();
+  return {
+    count: data.count,
+    offset: data.offset,
+    limit: data.limit,
+    products: data.products.map((product) => {
+      const { price_in_cents, currency } = getProductPrice(product);
 
-			return {
-				id: product.id,
-				title: product.title,
-				subtitle: product.subtitle,
-				ribbon_text: product.ribbon_text,
-				description: product.description,
-				image: product.thumbnail,
-				price_in_cents,
-				currency,
-				purchasable: product.purchasable,
-				order: product.order,
-				site_product_selection: product.site_product_selection,
-				images: extractImages(product.images),
-				options: extractProductOptions(product.options),
-				variants: extractVariants(product.variants),
-				collections: extractCollections(product.product_collections),
-				additional_info: extractAdditionalInfo(product.additional_info),
-				type: {
-					value: product.type?.value || "",
-				},
-				custom_fields: extractCustomFields(product.custom_fields),
-				related_products: extractRelatedProducts(product.related_products),
-				updated_at: product.updated_at,
-			};
-		}),
-	};
+      return {
+        id: product.id,
+        title: product.title,
+        subtitle: product.subtitle,
+        ribbon_text: product.ribbon_text,
+        description: product.description,
+        image: product.thumbnail,
+        price_in_cents,
+        currency,
+        purchasable: product.purchasable,
+        order: product.order,
+        site_product_selection: product.site_product_selection,
+        images: extractImages(product.images),
+        options: extractProductOptions(product.options),
+        variants: extractVariants(product.variants),
+        collections: extractCollections(product.product_collections),
+        additional_info: extractAdditionalInfo(product.additional_info),
+        type: {
+          value: product.type?.value || "",
+        },
+        custom_fields: extractCustomFields(product.custom_fields),
+        related_products: extractRelatedProducts(product.related_products),
+        updated_at: product.updated_at,
+      };
+    }),
+  };
 }
 
 /**
@@ -446,60 +465,60 @@ export async function getProducts({ids, offset, limit, order, sort_by, is_hidden
  *   field: "sku"
  * });
  */
-export async function getProduct(id, {field} = {}) {
-	const queryParams = new URLSearchParams();
+export async function getProduct(id, { field } = {}) {
+  const queryParams = new URLSearchParams();
 
-	if (field) {
-		queryParams.append("field", String(field));
-	}
+  if (field) {
+    queryParams.append("field", String(field));
+  }
 
-	const queryString = queryParams.toString();
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products/${id}${queryString ? `?${queryString}` : ""}`;
+  const queryString = queryParams.toString();
+  const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/products/${id}${queryString ? `?${queryString}` : ""}`;
 
-	const response = await fetch(url, {
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-	});
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	const data = await response.json();
-	const product = data.product;
+  const data = await response.json();
+  const product = data.product;
 
-	const { price_in_cents, currency } = getProductPrice(product);
+  const { price_in_cents, currency } = getProductPrice(product);
 
-	return {
-		id: product.id,
-		title: product.title,
-		subtitle: product.subtitle,
-		ribbon_text: product.ribbon_text,
-		description: product.description,
-		image: product.thumbnail,
-		price_in_cents,
-		currency,
-		status: product.status,
-		purchasable: product.purchasable,
-		order: product.order,
-		site_product_selection: product.site_product_selection,
-		images: extractImages(product.media),
-		options: extractProductOptions(product.options),
-		variants: extractVariants(product.variants),
-		collections: extractCollections(product.product_collections),
-		additional_info: extractAdditionalInfo(product.additional_info),
-		type: {
-			value: product.type?.value || "",
-		},
-		custom_fields: extractCustomFields(product.custom_fields),
-		related_products: extractRelatedProducts(product.related_products),
-		updated_at: product.updated_at,
-		created_at: product.created_at,
-		deleted_at: product.deleted_at,
-		metadata: product.metadata,
-	};
+  return {
+    id: product.id,
+    title: product.title,
+    subtitle: product.subtitle,
+    ribbon_text: product.ribbon_text,
+    description: product.description,
+    image: product.thumbnail,
+    price_in_cents,
+    currency,
+    status: product.status,
+    purchasable: product.purchasable,
+    order: product.order,
+    site_product_selection: product.site_product_selection,
+    images: extractImages(product.media),
+    options: extractProductOptions(product.options),
+    variants: extractVariants(product.variants),
+    collections: extractCollections(product.product_collections),
+    additional_info: extractAdditionalInfo(product.additional_info),
+    type: {
+      value: product.type?.value || "",
+    },
+    custom_fields: extractCustomFields(product.custom_fields),
+    related_products: extractRelatedProducts(product.related_products),
+    updated_at: product.updated_at,
+    created_at: product.created_at,
+    deleted_at: product.deleted_at,
+    metadata: product.metadata,
+  };
 }
 
 /**
@@ -523,37 +542,37 @@ export async function getProduct(id, {field} = {}) {
  *   product_ids: ["product_123", "product_456", "product_789"]
  * });
  */
-export async function getProductQuantities({fields, product_ids}) {
-	const queryParams = new URLSearchParams();
+export async function getProductQuantities({ fields, product_ids }) {
+  const queryParams = new URLSearchParams();
 
-	queryParams.append("fields", fields);
+  queryParams.append("fields", fields);
 
-	product_ids.forEach((id) => {
-		queryParams.append("product_ids[]", id);
-	});
+  product_ids.forEach((id) => {
+    queryParams.append("product_ids[]", id);
+  });
 
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/variants?${queryParams.toString()}`;
+  const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/variants?${queryParams.toString()}`;
 
-	const response = await fetch(url, {
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-	});
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	const data = await response.json();
+  const data = await response.json();
 
-	// Track only if product variant manage_inventory=true
-	return {
-		variants: (data.variants || []).map((variant) => ({
-			id: variant.id,
-			inventory_quantity: variant.inventory_quantity,
-		})),
-	};
+  // Track only if product variant manage_inventory=true
+  return {
+    variants: (data.variants || []).map((variant) => ({
+      id: variant.id,
+      inventory_quantity: variant.inventory_quantity,
+    })),
+  };
 }
 
 /**
@@ -571,50 +590,53 @@ export async function getProductQuantities({fields, product_ids}) {
  * // Use categories to filter products by checking product.collections[].collection_id
  */
 export async function getCategories() {
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/collections`;
+  const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/collections`;
 
-	const response = await fetch(url, {
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-	});
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	const data = await response.json();
+  const data = await response.json();
 
-	return {
-		categories: (data.collections || []).map((collection) => ({
-			id: collection.id,
-			title: collection.title,
-			image_url: collection.image_url,
-			store_id: collection.store_id,
-			created_at: collection.created_at,
-			updated_at: collection.updated_at,
-			deleted_at: collection.deleted_at,
-			metadata: collection.metadata,
-		})),
-		count: data.count,
-	};
+  return {
+    categories: (data.collections || []).map((collection) => ({
+      id: collection.id,
+      title: collection.title,
+      image_url: collection.image_url,
+      store_id: collection.store_id,
+      created_at: collection.created_at,
+      updated_at: collection.updated_at,
+      deleted_at: collection.deleted_at,
+      metadata: collection.metadata,
+    })),
+    count: data.count,
+  };
 }
 
 async function getCheckoutLanguage() {
-	const response = await fetch(`${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/settings`, {
-		method: "GET",
-		headers: {
-			"Content-Type": "application/json",
-		},
-	});
+  const response = await fetch(
+    `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/settings`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	const data = await response.json();
-	return data.store_owner?.language;
+  const data = await response.json();
+  return data.store_owner?.language;
 }
 
 /**
@@ -623,19 +645,20 @@ async function getCheckoutLanguage() {
  * @static
  * @operationId PostInitializeCheckout
  * @summary Initialize Checkout
- * @description Initialize checkout/payment session for customer purchase. This endpoint creates a payment session and returns a checkout URL where customers can complete their payment.
+ * @description Creates a payment session and returns a checkout URL. Shape: {@link InitializeCheckoutParams}.
  * @group Checkout
  *
- * @param {InitializeCheckoutParams} params - Checkout request parameters
- * @param {Array<Object>} params.items - Array of items to checkout
- * @param {string} params.items[].variant_id - Product variant identifier (required)
- * @param {number} params.items[].quantity - Quantity to purchase, minimum 1 (required)
- * @param {Array<Object>} [params.items[].custom_field_values] - Array of custom field values for this item (optional)
- * @param {string} params.items[].custom_field_values[].custom_field_id - Custom field identifier (required if custom_field_values provided)
+ * @param {InitializeCheckoutParams} params - Request body fields (see typedefs for nested types)
+ * @param {CheckoutItem[]} params.items - Line items
+ * @param {string} params.items[].variant_id - Product variant id
+ * @param {number} params.items[].quantity - Quantity to purchase (minimum 1)
+ * @param {CheckoutItemCustomFieldValue[]} [params.items[].custom_field_values] - Array of custom field values for this item
+ * @param {string} params.items[].custom_field_values[].custom_field_id - Custom field id (required if custom_field_values provided)
  * @param {string} params.items[].custom_field_values[].value - Custom field value (required if custom_field_values provided)
- * @param {string} params.successUrl - URL for successful payment redirect (required)
- * @param {string} params.cancelUrl - URL for cancelled payment redirect (required)
- * @param {string} [params.locale] - Locale for checkout (e.g., "en", "es", "fr") (optional)
+ * @param {string} params.successUrl - Success redirect URL
+ * @param {string} params.cancelUrl - Cancel redirect URL
+ * @param {string} [params.locale] - Checkout locale (e.g. en, es, fr)
+ * @param {CheckoutCustomer} [params.customer] - Association with a PocketBase `users` row (see {@link CheckoutCustomer})
  *
  * @returns {Promise<InitializeCheckoutResponse>} Response object containing checkout URL
  *
@@ -653,33 +676,47 @@ async function getCheckoutLanguage() {
  *   successUrl: "https://example.com/success",
  *   cancelUrl: "https://example.com/cancel",
  *   locale: "en",
+ *   customer: {
+ *     external_id: "gtz405tyyzcdlfs",
+ *     email: "example@email.com"
+ *   }
  * });
  */
-export async function initializeCheckout({items, successUrl, cancelUrl, locale}) {
-	const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/checkout`;
-	
-	const checkoutInitPromise = fetch(url, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			items,
-			successUrl,
-			cancelUrl,
-			locale,
-			timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-		}),
-	});
+export async function initializeCheckout({
+  items,
+  successUrl,
+  cancelUrl,
+  locale,
+  customer,
+}) {
+  const url = `${ECOMMERCE_API_URL}/store/${ECOMMERCE_STORE_ID}/checkout`;
 
-	const [response, language] = await Promise.all([checkoutInitPromise, getCheckoutLanguage().catch(() => "en")]);
+  const checkoutInitPromise = fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      items,
+      successUrl,
+      cancelUrl,
+      locale,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      customer,
+    }),
+  });
 
-	if (!response.ok) {
-		throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-	}
+  const [response, language] = await Promise.all([
+    checkoutInitPromise,
+    getCheckoutLanguage().catch(() => "en"),
+  ]);
 
-	const data = await response.json();
-	const checkoutRedirectUrl = `${data.url}&lang=${language?.toLowerCase() || "en"}`;
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
 
-	return { url: checkoutRedirectUrl };
+  const data = await response.json();
+  const checkoutRedirectUrl = `${data.url}&lang=${language?.toLowerCase() || "en"}`;
+
+  return { url: checkoutRedirectUrl };
 }

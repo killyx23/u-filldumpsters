@@ -8,10 +8,10 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
-import { format, parseISO, isValid } from 'date-fns';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
+import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 
 export default function BookingConfirmation() {
   const [searchParams] = useSearchParams();
@@ -466,14 +466,7 @@ export default function BookingConfirmation() {
   const deliveryAddress  = bookingDetails.delivery_address || bookingDetails.contact_address || {};
   const formattedAddress = `${deliveryAddress.street || bookingDetails.street || 'N/A'}, ${deliveryAddress.city || bookingDetails.city || 'N/A'}, ${deliveryAddress.state || bookingDetails.state || 'N/A'} ${deliveryAddress.zip || bookingDetails.zip || 'N/A'}`;
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const parsed = dateString instanceof Date ? dateString : parseISO(dateString.toString());
-      if (!isValid(parsed)) return dateString;
-      return format(parsed, 'EEEE, MMMM d, yyyy');
-    } catch { return dateString; }
-  };
+  const formatDate = (dateString) => formatBookingDateOnly(dateString, 'EEEE, MMMM d, yyyy');
 
   const serviceName = serviceDetails?.name || bookingDetails.plan?.name || 'N/A';
   const isDelivery = bookingDetails.addons?.deliveryService || bookingDetails.addons?.isDelivery;

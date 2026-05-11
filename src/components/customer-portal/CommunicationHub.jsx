@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -6,26 +7,34 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Star, MessageSquare, Ticket, Send, Paperclip, Loader2, CheckCircle, Clock } from 'lucide-react';
+import { Star, MessageSquare, Ticket, Send, Paperclip, Loader2, CheckCircle, Clock, Info, AlertCircle, Bot } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { AIAssistantTab } from './AIAssistantTab';
 
 export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefreshData }) => {
     return (
         <div className="space-y-6">
             <div>
                 <h2 className="text-2xl font-bold text-white mb-1">Communication Hub</h2>
-                <p className="text-sm text-blue-200">Chat with support in real-time, submit tickets, or leave reviews.</p>
+                <p className="text-sm text-blue-200">Chat with support, get AI assistance, submit tickets, or leave reviews.</p>
             </div>
 
-            <Tabs defaultValue="chat" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 bg-black/20 text-white">
+            <Tabs defaultValue="ai-assistant" className="w-full">
+                <TabsList className="grid w-full grid-cols-4 bg-black/20 text-white">
+                    <TabsTrigger value="ai-assistant" className="data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300">
+                        <Bot className="w-4 h-4 mr-2 hidden sm:block"/> AI Assistant
+                    </TabsTrigger>
                     <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
                     <TabsTrigger value="tickets"><Ticket className="w-4 h-4 mr-2 hidden sm:block"/> Support Tickets</TabsTrigger>
                     <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="ai-assistant" className="mt-4">
+                    <AIAssistantTab customer={customer} />
+                </TabsContent>
 
                 <TabsContent value="chat" className="mt-4">
                     <ChatInterface customer={customer} />
@@ -377,7 +386,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                                 <Textarea value={content} onChange={(e) => setContent(e.target.value)} required className="bg-black/30 border-white/20 h-32 text-white" placeholder="Tell us what you thought..." />
                             </div>
                             <Button type="submit" disabled={isSubmitting || !title || !content} className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold">
-                                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Star className="w-4 h-4 mr-2" />} Submit Review
+                                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Star className="w-4 w-4 mr-2" />} Submit Review
                             </Button>
                         </form>
                     )}
