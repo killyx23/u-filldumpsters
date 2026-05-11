@@ -28,9 +28,28 @@ export const DeliveryLocationMap = ({ deliveryAddress, isVerified, onVerificatio
   }
 
   const { street, city, state, zip } = deliveryAddress || {};
-  
+
   if (!street || !city || !state) {
-    return null; // Don't render if address is totally invalid
+    return (
+      <div className="bg-white/5 p-6 rounded-lg mb-8 border border-amber-500/30 flex flex-col items-center justify-center text-center">
+        <AlertTriangle className="h-10 w-10 text-amber-400 mb-3" />
+        <h4 className="text-lg font-semibold text-amber-200 mb-1">Delivery address incomplete</h4>
+        <p className="text-sm text-amber-200/80 mb-4">
+          Street, city, and state are required to show the map. You can still confirm the delivery location below.
+        </p>
+        <div className="flex items-center space-x-3 bg-amber-950/30 p-4 rounded-lg border border-amber-500/20 w-full justify-center">
+          <Checkbox
+            id="verify-location-incomplete-address"
+            checked={isVerified}
+            onCheckedChange={onVerificationChange}
+            className="border-white/50 data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500"
+          />
+          <Label htmlFor="verify-location-incomplete-address" className="text-sm text-blue-100 cursor-pointer">
+            I confirm the delivery location on file is correct
+          </Label>
+        </div>
+      </div>
+    );
   }
 
   const fullAddress = `${street}, ${city}, ${state} ${zip || ''}`.trim();

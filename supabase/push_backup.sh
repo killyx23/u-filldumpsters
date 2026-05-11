@@ -112,7 +112,7 @@ mkdir -p "$STAGING_DIR"
 echo ""
 info "Copying functions into staging: $STAGING_DIR"
 for fn in "${FUNCTIONS[@]}"; do
-  SRC="$BACKUP_DIR/$fn/supabase/functions/$fn"
+  SRC="$BACKUP_DIR/$fn"
   DEST="$STAGING_DIR/$fn"
   info "  Copying $fn …"
   rm -rf "$DEST"
