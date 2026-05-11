@@ -284,11 +284,10 @@ export default defineConfig({
 		react(),
 		addTransformIndexHtml
 	],
+	// Do not set Cross-Origin-Embedder-Policy on the dev server: it breaks Stripe.js
+	// Payment Element iframes (elements-inner-*, CORP / blocked subresources).
 	server: {
 		cors: true,
-		headers: {
-			'Cross-Origin-Embedder-Policy': 'credentialless',
-		},
 		allowedHosts: [
 			'.app-preview.com',
 			'.app-preview.io',
