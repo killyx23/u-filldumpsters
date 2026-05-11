@@ -13,6 +13,7 @@ import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { calculateAddonsDifference } from '@/utils/rescheduleCalculations';
+import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
 const STEPS = {
   SERVICE: 1,
@@ -233,6 +234,7 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       if (requestError) throw requestError;
 
       console.log('Reschedule request successful:', requestData);
+      expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
 
       toast({
         title: "Reschedule Request Submitted!",
