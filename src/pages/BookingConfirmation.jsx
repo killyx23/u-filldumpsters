@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
+import { format, parseISO, isValid } from 'date-fns';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
@@ -468,9 +469,9 @@ export default function BookingConfirmation() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-      });
+      const parsed = dateString instanceof Date ? dateString : parseISO(dateString.toString());
+      if (!isValid(parsed)) return dateString;
+      return format(parsed, 'EEEE, MMMM d, yyyy');
     } catch { return dateString; }
   };
 
