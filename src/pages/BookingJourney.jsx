@@ -340,7 +340,6 @@ function BookingJourney() {
       case 9:
         return (
           <PaymentPage
-            totalPrice={finalPrice}
             bookingData={bookingData}
             plan={selectedPlan}
             addonsData={addonsData}

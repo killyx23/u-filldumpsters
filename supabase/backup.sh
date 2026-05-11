@@ -74,8 +74,7 @@ echo "$FUNCTIONS"
 while read -r fn; do
     if [ -n "$fn" ]; then
         echo "   - Downloading function: $fn"
-        mkdir -p "$BACKUP_DIR/functions_$DATE/$fn"
-        npx supabase functions download "$fn" --project-ref $PROJECT_REF --workdir "$BACKUP_DIR/functions_$DATE/$fn" || echo "      ⚠ Failed to download $fn"
+        npx supabase functions download "$fn" --project-ref $PROJECT_REF --workdir "$BACKUP_DIR/functions_$DATE" || echo "      ⚠ Failed to download $fn"
     fi
 done <<< "$FUNCTIONS"
 

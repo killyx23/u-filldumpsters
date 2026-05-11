@@ -1,57 +1,10 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 import { isValidEquipmentId, logEquipmentIdQuery, getEquipmentName } from './equipmentIdValidator';
 
 /**
  * Equipment Pricing Integration
- * Handles all equipment pricing operations with numeric IDs (1-6 ONLY)
- * 
- * CRITICAL: Equipment ID 7 is RESERVED for Premium Insurance service
- * and MUST NOT be processed through equipment pricing system.
- * Premium Insurance pricing is managed via services table (service_id=7).
+ * Handles all equipment pricing operations with numeric IDs (1-7)
  */
-
-const INSURANCE_SERVICE_ID = 7;
-const EXCLUDED_EQUIPMENT_IDS = [INSURANCE_SERVICE_ID]; // IDs to exclude from equipment pricing
-
-/**
- * Check if equipment ID should be excluded from pricing system
- * @param {number} equipmentId - Equipment ID to check
- * @returns {boolean} True if ID should be excluded
- */
-function isExcludedEquipmentId(equipmentId) {
-  const numericId = Number(equipmentId);
-  return EXCLUDED_EQUIPMENT_IDS.includes(numericId);
-}
-
-/**
- * Validate equipment ID for pricing operations
- * @param {number} equipmentId - Equipment ID to validate
- * @param {string} context - Context for logging
- * @returns {boolean} True if valid for pricing operations
- */
-function validateEquipmentIdForPricing(equipmentId, context) {
-  if (!equipmentId) {
-    console.error(`[${context}] No equipment ID provided`);
-    return false;
-  }
-
-  const numericId = Number(equipmentId);
-
-  // Check if excluded (ID 7 = Premium Insurance)
-  if (isExcludedEquipmentId(numericId)) {
-    console.warn(`[${context}] Equipment ID ${numericId} is excluded from pricing system (reserved for Premium Insurance service)`);
-    return false;
-  }
-
-  // Validate ID range (1-6 only, excluding 7)
-  if (!isValidEquipmentId(numericId) || numericId === INSURANCE_SERVICE_ID) {
-    console.error(`[${context}] Invalid equipment ID: ${numericId} (expected 1-6, excluding 7)`);
-    return false;
-  }
-
-  return true;
-}
 
 /**
  * Determine item_type from equipment record
@@ -66,10 +19,7 @@ function determineItemType(equipment) {
     if (equipment.type === 'consumable') return 'consumable_item';
     if (equipment.type === 'service') return 'service_item';
     if (equipment.type === 'rental') return 'rental_equipment';
-    if (equipment.type === 'insurance') {
-      console.warn('[determineItemType] Insurance type detected - this should use services table, not equipment_pricing');
-      return 'insurance';
-    }
+    if (equipment.type === 'insurance') return 'insurance';
   }
   
   // Default to rental_equipment
@@ -85,15 +35,23 @@ function normalizePricingItemType(itemType) {
 
 /**
  * Get or create equipment_pricing record
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @param {string|null} itemType - Optional item type override
  * @returns {Promise<object|null>} Equipment pricing record or null
  */
 export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) {
   const context = 'getOrCreateEquipmentPricing';
   
-  // Validate and check exclusions
-  if (!validateEquipmentIdForPricing(equipmentId, context)) {
+  if (!equipmentId) {
+    console.error(`[${context}] No equipment ID provided`);
+    return null;
+  }
+
+  // Validate equipment ID (numeric 1-7)
+  const isValid = logEquipmentIdQuery(equipmentId, context);
+  
+  if (!isValid) {
+    console.error(`[${context}] Invalid equipment ID: ${equipmentId} (expected 1-7)`);
     return null;
   }
 
@@ -192,16 +150,23 @@ export async function getOrCreateEquipmentPricing(equipmentId, itemType = null) 
 
 /**
  * Fetch current or historical price for equipment from equipment_pricing table
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @param {Date|string|null} date - Optional date for historical pricing
  * @returns {Promise<number>} Price amount (never returns null, returns 0 on error)
  */
 export async function getPriceForEquipment(equipmentId, date = null) {
   const context = 'getPriceForEquipment';
   
-  // Validate and check exclusions
-  if (!validateEquipmentIdForPricing(equipmentId, context)) {
-    console.warn(`[${context}] Skipping pricing fetch for excluded ID: ${equipmentId}`);
+  if (!equipmentId) {
+    console.warn(`[${context}] No equipment ID provided`);
+    return 0;
+  }
+
+  // Validate equipment ID (numeric 1-7)
+  const isValid = logEquipmentIdQuery(equipmentId, context);
+  
+  if (!isValid) {
+    console.error(`[${context}] Invalid equipment ID: ${equipmentId} (expected 1-7)`);
     return 0;
   }
 
@@ -215,7 +180,7 @@ export async function getPriceForEquipment(equipmentId, date = null) {
     if (!pricingRecord) {
       console.warn(`[${context}] ⚠️ Could not get/create pricing record for: ${numericId}`);
       
-      // Fallback: try to get price directly from equipment table (excluding ID 7)
+      // Fallback: try to get price directly from equipment table
       try {
         console.log(`[${context}] Attempting fallback to equipment.price`);
         
@@ -300,7 +265,7 @@ export async function getPriceForEquipment(equipmentId, date = null) {
 
 /**
  * Update equipment price
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @param {number} newPrice - New price
  * @param {string} itemType - Item type
  * @param {string|null} updatedBy - User ID who updated the price
@@ -310,13 +275,16 @@ export async function getPriceForEquipment(equipmentId, date = null) {
 export async function updateEquipmentPrice(equipmentId, newPrice, itemType, updatedBy = null, changeReason = 'Manual price update') {
   const context = 'updateEquipmentPrice';
   
-  // Validate and check exclusions
-  if (!validateEquipmentIdForPricing(equipmentId, context)) {
-    return { 
-      success: false, 
-      error: 'Equipment ID 7 is reserved for Premium Insurance (use services table)', 
-      code: 'EXCLUDED_EQUIPMENT_ID' 
-    };
+  if (!equipmentId) {
+    return { success: false, error: 'Equipment ID is required', code: 'MISSING_EQUIPMENT_ID' };
+  }
+
+  // Validate equipment ID (numeric 1-7)
+  const isValid = logEquipmentIdQuery(equipmentId, context);
+  
+  if (!isValid) {
+    console.error(`[${context}] Invalid equipment ID: ${equipmentId} (expected 1-7)`);
+    return { success: false, error: 'Equipment ID must be between 1-7', code: 'INVALID_EQUIPMENT_ID' };
   }
 
   if (newPrice === undefined || newPrice === null || isNaN(Number(newPrice))) {
@@ -374,7 +342,6 @@ export async function updateEquipmentPrice(equipmentId, newPrice, itemType, upda
         updated_by: updatedBy
       })
       .eq('equipment_id', numericId)
-      .not('equipment_id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`) // Exclude ID 7
       .select()
       .single();
 
@@ -392,8 +359,7 @@ export async function updateEquipmentPrice(equipmentId, newPrice, itemType, upda
       await supabase
         .from('equipment')
         .update({ price: sanitizedPrice })
-        .eq('id', numericId)
-        .not('id', 'in', `(${EXCLUDED_EQUIPMENT_IDS.join(',')})`); // Exclude ID 7
+        .eq('id', numericId);
     } catch (equipUpdateErr) {
       console.warn(`[${context}] Failed to sync price to equipment table:`, equipUpdateErr);
     }
@@ -420,14 +386,21 @@ export async function updateEquipmentPrice(equipmentId, newPrice, itemType, upda
 
 /**
  * Get price change history for equipment
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @returns {Promise<Array>} Array of price history entries
  */
 export async function getPriceHistory(equipmentId) {
   const context = 'getPriceHistory';
   
-  // Validate and check exclusions
-  if (!validateEquipmentIdForPricing(equipmentId, context)) {
+  if (!equipmentId) {
+    console.warn(`[${context}] No equipment ID provided`);
+    return [];
+  }
+
+  const isValid = logEquipmentIdQuery(equipmentId, context);
+  
+  if (!isValid) {
+    console.error(`[${context}] Invalid equipment ID: ${equipmentId} (expected 1-7)`);
     return [];
   }
 
@@ -477,15 +450,9 @@ export async function getEquipmentPriceSnapshot(equipmentIds) {
       if (id) {
         const numericId = Number(id);
         
-        // Skip excluded IDs (ID 7 = Premium Insurance)
-        if (isExcludedEquipmentId(numericId)) {
-          console.log(`[${context}] Skipping excluded equipment ID: ${numericId} (Premium Insurance uses services table)`);
-          continue;
-        }
-        
-        // Validate ID (1-6 only)
+        // Validate ID
         if (!isValidEquipmentId(numericId)) {
-          console.warn(`[${context}] Skipping invalid equipment ID: ${id} (expected 1-6)`);
+          console.warn(`[${context}] Skipping invalid equipment ID: ${id} (expected 1-7)`);
           continue;
         }
         
@@ -506,7 +473,7 @@ export async function getEquipmentPriceSnapshot(equipmentIds) {
 
 /**
  * Calculate total cost for equipment with quantity
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @param {number} quantity - Quantity
  * @param {Date|string|null} date - Optional date for historical pricing
  * @returns {Promise<number>} Total cost
@@ -514,8 +481,8 @@ export async function getEquipmentPriceSnapshot(equipmentIds) {
 export async function calculateEquipmentCost(equipmentId, quantity, date = null) {
   const context = 'calculateEquipmentCost';
   
-  // Validate and check exclusions
-  if (!validateEquipmentIdForPricing(equipmentId, context)) {
+  if (!isValidEquipmentId(equipmentId)) {
+    console.error(`[${context}] Invalid equipment ID: ${equipmentId} (expected 1-7)`);
     return 0;
   }
   
@@ -558,22 +525,53 @@ export function sanitizePrice(price) {
 
 /**
  * Get price from snapshot or fetch current price
- * @param {number} equipmentId - Equipment ID (numeric 1-6, excluding 7)
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
  * @param {Object} snapshot - Price snapshot object
  * @returns {Promise<number>} Price amount
  */
 export async function getPriceFromSnapshotOrCurrent(equipmentId, snapshot = null) {
   const numericId = Number(equipmentId);
   
-  // Check exclusions
-  if (isExcludedEquipmentId(numericId)) {
-    console.warn('[getPriceFromSnapshotOrCurrent] Skipping excluded equipment ID:', numericId);
-    return 0;
-  }
-  
   if (snapshot && snapshot[numericId] !== undefined) {
     return Number(snapshot[numericId]);
   }
   
   return await getPriceForEquipment(numericId);
+}
+
+/**
+ * Returns both the current price and the is_taxable flag for a single equipment item.
+ * Used by the checkout flow to build per-line-item taxability metadata.
+ *
+ * @param {number} equipmentId - Equipment ID (numeric 1-7)
+ * @returns {Promise<{ price: number, is_taxable: boolean }>}
+ */
+export async function getEquipmentPricingMeta(equipmentId) {
+  if (!isValidEquipmentId(equipmentId)) {
+    return { price: 0, is_taxable: true };
+  }
+  const numericId = Number(equipmentId);
+  const record = await getOrCreateEquipmentPricing(numericId);
+  if (!record) {
+    return { price: 0, is_taxable: true };
+  }
+  return {
+    price:      Number(record.base_price ?? 0),
+    is_taxable: record.is_taxable !== false, // default true if column missing (pre-migration)
+  };
+}
+
+/**
+ * Bulk-fetches price and is_taxable for every equipment ID in the provided list.
+ * Returns a map keyed by equipment_id: { price, is_taxable }
+ *
+ * @param {number[]} ids - Array of numeric equipment IDs (1-7)
+ * @returns {Promise<Record<number, { price: number, is_taxable: boolean }>>}
+ */
+export async function getEquipmentPricingMetaMap(ids) {
+  const result = {};
+  for (const id of ids) {
+    result[Number(id)] = await getEquipmentPricingMeta(id);
+  }
+  return result;
 }
