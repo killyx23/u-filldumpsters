@@ -3,7 +3,7 @@
  * Standardizes time window formatting across the entire website
  */
 
-import { format, parseISO, isValid, addHours } from 'date-fns';
+import { format, parse, parseISO, isValid, addHours } from 'date-fns';
 
 /**
  * Format time window for display
@@ -17,15 +17,16 @@ import { format, parseISO, isValid, addHours } from 'date-fns';
 export function formatTimeWindow(timeString, options = {}) {
   const { isWindow = false, isSelfService = false, serviceType = '' } = options;
   
-  if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) {
+  if (!timeString || typeof timeString !== 'string') {
     return 'Time not specified';
   }
 
   try {
-    const [hours, minutes] = timeString.split(':');
-    const date = new Date();
-    date.setHours(parseInt(hours, 10));
-    date.setMinutes(parseInt(minutes || '0', 10));
+    const normalized = timeString.trim();
+    const referenceDate = new Date();
+    const date = /^\d{1,2}:\d{2}(:\d{2})?$/.test(normalized)
+      ? parse(normalized, normalized.split(':').length === 3 ? 'HH:mm:ss' : 'HH:mm', referenceDate)
+      : parse(normalized, 'h:mm a', referenceDate);
 
     if (!isValid(date)) {
       return timeString;
@@ -33,10 +34,12 @@ export function formatTimeWindow(timeString, options = {}) {
 
     // Self-service trailer: show "after 8:00 AM" or "by 10:00 PM"
     if (isSelfService) {
-      if (timeString.startsWith('08:00')) {
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
+      if (hours === 8 && minutes === 0) {
         return `after ${format(date, 'h:mm a')}`;
       }
-      if (timeString.startsWith('22:00') || timeString.startsWith('10:00')) {
+      if ((hours === 22 || hours === 10) && minutes === 0) {
         return `by ${format(date, 'h:mm a')}`;
       }
     }
