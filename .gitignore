@@ -5,3 +5,4 @@ supabase/.env
  *:Zone.Identifier
 dist/
 .env.local
+.env*
