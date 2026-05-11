@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck } from 'lucide-react';
@@ -41,6 +42,7 @@ export const BookingForm = ({
   const [currentDeliveryFee, setCurrentDeliveryFee] = useState(0);
   const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(false);
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
+  const [loadingRentalHours, setLoadingRentalHours] = useState(false);
   
   // Disposal fees state
   const [mattressFee, setMattressFee] = useState(null);
@@ -181,19 +183,31 @@ export const BookingForm = ({
     }
   }, [isDelivery, setBookingData]);
 
-  // Fetch dynamic rental hours for Dump Loader Trailer Rental (Service ID: 2)
+  // TASK 1 FIX: Fetch dynamic rental hours from database when date changes
   useEffect(() => {
-    if (currentPlan?.id !== 2 || isDelivery) return;
+    if (currentPlan?.id !== 2 || isDelivery) {
+      // Reset rental hours if not applicable
+      setTrailerRentalHours({ pickupStart: '', returnBy: '' });
+      return;
+    }
 
     const fetchTrailerRentalHours = async () => {
-      console.log('[BookingForm] Fetching trailer rental hours for service 2');
+      console.log('[BookingForm] TASK 1: Fetching trailer rental hours for service 2');
+      setLoadingRentalHours(true);
+      
       let pickupStart = '';
       let returnBy = '';
       const defaultHours = { pickupStart: '8:00 AM', returnBy: '6:00 PM' };
 
       try {
+        // TASK 1: Only fetch if drop-off date is selected
         if (bookingData.dropOffDate) {
           const dateStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
+          const dow = bookingData.dropOffDate.getDay();
+          
+          console.log('[BookingForm] TASK 1: Querying date_specific_availability for date:', dateStr);
+          
+          // First try date-specific availability
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('pickup_start_time, return_by_time')
@@ -202,42 +216,62 @@ export const BookingForm = ({
             .maybeSingle();
 
           if (dsaError) {
-            console.warn('[BookingForm] Error fetching date-specific availability:', dsaError);
+            console.warn('[BookingForm] TASK 1: Error fetching date-specific availability:', dsaError);
           }
 
-          if (dsa?.pickup_start_time) pickupStart = dsa.pickup_start_time;
-          if (dsa?.return_by_time) returnBy = dsa.return_by_time;
+          if (dsa?.pickup_start_time) {
+            pickupStart = dsa.pickup_start_time;
+            console.log('[BookingForm] TASK 1: ✓ Found date-specific pickup_start_time:', pickupStart);
+          }
+          if (dsa?.return_by_time) {
+            returnBy = dsa.return_by_time;
+            console.log('[BookingForm] TASK 1: ✓ Found date-specific return_by_time:', returnBy);
+          }
+
+          // Fall back to service_availability if needed
+          if (!pickupStart || !returnBy) {
+            console.log('[BookingForm] TASK 1: No date-specific times found, falling back to service_availability for day:', dow);
+            
+            const { data: sa, error: saError } = await supabase
+              .from('service_availability')
+              .select('pickup_start_time, return_by_time')
+              .eq('service_id', 2)
+              .eq('day_of_week', dow)
+              .maybeSingle();
+
+            if (saError) {
+              console.warn('[BookingForm] TASK 1: Error fetching service availability:', saError);
+            }
+
+            if (sa) {
+              if (!pickupStart && sa.pickup_start_time) {
+                pickupStart = sa.pickup_start_time;
+                console.log('[BookingForm] TASK 1: ✓ Using service_availability pickup_start_time:', pickupStart);
+              }
+              if (!returnBy && sa.return_by_time) {
+                returnBy = sa.return_by_time;
+                console.log('[BookingForm] TASK 1: ✓ Using service_availability return_by_time:', returnBy);
+              }
+            }
+          }
         }
 
-        if (!pickupStart || !returnBy) {
-          const dow = bookingData.dropOffDate ? bookingData.dropOffDate.getDay() : new Date().getDay();
-          const { data: sa, error: saError } = await supabase
-            .from('service_availability')
-            .select('pickup_start_time, return_by_time')
-            .eq('service_id', 2)
-            .eq('day_of_week', dow)
-            .maybeSingle();
-
-          if (saError) {
-            console.warn('[BookingForm] Error fetching service availability:', saError);
-          }
-
-          if (sa) {
-            if (!pickupStart && sa.pickup_start_time) pickupStart = sa.pickup_start_time;
-            if (!returnBy && sa.return_by_time) returnBy = sa.return_by_time;
-          }
-        }
-
-        setTrailerRentalHours({
+        // Set the rental hours with formatted times
+        const finalHours = {
           pickupStart: pickupStart ? formatTimeToAmPm(pickupStart) : defaultHours.pickupStart,
           returnBy: returnBy ? formatTimeToAmPm(returnBy) : defaultHours.returnBy
-        });
+        };
 
-        console.log('[BookingForm] ✓ Trailer rental hours:', { pickupStart, returnBy });
+        setTrailerRentalHours(finalHours);
+
+        console.log('[BookingForm] TASK 1: ✓ Final trailer rental hours set:', finalHours);
+        console.log('[BookingForm] TASK 1: Database times - pickup:', pickupStart, 'return:', returnBy);
 
       } catch (error) {
-        console.warn('[BookingForm] Unexpected error fetching trailer rental hours:', error);
+        console.warn('[BookingForm] TASK 1: Unexpected error fetching trailer rental hours:', error);
         setTrailerRentalHours(defaultHours);
+      } finally {
+        setLoadingRentalHours(false);
       }
     };
 
@@ -894,9 +928,28 @@ export const BookingForm = ({
     }
 
     if (currentPlan?.id === 2) {
-      const rentalHoursText = trailerRentalHours.pickupStart && trailerRentalHours.returnBy 
-        ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
-        : 'gives you the trailer for a full rental day.';
+      // TASK 1 FIX: Display dynamic rental hours with conditional logic
+      const hasSelectedDate = bookingData.dropOffDate || bookingData.pickupDate;
+      
+      let rentalHoursText;
+      if (loadingRentalHours) {
+        rentalHoursText = (
+          <span className="inline-flex items-center">
+            <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
+            loading rental hours...
+          </span>
+        );
+      } else if (!hasSelectedDate) {
+        rentalHoursText = (
+          <span className="text-yellow-300 font-semibold">
+            Select your dates above to see available rental hours for that day
+          </span>
+        );
+      } else if (trailerRentalHours.pickupStart && trailerRentalHours.returnBy) {
+        rentalHoursText = `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`;
+      } else {
+        rentalHoursText = 'gives you the trailer for a full rental day.';
+      }
 
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
@@ -927,7 +980,9 @@ export const BookingForm = ({
               </li>
               <li className="flex items-start">
                 <span className="text-yellow-400 mr-2 mt-0.5">•</span>
-                <span><strong className="text-white">The Longest Rental Window:</strong> We offer some of the most generous rental hours in the industry, giving you a true full day's work without unnecessary restrictions. While other companies shorten your time or charge extra for full-day access, our flat daily rate {rentalHoursText}</span>
+                <span>
+                  <strong className="text-white">The Longest Rental Window:</strong> We offer some of the most generous rental hours in the industry, giving you a true full day's work without unnecessary restrictions. While other companies shorten your time or charge extra for full-day access, our flat daily rate {rentalHoursText}
+                </span>
               </li>
               <li className="flex items-start">
                 <span className="text-yellow-400 mr-2 mt-0.5">•</span>

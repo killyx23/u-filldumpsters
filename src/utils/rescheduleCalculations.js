@@ -1,6 +1,5 @@
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
 import { getPriceForEquipment, getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
-import { getEffectiveTaxRate } from './getTaxRate';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
 
@@ -72,19 +71,16 @@ export const calculateBookingCosts = async (service, days, addonsList, distanceM
     }
 
     const subtotal = serviceCost + addonsCost;
-    // Fetch rate from DB; falls back to 7.45 on error
-    const taxRate = await getEffectiveTaxRate().catch(() => 7.45);
-    const tax = Math.round(subtotal * (taxRate / 100) * 100) / 100;
+    const tax = subtotal * 0.07;
     const total = subtotal + tax;
 
     return {
-        serviceCost:   round2(serviceCost),
-        addonsCost:    round2(addonsCost),
+        serviceCost: round2(serviceCost),
+        addonsCost: round2(addonsCost),
         mileageCharge: round2(mileageCharge),
-        subtotal:      round2(subtotal),
-        tax:           round2(tax),
-        taxRate,
-        total:         round2(total),
+        subtotal: round2(subtotal),
+        tax: round2(tax),
+        total: round2(total)
     };
 };
 
@@ -257,19 +253,17 @@ export async function calculateComprehensivePricing(
 
   const addonsTotal = addonsBreakdown.reduce((sum, addon) => sum + addon.total, 0);
   const subtotal = baseRentalCost + deliveryFee + mileageCharge + addonsTotal + insurancePrice;
-  const taxRate = await getEffectiveTaxRate().catch(() => 7.45);
-  const tax = Math.round(subtotal * (taxRate / 100) * 100) / 100;
+  const tax = subtotal * 0.07;
   const estimatedTotal = subtotal + tax;
 
   return {
     baseRentalCost: round2(baseRentalCost),
-    deliveryFee:    round2(deliveryFee),
-    mileageCharge:  round2(mileageCharge),
+    deliveryFee: round2(deliveryFee),
+    mileageCharge: round2(mileageCharge),
     addonsBreakdown,
     insurancePrice: round2(insurancePrice),
-    subtotal:       round2(subtotal),
-    tax:            round2(tax),
-    taxRate,
-    estimatedTotal: round2(estimatedTotal),
+    subtotal: round2(subtotal),
+    tax: round2(tax),
+    estimatedTotal: round2(estimatedTotal)
   };
 }

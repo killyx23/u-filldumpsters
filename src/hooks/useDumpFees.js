@@ -1,3 +1,5 @@
+
+import React from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -14,21 +16,49 @@ import { toast } from '@/components/ui/use-toast';
 export const useDumpFees = () => {
   const [dumpFees, setDumpFees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [servicesPricing, setServicesPricing] = useState({});
 
   const fetchDumpFees = useCallback(async () => {
     setLoading(true);
+    setError(null);
+    
     try {
-      console.log('[Dump Fees] Fetching dump fees and service pricing');
+      console.log('[Dump Fees] 🔄 Initiating fetch from Supabase');
+      console.log('[Dump Fees] Supabase client status:', supabase ? '✓ Initialized' : '✗ Not initialized');
       
-      // SELECT only from dump_fees and services tables
-      const { data, error } = await supabase
+      // Test basic connection first
+      const { data: testData, error: testError } = await supabase
+        .from('dump_fees')
+        .select('id')
+        .limit(1);
+      
+      if (testError) {
+        console.error('[Dump Fees] ✗ Connection test failed:', testError);
+        throw new Error(`Connection test failed: ${testError.message}`);
+      }
+      
+      console.log('[Dump Fees] ✓ Connection test successful');
+      
+      // Fetch dump fees with service details
+      const { data, error: fetchError } = await supabase
         .from('dump_fees')
         .select('*, services(id, name, delivery_fee, mileage_rate)');
       
-      if (error) throw error;
+      if (fetchError) {
+        console.error('[Dump Fees] ✗ Fetch error:', {
+          message: fetchError.message,
+          details: fetchError.details,
+          hint: fetchError.hint,
+          code: fetchError.code
+        });
+        throw fetchError;
+      }
+      
+      console.log('[Dump Fees] ✓ Fetched data:', data);
       setDumpFees(data || []);
 
+      // Build pricing map from services data
       const pricingMap = {};
       if (data) {
         data.forEach(item => {
@@ -40,13 +70,17 @@ export const useDumpFees = () => {
           }
         });
       }
+      
       setServicesPricing(pricingMap);
-      console.log('[Dump Fees] ✓ Loaded dump fees for', Object.keys(pricingMap).length, 'services');
+      console.log('[Dump Fees] ✓ Successfully loaded dump fees for', Object.keys(pricingMap).length, 'services');
+      
     } catch (error) {
-      console.error('[Dump Fees] Error fetching dump fees:', error);
+      console.error('[Dump Fees] ✗ Fatal error:', error);
+      setError(error.message);
+      
       toast({
         title: 'Error loading dump fees',
-        description: error.message,
+        description: `${error.message}. Please check your connection and try again.`,
         variant: 'destructive',
       });
     } finally {
@@ -60,7 +94,7 @@ export const useDumpFees = () => {
 
   const updateDumpFee = async (serviceId, feePerTon, maxTons) => {
     try {
-      console.log('[Dump Fees] Updating dump fee for service:', serviceId);
+      console.log('[Dump Fees] 🔄 Updating dump fee for service:', serviceId);
       
       // UPSERT is allowed for dump_fees table (has proper RLS policies)
       const { error } = await supabase
@@ -75,17 +109,21 @@ export const useDumpFees = () => {
           { onConflict: 'service_id' }
         );
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Dump Fees] ✗ Update error:', error);
+        throw error;
+      }
       
       toast({
         title: 'Dump fee updated',
         description: 'The dump fee has been successfully updated.',
       });
+      
       await fetchDumpFees();
       console.log('[Dump Fees] ✓ Dump fee updated successfully');
       return true;
     } catch (error) {
-      console.error('[Dump Fees] Error updating dump fee:', error);
+      console.error('[Dump Fees] ✗ Error updating dump fee:', error);
       toast({
         title: 'Error updating dump fee',
         description: error.message,
@@ -118,6 +156,7 @@ export const useDumpFees = () => {
   return {
     dumpFees,
     loading,
+    error,
     fetchDumpFees,
     updateDumpFee,
     getFeeForService,
