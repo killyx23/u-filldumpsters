@@ -41,16 +41,7 @@ export default function CustomerPortalBookingDetail() {
             error: null
           });
         } catch (distError) {
-          console.error('[CustomerPortalBookingDetail] Distance calculation failed:', distError);
-          const msg = distError?.message || String(distError);
-          setDistanceInfo({
-            distance: 0,
-            travelTime: 0,
-            loading: false,
-            error: msg.includes('not authorized') || msg.includes('REQUEST_DENIED')
-              ? 'Distance could not be calculated (Google Maps key/API). Check Distance Matrix API (Legacy) is enabled for this key’s project.'
-              : 'Failed to calculate distance',
-          });
+          setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "Failed to calculate distance" });
         }
       } else {
           setDistanceInfo({ distance: 0, travelTime: 0, loading: false, error: "No address provided" });

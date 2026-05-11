@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Save, Plus, Edit, Trash2, Calculator } from 'lucide-react';
+import { Loader2, Save, Plus, Edit, Trash2, Calculator, Shield, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +10,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
 import { useDumpFees } from '@/hooks/useDumpFees';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
 
 const ServicePricingCard = ({ service, onSave }) => {
@@ -165,43 +165,111 @@ const DumpFeeCard = ({ service, dumpFeeData, onSave }) => {
     );
 };
 
-const InsurancePricingCard = () => {
-    const { insurancePrice, loading, updateInsurancePrice } = useInsurancePricing();
-    const [priceInput, setPriceInput] = useState('');
-    const [isSaving, setIsSaving] = useState(false);
-
-    useEffect(() => {
-        if (!loading) {
-            setPriceInput(insurancePrice.toString());
-        }
-    }, [insurancePrice, loading]);
-
-    const handleSave = async () => {
-        setIsSaving(true);
-        await updateInsurancePrice(parseFloat(priceInput));
-        setIsSaving(false);
-    };
-
-    if (loading) return null;
-
+const InsuranceItemCard = ({ item, onEdit, onDelete, isPremium }) => {
     return (
-        <div className="bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border border-white/10">
-            <p className="text-lg font-bold text-white w-full md:w-1/4">Hardware Protection (Insurance)</p>
+        <div className={`bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border transition-colors ${
+            isPremium ? 'border-purple-500/40 bg-purple-900/10' : 'border-purple-500/20 hover:border-purple-500/40'
+        }`}>
+            <div className="flex items-center gap-3 w-full md:w-1/4">
+                <div className={`p-2 rounded-lg ${isPremium ? 'bg-purple-500/30' : 'bg-purple-500/20'}`}>
+                    <Shield className="h-5 w-5 text-purple-400" />
+                </div>
+                <div>
+                    <p className="text-lg font-bold text-white">{item.name}</p>
+                    {isPremium && (
+                        <span className="text-xs text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded-full">Primary Insurance</span>
+                    )}
+                </div>
+            </div>
             <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
-                <div className="flex items-center gap-2">
-                    <Label className="text-white">Price ($):</Label>
-                    <Input 
-                        type="number" 
-                        step="0.01"
-                        value={priceInput} 
-                        onChange={(e) => setPriceInput(e.target.value)}
-                        className="w-32 bg-white/10 text-white"
-                        placeholder="e.g., 20.00"
-                        disabled={isSaving}
+                <div className="text-sm">
+                    <p className="text-gray-400">Base Price</p>
+                    <p className="text-white font-semibold">${Number(item.price || 0).toFixed(2)}</p>
+                </div>
+                {item.description && (
+                    <div className="text-sm max-w-xs">
+                        <p className="text-gray-400">Description</p>
+                        <p className="text-white text-xs">{item.description}</p>
+                    </div>
+                )}
+                <div className="flex gap-2">
+                    <Button
+                        onClick={() => onEdit(item)}
+                        size="icon"
+                        variant="outline"
+                        className="border-purple-600 text-purple-400 hover:bg-purple-900/20"
+                    >
+                        <Edit className="h-4 w-4" />
+                    </Button>
+                    {!isPremium && (
+                        <Button
+                            onClick={() => onDelete(item.id)}
+                            size="icon"
+                            variant="outline"
+                            className="border-red-600 text-red-400 hover:bg-red-900/20"
+                        >
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const InsuranceItemForm = ({ formData, setFormData, onSave, onCancel, isEditing, isPremium }) => {
+    return (
+        <div className={`bg-gradient-to-br from-purple-900/30 to-purple-800/20 p-5 rounded-lg border-2 shadow-xl ${
+            isPremium ? 'border-purple-500/50' : 'border-purple-500/30'
+        }`}>
+            {isPremium && (
+                <div className="mb-3 bg-purple-900/40 border border-purple-500/40 rounded p-2">
+                    <p className="text-purple-200 text-sm flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        <span className="font-semibold">Premium Insurance</span> - This is the primary insurance option shown to customers
+                    </p>
+                </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <Label className="text-white mb-2">Insurance Name</Label>
+                    <Input
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="e.g., Premium Insurance Service"
+                        className="bg-gray-800 border-gray-600 text-white"
+                        disabled={isPremium}
                     />
                 </div>
-                <Button onClick={handleSave} size="sm" disabled={isSaving} className="ml-2 min-w-[90px] bg-purple-600 hover:bg-purple-700 text-white">
-                    {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</> : <><Save className="mr-2 h-4 w-4" /> Save Price</>}
+                <div>
+                    <Label className="text-white mb-2">Price ($)</Label>
+                    <Input
+                        type="number"
+                        step="0.01"
+                        value={formData.price}
+                        onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                        placeholder="20.00"
+                        className="bg-gray-800 border-gray-600 text-white"
+                    />
+                </div>
+            </div>
+            <div className="mt-3">
+                <Label className="text-white mb-2">Description</Label>
+                <Input
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Protection plan details..."
+                    className="bg-gray-800 border-gray-600 text-white"
+                />
+            </div>
+            <div className="flex gap-2 mt-4">
+                <Button onClick={onSave} className="bg-purple-600 hover:bg-purple-700">
+                    <Save className="h-4 w-4 mr-2" />
+                    {isEditing ? 'Update' : 'Save'}
+                </Button>
+                <Button onClick={onCancel} variant="outline" className="border-gray-600 text-white hover:bg-gray-700">
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
                 </Button>
             </div>
         </div>
@@ -260,7 +328,6 @@ const TaxConfigurationCard = () => {
 
             if (error) throw error;
 
-            // Invalidate cache to force reload
             invalidateTaxRateCache();
 
             toast({
@@ -491,35 +558,73 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
 
 export const PricingManager = () => {
     const [services, setServices] = useState([]);
+    const [insuranceItems, setInsuranceItems] = useState([]);
+    const [premiumInsurance, setPremiumInsurance] = useState(null);
     const [coupons, setCoupons] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isCouponFormOpen, setIsCouponFormOpen] = useState(false);
     const [editingCoupon, setEditingCoupon] = useState(null);
+    const [addingInsurance, setAddingInsurance] = useState(false);
+    const [editingInsurance, setEditingInsurance] = useState(null);
+    const [insuranceFormData, setInsuranceFormData] = useState({
+        name: '',
+        price: '',
+        description: ''
+    });
 
     const { dumpFees, updateDumpFee } = useDumpFees();
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [servicesRes, couponsRes] = await Promise.all([
-                supabase.from('services').select('*').in('id', [1, 2, 3, 4]).order('id'),
-                supabase.from('coupons').select('*').order('created_at', { ascending: false })
+            const [servicesRes, couponsRes, insuranceRes] = await Promise.all([
+                supabase.from('services').select('*').in('id', [1, 2, 3, 4, 7]).order('id'),
+                supabase.from('coupons').select('*').order('created_at', { ascending: false }),
+                supabase.from('equipment').select('*').eq('type', 'insurance').order('name')
             ]);
 
             if (servicesRes.error) throw servicesRes.error;
             if (couponsRes.error) throw couponsRes.error;
+            if (insuranceRes.error) throw insuranceRes.error;
 
-            const serviceData = servicesRes.data;
-            const hasDeliveryService = serviceData.some(s => s.id === 4);
+            const serviceData = servicesRes.data || [];
+            
+            // Separate Premium Insurance (ID 7) from regular services
+            const premiumInsuranceService = serviceData.find(s => s.id === 7);
+            const regularServices = serviceData.filter(s => s.id !== 7);
+            
+            // Ensure service ID 4 exists
+            const hasDeliveryService = regularServices.some(s => s.id === 4);
             if (!hasDeliveryService) {
                 const { data: newService, error: newServiceError } = await supabase.from('services').select('*').eq('id', 4).single();
                 if (!newServiceError && newService) {
-                    serviceData.push(newService);
-                    serviceData.sort((a,b) => a.id - b.id);
+                    regularServices.push(newService);
+                    regularServices.sort((a,b) => a.id - b.id);
                 }
             }
-            setServices(serviceData);
-            setCoupons(couponsRes.data);
+            
+            setServices(regularServices);
+            
+            // Set Premium Insurance separately
+            if (premiumInsuranceService) {
+                setPremiumInsurance({
+                    id: 7,
+                    name: premiumInsuranceService.name || 'Premium Insurance',
+                    price: Number(premiumInsuranceService.base_price || 20),
+                    description: premiumInsuranceService.description || 'Complete protection coverage for your rental'
+                });
+            } else {
+                // Create default if doesn't exist
+                setPremiumInsurance({
+                    id: 7,
+                    name: 'Premium Insurance',
+                    price: 20.00,
+                    description: 'Complete protection coverage for your rental'
+                });
+            }
+            
+            setCoupons(couponsRes.data || []);
+            setInsuranceItems(insuranceRes.data || []);
         } catch (error) {
             console.error("Failed to fetch data:", error);
             toast({ title: "Failed to load data", variant: "destructive", description: error.message });
@@ -542,6 +647,106 @@ export const PricingManager = () => {
             console.error("Failed to save service pricing:", error);
             toast({ title: "Failed to save pricing", description: error.message || "An unknown error occurred.", variant: "destructive" });
         }
+    };
+
+    const handleSaveInsurance = async () => {
+        try {
+            const isPremiumInsurance = editingInsurance?.id === 7 || 
+                                      (editingInsurance && editingInsurance.name?.toLowerCase().includes('premium insurance'));
+            
+            if (isPremiumInsurance) {
+                // Save Premium Insurance to services table (ID 7)
+                console.log('[PricingManager] Saving Premium Insurance to services table (ID 7)');
+                
+                const { error } = await supabase
+                    .from('services')
+                    .update({
+                        base_price: parseFloat(insuranceFormData.price),
+                        description: insuranceFormData.description,
+                        name: insuranceFormData.name
+                    })
+                    .eq('id', 7);
+
+                if (error) throw error;
+                toast({ title: 'Premium Insurance updated successfully' });
+            } else {
+                // Save other insurance items to equipment table
+                const dataToSave = {
+                    name: insuranceFormData.name,
+                    type: 'insurance',
+                    price: parseFloat(insuranceFormData.price),
+                    description: insuranceFormData.description,
+                    total_quantity: 9999
+                };
+
+                if (editingInsurance) {
+                    const { error } = await supabase
+                        .from('equipment')
+                        .update(dataToSave)
+                        .eq('id', editingInsurance.id);
+
+                    if (error) throw error;
+                    toast({ title: 'Insurance item updated successfully' });
+                } else {
+                    const { error } = await supabase
+                        .from('equipment')
+                        .insert([dataToSave]);
+
+                    if (error) throw error;
+                    toast({ title: 'Insurance item created successfully' });
+                }
+            }
+
+            setAddingInsurance(false);
+            setEditingInsurance(null);
+            setInsuranceFormData({ name: '', price: '', description: '' });
+            fetchData();
+        } catch (error) {
+            console.error('Error saving insurance item:', error);
+            toast({
+                title: 'Failed to save insurance item',
+                description: error.message,
+                variant: 'destructive'
+            });
+        }
+    };
+
+    const handleEditInsurance = (item) => {
+        setEditingInsurance(item);
+        setInsuranceFormData({
+            name: item.name,
+            price: item.price || '',
+            description: item.description || ''
+        });
+        setAddingInsurance(true);
+    };
+
+    const handleDeleteInsurance = async (id) => {
+        if (!confirm('Are you sure you want to delete this insurance item?')) return;
+
+        try {
+            const { error } = await supabase
+                .from('equipment')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+            toast({ title: 'Insurance item deleted successfully' });
+            fetchData();
+        } catch (error) {
+            console.error('Error deleting insurance item:', error);
+            toast({
+                title: 'Failed to delete insurance item',
+                description: error.message,
+                variant: 'destructive'
+            });
+        }
+    };
+
+    const handleCancelInsurance = () => {
+        setAddingInsurance(false);
+        setEditingInsurance(null);
+        setInsuranceFormData({ name: '', price: '', description: '' });
     };
 
     const handleSaveCoupon = async (couponData) => {
@@ -573,6 +778,7 @@ export const PricingManager = () => {
     }
 
     const dumpFeeServices = services.filter(s => [1, 4].includes(s.id));
+    const isPremiumInsuranceEditing = editingInsurance?.id === 7;
 
     return (
         <div className="space-y-8">
@@ -586,9 +792,63 @@ export const PricingManager = () => {
             </div>
 
             <div className="bg-white/10 p-6 rounded-2xl border border-white/20">
-                <h2 className="text-2xl font-bold mb-4 text-white">Add-ons & Options</h2>
+                <div className="flex justify-between items-center mb-4">
+                    <div>
+                        <h2 className="text-2xl font-bold text-white flex items-center">
+                            <Shield className="mr-2 h-6 w-6 text-purple-400" />
+                            Insurance & Protection Plans
+                        </h2>
+                        <p className="text-sm text-gray-400 mt-1">Manage insurance and protection plan pricing</p>
+                    </div>
+                    <Button 
+                        onClick={() => setAddingInsurance(true)} 
+                        className="bg-purple-600 hover:bg-purple-700 text-white"
+                        disabled={addingInsurance}
+                    >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Insurance Item
+                    </Button>
+                </div>
                 <div className="space-y-4">
-                    <InsurancePricingCard />
+                    {addingInsurance && (
+                        <InsuranceItemForm
+                            formData={insuranceFormData}
+                            setFormData={setInsuranceFormData}
+                            onSave={handleSaveInsurance}
+                            onCancel={handleCancelInsurance}
+                            isEditing={!!editingInsurance}
+                            isPremium={isPremiumInsuranceEditing}
+                        />
+                    )}
+                    
+                    {/* Premium Insurance (from services table) */}
+                    {premiumInsurance && (
+                        <InsuranceItemCard
+                            item={premiumInsurance}
+                            onEdit={handleEditInsurance}
+                            onDelete={() => {}}
+                            isPremium={true}
+                        />
+                    )}
+                    
+                    {/* Other insurance items (from equipment table) */}
+                    {insuranceItems.length === 0 && !premiumInsurance && !addingInsurance ? (
+                        <div className="text-center py-8 text-gray-400 bg-gray-900/30 rounded-lg border border-gray-700 border-dashed">
+                            <Shield className="h-12 w-12 mx-auto mb-3 opacity-50 text-purple-400" />
+                            <p>No insurance items yet</p>
+                            <p className="text-xs mt-1">Click "Add Insurance Item" to create one</p>
+                        </div>
+                    ) : (
+                        insuranceItems.map(item => (
+                            <InsuranceItemCard
+                                key={item.id}
+                                item={item}
+                                onEdit={handleEditInsurance}
+                                onDelete={handleDeleteInsurance}
+                                isPremium={false}
+                            />
+                        ))
+                    )}
                 </div>
             </div>
 
