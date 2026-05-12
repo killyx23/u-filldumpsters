@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft, CreditCard, ShieldCheck } from 'lucide-react';
+import { Loader2, ArrowLeft, CreditCard, ShieldCheck, User, Mail, Phone, MapPin } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 
@@ -27,18 +27,16 @@ const CheckoutForm = ({ bookingId, onBack, totalPrice, bookingData }) => {
     setErrorMessage('');
 
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [PaymentPage] TASK 2: Starting payment submission`, {
+    console.log(`[${timestamp}] [PaymentPage] Starting payment submission`, {
       bookingId,
       totalPrice,
       email: bookingData?.email
     });
 
     try {
-      // TASK 2 FIX: Construct return URL with booking_id parameter
       const returnUrl = `${window.location.origin}/booking-confirmation?booking_id=${bookingId}`;
       
-      console.log(`[${timestamp}] [PaymentPage] TASK 2: Constructed return URL:`, returnUrl);
-      console.log(`[${timestamp}] [PaymentPage] TASK 2: Booking ID being preserved:`, bookingId);
+      console.log(`[${timestamp}] [PaymentPage] Constructed return URL:`, returnUrl);
 
       const { error } = await stripe.confirmPayment({
         elements,
@@ -57,7 +55,7 @@ const CheckoutForm = ({ bookingId, onBack, totalPrice, bookingData }) => {
           variant: 'destructive',
         });
       } else {
-        console.log(`[${new Date().toISOString()}] [PaymentPage] TASK 2: ✓ Payment confirmed, redirecting to:`, returnUrl);
+        console.log(`[${new Date().toISOString()}] [PaymentPage] ✓ Payment confirmed, redirecting to:`, returnUrl);
       }
     } catch (err) {
       console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected payment error:`, err);
@@ -127,15 +125,60 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
   const [clientSecret, setClientSecret] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [customerData, setCustomerData] = useState(null);
+  const [loadingCustomer, setLoadingCustomer] = useState(true);
+
+  // Task 4: Retrieve customer data from pending_customers table
+  useEffect(() => {
+    const fetchCustomerData = async () => {
+      if (!bookingData?.email) {
+        console.error('[PaymentPage] No email available to fetch customer data');
+        setLoadingCustomer(false);
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      console.log(`[${timestamp}] [PaymentPage] Task 4: Fetching customer data from pending_customers for email:`, bookingData.email);
+
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('pending_customers')
+          .select('*')
+          .eq('email', bookingData.email.toLowerCase().trim())
+          .single();
+
+        const fetchTs = new Date().toISOString();
+        
+        if (fetchError) {
+          if (fetchError.code === 'PGRST116') {
+            console.warn(`[${fetchTs}] [PaymentPage] No pending customer record found for email:`, bookingData.email);
+          } else {
+            console.error(`[${fetchTs}] [PaymentPage] Error fetching customer data:`, fetchError);
+          }
+          setCustomerData(null);
+        } else {
+          console.log(`[${fetchTs}] [PaymentPage] ✓ Customer data retrieved successfully:`, data);
+          setCustomerData(data);
+        }
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected error fetching customer:`, err);
+        setCustomerData(null);
+      } finally {
+        setLoadingCustomer(false);
+      }
+    };
+
+    fetchCustomerData();
+  }, [bookingData?.email]);
 
   useEffect(() => {
     const createPaymentIntent = async () => {
       const timestamp = new Date().toISOString();
       
-      console.log(`[${timestamp}] [PaymentPage] TASK 2: Creating payment intent for booking:`, bookingId);
+      console.log(`[${timestamp}] [PaymentPage] Creating payment intent for booking:`, bookingId);
 
       if (!bookingId) {
-        console.error(`[${timestamp}] [PaymentPage] TASK 2: ❌ Missing booking ID - cannot create payment intent`);
+        console.error(`[${timestamp}] [PaymentPage] ❌ Missing booking ID - cannot create payment intent`);
         setError('Booking ID is missing. Please go back and try again.');
         setLoading(false);
         return;
@@ -172,10 +215,7 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
           throw new Error('Failed to create payment intent: No client secret returned');
         }
 
-        console.log(`[${responseTs}] [PaymentPage] TASK 2: ✓ Payment intent created successfully`, {
-          hasClientSecret: true,
-          bookingId: bookingId
-        });
+        console.log(`[${responseTs}] [PaymentPage] ✓ Payment intent created successfully`);
 
         setClientSecret(data.clientSecret);
         setLoading(false);
@@ -196,7 +236,7 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
     createPaymentIntent();
   }, [bookingId, totalPrice, bookingData, plan]);
 
-  if (loading) {
+  if (loading || loadingCustomer) {
     return (
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-2xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
@@ -244,12 +284,63 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
     },
   };
 
+  // Use customer data from database if available, otherwise fall back to bookingData
+  const displayName = customerData?.name || `${bookingData.firstName} ${bookingData.lastName}`.trim();
+  const displayEmail = customerData?.email || bookingData.email;
+  const displayPhone = customerData?.phone || bookingData.phone;
+  const displayAddress = customerData ? 
+    `${customerData.street}, ${customerData.city}, ${customerData.state} ${customerData.zip}` :
+    `${bookingData.contactAddress?.street}, ${bookingData.contactAddress?.city}, ${bookingData.contactAddress?.state} ${bookingData.contactAddress?.zip}`;
+
   return (
     <div className="container mx-auto px-4 py-16">
       <div className="max-w-2xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-white mb-2">Secure Payment</h2>
           <p className="text-gray-300">Complete your booking with a secure payment</p>
+        </div>
+
+        {/* Task 4: Display customer data retrieved from pending_customers */}
+        <div className="bg-gradient-to-br from-indigo-900/40 to-purple-800/20 p-6 rounded-xl mb-6 border border-indigo-500/30">
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center">
+            <User className="h-5 w-5 mr-2 text-indigo-400" />
+            Booking Information
+            {customerData?.is_verified && (
+              <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-1 rounded-full border border-green-500/30">
+                ✓ Verified
+              </span>
+            )}
+          </h3>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-start">
+              <User className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
+              <div>
+                <p className="text-gray-400 text-xs">Customer Name</p>
+                <p className="text-white font-medium">{displayName}</p>
+              </div>
+            </div>
+            <div className="flex items-start">
+              <Mail className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
+              <div>
+                <p className="text-gray-400 text-xs">Email Address</p>
+                <p className="text-white font-medium">{displayEmail}</p>
+              </div>
+            </div>
+            <div className="flex items-start">
+              <Phone className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
+              <div>
+                <p className="text-gray-400 text-xs">Phone Number</p>
+                <p className="text-white font-medium">{displayPhone}</p>
+              </div>
+            </div>
+            <div className="flex items-start">
+              <MapPin className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
+              <div>
+                <p className="text-gray-400 text-xs">Contact Address</p>
+                <p className="text-white font-medium">{displayAddress}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 p-6 rounded-xl mb-8 border border-blue-500/30">
