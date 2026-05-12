@@ -14,7 +14,6 @@ import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory
 import { format, parseISO } from 'date-fns';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
-
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
     const [cancellationFee, setCancellationFee] = useState(0);
@@ -54,7 +53,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
 
             if (refundError) throw refundError;
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
-            
+
             const updatedBookingForEmail = {
                 ...booking, 
                 customers: customer, 
