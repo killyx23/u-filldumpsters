@@ -1,13 +1,16 @@
+
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2, Loader2, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from '@/components/ui/use-toast';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { supabase } from '@/lib/customSupabaseClient';
 
 export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack }) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
+    const [isSaving, setIsSaving] = useState(false);
 
     const handleInputChange = e => {
         const { name, value } = e.target;
@@ -30,7 +33,7 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
         return true;
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         
         const trimmedFirstName = (bookingData.firstName || '').trim();
@@ -55,7 +58,63 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
 
         if (!validatePhoneNumber()) return;
         
-        onSubmit();
+        // Task 2: Save customer data to pending_customers table
+        setIsSaving(true);
+        const timestamp = new Date().toISOString();
+        console.log(`[${timestamp}] [ContactInfoForm] Saving customer data to pending_customers table`);
+        
+        try {
+            const customerData = {
+                email: bookingData.email.toLowerCase().trim(),
+                name: `${trimmedFirstName} ${trimmedLastName}`.trim(),
+                phone: bookingData.phone.replace(/\D/g, ''), // Store only digits
+                street: cAddress.street,
+                city: cAddress.city,
+                state: cAddress.state,
+                zip: cAddress.zip,
+                is_verified: false
+            };
+
+            console.log(`[${timestamp}] [ContactInfoForm] Upserting customer data:`, customerData);
+
+            const { data, error } = await supabase
+                .from('pending_customers')
+                .upsert(customerData, { 
+                    onConflict: 'email',
+                    ignoreDuplicates: false 
+                })
+                .select();
+
+            const saveTs = new Date().toISOString();
+            
+            if (error) {
+                console.error(`[${saveTs}] [ContactInfoForm] Failed to save customer data:`, error);
+                throw error;
+            }
+
+            console.log(`[${saveTs}] [ContactInfoForm] ✓ Customer data saved successfully:`, data);
+            
+            toast({ 
+                title: "Information Saved", 
+                description: "Your contact details have been securely saved.",
+                className: "bg-green-900/80 border-green-500/30"
+            });
+
+            // Proceed to next step
+            onSubmit();
+            
+        } catch (error) {
+            console.error(`[${new Date().toISOString()}] [ContactInfoForm] Error saving customer data:`, error);
+            
+            toast({ 
+                title: "Save Failed", 
+                description: error.message || "Could not save your contact information. Please try again.",
+                variant: "destructive",
+                duration: 5000
+            });
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleManualAddressChange = (field, value) => {
@@ -80,7 +139,7 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
             >
                 <div className="max-w-3xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
                     <div className="flex items-center mb-8 border-b border-white/10 pb-4">
-                        <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20">
+                        <Button onClick={onBack} variant="ghost" size="icon" className="mr-4 text-white hover:bg-white/20" disabled={isSaving}>
                             <ArrowLeft />
                         </Button>
                         <h2 className="text-3xl font-bold text-white flex items-center">
@@ -94,11 +153,11 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                             <p className="text-blue-200 mb-4">Please provide your details so we can send you updates and coordinate your rental.</p>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <InputField icon={<User />} type="text" name="firstName" placeholder="First Name" value={bookingData.firstName} onChange={handleInputChange} onBlur={handleBlur} required />
-                                <InputField icon={<User />} type="text" name="lastName" placeholder="Last Name" value={bookingData.lastName} onChange={handleInputChange} onBlur={handleBlur} required />
+                                <InputField icon={<User />} type="text" name="firstName" placeholder="First Name" value={bookingData.firstName} onChange={handleInputChange} onBlur={handleBlur} required disabled={isSaving} />
+                                <InputField icon={<User />} type="text" name="lastName" placeholder="Last Name" value={bookingData.lastName} onChange={handleInputChange} onBlur={handleBlur} required disabled={isSaving} />
                             </div>
-                            <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
-                            <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
+                            <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required disabled={isSaving} />
+                            <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required disabled={isSaving} />
                         </div>
 
                         <div className="bg-black/20 p-6 rounded-xl border border-white/10 space-y-4">
@@ -129,19 +188,35 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                                     }))} 
                                     placeholder="Start typing your address..." 
                                     required 
+                                    disabled={isSaving}
                                 />
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.city || ''} onChange={(e) => handleManualAddressChange('city', e.target.value)} placeholder="City" />
-                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.state || ''} onChange={(e) => handleManualAddressChange('state', e.target.value)} placeholder="State" />
-                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.zip || ''} onChange={(e) => handleManualAddressChange('zip', e.target.value)} placeholder="ZIP Code" />
+                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.city || ''} onChange={(e) => handleManualAddressChange('city', e.target.value)} placeholder="City" disabled={isSaving} />
+                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.state || ''} onChange={(e) => handleManualAddressChange('state', e.target.value)} placeholder="State" disabled={isSaving} />
+                                <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.zip || ''} onChange={(e) => handleManualAddressChange('zip', e.target.value)} placeholder="ZIP Code" disabled={isSaving} />
                             </div>
                         </div>
 
                         <div className="pt-4">
-                            <Button type="submit" className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50">
-                                Continue to Terms & Conditions <ArrowRight className="ml-2 h-5 w-5" />
+                            <Button 
+                                type="submit" 
+                                disabled={isSaving}
+                                className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isSaving ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                                        Saving Information...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Database className="mr-2 h-5 w-5" />
+                                        Save & Continue to Terms
+                                        <ArrowRight className="ml-2 h-5 w-5" />
+                                    </>
+                                )}
                             </Button>
                         </div>
                     </form>
@@ -166,6 +241,6 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
 const InputField = ({ icon, disabled, ...props }) => (
     <div className="relative flex items-center">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-blue-300">{icon}</span>
-        <input {...props} disabled={disabled} className={`w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-4 py-3 placeholder-blue-200 transition-colors ${disabled ? 'opacity-60 bg-gray-800' : ''}`} />
+        <input {...props} disabled={disabled} className={`w-full bg-white/10 text-white rounded-lg border border-white/30 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 pl-10 pr-4 py-3 placeholder-blue-200 transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`} />
     </div>
 );
