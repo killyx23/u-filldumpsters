@@ -96,7 +96,7 @@ export const PendingVerificationsManager = () => {
 
             if (error) throw error;
             if (data?.error) throw new Error(data.error);
-
+            expireActiveRentalAccessCodesForOrder(selectedBooking.id, 'admin');
             const adminEmail = user?.email || 'admin';
             await supabase.from('customer_notes').insert({
                 customer_id: selectedBooking.customer_id,

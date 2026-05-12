@@ -75,7 +75,7 @@ const VerifyEmailPage = () => {
     <>
       <Helmet>
         <title>Verify Email - U-Fill Dumpsters</title>
-        <meta name="description" content="Verify your email address for U-Fill Dumpsters securely." />
+        <meta name="description" content="Verify your email address to complete your booking with U-Fill Dumpsters." />
       </Helmet>
       <div className="min-h-[calc(100vh-200px)] flex items-center justify-center p-4">
         <motion.div

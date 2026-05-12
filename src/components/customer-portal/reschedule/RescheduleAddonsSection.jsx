@@ -64,11 +64,11 @@ export const RescheduleAddonsSection = ({
           throw equipErr;
         }
         
-        console.log('[RescheduleAddons] Booking equipment fetched:', bookingEquip);
+        console.log('[RescheduleAddons] Booking equipment fetched (excluding ID 7):', bookingEquip);
         
-        // Add ALL equipment items to map (including disposal services)
+        // Add equipment items to map (excluding ID 7)
         (bookingEquip || []).forEach(be => {
-          if (be.equipment) {
+          if (be.equipment && be.equipment.id !== 7) {
             const equipId = be.equipment.id;
             const equipName = be.equipment.name;
             const equipType = be.equipment.type || 'rental';

@@ -155,7 +155,7 @@ export const generateVerificationEmailTemplate = (code, verifyLink) => {
         <div class="footer">
           <p>&copy; ${currentYear} U-Fill Dumpsters LLC. All rights reserved.</p>
           <p>If you did not request this verification, you can safely ignore this email.</p>
-          <p><a href="https://ufilldumpsters.com/contact">Contact Support</a> | <a href="https://ufilldumpsters.com/faq">FAQ</a></p>
+          <p><a href="https://u-filldumpsters.com/contact">Contact Support</a> | <a href="https://u-filldumpsters.com/faq">FAQ</a></p>
         </div>
       </div>
     </body>
