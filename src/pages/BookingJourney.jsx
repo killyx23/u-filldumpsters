@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
@@ -180,6 +181,27 @@ function BookingJourney() {
 
       setBookingId(data.id);
       console.log(`[${rpcEndTs}] [BookingJourney] Successfully extracted and set bookingId: ${data.id}`);
+
+      // Task 5 (modified): Link booking_id to pending_customers immediately after booking creation
+      const linkTimestamp = new Date().toISOString();
+      console.log(`[${linkTimestamp}] [BookingJourney] Linking booking_id ${data.id} to pending_customers for email: ${bookingData.email}`);
+      
+      const { error: linkError } = await supabase
+        .from('pending_customers')
+        .update({ booking_id: data.id })
+        .eq('email', bookingData.email.toLowerCase().trim());
+      
+      if (linkError) {
+        console.error(`[${new Date().toISOString()}] [BookingJourney] Failed to link booking_id to pending_customers:`, linkError);
+        // Don't block the flow - this is not critical
+        toast({
+          title: 'Warning',
+          description: 'Booking created but linking to customer record failed.',
+          variant: 'default'
+        });
+      } else {
+        console.log(`[${new Date().toISOString()}] [BookingJourney] ✓ Successfully linked booking_id to pending_customers`);
+      }
 
       if (addonsData.licenseImageUrls?.length > 0) {
         console.log(`[${rpcEndTs}] [BookingJourney] Updating customer ID ${data.customer_id} with license information.`);

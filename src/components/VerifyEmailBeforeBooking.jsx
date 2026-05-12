@@ -27,9 +27,26 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         returnByTime: 'Time not specified'
     });
 
+    // Extract email from bookingData
+    const customerEmail = bookingData?.email;
+
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+
+    // Validate that email exists
+    useEffect(() => {
+        if (!customerEmail) {
+            console.error('[VerifyEmailBeforeBooking] No email address provided in bookingData');
+            toast({
+                title: 'Configuration Error',
+                description: 'Email address is missing. Please go back and ensure your email is entered.',
+                variant: 'destructive'
+            });
+        } else {
+            console.log('[VerifyEmailBeforeBooking] Using email for verification:', customerEmail);
+        }
+    }, [customerEmail]);
 
     // Load equipment prices from database (excluding insurance which comes from hook)
     useEffect(() => {
@@ -86,25 +103,56 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
     }, [plan?.id, isDelivery, bookingData?.dropOffDate, bookingData?.pickupDate]);
 
     const handleSendCode = async () => {
+        if (!customerEmail) {
+            toast({
+                title: 'Error',
+                description: 'Email address is required to send verification code.',
+                variant: 'destructive'
+            });
+            return;
+        }
+
         setStatus('sending');
         try {
+            console.log('[VerifyEmailBeforeBooking] Sending verification code to:', customerEmail);
             const { data, error } = await supabase.functions.invoke('send-verification-email', {
-                body: { email: bookingData.email, name: `${bookingData.firstName} ${bookingData.lastName}`.trim() }
+                body: { 
+                    email: customerEmail, 
+                    name: `${bookingData.firstName} ${bookingData.lastName}`.trim() 
+                }
             });
+            
             if (error) {
-              const errData = await error.context?.json().catch(()=>null);
-              throw new Error(errData?.error || error.message);
+                const errData = await error.context?.json().catch(() => null);
+                throw new Error(errData?.error || error.message);
             }
+            
             setStatus('sent');
-            toast({ title: 'Code Sent', description: `We sent a verification code to ${bookingData.email}.` });
+            toast({ 
+                title: 'Code Sent', 
+                description: `We sent a verification code to ${customerEmail}.` 
+            });
         } catch (err) {
             console.error("[VerifyEmailBeforeBooking] Send error:", err);
             setStatus('initial');
-            toast({ title: 'Failed to send code', description: err.message || 'An error occurred.', variant: 'destructive' });
+            toast({ 
+                title: 'Failed to send code', 
+                description: err.message || 'An error occurred.', 
+                variant: 'destructive' 
+            });
         }
     };
 
     const handleVerify = async () => {
+        if (!customerEmail) {
+            toast({
+                title: 'Error',
+                description: 'Email address is required for verification.',
+                variant: 'destructive'
+            });
+            return;
+        }
+
         // Trim and validate code - must be exactly 6 digits
         const trimmedCode = code.trim();
         if (!trimmedCode || trimmedCode.length !== 6) {
@@ -119,17 +167,18 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
         setStatus('verifying');
         
         try {
-            console.log('[VerifyEmailBeforeBooking] Verifying code for email:', bookingData.email);
+            console.log('[VerifyEmailBeforeBooking] Verifying code for email:', customerEmail);
             
+            // Call verify-email-code edge function
             const { data, error } = await supabase.functions.invoke('verify-email-code', {
                 body: { 
-                    email: bookingData.email.trim(), 
+                    email: customerEmail,
                     code: trimmedCode 
                 }
             });
             
             if (error) {
-                const errData = await error.context?.json().catch(()=>null);
+                const errData = await error.context?.json().catch(() => null);
                 throw new Error(errData?.error || error.message);
             }
             
@@ -137,8 +186,15 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                 throw new Error(data?.error || 'Invalid verification code');
             }
             
-            console.log('[VerifyEmailBeforeBooking] ✓ Verification successful');
+            console.log('[VerifyEmailBeforeBooking] ✓ Email verification successful');
+            
             setStatus('verified');
+            
+            toast({
+                title: 'Email Verified!',
+                description: 'Your email has been successfully verified.',
+                className: "bg-green-900/80 border-green-500/30"
+            });
             
             // Continue to next step in booking journey
             onComplete();
@@ -515,14 +571,18 @@ export const VerifyEmailBeforeBooking = ({ bookingData, addonsData, plan, totalP
                             <Mail className="mx-auto h-12 w-12 text-blue-400 mb-4" />
                             <h3 className="text-xl font-bold text-white mb-2">Verify Your Email</h3>
                             <p className="text-gray-300 text-sm">
-                                We need to verify <strong className="text-yellow-300">{bookingData.email}</strong> to secure your booking and send your receipt.
+                                We need to verify <strong className="text-yellow-300">{customerEmail || 'your email'}</strong> to secure your booking and send your receipt.
                             </p>
                         </div>
 
                         <AnimatePresence mode="wait">
                             {status === 'initial' && (
                                 <motion.div key="initial" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                                    <Button onClick={handleSendCode} className="w-full py-6 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white">
+                                    <Button 
+                                        onClick={handleSendCode} 
+                                        className="w-full py-6 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                                        disabled={!customerEmail}
+                                    >
                                         Send Verification Code
                                     </Button>
                                 </motion.div>
