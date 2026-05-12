@@ -4,7 +4,73 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1965b82c-e02c-47e8-afbd-37846ef5fa10" name="Changes" comment="" />
+    <list default="true" id="1965b82c-e02c-47e8-afbd-37846ef5fa10" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.nvmrc" beforeDir="false" afterPath="$PROJECT_DIR$/.nvmrc" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.version" beforeDir="false" afterPath="$PROJECT_DIR$/.version" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/public/llms.txt" beforeDir="false" afterPath="$PROJECT_DIR$/public/llms.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/public/sitemap.xml" beforeDir="false" afterPath="$PROJECT_DIR$/public/sitemap.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/App.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/App.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/api/EcommerceApi.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/api/EcommerceApi.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/AddonsForm.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/AddonsForm.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/BookingForm.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/BookingForm.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/BookingSummaryReview.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/BookingSummaryReview.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/ContactInfoForm.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/ContactInfoForm.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/DeliveryAddressSection.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/DeliveryAddressSection.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/DeliveryLocationMap.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/DeliveryLocationMap.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/Hero.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/Hero.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/PaymentPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/PaymentPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/Plans.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/Plans.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/PrintableReceipt.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/PrintableReceipt.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/ReviewsCarousel.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/ReviewsCarousel.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/VerifyEmailBeforeBooking.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/VerifyEmailBeforeBooking.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/addons/OrderSummary.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/addons/OrderSummary.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/AIAssistantMessagesManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/AIAssistantMessagesManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/AIKnowledgeBaseManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/AIKnowledgeBaseManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/AIKnowledgeSectionManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/AIKnowledgeSectionManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/BookingsManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/BookingsManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/EquipmentManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/EquipmentManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/PendingVerificationsManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/PendingVerificationsManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/PricingManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/PricingManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/customer-detail/CustomerVerification.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/customer-detail/CustomerVerification.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/AIAssistant.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/AIAssistant.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/AIAssistantTab.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/AIAssistantTab.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/BookingActionsDialogs.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/BookingActionsDialogs.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/BusinessHoursDisplay.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/BusinessHoursDisplay.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/CommunicationHub.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/CommunicationHub.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/reschedule/RescheduleAddonsSection.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/reschedule/RescheduleAddonsSection.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/reschedule/RescheduleDialog.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/reschedule/RescheduleDialog.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/reschedule/ReschedulePricingBreakdown.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/reschedule/ReschedulePricingBreakdown.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/reschedule/ReschedulePricingBreakdownDisplay.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/reschedule/ReschedulePricingBreakdownDisplay.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/pricing/PriceBreakdown.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/pricing/PriceBreakdown.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/hooks/useDumpFees.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/hooks/useDumpFees.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/hooks/useGoogleMapsLoader.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/hooks/useGoogleMapsLoader.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/hooks/useGooglePlacesAutocomplete.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/hooks/useGooglePlacesAutocomplete.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/hooks/useInsurancePricing.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/hooks/useInsurancePricing.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/index.css" beforeDir="false" afterPath="$PROJECT_DIR$/src/index.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/customSupabaseClient.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/customSupabaseClient.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/AdminDashboard.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/AdminDashboard.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/BookingConfirmation.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/BookingConfirmation.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/BookingJourney.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/BookingJourney.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/CustomerPortalBookingDetail.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/CustomerPortalBookingDetail.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/EdgeFunctionDiagnosticPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/EdgeFunctionDiagnosticPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/ReceiptPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/ReceiptPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/SupabaseConnectionTest.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/SupabaseConnectionTest.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/VerifyEmailPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/VerifyEmailPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/AIAssistantService.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/AIAssistantService.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/services/AIKnowledgeBaseService.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/services/AIKnowledgeBaseService.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/bookingPinReinstate.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/bookingPinReinstate.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/calculateTaxAmount.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/calculateTaxAmount.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/debugIgloohomeHelper.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/debugIgloohomeHelper.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/equipmentDataCleanup.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/equipmentDataCleanup.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/equipmentPricingIntegration.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/equipmentPricingIntegration.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/getTaxRate.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/getTaxRate.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/igloohomeIntegrationDiagnostics.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/igloohomeIntegrationDiagnostics.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/rescheduleCalculations.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/rescheduleCalculations.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/send-verification-email-template.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/send-verification-email-template.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/timeWindowFormatter.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/timeWindowFormatter.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vite.config.js" beforeDir="false" afterPath="$PROJECT_DIR$/vite.config.js" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
