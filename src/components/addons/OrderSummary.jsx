@@ -88,8 +88,41 @@ export const OrderSummary = ({
             idsToLoad.add(7);
 
             try {
-                const meta = await getEquipmentPricingMetaMap([...idsToLoad]);
-                setEquipmentMeta(meta);
+                // Load equipment prices (IDs 1-6)
+                if (addons?.equipment && addons.equipment.length > 0) {
+                    for (const item of addons.equipment) {
+                        const equipmentId = item.equipment_id || item.dbId || item.id;
+                        
+                        if (!equipmentId) {
+                            console.warn('[OrderSummary] Equipment item missing ID:', item);
+                            continue;
+                        }
+
+                        if (!isValidEquipmentId(equipmentId)) {
+                            console.error('[OrderSummary] Invalid equipment ID format:', equipmentId);
+                            continue;
+                        }
+
+                        const price = await getPriceForEquipment(equipmentId);
+                        prices[equipmentId] = price;
+                    }
+                }
+
+                // Load disposal item prices (IDs 4, 5, 6)
+                const disposalItems = [
+                    { key: 'mattressDisposal', dbId: 4 },
+                    { key: 'tvDisposal', dbId: 5 },
+                    { key: 'applianceDisposal', dbId: 6 }
+                ];
+
+                for (const disposal of disposalItems) {
+                    if (addons?.[disposal.key] && addons[disposal.key] > 0) {
+                        const price = await getPriceForEquipment(disposal.dbId);
+                        prices[disposal.dbId] = price;
+                    }
+                }
+
+                setEquipmentPrices(prices);
             } catch (error) {
                 console.error('[OrderSummary] Error loading equipment meta:', error);
                 toast({ title: 'Error Loading Prices', description: 'Some prices could not be loaded from database.', variant: 'destructive' });

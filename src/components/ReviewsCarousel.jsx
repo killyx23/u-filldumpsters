@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Star, MessageCircle, ChevronLeft, ChevronRight, Package, X } from 'lucide-react';
+import { Star, MessageCircle, ChevronLeft, ChevronRight, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -59,25 +60,61 @@ export const ReviewsCarousel = () => {
     const [reviews, setReviews] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [selectedReview, setSelectedReview] = useState(null);
 
     useEffect(() => {
         const fetchReviews = async () => {
             setLoading(true);
-            const { data, error } = await supabase
-                .from('reviews')
-                .select('*, customers(name), bookings(plan, addons)')
-                .eq('is_public', true)
-                .order('created_at', { ascending: false })
-                .limit(10);
+            setError(null);
+            
+            try {
+                console.log('[Reviews Carousel] 🔄 Initiating fetch from Supabase');
+                console.log('[Reviews Carousel] Supabase client status:', supabase ? '✓ Initialized' : '✗ Not initialized');
+                
+                // Test basic connection first
+                const { data: testData, error: testError } = await supabase
+                    .from('reviews')
+                    .select('id')
+                    .limit(1);
+                
+                if (testError) {
+                    console.error('[Reviews Carousel] ✗ Connection test failed:', testError);
+                    throw new Error(`Connection test failed: ${testError.message}`);
+                }
+                
+                console.log('[Reviews Carousel] ✓ Connection test successful');
+                
+                // Fetch public reviews with customer and booking details
+                const { data, error: fetchError } = await supabase
+                    .from('reviews')
+                    .select('*, customers(name), bookings(plan, addons)')
+                    .eq('is_public', true)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
 
-            if (error) {
-                console.error("Error fetching reviews:", error);
-            } else {
-                setReviews(data);
+                if (fetchError) {
+                    console.error('[Reviews Carousel] ✗ Fetch error:', {
+                        message: fetchError.message,
+                        details: fetchError.details,
+                        hint: fetchError.hint,
+                        code: fetchError.code
+                    });
+                    throw fetchError;
+                }
+                
+                console.log('[Reviews Carousel] ✓ Fetched reviews:', data?.length || 0);
+                setReviews(data || []);
+                
+            } catch (error) {
+                console.error('[Reviews Carousel] ✗ Fatal error:', error);
+                setError(error.message);
+                // Don't show toast for reviews since this is optional content
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         };
+        
         fetchReviews();
     }, []);
 
@@ -98,12 +135,9 @@ export const ReviewsCarousel = () => {
         setCurrentIndex((prevIndex) => (prevIndex + 1) % reviews.length);
     };
 
-    if (loading) {
-        return null; // Don't show anything while loading
-    }
-
-    if (reviews.length === 0) {
-        return null; // Don't render the section if there are no reviews
+    // Don't render if loading or error (fail gracefully)
+    if (loading || error || reviews.length === 0) {
+        return null;
     }
 
     return (

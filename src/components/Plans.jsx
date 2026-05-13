@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PlanCard } from '@/components/PlanCard';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Loader2, CheckCircle } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { formatISO, startOfDay, addDays } from 'date-fns';
 import { useDumpFees } from '@/hooks/useDumpFees';
 
@@ -10,104 +11,138 @@ export const Plans = ({ onSelectPlan }) => {
     const [plans, setPlans] = useState([]);
     const [availability, setAvailability] = useState({});
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const { dumpFees } = useDumpFees();
 
     useEffect(() => {
         const fetchPlansAndAvailability = async () => {
             setLoading(true);
-
-            const { data: plansData, error: plansError } = await supabase
-                .from('services')
-                .select('*')
-                .in('id', [1, 2, 3, 4])
-                .order('id');
-            
-            if (plansError) {
-                console.error("Error fetching plans:", plansError);
-                setLoading(false);
-                return;
-            }
-            
-            // Filter to only show base plans on the frontend (1, 2, 3)
-            const frontendPlans = plansData.filter(p => [1, 2, 3].includes(p.id));
-            setPlans(frontendPlans);
-
-            if (frontendPlans.length === 0) {
-                setLoading(false);
-                return;
-            }
-            
-            const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
-            
-            // 1. Fetch explicit daily availability overrides for today from correct table
-            const { data: dateSpecificAvailData } = await supabase
-                .from('date_specific_availability')
-                .select('service_id, is_available')
-                .eq('date', todayStr);
-
-            const todayAvailabilityMap = {};
-            if (dateSpecificAvailData) {
-                dateSpecificAvailData.forEach(item => {
-                    todayAvailabilityMap[item.service_id] = item.is_available;
-                });
-            }
-
-            // 2. Fetch general 30-day availability as fallback
-            const startDate = todayStr;
-            const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
-            
-            const availabilityPromises = frontendPlans.map(plan => 
-                supabase.functions.invoke('get-availability', {
-                    body: {
-                        serviceId: plan.id,
-                        startDate,
-                        endDate,
-                        isDelivery: plan.id === 2 ? false : undefined 
-                    }
-                })
-            );
-            
-            const deliveryForPlan2Promise = supabase.functions.invoke('get-availability', {
-                body: { serviceId: 2, startDate, endDate, isDelivery: true }
-            });
+            setError(null);
 
             try {
-                const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
-                const newAvailability = {};
+                console.log('[Plans] 🔄 Initiating fetch from Supabase');
+                console.log('[Plans] Supabase client status:', supabase ? '✓ Initialized' : '✗ Not initialized');
+                
+                // Test basic connection first
+                const { data: testData, error: testError } = await supabase
+                    .from('services')
+                    .select('id')
+                    .limit(1);
+                
+                if (testError) {
+                    console.error('[Plans] ✗ Connection test failed:', testError);
+                    throw new Error(`Connection test failed: ${testError.message}`);
+                }
+                
+                console.log('[Plans] ✓ Connection test successful');
+                
+                // Fetch services (plans)
+                const { data: plansData, error: plansError } = await supabase
+                    .from('services')
+                    .select('*')
+                    .in('id', [1, 2, 3, 4])
+                    .order('id');
+                
+                if (plansError) {
+                    console.error('[Plans] ✗ Fetch error:', {
+                        message: plansError.message,
+                        details: plansError.details,
+                        hint: plansError.hint,
+                        code: plansError.code
+                    });
+                    throw plansError;
+                }
+                
+                console.log('[Plans] ✓ Fetched plans:', plansData?.length || 0);
+                
+                // Filter to only show base plans on the frontend (1, 2, 3)
+                const frontendPlans = plansData.filter(p => [1, 2, 3].includes(p.id));
+                setPlans(frontendPlans);
 
-                frontendPlans.forEach((plan, index) => {
-                    // Primary check: Is it explicitly marked closed today in admin?
-                    if (todayAvailabilityMap[plan.id] === false) {
-                        newAvailability[plan.id] = false;
-                        return;
-                    }
+                if (frontendPlans.length === 0) {
+                    setLoading(false);
+                    return;
+                }
+                
+                const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
+                
+                // 1. Fetch explicit daily availability overrides for today
+                const { data: dateSpecificAvailData, error: dateSpecificError } = await supabase
+                    .from('date_specific_availability')
+                    .select('service_id, is_available')
+                    .eq('date', todayStr);
 
-                    // Fallback check: Is it available at all in the next 30 days?
-                    let isAnyDayAvailable = false;
-                    const result = results[index];
-                    
-                    if (result.data?.availability) {
-                        isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
-                    }
-                    
-                    if (plan.id === 2) {
-                        const deliveryResult = results[results.length - 1];
-                        if (deliveryResult.data?.availability) {
-                            const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
-                            isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
+                if (dateSpecificError) {
+                    console.warn('[Plans] ⚠ Date-specific availability fetch failed:', dateSpecificError);
+                }
+
+                const todayAvailabilityMap = {};
+                if (dateSpecificAvailData) {
+                    dateSpecificAvailData.forEach(item => {
+                        todayAvailabilityMap[item.service_id] = item.is_available;
+                    });
+                }
+
+                // 2. Fetch general 30-day availability as fallback
+                const startDate = todayStr;
+                const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
+                
+                const availabilityPromises = frontendPlans.map(plan => 
+                    supabase.functions.invoke('get-availability', {
+                        body: {
+                            serviceId: plan.id,
+                            startDate,
+                            endDate,
+                            isDelivery: plan.id === 2 ? false : undefined 
                         }
-                    }
-
-                    newAvailability[plan.id] = isAnyDayAvailable;
+                    })
+                );
+                
+                const deliveryForPlan2Promise = supabase.functions.invoke('get-availability', {
+                    body: { serviceId: 2, startDate, endDate, isDelivery: true }
                 });
 
-                setAvailability(newAvailability);
+                try {
+                    const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
+                    const newAvailability = {};
+
+                    frontendPlans.forEach((plan, index) => {
+                        // Primary check: Is it explicitly marked closed today in admin?
+                        if (todayAvailabilityMap[plan.id] === false) {
+                            newAvailability[plan.id] = false;
+                            return;
+                        }
+
+                        // Fallback check: Is it available at all in the next 30 days?
+                        let isAnyDayAvailable = false;
+                        const result = results[index];
+                        
+                        if (result.data?.availability) {
+                            isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
+                        }
+                        
+                        if (plan.id === 2) {
+                            const deliveryResult = results[results.length - 1];
+                            if (deliveryResult.data?.availability) {
+                                const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
+                                isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
+                            }
+                        }
+
+                        newAvailability[plan.id] = isAnyDayAvailable;
+                    });
+
+                    setAvailability(newAvailability);
+                } catch (availError) {
+                    console.error('[Plans] ✗ Availability fetch failed:', availError);
+                    // Fallback to just today's map if edge functions fail
+                    const fallbackAvail = {};
+                    frontendPlans.forEach(p => fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false);
+                    setAvailability(fallbackAvail);
+                }
             } catch (error) {
-                console.error("Error fetching availability for plans:", error);
-                // Fallback to just today's map if edge functions fail
-                const fallbackAvail = {};
-                frontendPlans.forEach(p => fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false);
-                setAvailability(fallbackAvail);
+                console.error('[Plans] ✗ Fatal error:', error);
+                setError(error.message);
             } finally {
                 setLoading(false);
             }
@@ -146,6 +181,19 @@ export const Plans = ({ onSelectPlan }) => {
             <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
         </div>
       );
+    }
+
+    if (error) {
+        return (
+            <div className="flex flex-col justify-center items-center h-96 text-center px-4">
+                <AlertCircle className="h-16 w-16 text-red-400 mb-4" />
+                <h3 className="text-2xl font-bold text-white mb-2">Unable to Load Services</h3>
+                <p className="text-blue-200 max-w-md">
+                    We're experiencing connection issues. Please refresh the page or contact us for assistance.
+                </p>
+                <p className="text-sm text-gray-400 mt-2">Error: {error}</p>
+            </div>
+        );
     }
 
     const valueProps = [
