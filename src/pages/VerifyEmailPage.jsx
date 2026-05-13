@@ -1,25 +1,26 @@
+
 import React, { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Loader2, CheckCircle2, XCircle, ArrowRight, ShieldCheck, Mail, KeyRound } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, KeyRound, ShieldCheck, Lock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Helmet } from 'react-helmet';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '@/components/ui/use-toast';
 
 const VerifyEmailPage = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const urlCode = searchParams.get('code');
   
-  // States: 'idle', 'verifying', 'success', 'error'
-  // If a code is in the URL, start verifying immediately. Otherwise wait for manual input.
-  const [status, setStatus] = useState(urlCode ? 'verifying' : 'idle'); 
+  const [status, setStatus] = useState(urlCode ? 'verifying' : 'idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [manualCode, setManualCode] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [generatedPin, setGeneratedPin] = useState(null);
 
   useEffect(() => {
-    // Check if the code is present in the URL on mount and auto-verify
     if (urlCode) {
       setManualCode(urlCode);
       handleVerification(urlCode);
@@ -38,25 +39,61 @@ const VerifyEmailPage = () => {
     setErrorMessage('');
 
     try {
-      const { data, error } = await supabase.functions.invoke('verify-email-code', {
+      console.log('[VerifyEmailPage] Starting verification for code:', codeToVerify);
+
+      // Step 1: Verify email code
+      const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
         body: { code: codeToVerify.trim() }
       });
 
-      if (error) {
-         // Try to parse error response if it's from the edge function
-         const errData = await error.context?.json().catch(() => null);
-         throw new Error(errData?.error || error.message || 'Failed to communicate with verification server.');
+      if (verifyError) {
+        const errData = await verifyError.context?.json().catch(() => null);
+        throw new Error(errData?.error || verifyError.message || 'Failed to verify email');
       }
       
-      if (!data?.success) {
-        throw new Error(data?.error || 'The verification code was invalid or has expired.');
+      if (!verifyData?.success) {
+        throw new Error(verifyData?.error || 'Invalid or expired verification code');
+      }
+
+      console.log('[VerifyEmailPage] ✓ Email verified, booking_id:', verifyData.booking_id);
+
+      // Step 2: Generate PIN if we have a booking_id
+      if (verifyData.booking_id) {
+        console.log('[VerifyEmailPage] Generating PIN for booking:', verifyData.booking_id);
+        
+        const { data: pinData, error: pinError } = await supabase.functions.invoke('generate-pin', {
+          body: { booking_id: verifyData.booking_id }
+        });
+
+        if (pinError) {
+          const errData = await pinError.context?.json().catch(() => null);
+          console.error('[VerifyEmailPage] PIN generation error:', errData || pinError);
+          // Don't fail completely - email is verified, just show warning
+          toast({
+            title: "Email Verified",
+            description: "Your email was verified, but PIN generation failed. Please contact support.",
+            variant: "default"
+          });
+        } else if (pinData?.success) {
+          console.log('[VerifyEmailPage] ✓ PIN generated:', pinData.pin);
+          setGeneratedPin(pinData.pin);
+        }
       }
 
       setStatus('success');
+
+      // Redirect to confirmation page after 3 seconds
+      setTimeout(() => {
+        toast({
+          title: "Success!",
+          description: "Your email has been verified and your booking is confirmed.",
+        });
+        navigate('/confirmation');
+      }, 3000);
+
     } catch (err) {
-      console.error("Verification error:", err);
+      console.error("[VerifyEmailPage] Verification error:", err);
       setStatus('error');
-      // Set a user-friendly error message
       setErrorMessage(
         err.message || 
         'We could not verify your email at this time. Please check your code and try again.'
@@ -91,96 +128,130 @@ const VerifyEmailPage = () => {
             <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-yellow-500/10 rounded-full blur-3xl"></div>
 
             <div className="relative z-10">
-              {status === 'verifying' && (
-                <div className="py-8">
-                  <div className="relative w-20 h-20 mx-auto mb-6">
-                    <div className="absolute inset-0 border-4 border-white/10 rounded-full"></div>
-                    <div className="absolute inset-0 border-4 border-yellow-400 rounded-full border-t-transparent animate-spin"></div>
-                    <ShieldCheck className="absolute inset-0 m-auto h-8 w-8 text-yellow-400" />
-                  </div>
-                  <h1 className="text-3xl font-bold text-white mb-2">Verifying Code</h1>
-                  <p className="text-gray-300">Please wait while we securely verify your credentials...</p>
-                </div>
-              )}
-
-              {status === 'success' && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="py-6">
-                  <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
-                    <CheckCircle2 className="h-10 w-10 text-green-400" />
-                  </div>
-                  <h1 className="text-3xl font-bold text-white mb-3">Email Verified!</h1>
-                  <p className="text-gray-300 mb-8 leading-relaxed">
-                    Your email address has been successfully verified. Your account is now secure and ready to use.
-                  </p>
-                  <div className="space-y-4">
-                    <Button asChild className="w-full bg-yellow-400 text-black hover:bg-yellow-500 font-bold py-6 text-lg transition-transform hover:scale-[1.02]">
-                      <Link to="/login">
-                        Go to Customer Portal
-                        <ArrowRight className="ml-2 h-5 w-5" />
-                      </Link>
-                    </Button>
-                    <Button asChild variant="ghost" className="w-full text-blue-200 hover:text-white hover:bg-white/5 py-6">
-                      <Link to="/">Return to Homepage</Link>
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-
-              {(status === 'idle' || status === 'error') && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-4">
-                  <div className="mx-auto w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/30">
-                    <KeyRound className="h-8 w-8 text-blue-400" />
-                  </div>
-                  <h1 className="text-2xl font-bold text-white mb-2">Enter Verification Code</h1>
-                  <p className="text-gray-400 text-sm mb-6">
-                    Please enter the 6-digit code sent to your email address.
-                  </p>
-
-                  {status === 'error' && errorMessage && (
-                    <div className="mb-6 p-4 bg-red-900/40 rounded-xl border border-red-500/50 flex items-start text-left">
-                      <XCircle className="h-5 w-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" />
-                      <p className="text-red-200 text-sm">{errorMessage}</p>
+              <AnimatePresence mode="wait">
+                {status === 'verifying' && (
+                  <motion.div 
+                    key="verifying"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="py-8"
+                  >
+                    <div className="relative w-20 h-20 mx-auto mb-6">
+                      <div className="absolute inset-0 border-4 border-white/10 rounded-full"></div>
+                      <div className="absolute inset-0 border-4 border-yellow-400 rounded-full border-t-transparent animate-spin"></div>
+                      <ShieldCheck className="absolute inset-0 m-auto h-8 w-8 text-yellow-400" />
                     </div>
-                  )}
-
-                  <form onSubmit={onManualSubmit} className="space-y-6">
-                    <div>
-                      <Input
-                        type="text"
-                        placeholder="e.g. 123456"
-                        value={manualCode}
-                        onChange={(e) => setManualCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                        className="text-center text-2xl tracking-widest font-mono py-6 bg-black/40 border-white/20 text-white placeholder:text-gray-600 focus:border-blue-500 focus:ring-blue-500/20 transition-all"
-                        required
-                        disabled={isProcessing}
-                        maxLength={6}
-                      />
+                    <h1 className="text-3xl font-bold text-white mb-2">Verifying Email</h1>
+                    <p className="text-gray-300 mb-4">Please wait while we verify your email address...</p>
+                    <div className="flex items-center justify-center gap-2 text-sm text-blue-300">
+                      <Lock className="h-4 w-4 animate-pulse" />
+                      <span>Generating your secure access PIN</span>
                     </div>
-                    <Button 
-                      type="submit" 
-                      disabled={isProcessing || manualCode.length < 6}
-                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-6 text-lg font-semibold"
-                    >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                          Verifying...
-                        </>
-                      ) : (
-                        'Verify Code'
-                      )}
-                    </Button>
-                  </form>
-                  
-                  <div className="mt-8 pt-6 border-t border-white/10 text-sm text-gray-400">
-                    Didn't receive the email? Check your spam folder or 
-                    <Link to="/login" className="text-blue-400 hover:text-blue-300 ml-1 font-medium underline underline-offset-2">
-                      request a new one
-                    </Link>.
-                  </div>
-                </motion.div>
-              )}
+                  </motion.div>
+                )}
 
+                {status === 'success' && (
+                  <motion.div 
+                    key="success"
+                    initial={{ opacity: 0, y: 10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="py-6"
+                  >
+                    <div className="mx-auto w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-6 border border-green-500/30">
+                      <CheckCircle2 className="h-10 w-10 text-green-400" />
+                    </div>
+                    <h1 className="text-3xl font-bold text-white mb-3">Email Verified!</h1>
+                    <p className="text-gray-300 mb-6 leading-relaxed">
+                      Your email has been successfully verified and your booking is confirmed.
+                    </p>
+                    
+                    {generatedPin && (
+                      <div className="bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-xl p-6 mb-6">
+                        <div className="flex items-center justify-center gap-2 text-yellow-400 mb-3">
+                          <Lock className="h-5 w-5" />
+                          <span className="font-semibold">Your Access PIN</span>
+                        </div>
+                        <div className="text-5xl font-black text-white tracking-wider mb-2">
+                          {generatedPin}
+                        </div>
+                        <p className="text-sm text-gray-400">
+                          Use this PIN to access your rental equipment
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="text-blue-300 text-sm mb-4">
+                      Redirecting you to your booking confirmation...
+                    </p>
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-blue-400" />
+                  </motion.div>
+                )}
+
+                {(status === 'idle' || status === 'error') && (
+                  <motion.div 
+                    key="input"
+                    initial={{ opacity: 0 }} 
+                    animate={{ opacity: 1 }} 
+                    className="py-4"
+                  >
+                    <div className="mx-auto w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/30">
+                      <KeyRound className="h-8 w-8 text-blue-400" />
+                    </div>
+                    <h1 className="text-2xl font-bold text-white mb-2">Enter Verification Code</h1>
+                    <p className="text-gray-400 text-sm mb-6">
+                      Please enter the 6-digit code sent to your email address.
+                    </p>
+
+                    {status === 'error' && errorMessage && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mb-6 p-4 bg-red-900/40 rounded-xl border border-red-500/50 flex items-start text-left"
+                      >
+                        <XCircle className="h-5 w-5 text-red-400 mt-0.5 mr-3 flex-shrink-0" />
+                        <div>
+                          <p className="text-red-200 text-sm font-semibold mb-1">Verification Failed</p>
+                          <p className="text-red-300 text-sm">{errorMessage}</p>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    <form onSubmit={onManualSubmit} className="space-y-6">
+                      <div>
+                        <Input
+                          type="text"
+                          placeholder="000000"
+                          value={manualCode}
+                          onChange={(e) => setManualCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                          className="text-center text-2xl tracking-widest font-mono py-6 bg-black/40 border-white/20 text-white placeholder:text-gray-600 focus:border-blue-500 focus:ring-blue-500/20 transition-all"
+                          required
+                          disabled={isProcessing}
+                          maxLength={6}
+                        />
+                      </div>
+                      <Button 
+                        type="submit" 
+                        disabled={isProcessing || manualCode.length < 6}
+                        className="w-full bg-blue-600 hover:bg-blue-500 text-white py-6 text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isProcessing ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            Verifying...
+                          </>
+                        ) : (
+                          'Verify Code'
+                        )}
+                      </Button>
+                    </form>
+                    
+                    <div className="mt-8 pt-6 border-t border-white/10 text-sm text-gray-400">
+                      <p>Didn't receive the email? Check your spam folder or contact support.</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </motion.div>

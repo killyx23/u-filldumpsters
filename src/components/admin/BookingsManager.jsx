@@ -195,8 +195,8 @@ export const BookingsManager = ({ initialBookings }) => {
                     </TableHeader>
                     <TableBody>
                         {filteredBookings.map((booking) => {
-                            const stripeChargeId = 
-                                (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) || 
+                            const stripeChargeId =
+                                (Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0]?.stripe_charge_id : booking.stripe_payment_info?.stripe_charge_id) ||
                                 booking.payment_intent || 'N/A';
 
                             return (
@@ -274,7 +274,7 @@ export const BookingsManager = ({ initialBookings }) => {
                             {isEditMode ? 'Edit Booking' : 'Booking Details'} #{selectedBooking?.id}
                         </DialogTitle>
                     </DialogHeader>
-                    
+
                     {selectedBooking && (
                         isEditMode ? (
                             <BookingEditForm

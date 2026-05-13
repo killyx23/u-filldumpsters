@@ -54,7 +54,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
 
             if (refundError) throw refundError;
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
-
+            
             const updatedBookingForEmail = {
                 ...booking, 
                 customers: customer, 

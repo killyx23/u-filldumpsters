@@ -241,7 +241,7 @@ export async function getPriceForEquipment(equipmentId, date = null) {
   } catch (err) {
     console.error(`[${context}] Error fetching price for equipment ${equipmentId}:`, err);
     
-    // Final fallback attempt
+    // Final fallback attempt (excluding ID 7)
     try {
       const numericId = Number(equipmentId);
       console.log(`[${context}] Final fallback attempt to equipment.price`);
