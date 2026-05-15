@@ -1,0 +1,8 @@
+# Shell scripts must use LF (Linux/WSL/Git Bash)
+supabase/backup.sh text eol=lf
+supabase/*.sh text eol=lf
+*.sh text eol=lf
+
+# Env files sourced by scripts
+supabase/.env text eol=lf
+*.env text eol=lf

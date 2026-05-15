@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -17,30 +18,44 @@ import { CustomerVerification } from '@/components/admin/customer-detail/Custome
 import { CustomerProfileHeader } from '@/components/admin/customer-detail/CustomerProfileHeader';
 
 export const CustomerDetailView = () => {
-    const { id } = useParams();
+    const { customerId } = useParams();
+    const id = customerId;
     const [searchParams, setSearchParams] = useSearchParams();
     const [customer, setCustomer] = useState(null);
     const [bookings, setBookings] = useState([]);
     const [equipment, setEquipment] = useState([]);
     const [notes, setNotes] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
     const [hasUnreadNotes, setHasUnreadNotes] = useState(false);
 
     const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
+        if (!id || id === 'undefined') {
+            setError('Invalid customer ID');
+            setLoading(false);
+            return;
+        }
+        const numericId = Number(id);
+        if (!Number.isFinite(numericId)) {
+            setError('Invalid customer ID');
+            setLoading(false);
+            return;
+        }
+
         if (isInitialLoad) setLoading(true);
         try {
-            const { data: customerData, error: customerError } = await supabase.from('customers').select('*').eq('id', id).single();
+            const { data: customerData, error: customerError } = await supabase.from('customers').select('*').eq('id', numericId).single();
             if (customerError) throw customerError;
             setCustomer(customerData);
             
-            const { data: bookingsData, error: bookingsError } = await supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', id).order('created_at', { ascending: false });
+            const { data: bookingsData, error: bookingsError } = await supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', numericId).order('created_at', { ascending: false });
             if (bookingsError) throw bookingsError;
             setBookings(bookingsData || []);
 
-            const { data: notesData, error: notesError } = await supabase.from('customer_notes').select('*').eq('customer_id', id).order('created_at', { ascending: true });
+            const { data: notesData, error: notesError } = await supabase.from('customer_notes').select('*').eq('customer_id', numericId).order('created_at', { ascending: true });
             if (notesError) throw notesError;
             setNotes(notesData || []);
             setHasUnreadNotes(notesData.some(n => !n.is_read && n.author_type === 'customer'));
@@ -55,8 +70,9 @@ export const CustomerDetailView = () => {
                 setEquipment(data);
             }
 
-        } catch(error) {
-             toast({ title: "Failed to load customer details", description: error.message, variant: "destructive" });
+        } catch(err) {
+             toast({ title: "Failed to load customer details", description: err.message, variant: "destructive" });
+             setError(err.message);
              setCustomer(null);
              setBookings([]);
              setEquipment([]);
@@ -71,7 +87,9 @@ export const CustomerDetailView = () => {
     }, [fetchCustomerDetails]);
 
     useEffect(() => {
-        if (!id) return;
+        if (!id || id === 'undefined') return;
+        const numericId = Number(id);
+        if (!Number.isFinite(numericId)) return;
         
         const handleNewNote = (payload) => {
           setNotes((currentNotes) => {
@@ -91,9 +109,9 @@ export const CustomerDetailView = () => {
           }
         };
         
-        const notesSubscription = supabase.channel(`customer-notes-admin-${id}`)
+        const notesSubscription = supabase.channel(`customer-notes-admin-${numericId}`)
           .on('postgres_changes', 
-            { event: 'INSERT', schema: 'public', table: 'customer_notes', filter: `customer_id=eq.${id}` }, 
+            { event: 'INSERT', schema: 'public', table: 'customer_notes', filter: `customer_id=eq.${numericId}` }, 
             handleNewNote
           ).subscribe();
 
@@ -132,6 +150,17 @@ export const CustomerDetailView = () => {
     
     if (loading) {
         return <div className="flex justify-center items-center h-screen"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
+    }
+
+    if (error) {
+        return (
+            <div className="text-center py-20">
+                <h2 className="text-2xl font-bold text-red-500">{error}</h2>
+                <Link to="/admin?tab=customers">
+                    <Button className="mt-4"><ArrowLeft className="mr-2 h-4 w-4" />Back to Dashboard</Button>
+                </Link>
+            </div>
+        );
     }
 
     if (!customer) {

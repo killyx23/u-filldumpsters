@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -19,7 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { format, parseISO } from 'date-fns';
 
 export const CustomerDetailView = () => {
-    const { id } = useParams();
+    const { customerId } = useParams();
+    const id = customerId;
     const [searchParams, setSearchParams] = useSearchParams();
     const [customer, setCustomer] = useState(null);
     const [bookings, setBookings] = useState([]);
@@ -33,14 +35,26 @@ export const CustomerDetailView = () => {
     const [hasUnreadNotes, setHasUnreadNotes] = useState(false);
 
     const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
+        if (!id || id === 'undefined') {
+            setError('Invalid customer ID');
+            setLoading(false);
+            return;
+        }
+        const numericId = Number(id);
+        if (!Number.isFinite(numericId)) {
+            setError('Invalid customer ID');
+            setLoading(false);
+            return;
+        }
+
         if (isInitialLoad) {
             setLoading(true);
             setError(null);
         }
         try {
-            const customerPromise = supabase.from('customers').select('*').eq('id', id).single();
-            const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', id).order('created_at', { ascending: false });
-            const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', id).order('created_at', { ascending: true });
+            const customerPromise = supabase.from('customers').select('*').eq('id', numericId).single();
+            const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', numericId).order('created_at', { ascending: false });
+            const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', numericId).order('created_at', { ascending: true });
 
             const [{ data: customerData, error: customerError }, { data: bookingsData, error: bookingsError }, { data: notesData, error: notesError }] = await Promise.all([customerPromise, bookingsPromise, notesPromise]);
             
@@ -82,10 +96,12 @@ export const CustomerDetailView = () => {
     }, [fetchCustomerDetails]);
 
     useEffect(() => {
-        if (!id) return;
+        if (!id || id === 'undefined') return;
+        const numericId = Number(id);
+        if (!Number.isFinite(numericId)) return;
 
-        const notesChannel = supabase.channel(`customer-notes-${id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'customer_notes', filter: `customer_id=eq.${id}` }, 
+        const notesChannel = supabase.channel(`customer-notes-${numericId}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'customer_notes', filter: `customer_id=eq.${numericId}` }, 
             (payload) => {
                 setNotes(currentNotes => [...currentNotes, payload.new]);
                 if (payload.new.author_type === 'customer') {
@@ -99,13 +115,13 @@ export const CustomerDetailView = () => {
             })
             .subscribe();
 
-        const bookingsChannel = supabase.channel(`customer-bookings-${id}`)
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `customer_id=eq.${id}` }, () => fetchCustomerDetails(false))
+        const bookingsChannel = supabase.channel(`customer-bookings-${numericId}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings', filter: `customer_id=eq.${numericId}` }, () => fetchCustomerDetails(false))
             .subscribe();
         
-        const customerChannel = supabase.channel(`customer-profile-${id}`)
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers', filter: `id=eq.${id}` }, (payload) => {
-                if (payload.new.id.toString() === id) {
+        const customerChannel = supabase.channel(`customer-profile-${numericId}`)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers', filter: `id=eq.${numericId}` }, (payload) => {
+                if (payload.new.id === numericId) {
                     setCustomer(c => ({ ...c, ...payload.new }));
                     setHasUnreadNotes(payload.new.has_unread_notes);
                 }

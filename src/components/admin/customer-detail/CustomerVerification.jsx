@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -209,6 +210,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     const { history, loading: historyLoading } = useVerificationImageHistory(customer?.id);
 
     const handleSavePlate = async () => {
+        if (!customer?.id) return;
         setIsSavingPlate(true);
         const { error } = await supabase
             .from('customers')
@@ -226,6 +228,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     };
 
     const handleUpdateDocStatus = async (status) => {
+        if (!customer?.id) return;
         setIsProcessingStatus(true);
         try {
             const { data: { user } } = await supabase.auth.getUser();
@@ -240,6 +243,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     };
     
     const handleApprove = async (booking) => {
+        if (!customer?.id) return;
         const prevStatus = booking.status;
         const { error } = await supabase
             .from('bookings')

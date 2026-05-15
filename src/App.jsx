@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
@@ -25,6 +25,11 @@ import { ProductShowcasePage } from '@/pages/ProductShowcasePage';
 import AccessCodesPage from '@/pages/AccessCodesPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
+
+const PortalRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={`/customer-portal${search}`} replace />;
+};
 
 function App() {
   const [reorderData, setReorderData] = useState(null);
@@ -51,18 +56,20 @@ function App() {
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/admin-login" element={<AdminLogin />} />
               <Route path="/customer-login" element={<CustomerLogin />} />
+              <Route path="/login" element={<CustomerLogin />} />
               <Route path="/customer-portal-login" element={<CustomerPortalLogin />} />
               <Route path="/booking-confirmation" element={<BookingConfirmation />} />
               <Route path="/receipt/:bookingId" element={<ReceiptPage />} />
               <Route path="/products" element={<ProductShowcasePage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/payment" element={<PaymentPage />} />
-              <Route path="/confirmation" element={<PaymentPage />} />
+              <Route path="/confirmation" element={<BookingConfirmation />} />
               
               <Route path="/resources" element={<ResourceLibraryPage />} />
               <Route path="/resources/:id" element={<ResourceDetailPage />} />
               
               <Route path="/customer-portal" element={<CustomerPortal />} />
+              <Route path="/portal" element={<PortalRedirect />} />
 
               <Route
                 path="/admin/*"

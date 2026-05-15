@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -100,11 +101,15 @@ export const CustomerPortal = () => {
 
     useEffect(() => {
         const pid = searchParams.get('portal_id');
+        const pnum = searchParams.get('portal_number');
+        const cid = searchParams.get('cid');
         const ph = searchParams.get('phone');
         
-        console.log('[CustomerPortal] URL params detected:', { portal_id: pid, phone: ph });
+        const foundPid = pid || pnum || cid;
         
-        if (pid) setLoginPortalId(pid);
+        console.log('[CustomerPortal] URL params detected:', { foundPid, phone: ph });
+        
+        if (foundPid) setLoginPortalId(foundPid);
         if (ph) setLoginPhone(ph);
     }, [searchParams]);
 
@@ -139,14 +144,15 @@ export const CustomerPortal = () => {
         
         console.log(`[${timestamp}] [CustomerPortal] Customer DB ID from metadata:`, customerDbId);
 
-        if (!customerDbId) {
-            console.error(`[${timestamp}] [CustomerPortal] ⚠ Missing customer_db_id in user metadata`, {
+        const parsedId = Number(customerDbId);
+        if (customerDbId === null || customerDbId === undefined || Number.isNaN(parsedId) || !Number.isFinite(parsedId)) {
+            console.error(`[${timestamp}] [CustomerPortal] ⚠ Missing or invalid customer_db_id in user metadata`, {
                 fullMetadata: user.user_metadata
             });
             
             toast({ 
                 title: "Authentication Error", 
-                description: "Could not find your profile. Please try logging in again.", 
+                description: "Invalid booking ID. Please check your login credentials.", 
                 variant: "destructive" 
             });
             
@@ -159,7 +165,7 @@ export const CustomerPortal = () => {
             console.log(`[${timestamp}] [CustomerPortal] Calling get-customer-details edge function...`);
 
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
-                body: { customerId: customerDbId }
+                body: { customerId: parsedId }
             });
 
             console.log(`[${timestamp}] [CustomerPortal] Edge function response:`, {
@@ -290,9 +296,11 @@ export const CustomerPortal = () => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
         
+        const rawPhone = loginPhone.replace(/\D/g, '');
+        
         console.log(`[${timestamp}] [CustomerPortal] Login attempt initiated`, {
             portal_number: loginPortalId,
-            phone: loginPhone
+            phone: rawPhone
         });
 
         setIsLoggingIn(true);
@@ -303,7 +311,7 @@ export const CustomerPortal = () => {
             const { data, error } = await supabase.functions.invoke('customer-portal-login', {
                 body: { 
                     portal_number: loginPortalId, 
-                    phone: loginPhone 
+                    phone: rawPhone 
                 }
             });
 
@@ -377,7 +385,7 @@ export const CustomerPortal = () => {
         );
     }
 
-    if (!user || !session || !customerData) {
+    if (!user || !session || !customerData?.id) {
         console.log('[CustomerPortal] Rendering login form', {
             hasUser: !!user,
             hasSession: !!session,
