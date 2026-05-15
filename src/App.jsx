@@ -24,6 +24,7 @@ import { ReceiptPage } from '@/pages/ReceiptPage';
 import { ProductShowcasePage } from '@/pages/ProductShowcasePage';
 import AccessCodesPage from '@/pages/AccessCodesPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
+import { PaymentPage } from '@/pages/PaymentPage';
 
 function App() {
   const [reorderData, setReorderData] = useState(null);
@@ -55,6 +56,8 @@ function App() {
               <Route path="/receipt/:bookingId" element={<ReceiptPage />} />
               <Route path="/products" element={<ProductShowcasePage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/payment" element={<PaymentPage />} />
+              <Route path="/confirmation" element={<PaymentPage />} />
               
               <Route path="/resources" element={<ResourceLibraryPage />} />
               <Route path="/resources/:id" element={<ResourceDetailPage />} />
