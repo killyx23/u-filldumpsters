@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
 
-export default function CustomerPortalBookingDetail() {
+export const CustomerPortalBookingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [booking, setBooking] = useState(null);
@@ -208,4 +208,6 @@ export default function CustomerPortalBookingDetail() {
       />
     </div>
   );
-}
+};
+
+export default CustomerPortalBookingDetail;

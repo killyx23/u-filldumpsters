@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck } from 'lucide-react';
@@ -7,6 +6,8 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid, addDays, differenceInDays } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -16,6 +17,7 @@ import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
 
@@ -26,7 +28,8 @@ export const BookingForm = ({
   onSubmit,
   onBack,
   deliveryService,
-  setDeliveryService
+  setDeliveryService,
+  onReorderSelect
 }) => {
   const [allPlans, setAllPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
@@ -42,7 +45,7 @@ export const BookingForm = ({
   const [currentDeliveryFee, setCurrentDeliveryFee] = useState(0);
   const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(false);
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
-  const [loadingRentalHours, setLoadingRentalHours] = useState(false);
+  const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
   
   // Disposal fees state
   const [mattressFee, setMattressFee] = useState(null);
@@ -66,6 +69,69 @@ export const BookingForm = ({
     return allPlans.find(p => p.id === plan?.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
+  const handleReorderSelect = async (pastBooking) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [BookingForm] Reordering service from booking:`, pastBooking.id);
+
+    try {
+      const planData = pastBooking.plan;
+      const addons = pastBooking.addons || {};
+
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('email', pastBooking.email)
+        .maybeSingle();
+
+      if (customerError) {
+        console.error(`[${timestamp}] [BookingForm] Error fetching customer:`, customerError);
+      }
+
+      setBookingData(prev => ({
+        ...prev,
+        firstName: customer?.first_name || pastBooking.first_name || '',
+        lastName: customer?.last_name || pastBooking.last_name || '',
+        email: pastBooking.email,
+        phone: customer?.phone || pastBooking.phone || '',
+        contactAddress: {
+          street: customer?.street || pastBooking.street || '',
+          city: customer?.city || pastBooking.city || '',
+          state: customer?.state || pastBooking.state || '',
+          zip: customer?.zip || pastBooking.zip || '',
+          isVerified: true
+        },
+        addressVerified: true,
+        dropOffDate: null,
+        pickupDate: null,
+        dropOffTimeSlot: '',
+        pickupTimeSlot: '',
+        notes: pastBooking.notes || '',
+        termsAccepted: false
+      }));
+
+      if (onReorderSelect) {
+        onReorderSelect(pastBooking);
+      }
+
+      toast({
+        title: 'Booking Pre-filled',
+        description: 'Your previous booking details have been loaded. Please select new dates.',
+        duration: 5000
+      });
+
+      setIsReturningCustomerModalOpen(false);
+
+    } catch (error) {
+      const catchTs = new Date().toISOString();
+      console.error(`[${catchTs}] [BookingForm] Error in handleReorderSelect:`, error);
+      toast({
+        title: 'Reorder Failed',
+        description: 'Could not load your previous booking.',
+        variant: 'destructive'
+      });
+    }
+  };
+
   // Fetch disposal fees from equipment_pricing table
   useEffect(() => {
     const fetchDisposalFees = async () => {
@@ -82,7 +148,6 @@ export const BookingForm = ({
         if (error) {
           console.error('[BookingForm] Error fetching disposal fees:', error);
           setFeesError('Failed to load disposal fees');
-          // Set fallback values
           setMattressFee(25);
           setTvFee(15);
           setApplianceFee(35);
@@ -108,7 +173,6 @@ export const BookingForm = ({
         } else {
           console.warn('[BookingForm] No disposal fees found in database');
           setFeesError('No disposal fees found');
-          // Set fallback values
           setMattressFee(25);
           setTvFee(15);
           setApplianceFee(35);
@@ -116,7 +180,6 @@ export const BookingForm = ({
       } catch (err) {
         console.error('[BookingForm] Exception fetching disposal fees:', err);
         setFeesError('Error loading disposal fees');
-        // Set fallback values
         setMattressFee(25);
         setTvFee(15);
         setApplianceFee(35);
@@ -128,7 +191,6 @@ export const BookingForm = ({
     fetchDisposalFees();
   }, []);
 
-  // Helper function to format time to "h:mm a" format
   const formatTimeToAmPm = (timeStr) => {
     if (!timeStr) return '';
     try {
@@ -183,31 +245,18 @@ export const BookingForm = ({
     }
   }, [isDelivery, setBookingData]);
 
-  // TASK 1 FIX: Fetch dynamic rental hours from database when date changes
   useEffect(() => {
-    if (currentPlan?.id !== 2 || isDelivery) {
-      // Reset rental hours if not applicable
-      setTrailerRentalHours({ pickupStart: '', returnBy: '' });
-      return;
-    }
+    if (currentPlan?.id !== 2 || isDelivery) return;
 
     const fetchTrailerRentalHours = async () => {
-      console.log('[BookingForm] TASK 1: Fetching trailer rental hours for service 2');
-      setLoadingRentalHours(true);
-      
+      console.log('[BookingForm] Fetching trailer rental hours for service 2');
       let pickupStart = '';
       let returnBy = '';
       const defaultHours = { pickupStart: '8:00 AM', returnBy: '6:00 PM' };
 
       try {
-        // TASK 1: Only fetch if drop-off date is selected
         if (bookingData.dropOffDate) {
           const dateStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
-          const dow = bookingData.dropOffDate.getDay();
-          
-          console.log('[BookingForm] TASK 1: Querying date_specific_availability for date:', dateStr);
-          
-          // First try date-specific availability
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('pickup_start_time, return_by_time')
@@ -216,62 +265,42 @@ export const BookingForm = ({
             .maybeSingle();
 
           if (dsaError) {
-            console.warn('[BookingForm] TASK 1: Error fetching date-specific availability:', dsaError);
+            console.warn('[BookingForm] Error fetching date-specific availability:', dsaError);
           }
 
-          if (dsa?.pickup_start_time) {
-            pickupStart = dsa.pickup_start_time;
-            console.log('[BookingForm] TASK 1: ✓ Found date-specific pickup_start_time:', pickupStart);
+          if (dsa?.pickup_start_time) pickupStart = dsa.pickup_start_time;
+          if (dsa?.return_by_time) returnBy = dsa.return_by_time;
+        }
+
+        if (!pickupStart || !returnBy) {
+          const dow = bookingData.dropOffDate ? bookingData.dropOffDate.getDay() : new Date().getDay();
+          const { data: sa, error: saError } = await supabase
+            .from('service_availability')
+            .select('pickup_start_time, return_by_time')
+            .eq('service_id', 2)
+            .eq('day_of_week', dow)
+            .maybeSingle();
+
+          if (saError) {
+            console.warn('[BookingForm] Error fetching service availability:', saError);
           }
-          if (dsa?.return_by_time) {
-            returnBy = dsa.return_by_time;
-            console.log('[BookingForm] TASK 1: ✓ Found date-specific return_by_time:', returnBy);
-          }
 
-          // Fall back to service_availability if needed
-          if (!pickupStart || !returnBy) {
-            console.log('[BookingForm] TASK 1: No date-specific times found, falling back to service_availability for day:', dow);
-            
-            const { data: sa, error: saError } = await supabase
-              .from('service_availability')
-              .select('pickup_start_time, return_by_time')
-              .eq('service_id', 2)
-              .eq('day_of_week', dow)
-              .maybeSingle();
-
-            if (saError) {
-              console.warn('[BookingForm] TASK 1: Error fetching service availability:', saError);
-            }
-
-            if (sa) {
-              if (!pickupStart && sa.pickup_start_time) {
-                pickupStart = sa.pickup_start_time;
-                console.log('[BookingForm] TASK 1: ✓ Using service_availability pickup_start_time:', pickupStart);
-              }
-              if (!returnBy && sa.return_by_time) {
-                returnBy = sa.return_by_time;
-                console.log('[BookingForm] TASK 1: ✓ Using service_availability return_by_time:', returnBy);
-              }
-            }
+          if (sa) {
+            if (!pickupStart && sa.pickup_start_time) pickupStart = sa.pickup_start_time;
+            if (!returnBy && sa.return_by_time) returnBy = sa.return_by_time;
           }
         }
 
-        // Set the rental hours with formatted times
-        const finalHours = {
+        setTrailerRentalHours({
           pickupStart: pickupStart ? formatTimeToAmPm(pickupStart) : defaultHours.pickupStart,
           returnBy: returnBy ? formatTimeToAmPm(returnBy) : defaultHours.returnBy
-        };
+        });
 
-        setTrailerRentalHours(finalHours);
-
-        console.log('[BookingForm] TASK 1: ✓ Final trailer rental hours set:', finalHours);
-        console.log('[BookingForm] TASK 1: Database times - pickup:', pickupStart, 'return:', returnBy);
+        console.log('[BookingForm] ✓ Trailer rental hours:', { pickupStart, returnBy });
 
       } catch (error) {
-        console.warn('[BookingForm] TASK 1: Unexpected error fetching trailer rental hours:', error);
+        console.warn('[BookingForm] Unexpected error fetching trailer rental hours:', error);
         setTrailerRentalHours(defaultHours);
-      } finally {
-        setLoadingRentalHours(false);
       }
     };
 
@@ -332,7 +361,6 @@ export const BookingForm = ({
     fetchAvailability(currentMonth);
   }, [fetchAvailability, currentMonth]);
 
-  // Fetch Exact Times for Dump Loader Trailer Rental (ID: 2)
   useEffect(() => {
     if (!currentPlan || currentPlan.id !== 2 || isDelivery) return;
 
@@ -441,7 +469,6 @@ export const BookingForm = ({
     fetchExactTimes();
   }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, isDelivery, setBookingData]);
   
-  // Fetch Exact Times for Delivery Pickup Window (Service 1 & 4)
   useEffect(() => {
     if (!currentPlan || (currentPlan.id !== 1 && currentPlan.id !== 4)) return;
     
@@ -549,7 +576,6 @@ export const BookingForm = ({
     return { dropOff: dropOffSlots, pickup: pickupSlots };
   }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery, fetchedPickupWindows]);
   
-  // TASK 1: 24-hour rental logic for delivery services (plan.id === 3 or 4)
   const handleDateSelect = async (field, date) => {
     const newDate = date ? startOfDay(date) : null;
     if (newDate) {
@@ -570,19 +596,16 @@ export const BookingForm = ({
         ...(currentPlan?.id !== 2 || isDelivery ? { [`${field.replace('Date', '')}TimeSlot`]: '' } : {})
       };
 
-      // TASK 1: For delivery services (plan.id === 3 or 4), enforce 24-hour minimum rental
       if (field === 'dropOffDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
-        // Automatically set pickup date to next day (24-hour minimum)
         const nextDay = addDays(newDate, 1);
         state.pickupDate = nextDay;
-        state.pickupTimeSlot = ''; // Clear time slot to force reselection
+        state.pickupTimeSlot = '';
         
         console.log('[BookingForm] 24-hour rental: pickup date set to next day', {
           deliveryDate: format(newDate, 'yyyy-MM-dd'),
           pickupDate: format(nextDay, 'yyyy-MM-dd')
         });
       } else if (field === 'pickupDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
-        // Validate pickup is at least 24 hours after delivery
         if (prev.dropOffDate) {
           const minPickupDate = addDays(startOfDay(prev.dropOffDate), 1);
           if (isBefore(newDate, minPickupDate)) {
@@ -596,7 +619,6 @@ export const BookingForm = ({
           }
         }
       } else if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3 && currentPlan?.id !== 4) {
-        // Existing logic for other services
         if (!prev.pickupDate || isBefore(startOfDay(prev.pickupDate), newDate)) {
           state.pickupDate = newDate;
           if (currentPlan?.id !== 2 || isDelivery) {
@@ -647,24 +669,18 @@ export const BookingForm = ({
   useEffect(() => {
     if (!currentPlan) return;
     
-    // Calculate base rental price
     let basePriceCalculation = parseFloat(currentPlan.base_price) || 0;
     
     if (bookingData.dropOffDate && (bookingData.pickupDate || currentPlan.id === 3)) {
       const dropOff = startOfDay(new Date(bookingData.dropOffDate));
       const pickup = currentPlan.id === 3 ? dropOff : startOfDay(new Date(bookingData.pickupDate));
       if (isValid(dropOff) && isValid(pickup) && !isBefore(pickup, dropOff)) {
-        // TASK 1 FIX: Correct rental day calculation for delivery services
         let dayDiff;
         
-        // For delivery services (plan.id === 3 or 4), calculate rental days without adding +1
-        // because the difference already represents the correct number of rental days
         if (currentPlan.id === 3 || currentPlan.id === 4) {
           dayDiff = differenceInDays(pickup, dropOff);
-          // If same day delivery/pickup, count as 1 day minimum
           if (dayDiff === 0) dayDiff = 1;
         } else {
-          // For all other services, keep existing logic
           dayDiff = differenceInDays(pickup, dropOff) + 1;
         }
         
@@ -685,8 +701,6 @@ export const BookingForm = ({
     }
     
     setBaseRentalPrice(basePriceCalculation);
-    
-    // Calculate total: base rental + delivery fee (equipment not included here, only in OrderSummary)
     const total = basePriceCalculation + currentDeliveryFee;
     setTotalPrice(total);
     
@@ -702,7 +716,6 @@ export const BookingForm = ({
     let baseValid = bookingData.dropOffDate && bookingData.dropOffTimeSlot && bookingData.dropOffTimeSlot !== 'Not available';
     let pickupValid = currentPlan.id === 3 ? true : (bookingData.pickupDate && bookingData.pickupTimeSlot && bookingData.pickupTimeSlot !== 'Not available');
     
-    // TASK 1: Additional validation for 24-hour minimum rental
     if ((currentPlan.id === 3 || currentPlan.id === 4) && bookingData.dropOffDate && bookingData.pickupDate) {
       const minPickupDate = addDays(startOfDay(bookingData.dropOffDate), 1);
       if (isBefore(startOfDay(bookingData.pickupDate), minPickupDate)) {
@@ -928,28 +941,9 @@ export const BookingForm = ({
     }
 
     if (currentPlan?.id === 2) {
-      // TASK 1 FIX: Display dynamic rental hours with conditional logic
-      const hasSelectedDate = bookingData.dropOffDate || bookingData.pickupDate;
-      
-      let rentalHoursText;
-      if (loadingRentalHours) {
-        rentalHoursText = (
-          <span className="inline-flex items-center">
-            <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
-            loading rental hours...
-          </span>
-        );
-      } else if (!hasSelectedDate) {
-        rentalHoursText = (
-          <span className="text-yellow-300 font-semibold">
-            Select your dates above to see available rental hours for that day
-          </span>
-        );
-      } else if (trailerRentalHours.pickupStart && trailerRentalHours.returnBy) {
-        rentalHoursText = `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`;
-      } else {
-        rentalHoursText = 'gives you the trailer for a full rental day.';
-      }
+      const rentalHoursText = trailerRentalHours.pickupStart && trailerRentalHours.returnBy 
+        ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
+        : 'gives you the trailer for a full rental day.';
 
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
@@ -980,9 +974,7 @@ export const BookingForm = ({
               </li>
               <li className="flex items-start">
                 <span className="text-yellow-400 mr-2 mt-0.5">•</span>
-                <span>
-                  <strong className="text-white">The Longest Rental Window:</strong> We offer some of the most generous rental hours in the industry, giving you a true full day's work without unnecessary restrictions. While other companies shorten your time or charge extra for full-day access, our flat daily rate {rentalHoursText}
-                </span>
+                <span><strong className="text-white">The Longest Rental Window:</strong> We offer some of the most generous rental hours in the industry, giving you a true full day's work without unnecessary restrictions. While other companies shorten your time or charge extra for full-day access, our flat daily rate {rentalHoursText}</span>
               </li>
               <li className="flex items-start">
                 <span className="text-yellow-400 mr-2 mt-0.5">•</span>
@@ -1060,7 +1052,6 @@ export const BookingForm = ({
     return <p className="text-blue-200">{currentPlan?.description || plan?.description || ''}</p>;
   };
   
-  // Helper function to format fees as currency
   const formatFeeAsCurrency = (fee) => {
     if (fee === null || fee === undefined) return 'N/A';
     return `$${Number(fee).toFixed(2)}`;
@@ -1161,7 +1152,6 @@ export const BookingForm = ({
               )}
             </div>
             
-            {/* Scrollable Description Area */}
             <div className="max-h-[350px] overflow-y-auto mb-4 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
               {renderDescription()}
             </div>
@@ -1201,10 +1191,19 @@ export const BookingForm = ({
                   </div>}
 
               <div className="space-y-4 mt-6 bg-black/20 p-5 rounded-lg border border-white/10">
-                  <h3 className="text-lg font-semibold text-white flex items-center">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-white flex items-center">
                       <MapPin className="mr-2 h-5 w-5 text-red-400" />
                       Contact Address
-                  </h3>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsReturningCustomerModalOpen(true)}
+                      className="text-xs text-blue-400 hover:text-blue-300 underline transition-colors"
+                    >
+                      Returning Customer?
+                    </button>
+                  </div>
                   <div className="space-y-2">
                       <GooglePlacesAutocomplete 
                         value={bookingData.contactAddress?.street || ''} 
@@ -1291,6 +1290,12 @@ export const BookingForm = ({
     </motion.div>
     
     <UnavailableServiceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} serviceName={planName} />
+    
+    <ReturningCustomerVerificationModal
+      isOpen={isReturningCustomerModalOpen}
+      onClose={() => setIsReturningCustomerModalOpen(false)}
+      onReorderSelect={handleReorderSelect}
+    />
   </>;
 };
 

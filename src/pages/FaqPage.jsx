@@ -28,7 +28,7 @@ const FaqItem = ({ q, a, isOpen, onClick }) => {
   );
 };
 
-const FaqPage = () => {
+export const FaqPage = () => {
     const [openIndex, setOpenIndex] = useState(null);
     const [faqData, setFaqData] = useState([]);
     const [loading, setLoading] = useState(true);

@@ -237,7 +237,7 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
     );
 };
 
-const CustomerLogin = () => {
+export const CustomerLogin = () => {
     const [customerId, setCustomerId] = useState('');
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);

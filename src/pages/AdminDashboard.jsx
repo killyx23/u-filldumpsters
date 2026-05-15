@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -19,13 +18,14 @@ import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager'
 import { AIAssistantMessagesManager } from '@/components/admin/AIAssistantMessagesManager';
 import { AIKnowledgeBaseManager } from '@/components/admin/AIKnowledgeBaseManager';
 import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSectionManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers } from 'lucide-react';
+import { LoyaltyPointsManager } from '@/components/admin/LoyaltyPointsManager';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
 import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
 
-const AdminDashboard = () => {
+export const AdminDashboard = () => {
     const { user, signOut } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -148,7 +148,6 @@ const AdminDashboard = () => {
           description: `Created ${result.created_records} pricing records, updated ${result.updated_records} records.`
         });
         
-        // Refresh health check
         await checkPricingHealth();
       } else {
         toast({
@@ -253,6 +252,9 @@ const AdminDashboard = () => {
                         <TabsTrigger value="financial" className="py-2 bg-green-900/20 data-[state=active]:bg-green-600 data-[state=active]:text-white">
                             <Calculator className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Financial Books</span>
                         </TabsTrigger>
+                        <TabsTrigger value="loyalty" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
+                            <Gift className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Loyalty Points</span>
+                        </TabsTrigger>
                         <TabsTrigger value="ai-knowledge" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                             <Brain className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">AI Knowledge</span>
                         </TabsTrigger>
@@ -274,6 +276,7 @@ const AdminDashboard = () => {
                             <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
                             <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
                             <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
+                            <TabsContent value="loyalty"><LoyaltyPointsManager /></TabsContent>
                             <TabsContent value="ai-knowledge">
                                 <div className="space-y-8">
                                     <Tabs defaultValue="entries" className="w-full">
