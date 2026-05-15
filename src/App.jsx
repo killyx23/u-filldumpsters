@@ -26,9 +26,9 @@ import AccessCodesPage from '@/pages/AccessCodesPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
 
-const PortalRedirect = () => {
+const PortalRedirect = ({ to }) => {
   const { search } = useLocation();
-  return <Navigate to={`/customer-portal${search}`} replace />;
+  return <Navigate to={`${to}${search}`} replace />;
 };
 
 function App() {
@@ -69,7 +69,11 @@ function App() {
               <Route path="/resources/:id" element={<ResourceDetailPage />} />
               
               <Route path="/customer-portal" element={<CustomerPortal />} />
-              <Route path="/portal" element={<PortalRedirect />} />
+              <Route path="/portal" element={<PortalRedirect to="/customer-portal" />} />
+              
+              {/* Backward compatibility routes */}
+              <Route path="/customer-portal/dashboard" element={<PortalRedirect to="/customer-portal" />} />
+              <Route path="/customer-portal/login" element={<PortalRedirect to="/customer-portal-login" />} />
 
               <Route
                 path="/admin/*"
