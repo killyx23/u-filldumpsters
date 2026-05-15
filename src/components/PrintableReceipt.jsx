@@ -7,6 +7,7 @@ import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
+import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 
 const AgreementText = ({ booking }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
@@ -360,12 +361,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
-                                <p>Drop-off: {format(parseISO(reschedule_history[0].from_drop_off_date), 'MMM d, yyyy')} - {formatTimeWindow(reschedule_history[0].from_drop_off_time, timeOptions)}</p>
-                                <p>Pickup: {format(parseISO(reschedule_history[0].from_pickup_date), 'MMM d, yyyy')} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
+                                <p>Drop-off: {formatBookingDateOnly(reschedule_history[0].from_drop_off_date)} - {formatTimeWindow(reschedule_history[0].from_drop_off_time, timeOptions)}</p>
+                                <p>Pickup: {formatBookingDateOnly(reschedule_history[0].from_pickup_date)} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
                             </div>
                         )}
-                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(drop_off_date), 'MMM d, yyyy')} - ${formatTimeWindow(drop_off_time_slot, timeOptions)}`}</p>
-                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${format(parseISO(pickup_date), 'MMM d, yyyy')} - ${formatTimeWindow(pickup_time_slot, timeOptions)}`}</p>}
+                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, timeOptions)}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, timeOptions)}`}</p>}
                     </div>
 
                     {/* 8-Category Breakdown */}

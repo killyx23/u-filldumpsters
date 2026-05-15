@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Loader2, LogOut, Home, Key, Calendar, Clock, Info, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 
-const CustomerPortalDashboard = () => {
+export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);

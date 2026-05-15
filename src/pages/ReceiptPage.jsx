@@ -10,7 +10,7 @@ import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distance
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
-const ReceiptPage = () => {
+export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
     const [status, setStatus] = useState('loading');
     const [error, setError] = useState('');
@@ -213,14 +213,9 @@ const ReceiptPage = () => {
                 }
                 setCalculatingMileage(false);
 
-                // Calculate totals — use stored tax fields from bookings when available
-                // (PaymentPage writes tax_amount, tax_rate_used, subtotal_before_tax before payment)
+                // Calculate totals
                 const subtotal = basePrice + deliveryFee + mileageCharge + addonsTotal;
-                const storedTaxAmount = parseFloat(booking.tax_amount || 0);
-                const storedTaxRate   = parseFloat(booking.tax_rate_used || 7.45);
-                const tax  = storedTaxAmount > 0
-                    ? storedTaxAmount
-                    : Math.round(subtotal * (storedTaxRate / 100) * 100) / 100;
+                const tax = subtotal * 0.07;
                 const total = subtotal + tax;
 
                 setReceiptDetails({
@@ -247,7 +242,6 @@ const ReceiptPage = () => {
                     addonsTotal,
                     subtotal,
                     tax,
-                    taxRate: storedTaxRate,
                     total,
                     dropOffDate: booking.drop_off_date,
                     pickupDate: booking.pickup_date
@@ -514,7 +508,7 @@ const ReceiptPage = () => {
                                     </div>
                                     
                                     <div className="flex justify-between text-gray-400">
-                                        <span>Tax ({(receiptDetails.taxRate ?? 7.45).toFixed(2)}%)</span>
+                                        <span>Tax (7%)</span>
                                         <span className="font-semibold">{formatCurrency(receiptDetails.tax)}</span>
                                     </div>
                                     

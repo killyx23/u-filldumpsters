@@ -6,7 +6,7 @@ import { ArrowLeft, Download, Share2, Loader2, PlayCircle, FileText } from 'luci
 import { Helmet } from 'react-helmet';
 import { useToast } from '@/hooks/use-toast';
 
-const ResourceDetailPage = () => {
+export const ResourceDetailPage = () => {
   const { resourceId } = useParams();
   const navigate = useNavigate();
   const { fetchResourceById, loading } = useResources();
