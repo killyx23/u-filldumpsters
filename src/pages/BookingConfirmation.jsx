@@ -1,21 +1,21 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams, Link, useNavigate } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
   CheckCircle, Home, AlertTriangle, Calendar, MapPin,
-  Mail, Loader2, RefreshCw, Key, Printer, Copy, ExternalLink
+  Mail, Loader2, RefreshCw, Key, Printer, Copy, ExternalLink, Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
-import { format, parseISO, isValid } from 'date-fns';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
+import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
+import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
 
-export default function BookingConfirmation() {
+export const BookingConfirmation = () => {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
 
   const bookingId            = searchParams.get('booking_id');
   const paymentIntentId      = searchParams.get('payment_intent');
@@ -33,8 +33,12 @@ export default function BookingConfirmation() {
   const [generatingMagicLink, setGeneratingMagicLink] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState(null);
+  const [pointsAwarded, setPointsAwarded] = useState(0);
 
   const receiptRef = useRef();
+
+  // Loyalty points hook (only if we have booking details)
+  const { calculatePointsEarned, awardPoints } = useCustomerLoyaltyPoints(bookingDetails?.customer_id);
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
@@ -42,7 +46,6 @@ export default function BookingConfirmation() {
     removeAfterPrint: true,
   });
 
-  // Generate magic link token for access codes
   const generateMagicLink = async (customerId, customerPhone) => {
     const timestamp = new Date().toISOString();
     
@@ -89,7 +92,6 @@ export default function BookingConfirmation() {
         stack: err.stack
       });
       
-      // Fallback to direct link
       const fallbackUrl = `${window.location.origin}/customer-portal?order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
       console.log(`[${timestamp}] [BookingConfirmation] Using fallback URL:`, fallbackUrl);
       setMagicLinkUrl(fallbackUrl);
@@ -99,7 +101,6 @@ export default function BookingConfirmation() {
     }
   };
 
-  // Copy magic link to clipboard
   const copyMagicLink = () => {
     navigator.clipboard.writeText(magicLinkUrl);
     toast({
@@ -108,7 +109,6 @@ export default function BookingConfirmation() {
     });
   };
 
-  // Finalize booking with comprehensive logging and tax record creation
   const finalizeBooking = async ({ isRetry = false } = {}) => {
     if (!bookingId) {
       console.warn('[BookingConfirmation] Cannot finalize: missing bookingId');
@@ -160,7 +160,6 @@ export default function BookingConfirmation() {
         bookingUpdated: data?.bookingUpdated
       });
 
-      // Create tax record for audit tracking
       if (data?.bookingData) {
         console.log(`[${timestamp}] [BookingConfirmation] Creating tax record...`);
         
@@ -213,7 +212,38 @@ export default function BookingConfirmation() {
     }
   };
 
-  // Fetch booking with comprehensive logging
+  // Award loyalty points after successful booking
+  const awardLoyaltyPoints = async (customerId, totalAmount) => {
+    if (!customerId || !totalAmount) return;
+
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [BookingConfirmation] Awarding loyalty points for booking ${bookingId}`);
+
+    try {
+      const points = calculatePointsEarned(totalAmount);
+      if (points <= 0) {
+        console.log(`[${timestamp}] [BookingConfirmation] No points to award for amount ${totalAmount}`);
+        return;
+      }
+
+      const result = await awardPoints(points, bookingId);
+      
+      if (result.success) {
+        console.log(`[${timestamp}] [BookingConfirmation] ✓ Awarded ${points} loyalty points`);
+        setPointsAwarded(points);
+        
+        toast({
+          title: 'Loyalty Points Earned! 🎉',
+          description: `You earned ${points} points with this booking!`,
+        });
+      } else {
+        console.error(`[${timestamp}] [BookingConfirmation] Failed to award points:`, result.error);
+      }
+    } catch (err) {
+      console.error(`[${timestamp}] [BookingConfirmation] Exception awarding points:`, err);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -310,7 +340,6 @@ export default function BookingConfirmation() {
           }
         }
 
-        // Generate magic link for access codes if Dump Loader Trailer
         const serviceName = booking.plan?.name || '';
         const isDumpLoaderRental = 
           serviceName.toLowerCase().includes('dump loader') ||
@@ -326,7 +355,12 @@ export default function BookingConfirmation() {
         clearTimeout(timeoutId);
 
         console.log(`[${timestamp}] [BookingConfirmation] Triggering finalization process...`);
-        finalizeBooking();
+        await finalizeBooking();
+
+        // Award loyalty points after finalization
+        if (booking.customer_id && booking.total_price) {
+          await awardLoyaltyPoints(booking.customer_id, booking.total_price);
+        }
 
       } catch (err) {
         const errorTimestamp = new Date().toISOString();
@@ -352,7 +386,6 @@ export default function BookingConfirmation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingId]);
 
-  // Portal access with retry logic and comprehensive logging
   const handleGoToPortal = async () => {
     const timestamp = new Date().toISOString();
     const portalId = bookingDetails?.customers?.customer_id_text ?? '';
@@ -421,7 +454,7 @@ export default function BookingConfirmation() {
 
       console.log(`[${timestamp}] [BookingConfirmation] ✓ Customer verified, navigating to portal...`);
       
-      navigate(`/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`);
+      window.location.href = `/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`;
       
     } catch (err) {
       console.error(`[${timestamp}] [BookingConfirmation] Portal navigation error:`, err);
@@ -466,25 +499,16 @@ export default function BookingConfirmation() {
   const deliveryAddress  = bookingDetails.delivery_address || bookingDetails.contact_address || {};
   const formattedAddress = `${deliveryAddress.street || bookingDetails.street || 'N/A'}, ${deliveryAddress.city || bookingDetails.city || 'N/A'}, ${deliveryAddress.state || bookingDetails.state || 'N/A'} ${deliveryAddress.zip || bookingDetails.zip || 'N/A'}`;
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    try {
-      const parsed = dateString instanceof Date ? dateString : parseISO(dateString.toString());
-      if (!isValid(parsed)) return dateString;
-      return format(parsed, 'EEEE, MMMM d, yyyy');
-    } catch { return dateString; }
-  };
+  const formatDate = (dateString) => formatBookingDateOnly(dateString, 'EEEE, MMMM d, yyyy');
 
   const serviceName = serviceDetails?.name || bookingDetails.plan?.name || 'N/A';
   const isDelivery = bookingDetails.addons?.deliveryService || bookingDetails.addons?.isDelivery;
   
-  // Check if this is Dump Loader Trailer rental
   const isDumpLoaderRental = 
     serviceName.toLowerCase().includes('dump loader') ||
     serviceName.toLowerCase().includes('trailer') ||
     parseInt(bookingDetails.plan?.id) === 2;
   
-  // Time window formatting options
   const showTimeWindow = shouldShowTimeWindow(bookingDetails.plan, isDelivery);
   const isSelfService = isSelfServiceTrailer(bookingDetails.plan, isDelivery);
   const timeOptions = {
@@ -493,13 +517,11 @@ export default function BookingConfirmation() {
     serviceType: bookingDetails.plan?.service_type
   };
 
-  // Get tax information from booking record
   const taxRateUsed = bookingDetails.tax_rate_used || 7.45;
   const taxAmount = bookingDetails.tax_amount || 0;
   const subtotalBeforeTax = bookingDetails.subtotal_before_tax || 0;
   const totalPaid = bookingDetails.total_price || 0;
 
-  // Finalization status banner
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
       finalizeStatus === 'done'
@@ -576,7 +598,22 @@ export default function BookingConfirmation() {
 
           <FinalizeBanner />
 
-          {/* Magic Link Section for Dump Loader Trailer */}
+          {pointsAwarded > 0 && (
+            <div className="bg-gradient-to-br from-purple-900/40 to-indigo-800/20 border border-purple-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="h-6 w-6 text-purple-300" />
+                <h3 className="text-xl font-bold text-purple-300">Loyalty Points Earned!</h3>
+              </div>
+              <p className="text-purple-100/80 text-sm mb-3">
+                You've earned <span className="font-bold text-purple-300">{pointsAwarded} loyalty points</span> with this booking! 
+                Use your points on future orders for discounts.
+              </p>
+              <p className="text-xs text-purple-200/60">
+                View your points balance and redeem rewards in your customer portal.
+              </p>
+            </div>
+          )}
+
           {isDumpLoaderRental && magicLinkUrl && (
             <div className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 border border-blue-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
               <h3 className="text-xl font-bold text-blue-400 mb-3 flex items-center">
@@ -739,4 +776,6 @@ export default function BookingConfirmation() {
       </div>
     </>
   );
-}
+};
+
+export default BookingConfirmation;

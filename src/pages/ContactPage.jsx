@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { Label } from '@/components/ui/label';
 import BackButton from '@/components/BackButton';
 
-const ContactPage = () => {
+export const ContactPage = () => {
     const { toast } = useToast();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');

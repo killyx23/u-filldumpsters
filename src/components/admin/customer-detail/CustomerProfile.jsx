@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -127,6 +128,8 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
     };
 
     const handleSave = async (forceSave = false) => {
+        if (!customer?.id) return;
+        
         if (!editedCustomer.first_name || !editedCustomer.last_name) {
             toast({ title: 'Missing Name', description: 'Please provide both first and last name.', variant: 'destructive' });
             return;
@@ -234,6 +237,7 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
     };
 
     const handleSaveAdminNotes = async () => {
+        if (!customer?.id) return;
         setIsSaving(true);
         const { error } = await supabase
             .from('customers')
@@ -250,6 +254,7 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
     };
     
     const handleSaveManualDistance = async () => {
+        if (!customer?.id) return;
         const distNum = parseFloat(manualDistance);
         const timeNum = parseInt(manualTime, 10);
         

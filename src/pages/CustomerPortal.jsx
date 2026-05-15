@@ -1,13 +1,15 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Loader2, Key } from 'lucide-react';
+import { Loader2, Key, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
+import { format } from 'date-fns';
 
 import { PortalNavigation } from '@/components/customer-portal/PortalNavigation';
 import { PortalDashboard } from '@/components/customer-portal/PortalDashboard';
@@ -22,17 +24,15 @@ import { CustomerPortalResourcesPage } from '@/components/customer-portal/Custom
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
 import AccessCodesPage from '@/pages/AccessCodesPage';
 
-export default function CustomerPortal() {
+export const CustomerPortal = () => {
     const { user, signOut, loading: authLoading, session } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
-    // Login State
     const [loginPortalId, setLoginPortalId] = useState('');
     const [loginPhone, setLoginPhone] = useState('');
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    // Portal State
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dashboard');
     const [customerData, setCustomerData] = useState(null);
     const [bookings, setBookings] = useState([]);
@@ -40,12 +40,10 @@ export default function CustomerPortal() {
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(new Date());
 
-    // Action States
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
 
-    // Magic link handler
     useEffect(() => {
         const handleMagicLink = async () => {
             const token = searchParams.get('token');
@@ -64,7 +62,6 @@ export default function CustomerPortal() {
 
                     console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
 
-                    // Use customer-portal-login to create session
                     const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
                         body: {
                             portal_number: data.customer.customer_id_text,
@@ -78,8 +75,6 @@ export default function CustomerPortal() {
 
                     if (loginData?.session) {
                         await supabase.auth.setSession(loginData.session);
-                        
-                        // Remove token from URL and set tab to access-codes
                         setSearchParams({ tab: 'access-codes' });
                         setActiveTab('access-codes');
                         
@@ -96,8 +91,6 @@ export default function CustomerPortal() {
                         description: err.message || 'This link has expired or is invalid. Please log in manually.',
                         variant: 'destructive'
                     });
-                    
-                    // Clear invalid token from URL
                     setSearchParams({});
                 }
             }
@@ -106,14 +99,17 @@ export default function CustomerPortal() {
         handleMagicLink();
     }, [searchParams, user, authLoading]);
 
-    // Initialization & Params logic
     useEffect(() => {
         const pid = searchParams.get('portal_id');
+        const pnum = searchParams.get('portal_number');
+        const cid = searchParams.get('cid');
         const ph = searchParams.get('phone');
         
-        console.log('[CustomerPortal] URL params detected:', { portal_id: pid, phone: ph });
+        const foundPid = pid || pnum || cid;
         
-        if (pid) setLoginPortalId(pid);
+        console.log('[CustomerPortal] URL params detected:', { foundPid, phone: ph });
+        
+        if (foundPid) setLoginPortalId(foundPid);
         if (ph) setLoginPhone(ph);
     }, [searchParams]);
 
@@ -123,7 +119,6 @@ export default function CustomerPortal() {
         setSearchParams({ tab: tabId });
     };
 
-    // ENHANCED: Fetch data with comprehensive logging
     const fetchData = useCallback(async (isInitialLoad = true) => {
         const timestamp = new Date().toISOString();
         
@@ -149,14 +144,15 @@ export default function CustomerPortal() {
         
         console.log(`[${timestamp}] [CustomerPortal] Customer DB ID from metadata:`, customerDbId);
 
-        if (!customerDbId) {
-            console.error(`[${timestamp}] [CustomerPortal] ⚠ Missing customer_db_id in user metadata`, {
+        const parsedId = Number(customerDbId);
+        if (customerDbId === null || customerDbId === undefined || Number.isNaN(parsedId) || !Number.isFinite(parsedId)) {
+            console.error(`[${timestamp}] [CustomerPortal] ⚠ Missing or invalid customer_db_id in user metadata`, {
                 fullMetadata: user.user_metadata
             });
             
             toast({ 
                 title: "Authentication Error", 
-                description: "Could not find your profile. Please try logging in again.", 
+                description: "Invalid booking ID. Please check your login credentials.", 
                 variant: "destructive" 
             });
             
@@ -169,7 +165,7 @@ export default function CustomerPortal() {
             console.log(`[${timestamp}] [CustomerPortal] Calling get-customer-details edge function...`);
 
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
-                body: { customerId: customerDbId }
+                body: { customerId: parsedId }
             });
 
             console.log(`[${timestamp}] [CustomerPortal] Edge function response:`, {
@@ -221,7 +217,6 @@ export default function CustomerPortal() {
         }
     }, [user, session, signOut]);
 
-    // Initial fetch
     useEffect(() => {
         const timestamp = new Date().toISOString();
         
@@ -242,7 +237,6 @@ export default function CustomerPortal() {
         }
     }, [user, session, authLoading, fetchData]);
 
-    // Auto-refresh interval (30 seconds)
     useEffect(() => {
         if (!user || !session) return;
         
@@ -259,7 +253,6 @@ export default function CustomerPortal() {
         };
     }, [user, session, fetchData]);
 
-    // Real-time subscriptions
     useEffect(() => {
         if (!customerData) {
             console.log('[CustomerPortal] No customer data, skipping realtime subscriptions');
@@ -299,14 +292,15 @@ export default function CustomerPortal() {
         };
     }, [customerData, fetchData]);
 
-    // ENHANCED: Login with comprehensive logging and retry logic
     const handleLoginSubmit = async (e) => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
         
+        const rawPhone = loginPhone.replace(/\D/g, '');
+        
         console.log(`[${timestamp}] [CustomerPortal] Login attempt initiated`, {
             portal_number: loginPortalId,
-            phone: loginPhone
+            phone: rawPhone
         });
 
         setIsLoggingIn(true);
@@ -317,7 +311,7 @@ export default function CustomerPortal() {
             const { data, error } = await supabase.functions.invoke('customer-portal-login', {
                 body: { 
                     portal_number: loginPortalId, 
-                    phone: loginPhone 
+                    phone: rawPhone 
                 }
             });
 
@@ -369,12 +363,17 @@ export default function CustomerPortal() {
         }
     };
 
-    // Handler for reschedule - receives booking object, stores booking ID
     const handleRescheduleClick = (booking) => {
         console.log('[CustomerPortal] Reschedule clicked for booking:', booking?.id);
         if (booking && booking.id) {
             setSelectedBookingForReschedule(booking.id);
         }
+    };
+
+    const handleQuickReorder = (booking) => {
+        console.log('[CustomerPortal] Quick reorder clicked for booking:', booking.id);
+        localStorage.setItem('booking_email', booking.email);
+        navigate(`/?email=${encodeURIComponent(booking.email)}`);
     };
 
     if (loading || authLoading) {
@@ -386,7 +385,7 @@ export default function CustomerPortal() {
         );
     }
 
-    if (!user || !session || !customerData) {
+    if (!user || !session || !customerData?.id) {
         console.log('[CustomerPortal] Rendering login form', {
             hasUser: !!user,
             hasSession: !!session,
@@ -453,6 +452,12 @@ export default function CustomerPortal() {
     const hasUnreadMessages = notes.some(n => !n.is_read && n.author_type === 'admin');
     const hasPendingVerifications = bookings.some(b => b.pending_address_verification) || customerData.has_incomplete_verification;
 
+    // Get last 3 completed bookings for quick reorder
+    const recentCompletedBookings = bookings
+        .filter(b => b.status && !['cancelled', 'pending_payment'].includes(b.status.toLowerCase()))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 3);
+
     return (
         <div className="container mx-auto py-8 px-4 flex flex-col lg:flex-row min-h-[calc(100vh-200px)]">
             
@@ -465,12 +470,67 @@ export default function CustomerPortal() {
 
             <div className="flex-1 lg:pl-4 min-w-0">
                 {activeTab === 'dashboard' && (
-                    <PortalDashboard 
-                        bookings={bookings} 
-                        customerData={customerData} 
-                        lastUpdated={lastUpdated} 
-                        onRefresh={() => fetchData(true)} 
-                    />
+                    <div className="space-y-6">
+                        <PortalDashboard 
+                            bookings={bookings} 
+                            customerData={customerData} 
+                            lastUpdated={lastUpdated} 
+                            onRefresh={() => fetchData(true)} 
+                        />
+
+                        {/* Quick Reorder Section */}
+                        {recentCompletedBookings.length > 0 && (
+                            <Card className="bg-white/10 backdrop-blur-md border-white/20 shadow-xl">
+                                <CardHeader>
+                                    <CardTitle className="text-white flex items-center gap-2">
+                                        <RotateCcw className="h-6 w-6 text-green-400" />
+                                        Quick Reorder
+                                    </CardTitle>
+                                    <CardDescription className="text-blue-200">
+                                        Order again from your recent bookings
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-3">
+                                        {recentCompletedBookings.map(booking => (
+                                            <div 
+                                                key={booking.id} 
+                                                className="bg-black/20 p-4 rounded-lg border border-white/10 hover:border-green-500/50 transition-all group"
+                                            >
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex-1">
+                                                        <p className="text-white font-semibold">
+                                                            {booking.plan?.name || 'Service'}
+                                                        </p>
+                                                        <p className="text-sm text-blue-200">
+                                                            {format(new Date(booking.created_at), 'MMMM d, yyyy')}
+                                                        </p>
+                                                        <p className="text-xs text-gray-400 mt-1">
+                                                            ${Number(booking.total_price || 0).toFixed(2)}
+                                                        </p>
+                                                    </div>
+                                                    <Button
+                                                        onClick={() => handleQuickReorder(booking)}
+                                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                                    >
+                                                        <RotateCcw className="mr-2 h-4 w-4" />
+                                                        Reorder
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        className="w-full mt-4 border-white/30 text-white hover:bg-white/10"
+                                        onClick={() => handleTabChange('bookings')}
+                                    >
+                                        View Full Booking History
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        )}
+                    </div>
                 )}
 
                 {activeTab === 'access-codes' && (
@@ -547,4 +607,6 @@ export default function CustomerPortal() {
 
         </div>
     );
-}
+};
+
+export default CustomerPortal;

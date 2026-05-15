@@ -1,9 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useGoogleMapsLoader } from '@/hooks/useGoogleMapsLoader';
+import { useLoadScript } from '@react-google-maps/api';
+
+const libraries = ['places'];
 
 export const useGooglePlacesAutocomplete = (apiKey) => {
-  const { isLoaded, error: mapsLoaderError } = useGoogleMapsLoader();
-  const loadError = mapsLoaderError ? new Error(mapsLoaderError) : null;
+  const { isLoaded, loadError } = useLoadScript({
+    googleMapsApiKey: apiKey,
+    libraries,
+  });
 
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
