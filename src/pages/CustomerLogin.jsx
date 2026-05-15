@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -237,7 +238,7 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
     );
 };
 
-const CustomerLogin = () => {
+export const CustomerLogin = () => {
     const [customerId, setCustomerId] = useState('');
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
@@ -247,9 +248,14 @@ const CustomerLogin = () => {
 
     useEffect(() => {
         const cid = searchParams.get('cid');
+        const portalId = searchParams.get('portal_id');
+        const portalNumber = searchParams.get('portal_number');
         const ph = searchParams.get('phone');
-        if (cid) {
-            setCustomerId(cid);
+        
+        const foundId = cid || portalNumber || portalId;
+        
+        if (foundId) {
+            setCustomerId(foundId);
         }
         if (ph) {
             handlePhoneChange({ target: { value: ph } });
@@ -342,7 +348,7 @@ const CustomerLogin = () => {
                     title: 'Login Successful!',
                     description: 'Redirecting you to your portal...',
                 });
-                navigate('/portal');
+                navigate('/customer-portal');
             } else {
                 throw new Error('Could not create a session. Please try again.');
             }

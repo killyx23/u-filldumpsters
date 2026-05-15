@@ -53,7 +53,7 @@ const ReviewCard = ({ review, index, onReadMore }) => {
     );
 };
 
-export default function ReviewsPage() {
+export const ReviewsPage = () => {
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -171,4 +171,6 @@ export default function ReviewsPage() {
             )}
         </>
     );
-}
+};
+
+export default ReviewsPage;
