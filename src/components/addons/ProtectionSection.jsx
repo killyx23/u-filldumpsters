@@ -40,8 +40,8 @@ export const ProtectionSection = ({
     const showDrivewayProtection = isDeliveryRequired && !isDumpLoaderTrailerRental && !isDumpLoaderWithDelivery;
     
     // Use insurance price from addonPrices (loaded from database via hook)
-    const insurancePrice = addonPrices?.insurance || 20;
-    const drivewayPrice = addonPrices?.drivewayProtection || 15;
+    const insurancePrice = Number(addonPrices?.insurance ?? 0);
+    const drivewayPrice = Number(addonPrices?.drivewayProtection ?? 0);
 
     // Service-specific insurance info text
     const getInsuranceInfoText = () => {

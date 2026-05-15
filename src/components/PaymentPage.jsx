@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { getEquipmentPricingMetaMap } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
@@ -62,6 +63,7 @@ const CheckoutForm = ({
   deliveryService,
   clientSecret,
   insurancePrice,
+  drivewayPrice,
   // Service-level taxability props passed from parent (loaded from services table)
   serviceTaxable     = true,
   deliveryFeeTaxable = true,
@@ -120,13 +122,13 @@ const CheckoutForm = ({
   useEffect(() => {
     const loadPrices = async () => {
       setLoadingPrices(true);
-      const idsToLoad = new Set([1, 2, 3, 4, 5, 6, 7]);
+      const idsToLoad = new Set([1, 2, 3, 4, 5, 6]);
       try {
         const meta = await getEquipmentPricingMetaMap([...idsToLoad].filter(isValidEquipmentId));
         setEquipmentMeta(meta);
       } catch (error) {
         console.error('[PaymentPage] Error loading equipment meta:', error);
-        // Fallback with safe defaults; insurance (7) non-taxable
+        // Fallback with existing addon defaults for rental/disposal items only.
         setEquipmentMeta({
           1: { price: 10, is_taxable: true  },
           2: { price: 15, is_taxable: true  },
@@ -134,7 +136,6 @@ const CheckoutForm = ({
           4: { price: 25, is_taxable: true  },
           5: { price: 15, is_taxable: true  },
           6: { price: 35, is_taxable: true  },
-          7: { price: 20, is_taxable: false }, // insurance non-taxable
         });
       } finally {
         setLoadingPrices(false);
@@ -180,16 +181,16 @@ const CheckoutForm = ({
   const tripMileageCost = addonsData?.mileageCharge || addonsData?.distanceInfo?.mileageFee || 0;
   if (tripMileageCost > 0) lineItems.push({ label: 'Mileage Charge', amount: tripMileageCost, is_taxable: mileageTaxable });
 
-  // Insurance — is_taxable from DB (false in Utah)
+  // Insurance is priced from services ID 7 and persisted when the customer accepts it.
   if (addonsData?.insurance === 'accept') {
-    const ins = meta(7);
-    const insuranceCost = ins.price || insurancePrice;
-    if (insuranceCost > 0) lineItems.push({ label: 'Rental Insurance', amount: insuranceCost, is_taxable: ins.is_taxable });
+    const insuranceCost = Number(addonsData?.insurancePriceApplied ?? insurancePrice ?? 0);
+    if (insuranceCost > 0) lineItems.push({ label: 'Rental Insurance', amount: insuranceCost, is_taxable: false });
   }
 
   // Driveway protection
   if ((plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept') {
-    lineItems.push({ label: 'Driveway Protection', amount: 15, is_taxable: true });
+    const drivewayCost = Number(addonsData?.drivewayPriceApplied ?? drivewayPrice ?? 0);
+    if (drivewayCost > 0) lineItems.push({ label: 'Driveway Protection', amount: drivewayCost, is_taxable: true });
   }
 
   // Rental equipment & consumables
@@ -614,7 +615,8 @@ const CheckoutForm = ({
 export const PaymentPage = ({ bookingData, plan, addonsData, onBack, bookingId, deliveryService }) => {
   const [clientSecret, setClientSecret] = useState(null);
   const [error,        setError]        = useState(null);
-  const { insurancePrice } = useInsurancePricing();
+  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+  const { drivewayPrice, loading: loadingDrivewayPrice } = useDrivewayProtectionPrice();
 
   useEffect(() => {
     if (!bookingId) { setError("Booking ID is missing. Cannot proceed with payment."); return; }
@@ -646,7 +648,7 @@ export const PaymentPage = ({ bookingData, plan, addonsData, onBack, bookingId, 
   if (error) {
     return <div className="container mx-auto px-4 py-8"><div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-6 rounded-lg shadow-lg"><div className="flex items-center text-red-200 font-bold text-xl mb-4"><AlertTriangle className="h-8 w-8 mr-3 text-red-400" />Payment Initialization Failed</div><p className="text-red-100 mb-6 bg-black/20 p-4 rounded font-mono text-sm border border-red-500/20 break-words">{error}</p><div className="flex justify-center"><Button onClick={onBack} variant="outline" className="text-white hover:bg-white/10 w-full sm:w-auto"><ArrowLeft className="mr-2 h-4 w-4" /> Go Back to Review</Button></div></div></div>;
   }
-  if (!clientSecret) {
+  if (!clientSecret || loadingInsurancePrice || loadingDrivewayPrice) {
     return <div className="flex flex-col justify-center items-center h-96 text-white"><Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" /><span className="text-xl font-medium">Preparing Secure Payment...</span><p className="text-gray-400 mt-2">Connecting to payment gateway. Please wait.</p></div>;
   }
 
@@ -670,6 +672,7 @@ export const PaymentPage = ({ bookingData, plan, addonsData, onBack, bookingId, 
         deliveryService={deliveryService}
         clientSecret={clientSecret}
         insurancePrice={insurancePrice}
+        drivewayPrice={drivewayPrice}
       />
     </Elements>
   );

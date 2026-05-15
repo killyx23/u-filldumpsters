@@ -37,8 +37,8 @@ export const OrderSummary = ({
     const [equipmentMeta, setEquipmentMeta] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(false);
 
-    const { insurancePrice } = useInsurancePricing();
-    const { drivewayPrice }  = useDrivewayProtectionPrice();
+    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { drivewayPrice, loading: loadingDrivewayPrice }  = useDrivewayProtectionPrice();
 
     // Determine delivery type from plan + deliveryService flag for correct tax rate
     const deliveryType = resolveDeliveryType(plan, deliveryService);
@@ -84,45 +84,11 @@ export const OrderSummary = ({
             if (addons?.tvDisposal > 0)         idsToLoad.add(5);
             if (addons?.applianceDisposal > 0)  idsToLoad.add(6);
 
-            // Insurance
-            idsToLoad.add(7);
-
             try {
-                // Load equipment prices (IDs 1-6)
-                if (addons?.equipment && addons.equipment.length > 0) {
-                    for (const item of addons.equipment) {
-                        const equipmentId = item.equipment_id || item.dbId || item.id;
-                        
-                        if (!equipmentId) {
-                            console.warn('[OrderSummary] Equipment item missing ID:', item);
-                            continue;
-                        }
-
-                        if (!isValidEquipmentId(equipmentId)) {
-                            console.error('[OrderSummary] Invalid equipment ID format:', equipmentId);
-                            continue;
-                        }
-
-                        const price = await getPriceForEquipment(equipmentId);
-                        prices[equipmentId] = price;
-                    }
-                }
-
-                // Load disposal item prices (IDs 4, 5, 6)
-                const disposalItems = [
-                    { key: 'mattressDisposal', dbId: 4 },
-                    { key: 'tvDisposal', dbId: 5 },
-                    { key: 'applianceDisposal', dbId: 6 }
-                ];
-
-                for (const disposal of disposalItems) {
-                    if (addons?.[disposal.key] && addons[disposal.key] > 0) {
-                        const price = await getPriceForEquipment(disposal.dbId);
-                        prices[disposal.dbId] = price;
-                    }
-                }
-
-                setEquipmentPrices(prices);
+                const meta = idsToLoad.size > 0
+                    ? await getEquipmentPricingMetaMap([...idsToLoad])
+                    : {};
+                setEquipmentMeta(meta);
             } catch (error) {
                 console.error('[OrderSummary] Error loading equipment meta:', error);
                 toast({ title: 'Error Loading Prices', description: 'Some prices could not be loaded from database.', variant: 'destructive' });
@@ -205,18 +171,17 @@ export const OrderSummary = ({
             items.push({ label: 'Mileage Charge', amount: mileageCharge, is_taxable: mileageTaxable, sublabel: addons?.distanceFeeDisplay });
         }
 
-        // 4. Insurance — is_taxable comes from DB (non-taxable in Utah)
+        // 4. Insurance uses the services-backed price captured when the option was accepted.
         if (addons?.insurance === 'accept') {
-            const ins = meta(7);
-            const insuranceCost = Number(ins.price || insurancePrice || 20);
+            const insuranceCost = Number(addons?.insurancePriceApplied ?? insurancePrice ?? 0);
             if (insuranceCost > 0) {
-                items.push({ label: 'Rental Insurance', amount: insuranceCost, is_taxable: ins.is_taxable });
+                items.push({ label: 'Rental Insurance', amount: insuranceCost, is_taxable: false });
             }
         }
 
         // 5. Driveway protection
         if (addons?.drivewayProtection === 'accept' && showDrivewayProtection) {
-            const drivewayAmt = Number(drivewayPrice || 15);
+            const drivewayAmt = Number(addons?.drivewayPriceApplied ?? drivewayPrice ?? 0);
             if (drivewayAmt > 0) {
                 items.push({ label: 'Driveway Protection', amount: drivewayAmt, is_taxable: true });
             }
@@ -294,7 +259,7 @@ export const OrderSummary = ({
     };
 
     // ── Loading state ─────────────────────────────────────────────────────────
-    if (loadingPrices || loadingTaxRate) {
+    if (loadingPrices || loadingTaxRate || loadingInsurancePrice || loadingDrivewayPrice) {
         return (
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 sticky top-8">
                 <div className="flex items-center justify-center h-64">

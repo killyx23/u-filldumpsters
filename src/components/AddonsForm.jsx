@@ -38,6 +38,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [fetchedDeliveryFeeFlat, setFetchedDeliveryFeeFlat] = useState(plan?.delivery_fee !== undefined ? Number(plan.delivery_fee) : 10.00);
   const [equipmentMetaWithPrices, setEquipmentMetaWithPrices] = useState(equipmentMeta);
   const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
+  const [loadingAddonPrices, setLoadingAddonPrices] = useState(true);
 
   // Load insurance and driveway protection prices from hooks
   const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
@@ -58,6 +59,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   // Load equipment and disposal prices from database (IDs 1-6 only, excluding ID 7)
   useEffect(() => {
     const loadPrices = async () => {
+      setLoadingAddonPrices(true);
       try {
         console.log('[AddonsForm] Loading equipment and disposal prices from database (IDs 1-6, excluding Premium Insurance)');
 
@@ -89,6 +91,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
           description: 'Some prices could not be loaded from database.',
           variant: 'destructive'
         });
+      } finally {
+        setLoadingAddonPrices(false);
       }
     };
 
@@ -224,19 +228,19 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     // Do not process disposal items for Dump Loader Trailer (ID 2)
     if (plan?.id !== 2) {
       if (addonsData?.mattressDisposal > 0) {
-          const mattressPrice = disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25;
+          const mattressPrice = Number(disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price ?? 0);
           finalTotal += mattressPrice * addonsData.mattressDisposal;
           totalDisposalFee += mattressPrice * addonsData.mattressDisposal;
           disposalItemsList.push(`${addonsData.mattressDisposal}x Mattress Disposal`);
       }
       if (addonsData?.tvDisposal > 0) {
-          const tvPrice = disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15;
+          const tvPrice = Number(disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price ?? 0);
           finalTotal += tvPrice * addonsData.tvDisposal;
           totalDisposalFee += tvPrice * addonsData.tvDisposal;
           disposalItemsList.push(`${addonsData.tvDisposal}x TV Disposal`);
       }
       if (addonsData?.applianceDisposal > 0) {
-          const appliancePrice = disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35;
+          const appliancePrice = Number(disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price ?? 0);
           finalTotal += appliancePrice * addonsData.applianceDisposal;
           totalDisposalFee += appliancePrice * addonsData.applianceDisposal;
           disposalItemsList.push(`${addonsData.applianceDisposal}x Appliance Disposal`);
@@ -290,9 +294,16 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const rentalEquipment = equipmentMetaWithPrices.filter(item => item.type === 'rental');
   const purchaseItems = equipmentMetaWithPrices.filter(item => item.type === 'purchase');
 
-  // Show loading indicator if insurance or driveway prices are still loading
-  if (insuranceLoading || drivewayLoading) {
-    console.log('[AddonsForm] Waiting for insurance/driveway prices to load...');
+  if (insuranceLoading || drivewayLoading || loadingAddonPrices) {
+    return (
+      <div className="container mx-auto py-16 px-4">
+        <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+          <div className="flex items-center justify-center h-64">
+            <span className="text-white">Loading protection prices...</span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -452,9 +463,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
           <DialogDescription className="text-blue-200 text-sm leading-relaxed pt-2 pb-4">
             Mattress, TV, and appliance disposal requires specialized handling and processing at certified waste facilities. These items cannot be disposed of in standard landfills due to environmental and safety regulations. The fees charged reflect the actual costs incurred by waste management facilities for proper recycling and disposal:
             <ul className="list-disc list-inside mt-2 space-y-1 text-white">
-              <li>Mattresses: ${disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25}/unit</li>
-              <li>TVs/Monitors: ${disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15}/unit</li>
-              <li>Appliances: ${disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35}/unit</li>
+              <li>Mattresses: ${Number(disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price ?? 0)}/unit</li>
+              <li>TVs/Monitors: ${Number(disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price ?? 0)}/unit</li>
+              <li>Appliances: ${Number(disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price ?? 0)}/unit</li>
             </ul>
             <br />
             By including these fees upfront, we ensure transparent pricing and proper environmental stewardship for these materials.

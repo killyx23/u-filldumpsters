@@ -51,8 +51,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         const loadPrices = async () => {
             const prices = {};
             try {
-                // Load all equipment prices (IDs 1-7)
-                for (let id = 1; id <= 7; id++) {
+                // Load equipment/disposal prices only. Insurance is persisted on booking.addons.
+                for (let id = 1; id <= 6; id++) {
                     if (isValidEquipmentId(id)) {
                         prices[id] = await getPriceForEquipment(id);
                     }
@@ -158,9 +158,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
-    // Protection costs
-    const insuranceCost = addons.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
-    const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
+    // Protection costs are captured when the customer accepts them during booking.
+    const insuranceCost = addons.insurance === 'accept' ? Number(addons.insurancePriceApplied || 0) : 0;
+    const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept')
+        ? Number(addons.drivewayPriceApplied || 0)
+        : 0;
 
     // Equipment costs
     let rentEquipmentCost = 0;
@@ -203,9 +205,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const tvCount = addons.tvDisposal || 0;
     const applianceCount = addons.applianceDisposal || 0;
 
-    const mattressCost = mattressCount > 0 ? Number(equipmentPrices[4] || 25) * mattressCount : 0;
-    const tvCost = tvCount > 0 ? Number(equipmentPrices[5] || 15) * tvCount : 0;
-    const applianceCost = applianceCount > 0 ? Number(equipmentPrices[6] || 35) * applianceCount : 0;
+    const mattressCost = mattressCount > 0 ? Number(equipmentPrices[4] ?? 0) * mattressCount : 0;
+    const tvCost = tvCount > 0 ? Number(equipmentPrices[5] ?? 0) * tvCount : 0;
+    const applianceCost = applianceCount > 0 ? Number(equipmentPrices[6] ?? 0) * applianceCount : 0;
     const disposalCost = mattressCost + tvCost + applianceCost;
 
     // Subtotal before discount

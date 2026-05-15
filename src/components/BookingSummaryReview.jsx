@@ -5,14 +5,15 @@ import { ArrowLeft, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { format, parseISO, isValid } from 'date-fns';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
-import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { getEquipmentPricingMetaMap } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTaxAmount, calculateTotalWithTax } from '@/utils/calculateTaxAmount';
+import { calculateItemizedTax, resolveDeliveryType } from '@/utils/calculateTaxAmount';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -25,39 +26,39 @@ export const BookingSummaryReview = ({
     deliveryService
 }) => {
     const isDelivery = plan?.id === 2 && deliveryService;
-    const [equipmentPrices, setEquipmentPrices] = useState({});
+    const deliveryType = resolveDeliveryType(plan, deliveryService);
+    const deliveryZip =
+        addonsData?.deliveryAddress?.zip ??
+        bookingData?.zip ??
+        bookingData?.contactAddress?.zip ??
+        null;
+    const [equipmentMeta, setEquipmentMeta] = useState({});
     const [loading, setLoading] = useState(true);
     const [availabilityTimes, setAvailabilityTimes] = useState({
         pickupStartTime: 'Time not specified',
         returnByTime: 'Time not specified'
     });
 
-    const { taxRate, loading: loadingTaxRate } = useTaxRate();
+    const { taxRate, loading: loadingTaxRate } = useTaxRate(deliveryType, deliveryZip);
     const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { drivewayPrice, loading: loadingDrivewayPrice } = useDrivewayProtectionPrice();
 
-    // Load equipment prices from database (excluding insurance which comes from hook)
+    // Load equipment + disposal pricing meta (IDs 1–6). Insurance uses useInsurancePricing.
     useEffect(() => {
-        const loadPrices = async () => {
+        const loadMeta = async () => {
             setLoading(true);
-            const prices = {};
-
             try {
-                // Load equipment and disposal prices (IDs 1-6)
-                // Note: ID 7 (Premium Insurance) is loaded via useInsurancePricing hook
-                for (let id = 1; id <= 6; id++) {
-                    if (isValidEquipmentId(id)) {
-                        prices[id] = await getPriceForEquipment(id);
-                    }
-                }
-                setEquipmentPrices(prices);
+                const ids = [1, 2, 3, 4, 5, 6].filter(isValidEquipmentId);
+                const meta = await getEquipmentPricingMetaMap(ids);
+                setEquipmentMeta(meta);
             } catch (error) {
-                console.error('[BookingSummaryReview] Error loading prices:', error);
+                console.error('[BookingSummaryReview] Error loading equipment pricing meta:', error);
             } finally {
                 setLoading(false);
             }
         };
 
-        loadPrices();
+        loadMeta();
     }, []);
 
     // Load availability times for Dump Loader Trailer (plan.id === 2) without delivery
@@ -101,34 +102,33 @@ export const BookingSummaryReview = ({
     };
 
     const calculatedTotals = useMemo(() => {
-        const basePriceAmount = plan?.price !== undefined ? plan.price : (basePrice || 0);
-        const deliveryFeeFlat = addonsData?.deliveryFee || 0;
-        const tripMileageCost = addonsData?.mileageCharge || 0;
-        
-        // Protection costs - Use hook for insurance price
-        const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
-        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+        const meta = (id) => equipmentMeta[Number(id)] ?? { price: 0, is_taxable: true };
 
-        console.log('[BookingSummaryReview] Insurance calculation:', {
-            addonsInsurance: addonsData?.insurance,
-            insurancePrice: insurancePrice,
-            insuranceCost: insuranceCost
-        });
+        const basePriceAmount = Number(
+            plan?.price !== undefined && plan?.price !== null ? plan.price : (basePrice || 0)
+        );
+        const deliveryFeeFlat = Number(addonsData?.deliveryFee || 0);
+        const tripMileageCost = Number(addonsData?.mileageCharge || 0);
 
-        // Equipment costs
+        const insuranceCost = addonsData?.insurance === 'accept'
+            ? Number(addonsData?.insurancePriceApplied ?? insurancePrice ?? 0)
+            : 0;
+        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+            ? Number(addonsData?.drivewayPriceApplied ?? drivewayPrice ?? 0)
+            : 0;
+
         let rentEquipmentCost = 0;
         let purchaseItemsCost = 0;
 
         if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
             addonsData.equipment.forEach(item => {
                 const equipmentId = item.equipment_id || item.dbId || item.id;
-                if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+                if (!equipmentId || !isValidEquipmentId(equipmentId) || Number(equipmentId) === 7) return;
 
-                const price = Number(equipmentPrices[equipmentId] || 0);
+                const price = Number(meta(equipmentId).price || 0);
                 const quantity = Number(item.quantity || 1);
                 const itemTotal = price * quantity;
 
-                // ID 3 is Working Gloves (purchase item)
                 if (equipmentId === 3) {
                     purchaseItemsCost += itemTotal;
                 } else {
@@ -137,38 +137,97 @@ export const BookingSummaryReview = ({
             });
         }
 
-        // Disposal costs
         let disposalCost = 0;
-        if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
-            disposalCost += Number(equipmentPrices[4] || 25) * addonsData.mattressDisposal;
-        }
-        if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
-            disposalCost += Number(equipmentPrices[5] || 15) * addonsData.tvDisposal;
-        }
-        if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
-            disposalCost += Number(equipmentPrices[6] || 35) * addonsData.applianceDisposal;
-        }
-
-        // Subtotal before discount
-        const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost + 
-                                        insuranceCost + drivewayProtectionCost + 
-                                        rentEquipmentCost + purchaseItemsCost + disposalCost;
-
-        // Discount
-        let discount = 0;
-        if (addonsData?.coupon?.isValid) {
-            if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
-            } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+        if (plan?.id !== 2) {
+            if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
+                disposalCost += Number(meta(4).price ?? 0) * addonsData.mattressDisposal;
+            }
+            if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
+                disposalCost += Number(meta(5).price ?? 0) * addonsData.tvDisposal;
+            }
+            if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
+                disposalCost += Number(meta(6).price ?? 0) * addonsData.applianceDisposal;
             }
         }
 
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        
-        // Use dynamic tax rate from database
-        const taxCalc = calculateTotalWithTax(subtotal, taxRate);
-        
+        const items = [];
+        if (basePriceAmount > 0) {
+            items.push({ label: 'Base Rental', amount: basePriceAmount, is_taxable: true });
+        }
+        if (deliveryFeeFlat > 0) {
+            items.push({ label: 'Base Delivery Fee', amount: deliveryFeeFlat, is_taxable: true });
+        }
+        if (tripMileageCost > 0) {
+            items.push({
+                label: 'Mileage Charge',
+                amount: tripMileageCost,
+                is_taxable: true,
+                sublabel: addonsData?.distanceFeeDisplay,
+            });
+        }
+        if (insuranceCost > 0) {
+            items.push({ label: 'Rental Insurance', amount: insuranceCost, is_taxable: false });
+        }
+        if (drivewayProtectionCost > 0) {
+            items.push({ label: 'Driveway Protection', amount: drivewayProtectionCost, is_taxable: true });
+        }
+
+        if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
+            for (const item of addonsData.equipment) {
+                const id = item.equipment_id || item.dbId || item.id;
+                if (!id || !isValidEquipmentId(id) || Number(id) === 7) continue;
+                const { price, is_taxable } = meta(id);
+                const quantity = Number(item.quantity || 1);
+                const total = price * quantity;
+                if (total === 0) continue;
+                const label =
+                    id === 1 ? 'Wheelbarrow' :
+                    id === 2 ? 'Hand Truck' :
+                    id === 3 ? 'Working Gloves (Pair)' :
+                    `Equipment #${id}`;
+                items.push({
+                    label: `${label}${quantity > 1 ? ` (x${quantity})` : ''}`,
+                    amount: total,
+                    is_taxable,
+                });
+            }
+        }
+
+        if (plan?.id !== 2) {
+            for (const [key, dbId, singular] of [
+                ['mattressDisposal', 4, 'Mattress Disposal'],
+                ['tvDisposal', 5, 'TV Disposal'],
+                ['applianceDisposal', 6, 'Appliance Disposal'],
+            ]) {
+                const qty = Number(addonsData?.[key] || 0);
+                if (qty > 0) {
+                    const { price, is_taxable } = meta(dbId);
+                    items.push({ label: `${singular} (x${qty})`, amount: price * qty, is_taxable });
+                }
+            }
+        }
+
+        let discount = 0;
+        if (addonsData?.coupon?.isValid) {
+            const taxableSum = items.filter(i => i.is_taxable).reduce((s, i) => s + i.amount, 0);
+            const fullSum = items.reduce((s, i) => s + i.amount, 0);
+            if (addonsData.coupon.discountType === 'fixed') {
+                discount = Number(addonsData.coupon.discountValue || 0);
+            } else if (addonsData.coupon.discountType === 'percentage') {
+                discount = (fullSum * Number(addonsData.coupon.discountValue || 0)) / 100;
+            }
+            discount = Math.min(discount, taxableSum);
+            if (discount > 0) {
+                items.push({
+                    label: `Coupon (${addonsData.coupon.code || 'Applied'})`,
+                    amount: -discount,
+                    is_taxable: true,
+                });
+            }
+        }
+
+        const taxCalc = calculateItemizedTax(items, taxRate);
+
         return {
             basePriceAmount,
             deliveryFeeFlat,
@@ -180,11 +239,11 @@ export const BookingSummaryReview = ({
             disposalCost,
             discount,
             subtotal: taxCalc.subtotal,
-            tax: taxCalc.tax,
-            taxRate: taxRate,
-            total: taxCalc.total
+            tax: taxCalc.taxAmount,
+            taxRate,
+            total: taxCalc.total,
         };
-    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
+    }, [basePrice, plan, addonsData, equipmentMeta, isDelivery, taxRate, insurancePrice, drivewayPrice]);
 
     const planName = plan?.name || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
@@ -219,7 +278,7 @@ export const BookingSummaryReview = ({
         return formatTimeWindow(timeSlot, timeOptions);
     };
 
-    if (loading || loadingTaxRate || loadingInsurancePrice) {
+    if (loading || loadingTaxRate || loadingInsurancePrice || loadingDrivewayPrice) {
         return (
             <div className="flex justify-center items-center h-64">
                 <div className="text-white">Loading price breakdown...</div>
@@ -255,9 +314,9 @@ export const BookingSummaryReview = ({
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
             const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3) return;
+            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3 || Number(equipmentId) === 7) return;
             
-            const price = Number(equipmentPrices[equipmentId] || 0);
+            const price = Number(equipmentMeta[equipmentId]?.price ?? 0);
             const quantity = Number(item.quantity || 1);
             const itemName = equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`;
             
@@ -276,7 +335,7 @@ export const BookingSummaryReview = ({
         });
         
         if (glovesItem) {
-            const price = Number(equipmentPrices[3] || 0);
+            const price = Number(equipmentMeta[3]?.price ?? 0);
             const quantity = Number(glovesItem.quantity || 1);
             purchaseItems.push({ 
                 label: `Working Gloves (Pair) (x${quantity})`, 
@@ -286,22 +345,22 @@ export const BookingSummaryReview = ({
     }
 
     const disposalItems = [];
-    if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
-        const price = Number(equipmentPrices[4] || 25);
+    if (plan?.id !== 2 && addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
+        const price = Number(equipmentMeta[4]?.price ?? 0);
         disposalItems.push({ 
             label: `Mattress Disposal (x${addonsData.mattressDisposal})`, 
             amount: price * addonsData.mattressDisposal 
         });
     }
-    if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
-        const price = Number(equipmentPrices[5] || 15);
+    if (plan?.id !== 2 && addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
+        const price = Number(equipmentMeta[5]?.price ?? 0);
         disposalItems.push({ 
             label: `TV Disposal (x${addonsData.tvDisposal})`, 
             amount: price * addonsData.tvDisposal 
         });
     }
-    if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
-        const price = Number(equipmentPrices[6] || 35);
+    if (plan?.id !== 2 && addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
+        const price = Number(equipmentMeta[6]?.price ?? 0);
         disposalItems.push({ 
             label: `Appliance Disposal (x${addonsData.applianceDisposal})`, 
             amount: price * addonsData.applianceDisposal 
