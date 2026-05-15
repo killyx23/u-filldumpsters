@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
@@ -194,7 +195,11 @@ function BookingJourney({ reorderData }) {
     setIsProcessing(true);
 
     try {
-      const result = await storePendingBooking(bookingData, selectedPlan, addonsData);
+      const result = await storePendingBooking(bookingData, selectedPlan, addonsData, {
+        totalPrice: finalPrice,
+        basePrice: basePrice,
+        deliveryService: deliveryService
+      });
       
       const resultTs = new Date().toISOString();
       if (!result.success) {
@@ -232,7 +237,11 @@ function BookingJourney({ reorderData }) {
     setIsProcessing(true);
 
     try {
-      const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...verificationData });
+      const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...verificationData }, {
+        totalPrice: finalPrice,
+        basePrice: basePrice,
+        deliveryService: deliveryService
+      });
       
       const resultTs = new Date().toISOString();
       if (!result.success) {

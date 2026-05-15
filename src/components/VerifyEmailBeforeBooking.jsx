@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -347,7 +348,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         try {
             console.log(`[${timestamp}] [VerifyEmailBeforeBooking] Invoking verify-email-code function`);
             const { data, error } = await supabase.functions.invoke('verify-email-code', {
-                body: { email: bookingData.email, code }
+                body: { email: bookingData.email, code, pending_customer_id: token }
             });
 
             clearTimeout(verificationTimeoutRef.current);

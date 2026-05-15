@@ -1,5 +1,5 @@
+
 import { supabase } from '@/lib/customSupabaseClient';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * EMAIL DEDUPLICATION PATTERN
@@ -8,12 +8,10 @@ import { v4 as uuidv4 } from 'uuid';
  * in the pending_customers table. The pattern is:
  * 
  * 1. Check if email already exists in pending_customers
- * 2. If exists and NOT verified:
- *    - UPDATE the existing record with new booking data
+ * 2. If exists:
+ *    - UPDATE the existing record with new booking data, setting is_verified back to false
  *    - Return the existing token for email verification
- * 3. If exists and IS verified:
- *    - Return error prompting user to use different email or login
- * 4. If doesn't exist:
+ * 3. If doesn't exist:
  *    - INSERT new record
  * 
  * IMPORTANT: Do NOT bypass this pattern. Always use storePendingBooking() to create
@@ -25,9 +23,10 @@ import { v4 as uuidv4 } from 'uuid';
  * @param {Object} bookingData - Contact and booking information
  * @param {Object} plan - Selected service plan
  * @param {Object} addonsData - Selected add-ons and additional data
+ * @param {Object} options - Additional options including pricing data
  * @returns {Promise<{success: boolean, token?: string, error?: string}>}
  */
-export async function storePendingBooking(bookingData, plan, addonsData) {
+export async function storePendingBooking(bookingData, plan, addonsData, options = {}) {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [storePendingBooking] Starting with email: ${bookingData.email}`);
 
@@ -81,7 +80,11 @@ export async function storePendingBooking(bookingData, plan, addonsData) {
       plan_data: plan || null,
       addons_data: addonsData || null,
       booking_data: bookingData || null,
-      is_verified: false
+      is_verified: false,
+      verified_at: null,
+      total_price: options.totalPrice || null,
+      base_price: options.basePrice || null,
+      delivery_service: options.deliveryService || false
     };
 
     // STEP 2: Handle existing email
@@ -92,17 +95,8 @@ export async function storePendingBooking(bookingData, plan, addonsData) {
         created_at: existingRecord.created_at
       });
 
-      // STEP 2a: If email is already verified, prevent overwrite
-      if (existingRecord.is_verified) {
-        console.warn(`[${timestamp}] [storePendingBooking] Email already verified - blocking duplicate`);
-        return {
-          success: false,
-          error: 'This email is already registered. Please use a different email or log in to your existing account.'
-        };
-      }
-
-      // STEP 2b: Email exists but not verified - UPDATE the record
-      console.log(`[${timestamp}] [storePendingBooking] Updating existing unverified record`);
+      // Update the existing record regardless of verification status
+      console.log(`[${timestamp}] [storePendingBooking] Updating existing record to unverified with new details`);
       
       const { data: updatedRecord, error: updateError } = await supabase
         .from('pending_customers')

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
@@ -32,12 +33,13 @@ export const StepIndicator = ({ currentStep, highestStep = currentStep, onStepCl
             const isActive = currentStep === step.number;
             const isPast = currentStep > step.number;
             const isClickable = step.number <= highestStep;
+            const isInteractive = Boolean(onStepClick) && isClickable;
             
             return (
               <div key={step.number} className="relative z-10 flex flex-col items-center mx-4">
                 <motion.button
-                  onClick={() => isClickable && onStepClick && onStepClick(step.number)}
-                  disabled={!isClickable}
+                  onClick={() => isInteractive && onStepClick(step.number)}
+                  disabled={!isInteractive && !isActive && !isPast}
                   initial={false}
                   animate={{
                     backgroundColor: isActive || isPast ? '#EAB308' : '#1F2937',
@@ -46,17 +48,17 @@ export const StepIndicator = ({ currentStep, highestStep = currentStep, onStepCl
                   }}
                   className={`w-8 h-8 md:w-10 md:h-10 rounded-full border-2 flex items-center justify-center font-bold transition-all duration-300 outline-none
                     ${(isActive || isPast) ? 'text-black shadow-lg shadow-yellow-900/50' : 'text-gray-400'}
-                    ${isClickable && !isActive ? 'cursor-pointer hover:scale-110 hover:shadow-yellow-500/50' : ''}
-                    ${!isClickable ? 'opacity-70 cursor-not-allowed' : ''}
+                    ${isInteractive && !isActive ? 'cursor-pointer hover:scale-110 hover:shadow-yellow-500/50' : ''}
+                    ${!isInteractive && !isActive && !isPast ? 'opacity-70 cursor-default' : ''}
                   `}
                 >
                   {isPast ? <Check className="w-4 h-4 md:w-5 md:h-5" /> : step.number}
                 </motion.button>
                 <span className={`absolute top-full mt-3 text-xs font-semibold whitespace-nowrap transition-colors duration-300 max-w-[120px] text-center leading-tight
                   ${isActive ? 'text-yellow-400' : isPast ? 'text-white' : 'text-gray-500'}
-                  ${isClickable && !isActive ? 'cursor-pointer hover:text-yellow-200' : ''}
+                  ${isInteractive && !isActive ? 'cursor-pointer hover:text-yellow-200' : ''}
                 `}
-                onClick={() => isClickable && onStepClick && onStepClick(step.number)}
+                onClick={() => isInteractive && onStepClick(step.number)}
                 >
                   {step.title}
                 </span>
