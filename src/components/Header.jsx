@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -61,7 +62,7 @@ export const Header = ({ onReorderSelect }) => {
     }
     
     return (
-      <Button onClick={() => { navigate('/customer-portal-login'); closeMenu(); }} variant="outline" className={`${btnClass} text-white border-white/50 hover:bg-white/20 hover:text-white`}>
+      <Button onClick={() => { navigate('/customer-login'); closeMenu(); }} variant="outline" className={`${btnClass} text-white border-white/50 hover:bg-white/20 hover:text-white`}>
         <LogIn className="mr-2 h-4 w-4" />
         Customer Portal
       </Button>
