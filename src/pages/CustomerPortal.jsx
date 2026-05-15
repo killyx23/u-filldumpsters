@@ -144,8 +144,8 @@ export const CustomerPortal = () => {
         
         console.log(`[${timestamp}] [CustomerPortal] Customer DB ID from metadata:`, customerDbId);
 
-        const parsedId = Number(customerDbId);
-        if (customerDbId === null || customerDbId === undefined || Number.isNaN(parsedId) || !Number.isFinite(parsedId)) {
+        const parsedId = Number.parseInt(String(customerDbId), 10);
+        if (customerDbId === null || customerDbId === undefined || !Number.isFinite(parsedId)) {
             console.error(`[${timestamp}] [CustomerPortal] ⚠ Missing or invalid customer_db_id in user metadata`, {
                 fullMetadata: user.user_metadata
             });
