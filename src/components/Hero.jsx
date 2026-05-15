@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -13,11 +12,11 @@ const ServiceCard = ({
   // Common visual layout for ID 1 (16 Yard Dumpster), ID 2 (Dump Loader Trailer), and ID 3 (Rock Mulch and Gravel)
   let imageUrl = "";
   if (id === 1) {
-    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
+    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
   } else if (id === 2) {
-    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/71ba93b0b17b71051b7ab08600b18632.jpg";
+    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/71ba93b0b17b71051b7ab08600b18632.jpg";
   } else if (id === 3) {
-    imageUrl = "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
+    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
   }
   
   return (

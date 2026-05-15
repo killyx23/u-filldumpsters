@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, Info, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, Info, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -58,7 +58,7 @@ const IncompleteInfoPopover = () => (
     </Popover>
 );
 
-export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId }) => {
+export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId, customerEmail }) => {
     const [licensePlate, setLicensePlate] = useState('');
     const [plateError, setPlateError] = useState('');
     
@@ -74,6 +74,9 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
     const [isUploading, setIsUploading] = useState(false);
     const [isLoadingInitial, setIsLoadingInitial] = useState(true);
     const [verificationNotes, setVerificationNotes] = useState('');
+    
+    // New state to track if email is already registered
+    const [isEmailRegistered, setIsEmailRegistered] = useState(false);
 
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
@@ -92,15 +95,23 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                     setExistingBackUrl(doc.license_back_url || null);
                     setExistingFrontPath(doc.license_front_storage_path || null);
                     setExistingBackPath(doc.license_back_storage_path || null);
+                    
+                    // If customer already has documents, they're a returning customer
+                    setIsEmailRegistered(true);
                 } else {
                     // Explicitly reset to empty state if no record is found
                     setExistingFrontUrl(null);
                     setExistingBackUrl(null);
                     setExistingFrontPath(null);
                     setExistingBackPath(null);
+                    setIsEmailRegistered(false);
                 }
             } catch (err) {
                 console.error("Error fetching existing documents:", err);
+                // If there's an error but we have a customerId, assume they're registered
+                if (customerId) {
+                    setIsEmailRegistered(true);
+                }
             } finally {
                 setIsLoadingInitial(false);
             }
@@ -191,7 +202,24 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
             });
         } catch (error) {
             console.error("Verification upload error:", error);
-            toast({ title: 'Upload Failed', description: error.message || 'Failed to upload verification documents.', variant: 'destructive', duration: 15000 });
+            
+            // Handle duplicate email error gracefully with friendly informational toast
+            if (error.message && error.message.includes('already registered')) {
+                setIsEmailRegistered(true);
+                toast({ 
+                    title: 'Email Already in System', 
+                    description: 'This email is already in our system. You can log in with your existing account or use a different email to continue.',
+                    variant: 'info',
+                    duration: 6000
+                });
+            } else {
+                toast({ 
+                    title: 'Upload Failed', 
+                    description: error.message || 'Failed to upload verification documents.', 
+                    variant: 'destructive', 
+                    duration: 15000 
+                });
+            }
         } finally {
             setIsUploading(false);
         }
@@ -228,6 +256,24 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                             </p>
                         </div>
                     </div>
+
+                    {/* Friendly informational message for registered emails */}
+                    {isEmailRegistered && (
+                        <motion.div 
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mb-6 bg-blue-900/30 border border-blue-500/50 p-4 rounded-xl flex items-start gap-3"
+                        >
+                            <CheckCircle2 className="h-6 w-6 text-blue-400 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <h4 className="font-semibold text-blue-300 text-lg mb-1">Welcome Back!</h4>
+                                <p className="text-blue-200 text-sm">
+                                    {customerEmail ? `${customerEmail} is` : 'This email is'} already registered in our system. You can continue with the verification process. 
+                                    {existingFrontUrl && existingBackUrl ? ' Your previous documents are loaded below and can be updated if needed.' : ''}
+                                </p>
+                            </div>
+                        </motion.div>
+                    )}
 
                     <div className="space-y-8 bg-black/20 p-6 rounded-xl border border-white/10">
                         <div>

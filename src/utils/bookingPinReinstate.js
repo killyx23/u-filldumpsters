@@ -6,20 +6,20 @@ export const shouldDeletePinForStatus = (status) => PIN_DELETE_STATUSES.has(stat
 
 /**
  * Generate patch object to reset PIN tracking fields when transitioning from pending_review to Confirmed
- *
+ * 
  * This function determines if PIN-related fields should be cleared based on booking status transition.
  * When a booking moves from 'pending_review' back to 'Confirmed', we need to reset PIN tracking
  * so a new PIN can be generated through the normal flow.
- *
+ * 
  * @param {string} previousStatus - The previous booking status
  * @param {string} newStatus - The new booking status being applied
  * @returns {Object} Patch object containing PIN field resets, or empty object if no reset needed
- *
+ * 
  * @example
  * // Transitioning from pending_review to Confirmed - resets PIN fields
  * reinstatePinTrackingPatch('pending_review', 'Confirmed')
  * // Returns: { pin_generated_at: null, pin_notification_sent_at: null }
- *
+ * 
  * @example
  * // Any other transition - no PIN reset
  * reinstatePinTrackingPatch('Confirmed', 'Delivered')
@@ -34,19 +34,19 @@ export function reinstatePinTrackingPatch(previousStatus, newStatus) {
       pin_notification_sent_at: null
     };
   }
-
+  
   // No PIN reset needed for other transitions
   return {};
 }
 
 /**
  * Expire all active rental access codes (PINs) for a specific booking
- *
+ * 
  * This first calls the delete-pin edge function, which expires the PIN in the
  * database and attempts bridge deletion. If the edge call fails to confirm DB
  * expiry, this falls back to expiring active rows locally so portal access is
  * still revoked.
- *
+ * 
  * @async
  * @param {number|bigint} orderId - The booking ID whose PINs should be expired
  * @param {'admin'|'customer'} callerType - Auth context delete-pin should verify
@@ -54,7 +54,7 @@ export function reinstatePinTrackingPatch(previousStatus, newStatus) {
  *   - success {boolean} - Whether the operation completed successfully
  *   - expiredCount {number} - Number of PINs that were expired
  *   - error {string} [optional] - Error message if operation failed
- *
+ * 
  * @example
  * // Expire PINs when booking is moved to pending_review
  * const result = await expireActiveRentalAccessCodesForOrder(12345);
@@ -117,10 +117,10 @@ export async function expireActiveRentalAccessCodesForOrder(orderId, callerType 
 
     // Update all active codes to expired status
     const { error: updateError } = await supabase
-    .from('rental_access_codes')
-    .update({ status: 'expired' })
-    .eq('order_id', orderId)
-    .eq('status', 'active');
+      .from('rental_access_codes')
+      .update({ status: 'expired' })
+      .eq('order_id', orderId)
+      .eq('status', 'active');
 
     if (updateError) {
       console.error('[expireActiveRentalAccessCodesForOrder] Error updating codes to expired:', updateError);
@@ -129,7 +129,7 @@ export async function expireActiveRentalAccessCodesForOrder(orderId, callerType 
 
     const expiredCount = activeCodes.length;
     console.log(`[expireActiveRentalAccessCodesForOrder] ✓ Successfully expired ${expiredCount} PIN(s) for booking #${orderId}`);
-
+    
     // Log each expired PIN for audit trail
     activeCodes.forEach(code => {
       console.log(`  - Expired PIN: ${code.access_pin} (pin_id: ${code.pin_id})`);
@@ -140,10 +140,10 @@ export async function expireActiveRentalAccessCodesForOrder(orderId, callerType 
   } catch (error) {
     // Catch any unexpected errors and log them
     console.error('[expireActiveRentalAccessCodesForOrder] Unexpected error:', error);
-    return {
-      success: false,
-      expiredCount: 0,
-      error: error.message || 'Unknown error occurred'
+    return { 
+      success: false, 
+      expiredCount: 0, 
+      error: error.message || 'Unknown error occurred' 
     };
   }
 }

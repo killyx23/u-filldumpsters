@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet';
 import ProductShowcase from '@/components/ProductShowcase';
 import ProductModal from '@/components/ProductModal';
 
-const ProductShowcasePage = () => {
+export const ProductShowcasePage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const handleOpenModal = () => {
