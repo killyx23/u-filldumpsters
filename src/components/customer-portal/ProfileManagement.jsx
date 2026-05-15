@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -41,6 +42,8 @@ export const ProfileManagement = ({ customer, onUpdate }) => {
 
   const handleSave = async (e) => {
       e.preventDefault();
+      if (!customer?.id) return;
+      
       setIsSaving(true);
       
       const computedFullName = `${formData.first_name} ${formData.last_name}`.trim();
