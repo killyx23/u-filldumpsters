@@ -1,247 +1,147 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogIn, UserPlus, AlertCircle, RefreshCw } from 'lucide-react';
+import { Loader2, LogIn, UserPlus, AlertCircle, Shield } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 
-const loginLog = (label, data) => {
-  console.log(
-    `%c[AdminLogin] ${label}`,
-    'background:#1e3a5f;color:#facc15;font-weight:bold;padding:2px 6px;border-radius:3px',
-    data ?? ''
-  );
-};
-
-const AdminLogin = () => {
+export const AdminLogin = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loadingState, setLoadingState] = useState(false);
-  const [showCreateAdmin, setShowCreateAdmin] = useState(true);
-  const [authError, setAuthError] = useState(null);
-  const hasNavigated = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { user, isAdmin, loading: authLoading, signOut } = useAuth();
+  const { user, isAdmin, loading: authLoading, signIn, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
 
-  // Log auth state changes for debugging
+  console.log('[AdminLogin] Component state:', {
+    hasUser: !!user,
+    userEmail: user?.email,
+    isAdmin,
+    authLoading,
+    isSubmitting,
+  });
+
+  // Handle successful admin login
   useEffect(() => {
-    loginLog('Auth state update', {
-      userEmail: user?.email || 'NO USER',
-      userId: user?.id || 'NO USER',
-      isAdmin: isAdmin,
-      authLoading: authLoading,
-      hasNavigated: hasNavigated.current,
-    });
-  }, [user, isAdmin, authLoading]);
+    if (!authLoading && user && isAdmin) {
+      console.log('[AdminLogin] ✅ Admin user authenticated - redirecting to dashboard');
+      toast({
+        title: "Login Successful",
+        description: `Welcome, ${user.email}`,
+      });
+      
+      const from = location.state?.from?.pathname || '/admin/dashboard';
+      navigate(from, { replace: true });
+    }
+  }, [user, isAdmin, authLoading, navigate, location, toast]);
 
   // Handle unauthorized redirect from AdminRouteGuard
   useEffect(() => {
-    if (location.state?.error === 'unauthorized') {
-      loginLog('Unauthorized access detected from route guard', null);
+    if (location.state?.error === 'unauthorized' && location.state?.userEmail) {
+      console.warn('[AdminLogin] Unauthorized access detected:', location.state.userEmail);
+      toast({
+        variant: "destructive",
+        title: "Access Denied",
+        description: `${location.state.userEmail} does not have admin privileges.`,
+      });
       
+      // Sign out the non-admin user
       if (user && !isAdmin) {
-        loginLog('User exists but not admin - signing out', user.email);
-        setAuthError('You do not have administrative privileges.');
-        toast({
-          variant: "destructive",
-          title: "Access Denied",
-          description: "You do not have administrative privileges. Signing out...",
-        });
         signOut();
       }
     }
   }, [location.state, user, isAdmin, signOut, toast]);
 
-  // Handle authentication and navigation
-  useEffect(() => {
-    // Don't process if still loading or already navigated
-    if (authLoading || hasNavigated.current) {
-      loginLog('Skipping navigation logic', {
-        reason: authLoading ? 'auth still loading' : 'already navigated',
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    
+    if (!email || !password) {
+      toast({
+        variant: "destructive",
+        title: "Validation Error",
+        description: "Please enter both email and password.",
       });
       return;
     }
 
-    if (user) {
-      loginLog('User authenticated - checking admin status', {
-        email: user.email,
-        isAdmin: isAdmin,
-      });
-
-      if (isAdmin) {
-        loginLog('✅ User is admin - navigating to dashboard', null);
-        hasNavigated.current = true;
-        toast({
-          title: "Login Successful",
-          description: "Redirecting to admin dashboard...",
-        });
-        navigate('/admin', { replace: true });
-      } else if (location.state?.error !== 'unauthorized') {
-        // Only sign out if this isn't from an unauthorized redirect
-        // (to prevent double sign-out)
-        loginLog('❌ User is NOT admin - signing out', user.email);
-        setAuthError('Access denied: Administrative privileges required.');
-        toast({
-          variant: "destructive",
-          title: "Access Denied",
-          description: "You do not have administrative privileges.",
-        });
-        signOut();
-      }
-    } else {
-      loginLog('No user logged in - staying on login page', null);
-      // Reset navigation flag when no user (allows re-login)
-      hasNavigated.current = false;
-    }
-  }, [user, isAdmin, authLoading, navigate, signOut, toast, location.state]);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    loginLog('Login form submitted', { email });
-    
-    setLoadingState(true);
-    setAuthError(null);
-    hasNavigated.current = false; // Reset navigation flag
+    console.log('[AdminLogin] Login attempt:', email);
+    setIsSubmitting(true);
 
     try {
-      loginLog('Attempting Supabase authentication...', { email });
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error } = await signIn(email, password);
 
       if (error) {
-        loginLog('❌ Authentication failed', error.message);
-        setAuthError(error.message);
+        console.error('[AdminLogin] Login failed:', error.message);
         toast({
           variant: "destructive",
           title: "Login Failed",
           description: error.message,
         });
-        setLoadingState(false);
+        setIsSubmitting(false);
         return;
       }
 
-      loginLog('✅ Authentication successful', {
-        email: data.user?.email,
-        userId: data.user?.id,
-        app_metadata: data.user?.app_metadata,
-        user_metadata: data.user?.user_metadata,
-      });
-
-      // Check if user has admin flag
-      const hasAdminFlag = data.user?.app_metadata?.is_admin || 
-                          data.user?.user_metadata?.is_admin ||
-                          false;
-
-      loginLog('Admin flag check', {
-        hasAdminFlag: hasAdminFlag,
-        app_metadata_is_admin: data.user?.app_metadata?.is_admin,
-        user_metadata_is_admin: data.user?.user_metadata?.is_admin,
-      });
-
-      if (!hasAdminFlag) {
-        loginLog('⚠️ User authenticated but no admin flag found', {
-          message: 'Run query to set is_admin flag in Supabase',
-          user_id: data.user?.id,
-        });
-        setAuthError('Admin privileges not detected. Please verify your account setup.');
-        toast({
-          variant: "destructive",
-          title: "Access Denied",
-          description: "Your account does not have administrative privileges.",
-        });
-        await signOut();
-        setLoadingState(false);
-        return;
-      }
-
-      loginLog('Waiting for AuthContext to update isAdmin state...', null);
-      // Navigation will be handled by useEffect once AuthContext updates
-
+      console.log('[AdminLogin] Login successful - waiting for auth context to update');
+      // Don't set isSubmitting to false here - let the navigation happen
+      // The auth context will update and trigger the redirect useEffect
     } catch (err) {
-      loginLog('❌ Unexpected login error', err.message);
-      setAuthError('An unexpected error occurred. Please try again.');
+      console.error('[AdminLogin] Unexpected error:', err);
       toast({
         variant: "destructive",
-        title: "Login Error",
+        title: "Error",
         description: err.message || "An unexpected error occurred.",
       });
-      setLoadingState(false);
+      setIsSubmitting(false);
     }
   };
 
-  const handleRetry = () => {
-    loginLog('Retry button clicked - resetting form', null);
-    setAuthError(null);
-    setLoadingState(false);
-    setEmail('');
-    setPassword('');
-    hasNavigated.current = false;
-  };
-
   const handleCreateFirstAdmin = async () => {
-    const adminEmail = prompt("Please enter the email for the new admin user:");
-    if (!adminEmail) {
+    const adminEmail = prompt("Enter email for the first admin user:");
+    if (!adminEmail?.trim()) {
       toast({
         variant: "destructive",
         title: "Cancelled",
-        description: "Admin user creation was cancelled.",
+        description: "Admin creation cancelled.",
       });
       return;
     }
 
-    loginLog('Creating first admin user', { adminEmail });
-    setLoadingState(true);
-    setAuthError(null);
+    console.log('[AdminLogin] Creating first admin:', adminEmail);
+    setIsSubmitting(true);
 
     try {
       const { data, error } = await supabase.functions.invoke('create-first-admin', {
-        body: { email: adminEmail },
+        body: { email: adminEmail.trim() },
       });
 
-      if (error) {
-        loginLog('❌ Edge function error', error.message);
-        throw error;
-      }
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
 
-      if (data.error) {
-        loginLog('❌ Function returned error', data.error);
-        throw new Error(data.error);
-      }
-
-      loginLog('✅ Admin user created successfully', {
-        email: adminEmail,
-        userId: data.user?.id,
-      });
-
+      console.log('[AdminLogin] ✅ Admin user created:', data);
       toast({
-        title: "Admin User Created",
-        description: `Successfully created admin user for ${adminEmail}. You can now log in.`,
+        title: "Admin Created",
+        description: `Admin user created for ${adminEmail}. Check your email for login credentials.`,
       });
-      setShowCreateAdmin(false);
     } catch (error) {
-      loginLog('❌ Failed to create admin user', error.message);
-      setAuthError(error.message || 'Failed to create admin user');
+      console.error('[AdminLogin] Admin creation failed:', error);
       toast({
         variant: "destructive",
         title: "Creation Failed",
-        description: error.message || "Could not create admin user. They may already exist.",
+        description: error.message || "Could not create admin user.",
       });
     } finally {
-      setLoadingState(false);
+      setIsSubmitting(false);
     }
   };
 
-  const isUIBusy = loadingState || authLoading;
+  const isLoading = isSubmitting || authLoading;
 
   return (
     <motion.div
@@ -250,52 +150,30 @@ const AdminLogin = () => {
       transition={{ duration: 0.5 }}
       className="flex items-center justify-center min-h-[calc(100vh-200px)] px-4"
     >
-      <div className="w-full max-w-md p-8 space-y-8 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 relative overflow-hidden">
-        {isUIBusy && (
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-10 flex items-center justify-center">
-            <div className="text-center">
-              <Loader2 className="h-12 w-12 text-yellow-400 animate-spin mx-auto mb-2" />
-              <p className="text-white text-sm">
-                {loadingState ? 'Authenticating...' : 'Verifying permissions...'}
-              </p>
+      <div className="w-full max-w-md p-8 space-y-6 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20">
+        <div className="text-center space-y-2">
+          <div className="flex justify-center">
+            <div className="bg-yellow-500 p-3 rounded-full">
+              <Shield className="h-8 w-8 text-black" />
             </div>
           </div>
-        )}
-
-        <div className="text-center">
           <h1 className="text-3xl font-bold text-yellow-400">Admin Login</h1>
-          <p className="mt-2 text-blue-200">Please sign in to access the dashboard.</p>
+          <p className="text-blue-200">Sign in to access the dashboard</p>
         </div>
 
-        {authError && (
-          <div className="bg-red-900/40 border border-red-500 p-4 rounded-lg space-y-3">
+        {location.state?.error === 'unauthorized' && (
+          <div className="bg-red-900/40 border border-red-500 p-4 rounded-lg">
             <div className="flex items-start text-red-200 text-sm">
               <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0 text-red-400 mt-0.5" />
-              <div className="flex-1">
-                <p className="font-semibold">Authentication Error</p>
-                <p className="mt-1">{authError}</p>
+              <div>
+                <p className="font-semibold">Access Denied</p>
+                <p className="mt-1">You do not have administrative privileges.</p>
               </div>
             </div>
-            <Button
-              onClick={handleRetry}
-              variant="outline"
-              size="sm"
-              className="w-full bg-red-950/50 border-red-500 text-red-200 hover:bg-red-900"
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Try Again
-            </Button>
           </div>
         )}
 
-        {location.state?.error === 'unauthorized' && !authError && (
-          <div className="bg-orange-900/40 border border-orange-500 p-3 rounded-lg flex items-center text-orange-200 text-sm">
-            <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0 text-orange-400" />
-            You must be an administrator to access that page.
-          </div>
-        )}
-
-        <form className="space-y-6" onSubmit={handleLogin}>
+        <form className="space-y-4" onSubmit={handleLogin}>
           <div className="space-y-2">
             <Label htmlFor="email" className="text-white">Email Address</Label>
             <Input
@@ -308,9 +186,10 @@ const AdminLogin = () => {
               onChange={(e) => setEmail(e.target.value)}
               className="bg-white/10 text-white border-white/30 focus:ring-yellow-400 placeholder-white/40"
               placeholder="admin@example.com"
-              disabled={isUIBusy}
+              disabled={isLoading}
             />
           </div>
+          
           <div className="space-y-2">
             <Label htmlFor="password" className="text-white">Password</Label>
             <Input
@@ -323,45 +202,51 @@ const AdminLogin = () => {
               onChange={(e) => setPassword(e.target.value)}
               className="bg-white/10 text-white border-white/30 focus:ring-yellow-400 placeholder-white/40"
               placeholder="••••••••"
-              disabled={isUIBusy}
+              disabled={isLoading}
             />
           </div>
-          <div>
-            <Button
-              type="submit"
-              className="w-full text-lg bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
-              disabled={isUIBusy}
-            >
-              <LogIn className="mr-2 h-5 w-5" />
-              {loadingState ? 'Authenticating...' : authLoading ? 'Verifying...' : 'Sign In'}
-            </Button>
-          </div>
+
+          <Button
+            type="submit"
+            className="w-full text-lg bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                {isSubmitting ? 'Signing In...' : 'Verifying...'}
+              </>
+            ) : (
+              <>
+                <LogIn className="mr-2 h-5 w-5" />
+                Sign In
+              </>
+            )}
+          </Button>
         </form>
 
-        {showCreateAdmin && (
-          <>
-            <div className="relative flex py-5 items-center">
-              <div className="flex-grow border-t border-white/20"></div>
-              <span className="flex-shrink mx-4 text-blue-200 text-sm">First Time Setup</span>
-              <div className="flex-grow border-t border-white/20"></div>
-            </div>
-            <div>
-              <Button
-                onClick={handleCreateFirstAdmin}
-                variant="outline"
-                className="w-full bg-transparent border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
-                disabled={isUIBusy}
-              >
-                <UserPlus className="mr-2 h-4 w-4" />
-                Create First Admin User
-              </Button>
-            </div>
-          </>
-        )}
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-white/20" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-transparent text-blue-200">First Time Setup</span>
+          </div>
+        </div>
+
+        <Button
+          onClick={handleCreateFirstAdmin}
+          variant="outline"
+          className="w-full bg-transparent border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
+          disabled={isLoading}
+        >
+          <UserPlus className="mr-2 h-4 w-4" />
+          Create First Admin User
+        </Button>
 
         <div className="pt-4 border-t border-white/10">
           <p className="text-xs text-blue-300 text-center">
-            🔍 Check browser console for detailed authentication logs
+            💡 Check browser console for detailed authentication logs
           </p>
         </div>
       </div>

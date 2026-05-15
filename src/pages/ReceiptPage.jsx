@@ -10,7 +10,7 @@ import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distance
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
-const ReceiptPage = () => {
+export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
     const [status, setStatus] = useState('loading');
     const [error, setError] = useState('');
