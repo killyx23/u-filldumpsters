@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
@@ -10,7 +9,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
 
-const AccessCodesPage = ({ customerData }) => {
+export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
   const [accessCode, setAccessCode] = useState(null);
   const [booking, setBooking] = useState(null);

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, DollarSign, ShieldAlert, MessageSquare, X } from 'lucide-react';
@@ -82,14 +83,17 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
     };
 
     const handleNavigate = (item) => {
-        if (!item || !item.customer_id && !item.id) return;
-        const customerId = item.customer_id || item.id;
+        if (!item) return;
+        const targetCustomerId = item.type === 'unread_notes' ? item.id : item.customer_id;
+        
+        if (!targetCustomerId) return;
+        
         let tab = 'profile';
         if (item.type === 'verification') tab = 'verification';
         if (item.type === 'flagged') tab = 'rentals';
         if (item.type === 'unread_notes') tab = 'notes';
         
-        navigate(`/admin/customer/${customerId}?tab=${tab}`);
+        navigate(`/admin/customer/${targetCustomerId}?tab=${tab}`);
         setDialogOpen(false);
     };
 

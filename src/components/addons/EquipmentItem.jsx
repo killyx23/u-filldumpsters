@@ -6,12 +6,12 @@ import { Minus, Plus, ChevronLeft, ChevronRight, Info, Package } from 'lucide-re
 import { motion, AnimatePresence } from 'framer-motion';
 
 const handTruckImages = [
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/438c04aacba2716be43c830e350b5eb6.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/86e98c2dc6d87e71b72926251853bc97.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/32442900188c66551491ad9c3a07a680.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/38ccd7fd464955d1c8cd2c74e3c81ac1.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/d8ad679fd9727d4de60d63303ee3c773.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/814730697e17b8d9b311c32ddf45da75.jpg"
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/438c04aacba2716be43c830e350b5eb6.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/86e98c2dc6d87e71b72926251853bc97.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/32442900188c66551491ad9c3a07a680.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/38ccd7fd464955d1c8cd2c74e3c81ac1.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d8ad679fd9727d4de60d63303ee3c773.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/814730697e17b8d9b311c32ddf45da75.jpg"
 ];
 
 const handTruckFeatures = [
@@ -23,15 +23,15 @@ const handTruckFeatures = [
 ];
 
 const gorillaImages = [
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/bf76a0fe48c0067c3d5cf8111f67bb6e.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/1b47df06cca424854ef628599b7724ed.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/3f278af24cb7e75e4fd71de66f75df17.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/b5178280ff3c8203532f253ccdf125ea.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/8c7d92ee5ec7d1aa3cd25a1cf6961f7b.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/2b5135e077b05c73e5d3a26b79796310.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/a0818a449711b9c10b3e121797bb3a7e.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/b4265b04e3d99c0b792667f7b8fcba8f.jpg",
-  "https://horizons-cdn.hostinger.com/19eea40a-338e-4256-ae46-d1bf7f025b8d/27e96171270f4792935dea32a3123abc.jpg"
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/bf76a0fe48c0067c3d5cf8111f67bb6e.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/1b47df06cca424854ef628599b7724ed.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/3f278af24cb7e75e4fd71de66f75df17.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/b5178280ff3c8203532f253ccdf125ea.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/8c7d92ee5ec7d1aa3cd25a1cf6961f7b.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/2b5135e077b05c73e5d3a26b79796310.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/a0818a449711b9c10b3e121797bb3a7e.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/b4265b04e3d99c0b792667f7b8fcba8f.jpg",
+  "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/27e96171270f4792935dea32a3123abc.jpg"
 ];
 
 const gorillaFeatures = [

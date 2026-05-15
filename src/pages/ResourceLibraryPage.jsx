@@ -8,7 +8,7 @@ import { Helmet } from 'react-helmet';
 
 const CATEGORIES = ['All', 'Video', 'Document', 'Guide'];
 
-const ResourceLibraryPage = () => {
+export const ResourceLibraryPage = () => {
   const { fetchAllResources, loading } = useResources();
   const [resources, setResources] = useState([]);
   const [filteredResources, setFilteredResources] = useState([]);
