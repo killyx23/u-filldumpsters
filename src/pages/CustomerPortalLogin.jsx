@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -39,11 +40,16 @@ export const CustomerPortalLogin = () => {
     console.log('[CustomerPortalLogin] Magic link auto-login initiated');
 
     try {
+      const parsedBookingId = Number.parseInt(String(urlOrderId).trim(), 10);
+      if (!Number.isFinite(parsedBookingId)) {
+        throw new Error('Invalid booking number');
+      }
+
       // Verify booking exists
       const { data: booking, error } = await supabase
         .from('bookings')
         .select('id, email, phone, drop_off_date, pickup_date')
-        .eq('id', urlOrderId)
+        .eq('id', parsedBookingId)
         .single();
 
       if (error || !booking) {
@@ -90,7 +96,7 @@ export const CustomerPortalLogin = () => {
         description: 'Redirecting to your access code...'
       });
 
-      navigate(`/customer-portal/dashboard?order_id=${booking.id}`);
+      navigate(`/customer-portal?tab=access-codes&order_id=${booking.id}`);
 
     } catch (error) {
       console.error('[CustomerPortalLogin] Magic link error:', error);
@@ -118,17 +124,39 @@ export const CustomerPortalLogin = () => {
       if (!orderId || !phone) {
         throw new Error('Please enter both Order ID and Phone Number');
       }
+      
+      const trimmedOrderId = String(orderId).trim();
+
+      if (trimmedOrderId.toUpperCase().startsWith('CID-')) {
+          toast({
+              title: "Invalid Input",
+              description: "Please use your booking number (e.g., 1253), not your Customer ID (CID-...)",
+              variant: "destructive",
+              action: (
+                  <Button variant="outline" size="sm" onClick={() => navigate(`/customer-login?cid=${trimmedOrderId}&phone=${phone.replace(/\D/g, '')}`)}>
+                      Log in with CID instead
+                  </Button>
+              )
+          });
+          setLoading(false);
+          return;
+      }
+
+      const bookingId = Number.parseInt(trimmedOrderId, 10);
+      if (!Number.isFinite(bookingId)) {
+          throw new Error('Invalid booking number');
+      }
 
       // Normalize phone number
       const normalizedPhone = phone.replace(/\D/g, '');
 
-      console.log('[CustomerPortalLogin] Querying database for booking:', orderId);
+      console.log('[CustomerPortalLogin] Querying database for booking:', bookingId);
 
       // Query database to find matching order
       const { data: booking, error } = await supabase
         .from('bookings')
         .select('id, email, phone, drop_off_date, pickup_date, status')
-        .eq('id', parseInt(orderId))
+        .eq('id', bookingId)
         .single();
 
       if (error || !booking) {
@@ -177,7 +205,7 @@ export const CustomerPortalLogin = () => {
         description: 'Redirecting to your rental dashboard...'
       });
 
-      navigate(`/customer-portal/dashboard?order_id=${booking.id}`);
+      navigate(`/customer-portal?tab=access-codes&order_id=${booking.id}`);
 
     } catch (error) {
       console.error('[CustomerPortalLogin] Login error:', error);
@@ -215,7 +243,7 @@ export const CustomerPortalLogin = () => {
                 Customer Portal Access
               </CardTitle>
               <CardDescription className="text-blue-200">
-                Enter your order details to view your rental information
+                Enter your booking details to view your rental information
               </CardDescription>
             </CardHeader>
 
@@ -230,13 +258,14 @@ export const CustomerPortalLogin = () => {
                     <Input
                       id="orderId"
                       type="text"
-                      placeholder="Enter your order ID"
+                      placeholder="Enter your booking number"
                       value={orderId}
                       onChange={(e) => setOrderId(e.target.value)}
                       className="pl-10 bg-white/10 border-white/30 text-white placeholder:text-blue-200"
                       required
                     />
                   </div>
+                  <p className="text-xs text-blue-300">Booking number e.g. 1253, not CID</p>
                 </div>
 
                 <div className="space-y-2">
@@ -273,6 +302,14 @@ export const CustomerPortalLogin = () => {
                 </Button>
               </form>
 
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <div className="text-center">
+                   <Link to="/customer-login" className="text-sm text-yellow-400 hover:underline">
+                      Log in with Customer ID (CID-...)
+                   </Link>
+                </div>
+              </div>
+
               <div className="mt-6 pt-6 border-t border-white/10">
                 <Link 
                   to="/" 
@@ -281,15 +318,6 @@ export const CustomerPortalLogin = () => {
                   <ArrowLeft className="h-4 w-4" />
                   <span>Back to Home</span>
                 </Link>
-              </div>
-
-              <div className="mt-4">
-                <p className="text-sm text-center text-blue-200">
-                  Need help? Contact us at{' '}
-                  <a href="/contact" className="text-yellow-400 hover:underline">
-                    support@ufilldumpsters.com
-                  </a>
-                </p>
               </div>
             </CardContent>
           </Card>
