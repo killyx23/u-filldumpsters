@@ -147,7 +147,7 @@ export const AdminDashboard = () => {
           title: 'Migration Successful',
           description: `Created ${result.created_records} pricing records, updated ${result.updated_records} records.`
         });
-        
+
         await checkPricingHealth();
       } else {
         toast({
