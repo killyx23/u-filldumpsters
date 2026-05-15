@@ -1,266 +1,617 @@
-
 import React, { useState, useEffect } from 'react';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft, CreditCard, ShieldCheck, User, Mail, Phone, MapPin } from 'lucide-react';
-import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import { format, isValid, parseISO } from 'date-fns';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { supabase } from '@/lib/customSupabaseClient';
+import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { formatTimeWindow } from '@/utils/timeWindowFormatter';
+import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
+import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePromise =
+  typeof stripePublishableKey === 'string' && stripePublishableKey.trim()
+    ? loadStripe(stripePublishableKey)
+    : null;
 
-const CheckoutForm = ({ bookingId, onBack, totalPrice, bookingData }) => {
+const formatMoney = (amount) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount ?? 0);
+
+const ConfirmationLine = ({ label, value }) => (
+  <div className="flex justify-between items-start py-1.5 border-b border-white/5 last:border-0">
+    <p className="font-medium text-blue-200/80 w-1/3 pr-2">{label}:</p>
+    <p className="text-right w-2/3 text-white font-medium whitespace-pre-line">{value ?? 'N/A'}</p>
+  </div>
+);
+
+const BreakdownLine = ({ label, value, icon = null }) => (
+  <div className="flex justify-between items-center py-1">
+    <span className="flex items-center">
+      {icon && <span className="mr-2">{icon}</span>}
+      {label}
+    </span>
+    <span>{formatMoney(value)}</span>
+  </div>
+);
+
+const CategoryHeader = ({ icon, title }) => (
+  <div className="flex items-center text-yellow-400 font-bold text-sm mt-4 mb-2 pb-1 border-b border-white/20">
+    <span className="text-lg mr-2">{icon}</span>
+    <span>{title}</span>
+  </div>
+);
+
+const CheckoutForm = ({ onBack }) => {
   const stripe = useStripe();
   const elements = useElements();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [delivery_location_verified, setDeliveryLocation_Verified] = useState(false);
+  const [formError, setFormError] = useState(null);
+  const [isPaymentElementReady, setIsPaymentElementReady] = useState(false);
+  const [equipmentPrices, setEquipmentPrices] = useState({});
+  const [loadingPrices, setLoadingPrices] = useState(true);
+  const [availabilityTimes, setAvailabilityTimes] = useState({
+    pickupStartTime: 'Time not specified',
+    returnByTime: 'Time not specified'
+  });
+  const [taxUpdateStatus, setTaxUpdateStatus] = useState('pending');
+  const [clientSecret, setClientSecret] = useState(null);
+  const [bookingId, setBookingId] = useState(null);
+  
+  // Retrieved booking data from pending_customers
+  const [bookingData, setBookingData] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [addonsData, setAddonsData] = useState(null);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const [deliveryService, setDeliveryService] = useState(false);
+  const [loadingBookingData, setLoadingBookingData] = useState(true);
+  const [dataError, setDataError] = useState(null);
+
+  const { taxRate, loading: loadingTaxRate } = useTaxRate();
+  const { insurancePrice } = useInsurancePricing();
+
+  // Retrieve booking data from pending_customers using URL parameter
+  useEffect(() => {
+    const retrieveBookingData = async () => {
+      const pendingId = searchParams.get('bookingId');
+      
+      if (!pendingId) {
+        setDataError('Missing booking ID. Cannot retrieve your booking data.');
+        setLoadingBookingData(false);
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      console.log(`[${timestamp}] [PaymentPage] Retrieving booking data for ID: ${pendingId}`);
+
+      try {
+        const { data, error } = await supabase
+          .from('pending_customers')
+          .select('*')
+          .eq('id', pendingId)
+          .single();
+
+        if (error) {
+          console.error(`[${timestamp}] [PaymentPage] Error fetching pending customer:`, error);
+          throw new Error('Could not find your booking. Please restart the booking process.');
+        }
+
+        if (!data) {
+          throw new Error('Booking not found. Please restart the booking process.');
+        }
+
+        console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, data);
+
+        // Reconstruct booking data from pending_customers
+        const retrievedBookingData = {
+          firstName: data.first_name || '',
+          lastName: data.last_name || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          contactAddress: data.contact_address || { 
+            street: data.street, 
+            city: data.city, 
+            state: data.state, 
+            zip: data.zip 
+          },
+          dropOffDate: data.drop_off_date,
+          pickupDate: data.pickup_date,
+          dropOffTimeSlot: data.drop_off_time_slot || '',
+          pickupTimeSlot: data.pickup_time_slot || '',
+          notes: data.notes || '',
+          ...data.booking_data
+        };
+
+        setBookingData(retrievedBookingData);
+        setPlan(data.plan_data);
+        setAddonsData(data.addons_data || {});
+        setTotalPrice(parseFloat(data.total_price) || 0);
+        setDeliveryService(data.delivery_service || false);
+
+        // Now create the actual booking in bookings table
+        await createActualBooking(retrievedBookingData, data);
+
+      } catch (error) {
+        console.error(`[${timestamp}] [PaymentPage] Failed to retrieve booking:`, error);
+        setDataError(error.message);
+      } finally {
+        setLoadingBookingData(false);
+      }
+    };
+
+    retrieveBookingData();
+  }, [searchParams]);
+
+  // Create actual booking from pending_customers data
+  const createActualBooking = async (retrievedBookingData, pendingCustomerData) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [PaymentPage] Creating actual booking from pending customer data...`);
+
+    try {
+      const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
+      const isUnverifiedDelivery = pendingCustomerData.delivery_address && 
+                                   !pendingCustomerData.delivery_address.isVerified;
+
+      const bookingPayload = {
+        name: fullName,
+        first_name: retrievedBookingData.firstName,
+        last_name: retrievedBookingData.lastName,
+        email: retrievedBookingData.email,
+        phone: retrievedBookingData.phone,
+        street: pendingCustomerData.contact_address?.street || pendingCustomerData.street,
+        city: pendingCustomerData.contact_address?.city || pendingCustomerData.city,
+        state: pendingCustomerData.contact_address?.state || pendingCustomerData.state,
+        zip: pendingCustomerData.contact_address?.zip || pendingCustomerData.zip,
+        contact_address: pendingCustomerData.contact_address,
+        delivery_address: pendingCustomerData.delivery_address || pendingCustomerData.contact_address,
+        notes: pendingCustomerData.notes,
+        drop_off_date: pendingCustomerData.drop_off_date,
+        pickup_date: pendingCustomerData.pickup_date,
+        drop_off_time_slot: pendingCustomerData.drop_off_time_slot,
+        pickup_time_slot: pendingCustomerData.pickup_time_slot,
+        plan: pendingCustomerData.plan_data,
+        total_price: parseFloat(pendingCustomerData.total_price),
+        status: 'pending_payment',
+        was_verification_skipped: isUnverifiedDelivery,
+        verification_notes: pendingCustomerData.addons_data?.verificationNotes || null,
+        addons: {
+          ...pendingCustomerData.addons_data,
+          isDelivery: pendingCustomerData.delivery_service,
+        },
+      };
+
+      console.log(`[${timestamp}] [PaymentPage] Calling create_pending_booking RPC...`);
+
+      const { data, error } = await supabase.rpc('create_pending_booking', { 
+        payload: bookingPayload 
+      });
+
+      if (error) {
+        console.error(`[${timestamp}] [PaymentPage] RPC error:`, error);
+        throw error;
+      }
+
+      if (!data || !data.id) {
+        console.error(`[${timestamp}] [PaymentPage] RPC succeeded but no ID returned:`, data);
+        throw new Error('Booking creation succeeded but ID was not returned.');
+      }
+
+      console.log(`[${timestamp}] [PaymentPage] ✓ Booking created with ID: ${data.id}`);
+      setBookingId(data.id);
+
+      // Handle license images if present
+      if (pendingCustomerData.addons_data?.licenseImageUrls?.length > 0) {
+        console.log(`[${timestamp}] [PaymentPage] Updating customer with license info...`);
+        await supabase
+          .from('customers')
+          .update({
+            license_plate: pendingCustomerData.addons_data.licensePlate,
+            license_image_urls: pendingCustomerData.addons_data.licenseImageUrls,
+          })
+          .eq('id', data.customer_id);
+      }
+
+      // Decrement equipment quantities if needed
+      if (pendingCustomerData.addons_data?.equipment?.length > 0) {
+        console.log(`[${timestamp}] [PaymentPage] Decrementing equipment quantities...`);
+        const equipmentToDecrement = pendingCustomerData.addons_data.equipment.map(item => ({
+          equipment_id: item.dbId || item.equipment_id,
+          quantity: item.quantity,
+        }));
+        await supabase.rpc('decrement_equipment_quantities', {
+          items_to_decrement: equipmentToDecrement,
+        });
+      }
+
+    } catch (error) {
+      console.error(`[${timestamp}] [PaymentPage] Failed to create booking:`, error);
+      throw error;
+    }
+  };
+
+  // Load equipment prices
+  useEffect(() => {
+    const loadPrices = async () => {
+      setLoadingPrices(true);
+      const prices = {};
+      
+      try {
+        for (let id = 1; id <= 7; id++) {
+          if (isValidEquipmentId(id)) {
+            prices[id] = await getPriceForEquipment(id);
+          }
+        }
+        setEquipmentPrices(prices);
+      } catch (error) {
+        console.error('[PaymentPage] Error loading equipment prices:', error);
+        prices[1] = 10;
+        prices[2] = 15;
+        prices[3] = 5;
+        prices[4] = 25;
+        prices[5] = 15;
+        prices[6] = 35;
+        prices[7] = 20;
+        setEquipmentPrices(prices);
+      } finally {
+        setLoadingPrices(false);
+      }
+    };
+
+    loadPrices();
+  }, []);
+
+  // Load availability times for self-service
+  useEffect(() => {
+    const loadAvailabilityTimes = async () => {
+      if (plan?.id === 2 && !deliveryService && bookingData?.dropOffDate) {
+        try {
+          const dropOffTimes = await getFormattedServiceTimes(2, bookingData.dropOffDate);
+          const pickupTimes = bookingData.pickupDate 
+            ? await getFormattedServiceTimes(2, bookingData.pickupDate)
+            : dropOffTimes;
+
+          setAvailabilityTimes({
+            pickupStartTime: dropOffTimes.pickupStartTime,
+            returnByTime: pickupTimes.returnByTime
+          });
+        } catch (error) {
+          console.error('[PaymentPage] Error loading availability times:', error);
+        }
+      }
+    };
+
+    loadAvailabilityTimes();
+  }, [plan?.id, deliveryService, bookingData?.dropOffDate, bookingData?.pickupDate]);
+
+  // Initialize payment intent once booking is created
+  useEffect(() => {
+    if (!bookingId || loadingBookingData) return;
+
+    const initPaymentIntent = async () => {
+      const timestamp = new Date().toISOString();
+      console.log(`[${timestamp}] [PaymentPage] Initializing payment intent for booking ${bookingId}...`);
+
+      try {
+        const payload = { booking_id: bookingId };
+        const { data, error: invokeError } = await supabase.functions.invoke('create-payment-intent', { 
+          body: payload 
+        });
+
+        if (invokeError) throw invokeError;
+        if (data?.error) throw new Error(data.error);
+
+        const secret = data?.clientSecret || data?.client_secret;
+        if (!secret) {
+          throw new Error('Invalid response from server: missing payment parameters.');
+        }
+
+        console.log(`[${timestamp}] [PaymentPage] ✓ Payment intent created successfully`);
+        setClientSecret(secret);
+      } catch (err) {
+        console.error(`[${timestamp}] [PaymentPage] Payment intent error:`, err);
+        let errorMessage = 'Failed to initialize payment gateway. Please try again later.';
+        if (err.message && !err.message.includes('Failed to fetch')) {
+          errorMessage = `Payment Setup Error: ${err.message}`;
+        }
+        setFormError(errorMessage);
+        toast({ 
+          title: 'Payment Error', 
+          description: errorMessage, 
+          variant: 'destructive' 
+        });
+      }
+    };
+
+    initPaymentIntent();
+  }, [bookingId, loadingBookingData]);
+
+  // Calculate pricing breakdown (only if data is loaded)
+  const isDelivery = plan?.id === 2 && deliveryService;
+  const currentPlan = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : (plan || {});
+  
+  const planName = currentPlan?.name || '';
+  const isDeliveryService = plan?.id === 1 || plan?.id === 4 || (plan?.id === 2 && deliveryService);
+
+  const firstName = bookingData?.firstName || bookingData?.first_name || '';
+  const lastName = bookingData?.lastName || bookingData?.last_name || '';
+  const customerFullName = `${firstName} ${lastName}`.trim() || bookingData?.name || 'N/A';
+
+  const contactAddress = bookingData?.contactAddress;
+  const deliveryAddress = addonsData?.deliveryAddress;
+  const addressToUse = (deliveryAddress?.street ? deliveryAddress : null) || contactAddress || {};
+
+  // Calculate pricing breakdown
+  const basePriceAmount = currentPlan?.base_price || currentPlan?.price || 0;
+  const deliveryFeeFlat = addonsData?.deliveryFee || 0;
+  const tripMileageCost = addonsData?.mileageCharge || addonsData?.distanceInfo?.mileageFee || 0;
+  
+  const insuranceCharge = addonsData?.insurance === 'accept' ? (equipmentPrices[7] || insurancePrice) : 0;
+  const drivewayCharge =
+    (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+      ? 15 : 0;
+  
+  // Calculate equipment and disposal charges
+  const equipmentItems = [];
+  const purchaseItems = [];
+  let equipmentTotal = 0;
+  let purchaseTotal = 0;
+  
+  if (addonsData?.equipment?.length > 0 && !loadingPrices) {
+    addonsData.equipment.forEach(item => {
+      const equipmentId = item.equipment_id || item.dbId || item.id;
+      
+      if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+      
+      const price = equipmentPrices[equipmentId] || 0;
+      const quantity = item.quantity || 1;
+      const itemTotal = price * quantity;
+      
+      const itemName = equipmentId === 1 ? 'Wheelbarrow' : 
+                       equipmentId === 2 ? 'Hand Truck' : 
+                       equipmentId === 3 ? 'Working Gloves (Pair)' : 
+                       `Equipment #${equipmentId}`;
+      
+      if (equipmentId === 3) {
+        purchaseTotal += itemTotal;
+        purchaseItems.push({ label: itemName, quantity, price: itemTotal });
+      } else {
+        equipmentTotal += itemTotal;
+        equipmentItems.push({ label: itemName, quantity, price: itemTotal });
+      }
+    });
+  }
+
+  const mattressCharge = (addonsData?.mattressDisposal || 0) * (equipmentPrices[4] || 25);
+  const tvCharge = (addonsData?.tvDisposal || 0) * (equipmentPrices[5] || 15);
+  const applianceCharge = (addonsData?.applianceDisposal || 0) * (equipmentPrices[6] || 35);
+
+  const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost + insuranceCharge + drivewayCharge + equipmentTotal + purchaseTotal + mattressCharge + tvCharge + applianceCharge;
+  
+  const discountAmount = addonsData?.coupon?.isValid 
+        ? (addonsData.coupon.discountType === 'fixed' ? (addonsData.coupon.discountValue || 0) : (subtotalBeforeDiscount * (addonsData.coupon.discountValue / 100))) 
+        : 0;
+  
+  const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+  
+  const taxCalc = calculateTotalWithTax(subtotal, taxRate);
+  const calculatedTotal = taxCalc.total;
+
+  // Update booking with tax information
+  useEffect(() => {
+    const updateBookingTaxInfo = async () => {
+      if (!bookingId || loadingPrices || loadingTaxRate || taxUpdateStatus !== 'pending') {
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      console.log(`[${timestamp}] [PaymentPage] Updating booking with tax information...`);
+
+      try {
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            subtotal_before_tax: taxCalc.subtotal,
+            tax_amount: taxCalc.tax,
+            tax_rate_used: taxRate,
+            total_price: calculatedTotal
+          })
+          .eq('id', bookingId);
+
+        if (error) {
+          console.error(`[${timestamp}] [PaymentPage] Failed to update tax info:`, error);
+          setTaxUpdateStatus('failed');
+        } else {
+          console.log(`[${timestamp}] [PaymentPage] ✓ Tax info updated`);
+          setTaxUpdateStatus('success');
+        }
+      } catch (err) {
+        console.error(`[${timestamp}] [PaymentPage] Error updating booking:`, err);
+        setTaxUpdateStatus('failed');
+      }
+    };
+
+    updateBookingTaxInfo();
+  }, [bookingId, taxCalc.subtotal, taxCalc.tax, taxRate, calculatedTotal, loadingPrices, loadingTaxRate, taxUpdateStatus]);
+
+  const formatDate = (date) => {
+    if (!date) return 'N/A';
+    try {
+      const parsedDate = date instanceof Date ? date : parseISO(date.toString());
+      if (!isValid(parsedDate)) return "Invalid Date";
+      return format(parsedDate, 'PPP');
+    } catch (e) { return "Invalid Date"; }
+  };
+
+  const canProceedWithPayment = isConfirmed && stripe && elements && isPaymentElementReady && (!isDeliveryService || delivery_location_verified) && taxUpdateStatus === 'success';
+
+  const handlePayment = async (e) => {
+    e.preventDefault();
+    setFormError(null);
+
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [PaymentPage] Payment submission started...`);
 
     if (!stripe || !elements) {
-      console.warn('[PaymentPage] Stripe.js has not loaded yet');
+      setFormError("Stripe is still initializing. Please wait a moment and try again.");
+      return;
+    }
+    if (!isConfirmed) {
+      toast({ title: "Confirmation Required", description: "Please confirm your details are correct before paying.", variant: "destructive" });
+      return;
+    }
+    if (isDeliveryService && !delivery_location_verified) {
+      toast({ title: "Location Verification Required", description: "Please verify the delivery location map to continue.", variant: "destructive" });
+      return;
+    }
+    if (!isPaymentElementReady) {
+      setFormError("Payment form is not ready yet. Please wait.");
+      return;
+    }
+    if (taxUpdateStatus !== 'success') {
+      setFormError("Tax calculation is still processing. Please wait a moment.");
       return;
     }
 
     setIsProcessing(true);
-    setErrorMessage('');
-
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [PaymentPage] Starting payment submission`, {
-      bookingId,
-      totalPrice,
-      email: bookingData?.email
-    });
 
     try {
-      const returnUrl = `${window.location.origin}/booking-confirmation?booking_id=${bookingId}`;
-      
-      console.log(`[${timestamp}] [PaymentPage] Constructed return URL:`, returnUrl);
+      if (isDeliveryService && delivery_location_verified) {
+        console.log(`[${timestamp}] [PaymentPage] Updating delivery location verification...`);
+        await supabase.from('bookings').update({ 
+          delivery_location_verified: true, 
+          delivery_location_verified_at: new Date().toISOString() 
+        }).eq('id', bookingId);
+      }
 
-      const { error } = await stripe.confirmPayment({
+      console.log(`[${timestamp}] [PaymentPage] Confirming payment with Stripe...`);
+
+      const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: returnUrl,
-          receipt_email: bookingData?.email,
+          payment_method_data: {
+            billing_details: {
+              name: customerFullName,
+              email: bookingData?.email || '',
+              phone: bookingData?.phone || '',
+              address: {
+                line1: addressToUse?.street || '',
+                city: addressToUse?.city || '',
+                state: addressToUse?.state || '',
+                postal_code: addressToUse?.zip || '',
+                country: 'US',
+              }
+            }
+          }
         },
+        redirect: 'if_required',
       });
 
-      if (error) {
-        console.error(`[${new Date().toISOString()}] [PaymentPage] Payment confirmation error:`, error);
-        setErrorMessage(error.message);
-        toast({
-          title: 'Payment Error',
-          description: error.message,
-          variant: 'destructive',
+      if (stripeError) {
+        console.error(`[${timestamp}] [PaymentPage] Stripe error:`, stripeError);
+        setFormError(stripeError.message || "An unexpected error occurred processing your payment.");
+        toast({ 
+          title: "Payment Failed", 
+          description: stripeError.message || "An unexpected error occurred.", 
+          variant: "destructive" 
         });
-      } else {
-        console.log(`[${new Date().toISOString()}] [PaymentPage] ✓ Payment confirmed, redirecting to:`, returnUrl);
+        setIsProcessing(false);
+        return;
       }
+
+      console.log(`[${timestamp}] [PaymentPage] ✅ Payment succeeded! Redirecting...`);
+      
+      const confirmationUrl = `${window.location.origin}/confirmation?booking_id=${bookingId}&payment_intent=${paymentIntent?.id}`;
+      
+      setTimeout(() => {
+        window.location.href = confirmationUrl;
+      }, 1500);
+
     } catch (err) {
-      console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected payment error:`, err);
-      setErrorMessage('An unexpected error occurred. Please try again.');
+      console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected error:`, err);
+      setIsProcessing(false);
+      setFormError("An error occurred during payment processing.");
       toast({
         title: 'Payment Error',
-        description: 'An unexpected error occurred during payment processing.',
-        variant: 'destructive',
+        description: err.message || 'An unexpected error occurred.',
+        variant: 'destructive'
       });
-    } finally {
-      setIsProcessing(false);
     }
   };
 
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="bg-white/5 p-6 rounded-xl border border-white/10">
-        <div className="flex items-center mb-4 pb-3 border-b border-white/10">
-          <CreditCard className="h-6 w-6 text-blue-400 mr-3" />
-          <h3 className="text-xl font-bold text-white">Payment Information</h3>
-        </div>
-        
-        <PaymentElement />
-        
-        {errorMessage && (
-          <div className="mt-4 p-3 bg-red-900/20 border border-red-500/30 rounded text-red-200 text-sm">
-            {errorMessage}
-          </div>
-        )}
-      </div>
+  const handleAddressCorrection = () => {
+    navigate('/book');
+  };
 
-      <div className="flex gap-4">
-        <Button
-          type="button"
-          onClick={onBack}
-          variant="outline"
-          className="flex-1 bg-white/5 border-white/20 text-white hover:bg-white/10"
-          disabled={isProcessing}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
-        
-        <Button
-          type="submit"
-          disabled={!stripe || isProcessing}
-          className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-semibold"
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Processing Payment...
-            </>
-          ) : (
-            <>
-              <ShieldCheck className="mr-2 h-5 w-5" />
-              Complete Booking (${totalPrice.toFixed(2)})
-            </>
-          )}
-        </Button>
-      </div>
-    </form>
-  );
-};
+  // Service-specific labels
+  const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+  const dropoffLabel = getServiceSpecificDateLabel(plan, isDelivery, 'dropoff');
+  const pickupLabel = getServiceSpecificDateLabel(plan, isDelivery, 'pickup');
 
-export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack, bookingId, deliveryService }) => {
-  const [clientSecret, setClientSecret] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [customerData, setCustomerData] = useState(null);
-  const [loadingCustomer, setLoadingCustomer] = useState(true);
+  const timeOptions = {
+    isWindow: isDeliveryService,
+    isSelfService: isSelfService,
+    serviceType: plan?.service_type
+  };
 
-  // Task 4: Retrieve customer data from pending_customers table
-  useEffect(() => {
-    const fetchCustomerData = async () => {
-      if (!bookingData?.email) {
-        console.error('[PaymentPage] No email available to fetch customer data');
-        setLoadingCustomer(false);
-        return;
-      }
+  const getDisplayTime = (timeSlot, isDropOff) => {
+    if (plan?.id === 2 && !deliveryService) {
+      return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
+    }
+    return formatTimeWindow(timeSlot, timeOptions);
+  };
 
-      const timestamp = new Date().toISOString();
-      console.log(`[${timestamp}] [PaymentPage] Task 4: Fetching customer data from pending_customers for email:`, bookingData.email);
+  const formatConfirmationValue = (date, timeSlot, isDropOff, label) => {
+    const formattedDate = formatDate(date);
+    const time = getDisplayTime(timeSlot, isDropOff);
+    
+    if (isSelfService) {
+      const timeLabel = isDropOff ? 'Pickup Start Time' : 'Return by Time';
+      return `${formattedDate}\n${timeLabel}: ${time}`;
+    } else {
+      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}`;
+    }
+  };
 
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('pending_customers')
-          .select('*')
-          .eq('email', bookingData.email.toLowerCase().trim())
-          .single();
-
-        const fetchTs = new Date().toISOString();
-        
-        if (fetchError) {
-          if (fetchError.code === 'PGRST116') {
-            console.warn(`[${fetchTs}] [PaymentPage] No pending customer record found for email:`, bookingData.email);
-          } else {
-            console.error(`[${fetchTs}] [PaymentPage] Error fetching customer data:`, fetchError);
-          }
-          setCustomerData(null);
-        } else {
-          console.log(`[${fetchTs}] [PaymentPage] ✓ Customer data retrieved successfully:`, data);
-          setCustomerData(data);
-        }
-      } catch (err) {
-        console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected error fetching customer:`, err);
-        setCustomerData(null);
-      } finally {
-        setLoadingCustomer(false);
-      }
-    };
-
-    fetchCustomerData();
-  }, [bookingData?.email]);
-
-  useEffect(() => {
-    const createPaymentIntent = async () => {
-      const timestamp = new Date().toISOString();
-      
-      console.log(`[${timestamp}] [PaymentPage] Creating payment intent for booking:`, bookingId);
-
-      if (!bookingId) {
-        console.error(`[${timestamp}] [PaymentPage] ❌ Missing booking ID - cannot create payment intent`);
-        setError('Booking ID is missing. Please go back and try again.');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const payload = {
-          bookingId,
-          amount: Math.round(totalPrice * 100),
-          currency: 'usd',
-          customerEmail: bookingData.email,
-          metadata: {
-            booking_id: bookingId,
-            customer_name: `${bookingData.firstName} ${bookingData.lastName}`.trim(),
-            service_name: plan?.name || 'Unknown Service',
-          }
-        };
-
-        console.log(`[${timestamp}] [PaymentPage] Calling create-payment-intent with payload:`, payload);
-
-        const { data, error: invokeError } = await supabase.functions.invoke('create-payment-intent', {
-          body: payload
-        });
-
-        const responseTs = new Date().toISOString();
-        
-        if (invokeError) {
-          console.error(`[${responseTs}] [PaymentPage] Payment intent creation error:`, invokeError);
-          throw invokeError;
-        }
-
-        if (!data?.clientSecret) {
-          console.error(`[${responseTs}] [PaymentPage] No client secret in response:`, data);
-          throw new Error('Failed to create payment intent: No client secret returned');
-        }
-
-        console.log(`[${responseTs}] [PaymentPage] ✓ Payment intent created successfully`);
-
-        setClientSecret(data.clientSecret);
-        setLoading(false);
-
-      } catch (err) {
-        console.error(`[${new Date().toISOString()}] [PaymentPage] Failed to create payment intent:`, err);
-        setError(err.message || 'Failed to initialize payment. Please try again.');
-        setLoading(false);
-        
-        toast({
-          title: 'Payment Setup Error',
-          description: err.message || 'Failed to initialize payment',
-          variant: 'destructive',
-        });
-      }
-    };
-
-    createPaymentIntent();
-  }, [bookingId, totalPrice, bookingData, plan]);
-
-  if (loading || loadingCustomer) {
+  // Error state - booking data not found
+  if (!loadingBookingData && dataError) {
     return (
       <div className="container mx-auto px-4 py-16">
-        <div className="max-w-2xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-          <div className="flex flex-col items-center justify-center py-12">
-            <Loader2 className="h-12 w-12 animate-spin text-blue-400 mb-4" />
-            <p className="text-white text-lg">Initializing secure payment...</p>
-            <p className="text-gray-400 text-sm mt-2">Please wait while we set up your payment</p>
+        <div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-8 rounded-lg shadow-lg">
+          <div className="flex items-center text-red-200 font-bold text-2xl mb-6">
+            <AlertTriangle className="h-10 w-10 mr-3 text-red-400" />
+            Booking Data Not Found
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="container mx-auto px-4 py-16">
-        <div className="max-w-2xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-          <div className="text-center py-8">
-            <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-6 mb-6">
-              <p className="text-red-200 font-semibold mb-2">Payment Setup Failed</p>
-              <p className="text-red-100 text-sm">{error}</p>
-            </div>
-            <Button onClick={onBack} variant="outline" className="bg-white/5 border-white/20 text-white hover:bg-white/10">
-              <ArrowLeft className="mr-2 h-4 w-4" />
+          <p className="text-red-100 mb-8 text-lg">
+            {dataError}
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Button 
+              onClick={() => navigate('/')} 
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Start New Booking
+            </Button>
+            <Button 
+              onClick={() => navigate(-1)} 
+              variant="outline" 
+              className="flex-1 text-white hover:bg-white/10"
+            >
               Go Back
             </Button>
           </div>
@@ -269,102 +620,308 @@ export const PaymentPage = ({ totalPrice, bookingData, plan, addonsData, onBack,
     );
   }
 
-  const options = {
-    clientSecret,
-    appearance: {
-      theme: 'night',
-      variables: {
-        colorPrimary: '#3b82f6',
-        colorBackground: '#1e293b',
-        colorText: '#ffffff',
-        colorDanger: '#ef4444',
-        fontFamily: 'system-ui, sans-serif',
-        borderRadius: '8px',
-      },
-    },
-  };
+  // Loading states
+  if (loadingBookingData || loadingPrices || loadingTaxRate || !bookingData) {
+    return (
+      <div className="flex flex-col justify-center items-center h-96 text-white">
+        <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
+        <span className="text-xl font-medium">Loading your booking details...</span>
+      </div>
+    );
+  }
 
-  // Use customer data from database if available, otherwise fall back to bookingData
-  const displayName = customerData?.name || `${bookingData.firstName} ${bookingData.lastName}`.trim();
-  const displayEmail = customerData?.email || bookingData.email;
-  const displayPhone = customerData?.phone || bookingData.phone;
-  const displayAddress = customerData ? 
-    `${customerData.street}, ${customerData.city}, ${customerData.state} ${customerData.zip}` :
-    `${bookingData.contactAddress?.street}, ${bookingData.contactAddress?.city}, ${bookingData.contactAddress?.state} ${bookingData.contactAddress?.zip}`;
+  if (!clientSecret) {
+    return (
+      <div className="flex flex-col justify-center items-center h-96 text-white">
+        <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
+        <span className="text-xl font-medium">Preparing Secure Payment...</span>
+        <p className="text-gray-400 mt-2">Connecting to payment gateway. Please wait.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto px-4 py-16">
-      <div className="max-w-2xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-white mb-2">Secure Payment</h2>
-          <p className="text-gray-300">Complete your booking with a secure payment</p>
+    <motion.div 
+      initial={{ opacity: 0, x: 100 }} 
+      animate={{ opacity: 1, x: 0 }} 
+      exit={{ opacity: 0, x: -100 }} 
+      transition={{ duration: 0.5 }} 
+      className="container mx-auto py-16 px-4"
+    >
+      <div className="max-w-2xl mx-auto bg-slate-900/60 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+        <div className="flex items-center mb-8">
+          <Button 
+            onClick={() => onBack ? onBack() : navigate(-1)} 
+            variant="ghost" 
+            size="icon" 
+            className="mr-4 text-white hover:bg-white/20" 
+            disabled={isProcessing}
+          >
+            <ArrowLeft />
+          </Button>
+          <h2 className="text-3xl font-bold text-white">Secure Payment</h2>
         </div>
 
-        {/* Task 4: Display customer data retrieved from pending_customers */}
-        <div className="bg-gradient-to-br from-indigo-900/40 to-purple-800/20 p-6 rounded-xl mb-6 border border-indigo-500/30">
-          <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-            <User className="h-5 w-5 mr-2 text-indigo-400" />
-            Booking Information
-            {customerData?.is_verified && (
-              <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-1 rounded-full border border-green-500/30">
-                ✓ Verified
-              </span>
+        {taxUpdateStatus === 'failed' && (
+          <div className="mb-6 bg-orange-950/40 border border-orange-500/30 rounded-lg p-4">
+            <p className="text-orange-300 text-sm">Tax calculation update pending. Payment may proceed once confirmed.</p>
+          </div>
+        )}
+
+        <div className="bg-white/5 p-6 rounded-lg mb-8 border border-white/10">
+          <h3 className="text-2xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Order Summary</h3>
+          <div className="space-y-1 text-white">
+            <ConfirmationLine label="Service" value={currentPlan?.name} />
+            <ConfirmationLine label="Customer" value={customerFullName} />
+            <ConfirmationLine label="Email" value={bookingData?.email} />
+            <ConfirmationLine 
+              label="Address" 
+              value={addressToUse?.street ? `${addressToUse.street}, ${addressToUse.city}, ${addressToUse.state} ${addressToUse.zip}` : 'N/A'} 
+            />
+            <ConfirmationLine 
+              label={dropoffLabel} 
+              value={formatConfirmationValue(bookingData?.dropOffDate, bookingData?.dropOffTimeSlot, true, dropoffLabel)} 
+            />
+            <ConfirmationLine 
+              label={pickupLabel} 
+              value={formatConfirmationValue(bookingData?.pickupDate, bookingData?.pickupTimeSlot, false, pickupLabel)} 
+            />
+          </div>
+        </div>
+
+        {isDeliveryService && (
+          <>
+            <DeliveryLocationMap 
+              deliveryAddress={addressToUse} 
+              isVerified={delivery_location_verified} 
+              onVerificationChange={setDeliveryLocation_Verified} 
+            />
+            <div className="mb-8 flex justify-center">
+              <Button 
+                onClick={handleAddressCorrection}
+                variant="outline"
+                className="text-orange-400 border-orange-500/50 hover:bg-orange-500/10 hover:border-orange-500"
+              >
+                This is incorrect - Go back to edit address
+              </Button>
+            </div>
+          </>
+        )}
+
+        <div className="bg-white/5 p-6 rounded-lg mb-8 border border-white/10">
+          <h4 className="text-2xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Charges Breakdown</h4>
+          
+          <div className="space-y-1 text-blue-100 font-mono text-sm">
+            <CategoryHeader icon="📦" title="Service Costs" />
+            <BreakdownLine label="Base Rental Price" value={basePriceAmount} />
+            {deliveryFeeFlat > 0 && <BreakdownLine label="Base Delivery Fee" value={deliveryFeeFlat} />}
+            {tripMileageCost > 0 && <BreakdownLine label="Mileage Charge" value={tripMileageCost} />}
+            
+            {(insuranceCharge > 0 || drivewayCharge > 0) && (
+              <>
+                <CategoryHeader icon="🛡️" title="Protection Options" />
+                {insuranceCharge > 0 && <BreakdownLine label="Rental Insurance" value={insuranceCharge} />}
+                {drivewayCharge > 0 && <BreakdownLine label="Driveway Protection" value={drivewayCharge} />}
+              </>
             )}
-          </h3>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-start">
-              <User className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
-              <div>
-                <p className="text-gray-400 text-xs">Customer Name</p>
-                <p className="text-white font-medium">{displayName}</p>
+            
+            {equipmentItems.length > 0 && (
+              <>
+                <CategoryHeader icon="🚚" title="Rent Equipment" />
+                {equipmentItems.map((item, idx) => (
+                  <BreakdownLine 
+                    key={idx} 
+                    label={`${item.label}${item.quantity > 1 ? ` (x${item.quantity})` : ''}`} 
+                    value={item.price} 
+                  />
+                ))}
+              </>
+            )}
+            
+            {purchaseItems.length > 0 && (
+              <>
+                <CategoryHeader icon="🛒" title="Items for Purchase" />
+                {purchaseItems.map((item, idx) => (
+                  <BreakdownLine 
+                    key={idx} 
+                    label={`${item.label}${item.quantity > 1 ? ` (x${item.quantity})` : ''}`} 
+                    value={item.price} 
+                  />
+                ))}
+              </>
+            )}
+            
+            {(mattressCharge > 0 || tvCharge > 0 || applianceCharge > 0) && (
+              <>
+                <CategoryHeader icon="♻️" title="Disposal Items" />
+                {mattressCharge > 0 && <BreakdownLine label={`Mattress Disposal (x${addonsData?.mattressDisposal || 0})`} value={mattressCharge} />}
+                {tvCharge > 0 && <BreakdownLine label={`TV Disposal (x${addonsData?.tvDisposal || 0})`} value={tvCharge} />}
+                {applianceCharge > 0 && <BreakdownLine label={`Appliance Disposal (x${addonsData?.applianceDisposal || 0})`} value={applianceCharge} />}
+              </>
+            )}
+            
+            {discountAmount > 0 && (
+              <>
+                <CategoryHeader icon="🏷️" title="Discounts" />
+                <BreakdownLine 
+                  label={`Coupon (${addonsData?.coupon?.code || 'Applied'})`} 
+                  value={-discountAmount} 
+                />
+              </>
+            )}
+            
+            <div className="border-t border-white/20 my-3 pt-3">
+              <BreakdownLine label="Subtotal" value={taxCalc.subtotal} />
+              <BreakdownLine label={`Tax (${taxRate.toFixed(2)}%)`} value={taxCalc.tax} />
+            </div>
+            <div className="border-t border-white/20 pt-3 mt-1">
+              <div className="flex justify-between items-center text-white">
+                <span className="text-lg font-bold">Total Amount:</span>
+                <span className="text-2xl font-bold text-green-400">{formatMoney(calculatedTotal)}</span>
               </div>
             </div>
-            <div className="flex items-start">
-              <Mail className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
-              <div>
-                <p className="text-gray-400 text-xs">Email Address</p>
-                <p className="text-white font-medium">{displayEmail}</p>
+            
+            {isDeliveryService && (
+              <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mt-4">
+                <div className="flex items-start">
+                  <span className="text-xl mr-2">🏗️</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-yellow-400">Landfill/Disposal Fees (TBD)</p>
+                    <p className="text-xs text-yellow-200 mt-1">Pending dump fees will be calculated based on actual waste processed</p>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="flex items-start">
-              <Phone className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
-              <div>
-                <p className="text-gray-400 text-xs">Phone Number</p>
-                <p className="text-white font-medium">{displayPhone}</p>
-              </div>
-            </div>
-            <div className="flex items-start">
-              <MapPin className="h-4 w-4 mr-3 text-indigo-300 mt-0.5" />
-              <div>
-                <p className="text-gray-400 text-xs">Contact Address</p>
-                <p className="text-white font-medium">{displayAddress}</p>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 p-6 rounded-xl mb-8 border border-blue-500/30">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-blue-200 text-sm mb-1">Total Amount Due</p>
-              <p className="text-3xl font-bold text-white">${totalPrice.toFixed(2)}</p>
-            </div>
-            <ShieldCheck className="h-12 w-12 text-green-400" />
+        <form onSubmit={handlePayment}>
+          <div className="mb-6">
+            <PaymentElement 
+              onReady={() => setIsPaymentElementReady(true)} 
+              options={{ 
+                layout: 'tabs', 
+                fields: { 
+                  billingDetails: { 
+                    name: 'never', 
+                    email: 'never', 
+                    phone: 'never', 
+                    address: 'never' 
+                  } 
+                } 
+              }} 
+            />
           </div>
-          <p className="text-blue-100 text-xs mt-3">
-            🔒 Your payment is secured by Stripe. We never store your card details.
+          
+          {formError && (
+            <div className="mb-6 flex items-start text-red-400 text-sm bg-red-950/40 p-3 rounded border border-red-500/30">
+              <span className="mr-2 flex-shrink-0">⚠</span>
+              <p>{formError}</p>
+            </div>
+          )}
+          
+          <div className="flex items-center space-x-3 mb-6 bg-white/5 p-4 rounded-lg border border-white/10">
+            <Checkbox 
+              id="confirm-details" 
+              checked={isConfirmed} 
+              onCheckedChange={setIsConfirmed} 
+              disabled={isProcessing} 
+              className="border-white/50 data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500" 
+            />
+            <Label 
+              htmlFor="confirm-details" 
+              className="text-sm text-blue-100 leading-snug cursor-pointer select-none"
+            >
+              I have reviewed all the information above and confirm it is correct.
+            </Label>
+          </div>
+          
+          {!canProceedWithPayment && !isProcessing && isDeliveryService && !delivery_location_verified && (
+            <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">
+              Please verify delivery location to continue
+            </div>
+          )}
+          
+          {!canProceedWithPayment && !isProcessing && taxUpdateStatus !== 'success' && (
+            <div className="mb-4 text-center text-orange-400 text-sm font-medium bg-orange-950/30 py-2 rounded border border-orange-500/30">
+              Finalizing tax calculation...
+            </div>
+          )}
+          
+          <Button 
+            type="submit" 
+            disabled={isProcessing || !canProceedWithPayment} 
+            className={`w-full py-6 text-xl font-bold transition-all duration-300 ${
+              isProcessing || !canProceedWithPayment 
+                ? 'bg-white/10 text-white/50 cursor-not-allowed border border-white/10' 
+                : 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-xl shadow-green-900/40 border border-green-400/30 active:scale-[0.98]'
+            }`}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 className="mr-3 h-6 w-6 animate-spin" />
+                Processing Payment...
+              </>
+            ) : (
+              <>
+                <CreditCard className="mr-3 h-6 w-6" />
+                Pay {formatMoney(calculatedTotal)}
+              </>
+            )}
+          </Button>
+          
+          <p className="text-xs text-gray-400 mt-4 flex items-center justify-center">
+            <Lock className="h-3 w-3 mr-1.5 text-blue-400" /> 
+            Secure 256-bit SSL Encrypted Payment
           </p>
-        </div>
-
-        <Elements stripe={stripePromise} options={options}>
-          <CheckoutForm 
-            bookingId={bookingId} 
-            onBack={onBack} 
-            totalPrice={totalPrice}
-            bookingData={bookingData}
-          />
-        </Elements>
+        </form>
       </div>
-    </div>
+    </motion.div>
+  );
+};
+
+export const PaymentPage = ({ onBack }) => {
+  const elementsOptions = {
+    appearance: {
+      theme: 'night',
+      variables: { 
+        colorPrimary: '#facc15', 
+        colorBackground: '#1e293b', 
+        colorText: '#f1f5f9', 
+        colorDanger: '#ef4444', 
+        fontFamily: '"Inter", system-ui, sans-serif', 
+        borderRadius: '8px' 
+      },
+      rules: { 
+        '.Input': { 
+          backgroundColor: '#0f172a', 
+          border: '1px solid rgba(255,255,255,0.15)' 
+        }, 
+        '.Input:focus': { 
+          border: '1px solid #facc15', 
+          boxShadow: '0 0 0 2px rgba(250,204,21,0.2)' 
+        }, 
+        '.Label': { 
+          color: '#94a3b8' 
+        } 
+      }
+    }
+  };
+
+  if (!stripePromise) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto bg-red-900/40 border border-red-500/50 p-4 rounded-lg text-red-200 font-semibold flex items-center shadow-lg">
+          <AlertTriangle className="h-6 w-6 mr-3 flex-shrink-0 text-red-400" />
+          <p>Payment configuration is missing. Please check your Stripe configuration.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Elements stripe={stripePromise} options={elementsOptions}>
+      <CheckoutForm onBack={onBack} />
+    </Elements>
   );
 };

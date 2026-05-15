@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
@@ -12,15 +11,17 @@ import { ContactInfoForm } from '@/components/ContactInfoForm';
 import { TermsAndConditionsStep } from '@/components/TermsAndConditionsStep';
 import { ComprehensiveAgreement } from '@/components/ComprehensiveAgreement';
 import { DriverVehicleVerification } from '@/components/DriverVehicleVerification';
-import { VerifyEmailBeforeBooking } from '@/components/VerifyEmailBeforeBooking';
 import { PaymentPage } from '@/components/PaymentPage';
 import { toast } from '@/components/ui/use-toast';
 import { ReviewsCarousel } from '@/components/ReviewsCarousel';
 import { KeyFeatures } from '@/components/KeyFeatures';
 import { StepIndicator } from '@/components/StepIndicator';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { storePendingBooking } from '@/utils/bookingDataPersistence';
+import { useNavigate } from 'react-router-dom';
 
-function BookingJourney() {
+function BookingJourney({ reorderData }) {
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [highestStep, setHighestStep] = useState(0);
   const [selectedPlan, setSelectedPlan] = useState(null);
@@ -52,15 +53,93 @@ function BookingJourney() {
 
   const [basePrice, setBasePrice] = useState(0);
   const [finalPrice, setFinalPrice] = useState(0);
-  const [bookingId, setBookingId] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
+
+  // Handle reorder data from Header modal
+  useEffect(() => {
+    if (reorderData) {
+      handleReorderService(reorderData);
+    }
+  }, [reorderData]);
 
   useEffect(() => {
     if (currentStep > highestStep) {
       setHighestStep(currentStep);
     }
   }, [currentStep, highestStep]);
+
+  const handleReorderService = async (pastBooking) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [BookingJourney] Reordering service from booking:`, pastBooking.id);
+
+    try {
+      const plan = pastBooking.plan;
+      const addons = pastBooking.addons || {};
+
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('email', pastBooking.email)
+        .maybeSingle();
+
+      if (customerError) {
+        console.error(`[${timestamp}] [BookingJourney] Error fetching customer:`, customerError);
+      }
+
+      setBookingData({
+        firstName: customer?.first_name || pastBooking.first_name || '',
+        lastName: customer?.last_name || pastBooking.last_name || '',
+        email: pastBooking.email,
+        phone: customer?.phone || pastBooking.phone || '',
+        contactAddress: {
+          street: customer?.street || pastBooking.street || '',
+          city: customer?.city || pastBooking.city || '',
+          state: customer?.state || pastBooking.state || '',
+          zip: customer?.zip || pastBooking.zip || '',
+          isVerified: true
+        },
+        addressVerified: true,
+        dropOffDate: null,
+        pickupDate: null,
+        dropOffTimeSlot: '',
+        pickupTimeSlot: '',
+        notes: '',
+        termsAccepted: false
+      });
+
+      setAddonsData({
+        insurance: addons.insurance || 'decline',
+        drivewayProtection: addons.drivewayProtection || 'decline',
+        equipment: addons.equipment || [],
+        coupon: null,
+        deliveryAddress: addons.deliveryAddress || null,
+        deliveryDistance: addons.deliveryDistance || 0,
+        deliveryFee: addons.deliveryFee || 0
+      });
+
+      setSelectedPlan(plan);
+      setDeliveryService(addons.deliveryService || (plan?.id === 2 && addons.isDelivery) || false);
+      setCurrentStep(1);
+
+      toast({
+        title: 'Booking Pre-filled',
+        description: 'Your previous booking details have been loaded. Please select new dates to continue.',
+        duration: 5000
+      });
+
+      window.scrollTo(0, 0);
+
+    } catch (error) {
+      const catchTs = new Date().toISOString();
+      console.error(`[${catchTs}] [BookingJourney] Error in handleReorderService:`, error);
+      toast({
+        title: 'Reorder Failed',
+        description: 'Could not load your previous booking. Please start a new booking.',
+        variant: 'destructive'
+      });
+    }
+  };
 
   const handlePlanSelect = (plan) => {
     setSelectedPlan(plan);
@@ -100,149 +179,83 @@ function BookingJourney() {
     window.scrollTo(0, 0);
   };
 
-  const handleAgreementAccept = () => {
-    if (selectedPlan?.id === 2 && !deliveryService) {
-      setCurrentStep(7);
-    } else {
-      setCurrentStep(8);
-    }
-    window.scrollTo(0, 0);
-  };
-
-  const handleVerificationSubmit = (verificationData) => {
-    setAddonsData(prev => ({ ...prev, ...verificationData }));
-    setCurrentStep(8);
-    window.scrollTo(0, 0);
-  };
-
-  const handleVerifyEmailComplete = async () => {
-    setIsProcessing(true);
+  const handleAgreementAccept = async () => {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [BookingJourney] handleVerifyEmailComplete triggered. Preparing to create booking in Supabase.`);
+    console.log(`[${timestamp}] [BookingJourney] handleAgreementAccept triggered`);
+    
+    if (selectedPlan?.id === 2 && !deliveryService) {
+      console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
+      setCurrentStep(7);
+      window.scrollTo(0, 0);
+      return;
+    }
 
-    const fullName = `${bookingData.firstName} ${bookingData.lastName}`.trim();
-    const isUnverifiedDelivery = addonsData.deliveryAddress && !addonsData.deliveryAddress.isVerified;
-
-    const pendingBookingPayload = {
-      name: fullName,
-      first_name: bookingData.firstName,
-      last_name: bookingData.lastName,
-      email: bookingData.email,
-      phone: bookingData.phone,
-      street: bookingData.contactAddress.street,
-      city: bookingData.contactAddress.city,
-      state: bookingData.contactAddress.state,
-      zip: bookingData.contactAddress.zip,
-      contact_address: bookingData.contactAddress,
-      delivery_address: addonsData.deliveryAddress || bookingData.contactAddress,
-      notes: bookingData.notes,
-      drop_off_date: bookingData.dropOffDate
-        ? new Date(bookingData.dropOffDate).toISOString().substring(0, 10)
-        : null,
-      pickup_date: bookingData.pickupDate
-        ? new Date(bookingData.pickupDate).toISOString().substring(0, 10)
-        : null,
-      drop_off_time_slot: bookingData.dropOffTimeSlot,
-      pickup_time_slot: bookingData.pickupTimeSlot,
-      plan: selectedPlan,
-      total_price: finalPrice,
-      status: 'pending_payment',
-      was_verification_skipped: isUnverifiedDelivery,
-      verification_notes: addonsData.verificationNotes || null,
-      addons: {
-        ...addonsData,
-        distanceInfo: {
-          miles: addonsData.deliveryDistance,
-          totalFee: addonsData.deliveryFee,
-          unverifiedAddress: isUnverifiedDelivery,
-        },
-        isDelivery: deliveryService,
-      },
-    };
-
-    console.log(`[${timestamp}] [BookingJourney] Payload for create_pending_booking:`, JSON.stringify(pendingBookingPayload, null, 2));
+    console.log(`[${timestamp}] [BookingJourney] Delivery/Full-service selected, storing pending booking and proceeding to email verification`);
+    setIsProcessing(true);
 
     try {
-      console.log(`[${timestamp}] [BookingJourney] Calling supabase.rpc('create_pending_booking')`);
-      const { data, error } = await supabase.rpc('create_pending_booking', { payload: pendingBookingPayload });
+      const result = await storePendingBooking(bookingData, selectedPlan, addonsData);
       
-      const rpcEndTs = new Date().toISOString();
-      if (error) {
-        console.error(`[${rpcEndTs}] [BookingJourney] create_pending_booking RPC failed:`, error);
-        throw error;
-      }
-
-      console.log(`[${rpcEndTs}] [BookingJourney] Booking successfully created! Returned data:`, data);
-      
-      if (!data || !data.id) {
-        console.error(`[${rpcEndTs}] [BookingJourney] RPC returned success but data.id is missing! Returned object:`, data);
-        throw new Error("Booking creation succeeded but ID was not returned by the server.");
-      }
-
-      setBookingId(data.id);
-      console.log(`[${rpcEndTs}] [BookingJourney] Successfully extracted and set bookingId: ${data.id}`);
-
-      // Task 5 (modified): Link booking_id to pending_customers immediately after booking creation
-      const linkTimestamp = new Date().toISOString();
-      console.log(`[${linkTimestamp}] [BookingJourney] Linking booking_id ${data.id} to pending_customers for email: ${bookingData.email}`);
-      
-      const { error: linkError } = await supabase
-        .from('pending_customers')
-        .update({ booking_id: data.id })
-        .eq('email', bookingData.email.toLowerCase().trim());
-      
-      if (linkError) {
-        console.error(`[${new Date().toISOString()}] [BookingJourney] Failed to link booking_id to pending_customers:`, linkError);
-        // Don't block the flow - this is not critical
+      const resultTs = new Date().toISOString();
+      if (!result.success) {
+        console.error(`[${resultTs}] [BookingJourney] Failed to store pending booking:`, result.error);
         toast({
-          title: 'Warning',
-          description: 'Booking created but linking to customer record failed.',
-          variant: 'default'
+          title: 'Error',
+          description: result.error || 'Failed to save booking data. Please try again.',
+          variant: 'destructive'
         });
-      } else {
-        console.log(`[${new Date().toISOString()}] [BookingJourney] ✓ Successfully linked booking_id to pending_customers`);
+        setIsProcessing(false);
+        return;
       }
 
-      if (addonsData.licenseImageUrls?.length > 0) {
-        console.log(`[${rpcEndTs}] [BookingJourney] Updating customer ID ${data.customer_id} with license information.`);
-        const { error: customerUpdateError } = await supabase
-          .from('customers')
-          .update({
-            license_plate: addonsData.licensePlate,
-            license_image_urls: addonsData.licenseImageUrls,
-          })
-          .eq('id', data.customer_id);
-        if (customerUpdateError) {
-          console.warn(`[${new Date().toISOString()}] [BookingJourney] Could not update customer with license info:`, customerUpdateError);
-        }
-      }
-
-      if (addonsData.equipment?.length > 0) {
-        console.log(`[${new Date().toISOString()}] [BookingJourney] Decrementing equipment quantities.`);
-        const equipmentToDecrement = addonsData.equipment.map(item => ({
-          equipment_id: item.dbId,
-          quantity: item.quantity,
-        }));
-        const { error: decrementError } = await supabase
-          .rpc('decrement_equipment_quantities', {
-            items_to_decrement: equipmentToDecrement,
-          });
-        if (decrementError) {
-          console.error(`[${new Date().toISOString()}] [BookingJourney] Failed to decrement equipment quantities:`, decrementError);
-        }
-      }
-
-      console.log(`[${new Date().toISOString()}] [BookingJourney] Navigating to Payment Page with confirmed booking_id: ${data.id}`);
-      setCurrentStep(9);
-      window.scrollTo(0, 0);
+      console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
+      navigate(`/verify-email?token=${result.token}`);
 
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] [BookingJourney] CRITICAL ERROR during booking creation:`, error);
+      const catchTs = new Date().toISOString();
+      console.error(`[${catchTs}] [BookingJourney] Exception in handleAgreementAccept:`, error);
       toast({
-        title: 'Booking Error',
-        description: `Could not create your booking record. Please try again. ${error.message}`,
-        variant: 'destructive',
-        duration: 30000,
+        title: 'Error',
+        description: 'An unexpected error occurred. Please try again.',
+        variant: 'destructive'
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleVerificationSubmit = async (verificationData) => {
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [BookingJourney] handleVerificationSubmit triggered with data:`, verificationData);
+    
+    setAddonsData(prev => ({ ...prev, ...verificationData }));
+    setIsProcessing(true);
+
+    try {
+      const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...verificationData });
+      
+      const resultTs = new Date().toISOString();
+      if (!result.success) {
+        console.error(`[${resultTs}] [BookingJourney] Failed to store pending booking:`, result.error);
+        toast({
+          title: 'Error',
+          description: result.error || 'Failed to save booking data. Please try again.',
+          variant: 'destructive'
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
+      navigate(`/verify-email?token=${result.token}`);
+
+    } catch (error) {
+      const catchTs = new Date().toISOString();
+      console.error(`[${catchTs}] [BookingJourney] Exception in handleVerificationSubmit:`, error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred. Please try again.',
+        variant: 'destructive'
       });
     } finally {
       setIsProcessing(false);
@@ -250,12 +263,8 @@ function BookingJourney() {
   };
 
   const handleBack = (step) => {
-    if (currentStep === 8) {
-      if (selectedPlan?.id !== 2 || deliveryService) {
-        setCurrentStep(6);
-      } else {
-        setCurrentStep(7);
-      }
+    if (currentStep === 7) {
+      setCurrentStep(6);
     } else {
       setCurrentStep(step);
     }
@@ -281,6 +290,7 @@ function BookingJourney() {
             onBack={() => handleBack(0)}
             deliveryService={deliveryService}
             setDeliveryService={setDeliveryService}
+            onReorderSelect={handleReorderService}
           />
         );
       case 2:
@@ -331,7 +341,7 @@ function BookingJourney() {
             bookingData={bookingData}
             onBack={() => handleBack(5)}
             onAccept={handleAgreementAccept}
-            isProcessing={false}
+            isProcessing={isProcessing}
           />
         );
       case 7:
@@ -339,36 +349,8 @@ function BookingJourney() {
           <DriverVehicleVerification
             onVerifiedSubmit={handleVerificationSubmit}
             onBack={() => handleBack(6)}
-          />
-        );
-      case 8:
-        return (
-          <VerifyEmailBeforeBooking
-            bookingData={{
-              ...bookingData,
-              street: bookingData.contactAddress?.street,
-              city: bookingData.contactAddress?.city,
-              state: bookingData.contactAddress?.state,
-              zip: bookingData.contactAddress?.zip,
-            }}
-            addonsData={addonsData}
-            plan={selectedPlan}
-            totalPrice={finalPrice}
-            onBack={() => handleBack(7)}
-            onComplete={handleVerifyEmailComplete}
-            isProcessing={isProcessing}
-          />
-        );
-      case 9:
-        return (
-          <PaymentPage
-            totalPrice={finalPrice}
-            bookingData={bookingData}
-            plan={selectedPlan}
-            addonsData={addonsData}
-            onBack={() => handleBack(8)}
-            bookingId={bookingId}
-            deliveryService={deliveryService}
+            customerId={bookingData.contactAddress?.customerId}
+            customerEmail={bookingData.email}
           />
         );
       default:
@@ -377,7 +359,6 @@ function BookingJourney() {
             <Banner />
             <Hero />
             
-            {/* Scroll anchors for ProductShowcase */}
             <div id="service-16-yard" className="scroll-mt-24"></div>
             <div id="service-10-yard" className="scroll-mt-24"></div>
             <div id="service-6-yard" className="scroll-mt-24"></div>
@@ -393,7 +374,7 @@ function BookingJourney() {
   return (
     <ErrorBoundary>
       <Toaster />
-      {currentStep > 0 && currentStep < 10 && (
+      {currentStep > 0 && currentStep < 8 && (
         <StepIndicator 
           currentStep={currentStep} 
           highestStep={highestStep} 
