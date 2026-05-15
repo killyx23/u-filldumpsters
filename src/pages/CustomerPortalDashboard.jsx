@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -53,7 +54,7 @@ export const CustomerPortalDashboard = () => {
           description: 'Your session has expired. Please log in again.',
           variant: 'destructive'
         });
-        navigate('/customer-portal/login');
+        navigate('/customer-portal-login');
         return;
       }
 
@@ -177,7 +178,7 @@ export const CustomerPortalDashboard = () => {
               <CardContent className="space-y-4">
                 <p className="text-white">{error}</p>
                 <div className="flex gap-2">
-                  <Button onClick={() => navigate('/customer-portal/login')} variant="outline">
+                  <Button onClick={() => navigate('/customer-portal-login')} variant="outline">
                     Back to Login
                   </Button>
                   <Button onClick={() => navigate('/')} className="bg-yellow-400 hover:bg-yellow-500 text-blue-900">
