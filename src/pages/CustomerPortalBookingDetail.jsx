@@ -3,26 +3,41 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, MapPin, Loader2, DollarSign, Package, Info, AlertTriangle, Navigation, RefreshCw } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
 
+const PORTAL_BOOKINGS_PATH = '/customer-portal?tab=bookings';
+
 export const CustomerPortalBookingDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [distanceInfo, setDistanceInfo] = useState({ distance: 0, travelTime: 0, loading: true, error: null });
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
 
   const fetchBookingAndDistance = async () => {
+    const customerDbId = user?.user_metadata?.customer_db_id;
+    const parsedCustomerId = Number.parseInt(String(customerDbId), 10);
+
+    if (!Number.isFinite(parsedCustomerId)) {
+      console.error('Missing or invalid customer_db_id in user metadata');
+      setBooking(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const { data, error } = await supabase
         .from('bookings')
         .select('*, customers(*)')
         .eq('id', id)
+        .eq('customer_id', parsedCustomerId)
         .single();
 
       if (error) throw error;
@@ -54,9 +69,9 @@ export const CustomerPortalBookingDetail = () => {
   };
 
   useEffect(() => {
-    if (id) fetchBookingAndDistance();
+    if (id && user) fetchBookingAndDistance();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, user]);
 
   if (loading) {
     return (
@@ -70,7 +85,7 @@ export const CustomerPortalBookingDetail = () => {
     return (
       <div className="text-center py-16">
         <h2 className="text-2xl font-bold text-white mb-4">Booking Not Found</h2>
-        <Button onClick={() => navigate('/portal?tab=bookings')} variant="outline" className="text-white border-white/20">
+        <Button onClick={() => navigate(PORTAL_BOOKINGS_PATH)} variant="outline" className="text-white border-white/20">
           Return to Portal
         </Button>
       </div>
@@ -85,7 +100,7 @@ export const CustomerPortalBookingDetail = () => {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
-            <Button onClick={() => navigate('/portal?tab=bookings')} variant="ghost" className="text-gray-400 hover:text-white hover:bg-white/10">
+            <Button onClick={() => navigate(PORTAL_BOOKINGS_PATH)} variant="ghost" className="text-gray-400 hover:text-white hover:bg-white/10">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to Portal
             </Button>
             <h1 className="text-3xl font-bold text-white">Order #{booking.id}</h1>

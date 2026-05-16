@@ -25,6 +25,8 @@ import { ProductShowcasePage } from '@/pages/ProductShowcasePage';
 import AccessCodesPage from '@/pages/AccessCodesPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
+import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
+import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortalGuard';
 
 const PortalRedirect = ({ to }) => {
   const { search } = useLocation();
@@ -74,6 +76,15 @@ function App() {
               {/* Backward compatibility routes */}
               <Route path="/customer-portal/dashboard" element={<PortalRedirect to="/customer-portal" />} />
               <Route path="/customer-portal/login" element={<PortalRedirect to="/customer-portal-login" />} />
+
+              <Route
+                path="/portal/bookings/:id"
+                element={
+                  <CustomerPortalGuard>
+                    <CustomerPortalBookingDetail />
+                  </CustomerPortalGuard>
+                }
+              />
 
               <Route
                 path="/admin/*"
