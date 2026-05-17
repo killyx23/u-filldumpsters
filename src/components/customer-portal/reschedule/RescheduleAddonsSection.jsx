@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { toast } from '@/components/ui/use-toast';
 import { checkInventoryAvailability } from '@/utils/equipmentInventoryManager';
+import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 
 const getIconForEquipment = (name) => {
   const nameLower = name?.toLowerCase() || '';
@@ -88,20 +89,16 @@ export const RescheduleAddonsSection = ({
           }
         });
         
-        // Check for insurance in addons JSON (use hook price, not equipment table)
-        if (originalBooking.addons && typeof originalBooking.addons === 'object') {
-          Object.entries(originalBooking.addons).forEach(([key, val]) => {
-            if (key.toLowerCase().includes('insurance')) {
-              // Use insurancePrice from hook (services table)
-              console.log('[RescheduleAddons] Original insurance found, using services table price:', insurancePrice);
-              originalMap.set('insurance', {
-                id: 'insurance',
-                name: 'Premium Insurance',
-                price: insurancePrice,
-                quantity: 1,
-                type: 'service'
-              });
-            }
+        if (bookingHadInsurance(originalBooking.addons)) {
+          const applied = Number(originalBooking.addons.insurancePriceApplied);
+          const price = applied > 0 ? applied : insurancePrice;
+          console.log('[RescheduleAddons] Original insurance accepted, price:', price);
+          originalMap.set('insurance', {
+            id: 'insurance',
+            name: 'Premium Insurance',
+            price,
+            quantity: 1,
+            type: 'insurance',
           });
         }
         

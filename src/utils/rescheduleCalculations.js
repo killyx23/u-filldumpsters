@@ -1,7 +1,107 @@
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
-import { getPriceForEquipment, getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
+import { getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
+import { isValidEquipmentId } from './equipmentIdValidator';
 
+const INSURANCE_SERVICE_EQUIPMENT_ID = 7;
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
+
+/** Premium Insurance was purchased (not merely present as "decline" on the addons JSON). */
+export function bookingHadInsurance(addons) {
+    if (!addons || typeof addons !== 'object') return false;
+    if (addons.insurance === 'accept') return true;
+    if (Number(addons.insurancePriceApplied) > 0) return true;
+    return false;
+}
+
+export function isInsuranceAddon(addon) {
+    if (!addon) return false;
+    if (addon.id === 'insurance' || addon.type === 'insurance') return true;
+    const name = (addon.name || '').toLowerCase();
+    return name.includes('premium insurance');
+}
+
+/** Numeric equipment id 1–6 only (excludes insurance service id 7 and string slugs). */
+export function resolveNumericEquipmentId(addon) {
+    const raw = addon?.equipment_id ?? addon?.dbId ?? addon?.id;
+    const numericId = Number(raw);
+    if (!isValidEquipmentId(numericId) || numericId === INSURANCE_SERVICE_EQUIPMENT_ID) {
+        return null;
+    }
+    return numericId;
+}
+
+function addonMapKey(addon) {
+    if (isInsuranceAddon(addon)) return 'insurance';
+    const numericId = resolveNumericEquipmentId(addon);
+    if (numericId != null) return numericId;
+    return addon?.id ?? addon?.equipment_id ?? addon?.name ?? 'unknown';
+}
+
+async function resolveAddonUnitPrice(addon, priceSnapshot = null) {
+    if (isInsuranceAddon(addon)) {
+        return Number(addon?.price || 0);
+    }
+    const equipmentId = resolveNumericEquipmentId(addon);
+    if (equipmentId) {
+        return await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
+    }
+    return Number(addon?.price || 0);
+}
+
+/** Build original add-on list from booking_equipment rows and addons JSON fallback. */
+export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment = [], insuranceFallbackPrice = 25) {
+    const list = [];
+    const seenIds = new Set();
+
+    for (const be of bookingEquip || []) {
+        const equipId = be.equipment_id ?? be.equipment?.id;
+        if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
+        seenIds.add(equipId);
+        list.push({
+            id: equipId,
+            equipment_id: equipId,
+            name: be.equipment?.name || 'Unknown Equipment',
+            quantity: be.quantity || 1,
+            price: Number(be.equipment?.price || 0),
+            description: be.equipment?.description || be.equipment?.type || 'Equipment',
+            type: be.equipment?.type || 'equipment',
+        });
+    }
+
+    if (list.length === 0 && Array.isArray(booking?.addons?.equipment) && booking.addons.equipment.length > 0) {
+        const equipmentMap = new Map(
+            (allEquipment || []).map((e) => [e.name.toLowerCase().replace(/ /g, ''), e])
+        );
+        for (const item of booking.addons.equipment) {
+            const slug = (item.id || '').toLowerCase().replace(/ /g, '');
+            const matched = item.dbId ? allEquipment.find((e) => e.id === item.dbId) : equipmentMap.get(slug);
+            const equipId = item.dbId || matched?.id;
+            if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
+            seenIds.add(equipId);
+            list.push({
+                id: equipId,
+                equipment_id: equipId,
+                name: matched?.name || item.name || 'Equipment',
+                quantity: item.quantity || 1,
+                price: Number(matched?.price || item.price || 0),
+                type: matched?.type || 'equipment',
+            });
+        }
+    }
+
+    if (bookingHadInsurance(booking?.addons)) {
+        const applied = Number(booking.addons.insurancePriceApplied);
+        list.push({
+            id: 'insurance',
+            name: 'Premium Insurance',
+            quantity: 1,
+            price: applied > 0 ? applied : insuranceFallbackPrice,
+            type: 'insurance',
+        });
+    }
+
+    return list;
+}
 
 export const calculateDays = (dropOff, pickup) => {
     if (!dropOff || !pickup) return 1;
@@ -46,21 +146,12 @@ export const calculateBookingCosts = async (service, days, addonsList, distanceM
         serviceCost += mileageCharge;
     }
 
-    // Calculate add-ons cost using equipment_pricing
     let addonsCost = 0;
     if (Array.isArray(addonsList)) {
         for (const addon of addonsList) {
-            const equipmentId = addon.equipment_id || addon.dbId || addon.id;
-            if (equipmentId) {
-                const price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
-                const qty = Number(addon?.quantity || 1);
-                addonsCost += price * qty;
-            } else {
-                // Fallback to addon.price if no equipment_id
-                const price = Number(addon?.price || 0);
-                const qty = Number(addon?.quantity || 1);
-                addonsCost += price * qty;
-            }
+            const price = await resolveAddonUnitPrice(addon, priceSnapshot);
+            const qty = Number(addon?.quantity || 1);
+            addonsCost += price * qty;
         }
     } else if (addonsList && typeof addonsList === 'object') {
         for (const [key, val] of Object.entries(addonsList)) {
@@ -125,20 +216,19 @@ export const calculateAddonsDifference = async (originalAddons = [], newAddons =
     const originalMap = new Map();
     const newMap = new Map();
     
-    // Build maps with current prices
     for (const addon of originalAddons) {
-        const key = addon.id || addon.equipment_id;
-        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
+        const key = addonMapKey(addon);
+        const price = await resolveAddonUnitPrice(addon, priceSnapshot);
         originalMap.set(key, {
             ...addon,
             quantity: Number(addon.quantity || 1),
             price
         });
     }
-    
+
     for (const addon of newAddons) {
-        const key = addon.id || addon.equipment_id;
-        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
+        const key = addonMapKey(addon);
+        const price = await resolveAddonUnitPrice(addon, priceSnapshot);
         newMap.set(key, {
             ...addon,
             quantity: Number(addon.quantity || 1),
@@ -235,14 +325,9 @@ export async function calculateComprehensivePricing(
 
   // Calculate add-ons using equipment_pricing
   const addonsBreakdown = [];
-  for (const addon of selectedAddons.filter(a => a.quantity > 0)) {
-    const equipmentId = addon.equipment_id || addon.dbId || addon.id;
-    let price = Number(addon.price || 0);
-    
-    if (equipmentId) {
-      price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
-    }
-    
+  for (const addon of selectedAddons.filter(a => (a.quantity ?? 0) > 0)) {
+    const price = await resolveAddonUnitPrice(addon, priceSnapshot);
+
     addonsBreakdown.push({
       name: addon.name,
       price,

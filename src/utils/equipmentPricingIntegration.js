@@ -30,12 +30,17 @@ function isExcludedEquipmentId(equipmentId) {
  * @returns {boolean} True if valid for pricing operations
  */
 function validateEquipmentIdForPricing(equipmentId, context) {
-  if (!equipmentId) {
+  if (equipmentId === null || equipmentId === undefined || equipmentId === '') {
     console.error(`[${context}] No equipment ID provided`);
     return false;
   }
 
   const numericId = Number(equipmentId);
+
+  if (Number.isNaN(numericId)) {
+    console.warn(`[${context}] Non-numeric equipment ID rejected:`, equipmentId);
+    return false;
+  }
 
   // Check if excluded (ID 7 = Premium Insurance)
   if (isExcludedEquipmentId(numericId)) {
@@ -559,16 +564,14 @@ export function sanitizePrice(price) {
  */
 export async function getPriceFromSnapshotOrCurrent(equipmentId, snapshot = null) {
   const numericId = Number(equipmentId);
-  
-  // Check exclusions
-  if (isExcludedEquipmentId(numericId)) {
-    console.warn('[getPriceFromSnapshotOrCurrent] Skipping excluded equipment ID:', numericId);
+
+  if (Number.isNaN(numericId) || !isValidEquipmentId(numericId) || isExcludedEquipmentId(numericId)) {
     return 0;
   }
-  
+
   if (snapshot && snapshot[numericId] !== undefined) {
     return Number(snapshot[numericId]);
   }
-  
+
   return await getPriceForEquipment(numericId);
 }
