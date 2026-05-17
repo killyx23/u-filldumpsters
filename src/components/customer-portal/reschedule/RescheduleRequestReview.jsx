@@ -1,57 +1,82 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { format } from 'date-fns';
-import { Clock, Calendar, MapPin, MessageSquare, Package, CheckSquare, DollarSign, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Clock, Calendar, MapPin, MessageSquare, Package, CheckSquare, DollarSign, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
-import { safeExtractString, safeExtractNumber } from '@/utils/stringExtractors';
+import { safeExtractString } from '@/utils/stringExtractors';
 import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
 
-export const RescheduleRequestReview = ({ 
-    bookingId,
-    originalBooking, 
-    originalService, 
-    newService, 
-    newDropOffDate, 
-    newPickupDate, 
-    newDropOffTime, 
-    newPickupTime, 
+export const RescheduleRequestReview = ({
+    originalBooking,
+    originalService,
+    originalAddonsList = [],
+    newService,
+    newDropOffDate,
+    newPickupDate,
+    newDropOffTime,
+    newPickupTime,
     selectedAddonsList,
-    deliveryAddress, 
-    comments 
+    deliveryAddress,
+    comments,
 }) => {
-    // Calculate original costs
-    const origDays = calculateDays(originalBooking?.drop_off_date, originalBooking?.pickup_date);
-    const originalDistance = Number(originalBooking?.customers?.distance_miles || 0);
-    
-    // Get original addons from booking_equipment (passed via selectedAddonsList initially)
-    const originalAddonsList = [];
-    if (originalBooking?.addons && typeof originalBooking.addons === 'object') {
-        Object.entries(originalBooking.addons).forEach(([key, val]) => {
-            if (key.toLowerCase().includes('insurance')) {
-                const price = typeof val === 'object' ? Number(val.price || 25) : Number(val || 25);
-                originalAddonsList.push({
-                    id: 'insurance',
-                    name: 'Premium Insurance',
-                    quantity: 1,
-                    price: price
-                });
+    const [costsLoading, setCostsLoading] = useState(true);
+    const [originalCosts, setOriginalCosts] = useState(null);
+    const [newCosts, setNewCosts] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadCosts = async () => {
+            setCostsLoading(true);
+            try {
+                const origDays = calculateDays(originalBooking?.drop_off_date, originalBooking?.pickup_date);
+                const originalDistance = Number(originalBooking?.customers?.distance_miles || 0);
+                const newDays = calculateDays(newDropOffDate, newPickupDate);
+                const newDistance = originalDistance;
+
+                const [orig, updated] = await Promise.all([
+                    calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance),
+                    calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance),
+                ]);
+
+                if (!cancelled) {
+                    setOriginalCosts(orig);
+                    setNewCosts(updated);
+                }
+            } catch (err) {
+                console.error('[RescheduleRequestReview] Cost calculation failed:', err);
+                if (!cancelled) {
+                    setOriginalCosts({ total: 0 });
+                    setNewCosts({ total: 0 });
+                }
+            } finally {
+                if (!cancelled) setCostsLoading(false);
             }
-        });
-    }
-    
-    const originalCosts = calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance);
-    
-    // Calculate new costs
-    const newDays = calculateDays(newDropOffDate, newPickupDate);
-    const newDistance = originalDistance; // Using same distance unless address changed
-    const newCosts = calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance);
-    
-    const diffVal = newCosts.total - originalCosts.total;
-    
+        };
+
+        if (originalService && newService) {
+            loadCosts();
+        }
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        originalBooking,
+        originalService,
+        originalAddonsList,
+        newService,
+        newDropOffDate,
+        newPickupDate,
+        selectedAddonsList,
+    ]);
+
+    const diffVal = (newCosts?.total ?? 0) - (originalCosts?.total ?? 0);
+
     const originalServiceName = safeExtractString(originalService?.name, 'Standard Service');
     const newServiceName = safeExtractString(newService?.name, 'New Service');
-    
+
     const origDropOffStr = safeExtractString(originalBooking?.drop_off_date);
     const origPickupStr = safeExtractString(originalBooking?.pickup_date);
     const origDropOffTimeStr = safeExtractString(originalBooking?.drop_off_time_slot, '08:00');
@@ -62,12 +87,20 @@ export const RescheduleRequestReview = ({
     const safeAddress = safeExtractString(deliveryAddress, 'No address provided');
     const safeComments = safeExtractString(comments, '');
 
-    // Agreements state (these should all be true to reach this step)
     const agreements = {
         terms: true,
         charges: true,
-        release: true
+        release: true,
     };
+
+    if (costsLoading || !originalCosts || !newCosts) {
+        return (
+            <div className="flex flex-col items-center justify-center py-24">
+                <Loader2 className="h-10 w-10 animate-spin text-gold mb-4" />
+                <p className="text-gray-400">Calculating review totals...</p>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto w-full">
@@ -80,7 +113,6 @@ export const RescheduleRequestReview = ({
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-6 items-stretch">
-                {/* Original Details */}
                 <Card className="bg-gray-900/80 border-gray-800 shadow-none h-full flex flex-col rounded-2xl">
                     <CardContent className="p-8 flex-1 flex flex-col space-y-6">
                         <h4 className="font-black text-gray-500 flex items-center border-b border-gray-800 pb-4 uppercase tracking-widest text-xs">
@@ -88,18 +120,18 @@ export const RescheduleRequestReview = ({
                         </h4>
                         <div className="text-base text-gray-400 space-y-6 flex-1">
                             <div className="flex items-start">
-                                <Package className="w-6 h-6 mr-4 mt-1 opacity-60 shrink-0"/> 
+                                <Package className="w-6 h-6 mr-4 mt-1 opacity-60 shrink-0"/>
                                 <div>
                                     <span className="text-gray-200 font-bold text-xl block mb-2">{originalServiceName}</span>
                                 </div>
                             </div>
                             <div className="bg-gray-950 p-5 rounded-xl border border-gray-800 space-y-3 shadow-inner">
                                 <p className="flex items-center">
-                                    <Clock className="w-5 h-5 mr-3 opacity-60 shrink-0"/> 
+                                    <Clock className="w-5 h-5 mr-3 opacity-60 shrink-0"/>
                                     <span className="text-gray-300 font-medium">Start: {origDropOffStr ? format(new Date(origDropOffStr), 'MMM d, yyyy') : 'N/A'} @ {convertTo12Hour(origDropOffTimeStr)}</span>
                                 </p>
                                 <p className="flex items-center">
-                                    <Clock className="w-5 h-5 mr-3 opacity-60 shrink-0"/> 
+                                    <Clock className="w-5 h-5 mr-3 opacity-60 shrink-0"/>
                                     <span className="text-gray-300 font-medium">End: {origPickupStr ? format(new Date(origPickupStr), 'MMM d, yyyy') : 'N/A'} @ {convertTo12Hour(origPickupTimeStr)}</span>
                                 </p>
                             </div>
@@ -115,7 +147,6 @@ export const RescheduleRequestReview = ({
                     <ArrowRight className="w-10 h-10 text-gray-700 rotate-90 lg:rotate-0" />
                 </div>
 
-                {/* New Details */}
                 <Card className="bg-[hsl(var(--gold)_/_0.03)] border-[hsl(var(--gold)_/_0.4)] shadow-[0_0_30px_hsla(var(--gold),0.05)] h-full flex flex-col relative overflow-hidden rounded-2xl">
                     <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-gold to-gold-light"></div>
                     <CardContent className="p-8 flex-1 flex flex-col space-y-6">
@@ -124,7 +155,7 @@ export const RescheduleRequestReview = ({
                         </h4>
                         <div className="text-base text-yellow-100/90 space-y-6 flex-1">
                             <div className="flex items-start">
-                                <Package className="w-6 h-6 mr-4 mt-1 text-gold shrink-0"/> 
+                                <Package className="w-6 h-6 mr-4 mt-1 text-gold shrink-0"/>
                                 <div>
                                     <span className="text-white font-black text-xl block mb-2">{newServiceName}</span>
                                     <div className="flex flex-wrap gap-2 text-gold-light mt-3">
@@ -141,11 +172,11 @@ export const RescheduleRequestReview = ({
                             </div>
                             <div className="bg-gray-950/80 p-5 rounded-xl border border-[hsl(var(--gold)_/_0.3)] space-y-3 shadow-inner">
                                 <p className="flex items-center text-white">
-                                    <Clock className="w-5 h-5 mr-3 text-gold shrink-0"/> 
+                                    <Clock className="w-5 h-5 mr-3 text-gold shrink-0"/>
                                     <span className="font-bold">Start: {newDropOffDate ? format(newDropOffDate, 'MMM d, yyyy') : 'N/A'} @ {convertTo12Hour(newDropOffTimeStr)}</span>
                                 </p>
                                 <p className="flex items-center text-white">
-                                    <Clock className="w-5 h-5 mr-3 text-gold shrink-0"/> 
+                                    <Clock className="w-5 h-5 mr-3 text-gold shrink-0"/>
                                     <span className="font-bold">End: {newPickupDate ? format(newPickupDate, 'MMM d, yyyy') : 'N/A'} @ {convertTo12Hour(newPickupTimeStr)}</span>
                                 </p>
                             </div>
@@ -205,7 +236,7 @@ export const RescheduleRequestReview = ({
                     </CardContent>
                 </Card>
             </div>
-            
+
             <div className="bg-red-950/30 border-2 border-red-900/60 p-5 rounded-2xl text-center text-red-400 text-sm font-bold shadow-lg flex items-center justify-center">
                 <span className="text-xl mr-3">⚠️</span> IMPORTANT: Submitting this request sends it to administration for review. Approval is required before dates are locked in.
             </div>

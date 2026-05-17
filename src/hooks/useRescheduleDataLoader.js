@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import {
+    calculateBookingCosts,
+    calculateDays,
+    buildOriginalAddonsList,
+} from '@/utils/rescheduleCalculations';
+
+const DEFAULT_INSURANCE_PRICE = 25;
 
 export const useRescheduleDataLoader = (bookingId) => {
     const [data, setData] = useState(null);
@@ -12,7 +18,6 @@ export const useRescheduleDataLoader = (bookingId) => {
             if (!bookingId) return;
             setLoading(true);
             try {
-                // 1. Fetch Booking with customer data
                 const { data: booking, error: bookingErr } = await supabase
                     .from('bookings')
                     .select('*, customers(*)')
@@ -20,73 +25,52 @@ export const useRescheduleDataLoader = (bookingId) => {
                     .single();
                 if (bookingErr) throw bookingErr;
 
-                // 2. Fetch ALL Services
                 const { data: services, error: servicesErr } = await supabase
                     .from('services')
                     .select('*');
                 if (servicesErr) throw servicesErr;
 
-                // 3. Fetch ALL Equipment from equipment table (for available options)
                 const { data: allEquipment, error: allEquipErr } = await supabase
                     .from('equipment')
                     .select('*');
                 if (allEquipErr) throw allEquipErr;
 
-                // 4. Fetch Original Booking Equipment (what customer selected originally)
                 const { data: bookingEquip, error: equipErr } = await supabase
                     .from('booking_equipment')
                     .select('*, equipment(*)')
                     .eq('booking_id', bookingId);
                 if (equipErr) throw equipErr;
 
-                // Map original booking equipment to addons format
-                const originalAddonsList = (bookingEquip || []).map(be => {
-                    const equipName = be.equipment?.name || 'Unknown Equipment';
-                    const equipPrice = Number(be.equipment?.price || 0);
-                    return {
-                        id: be.equipment_id,
-                        name: equipName,
-                        quantity: be.quantity || 1,
-                        price: equipPrice,
-                        description: be.equipment?.description || be.equipment?.type || 'Equipment',
-                        type: be.equipment?.type || 'equipment'
-                    };
-                });
-
-                // Check if insurance was in original booking (from addons JSON field)
-                let hasOriginalInsurance = false;
-                let originalInsurancePrice = 25;
-                if (booking.addons && typeof booking.addons === 'object') {
-                    Object.entries(booking.addons).forEach(([key, val]) => {
-                        if (key.toLowerCase().includes('insurance')) {
-                            hasOriginalInsurance = true;
-                            originalInsurancePrice = typeof val === 'object' ? Number(val.price || 25) : Number(val || 25);
-                        }
-                    });
+                let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
+                const { data: insuranceService } = await supabase
+                    .from('services')
+                    .select('base_price')
+                    .eq('id', 7)
+                    .maybeSingle();
+                if (insuranceService?.base_price != null) {
+                    insuranceFallbackPrice = Number(insuranceService.base_price);
                 }
 
-                if (hasOriginalInsurance) {
-                    originalAddonsList.push({
-                        id: 'insurance',
-                        name: 'Premium Insurance',
-                        quantity: 1,
-                        price: originalInsurancePrice,
-                        description: 'Complete protection coverage for your rental',
-                        type: 'insurance'
-                    });
-                }
+                const originalAddonsList = buildOriginalAddonsList(
+                    booking,
+                    bookingEquip,
+                    allEquipment,
+                    insuranceFallbackPrice
+                );
 
-                // 5. Identify Original Service
                 const originalServiceId = booking.plan?.id || booking.service_id;
-                const originalService = services.find(s => s.id === originalServiceId) || services[0];
+                const originalService = services.find((s) => s.id === originalServiceId) || services[0];
 
-                // 6. Calculate Original Costs with correct mileage
                 const distanceMiles = Number(booking.customers?.distance_miles || 0);
                 const origDays = calculateDays(booking.drop_off_date, booking.pickup_date);
-                
-                const originalCosts = calculateBookingCosts(originalService, origDays, originalAddonsList, distanceMiles);
 
-                // 7. Fetch Availability
+                const originalCosts = await calculateBookingCosts(
+                    originalService,
+                    origDays,
+                    originalAddonsList,
+                    distanceMiles
+                );
+
                 const { data: availability, error: availErr } = await supabase
                     .from('date_specific_availability')
                     .select('*')
@@ -97,22 +81,21 @@ export const useRescheduleDataLoader = (bookingId) => {
                     originalBooking: booking,
                     originalService,
                     availableServices: services,
-                    allEquipment: allEquipment || [], // All equipment available for selection
-                    originalAddonsList, // What customer selected in original booking
+                    allEquipment: allEquipment || [],
+                    originalAddonsList,
                     originalCosts: {
                         serviceCost: originalCosts.serviceCost,
                         addonsCost: originalCosts.addonsCost,
                         mileageCharge: originalCosts.mileageCharge,
                         subtotal: originalCosts.subtotal,
                         tax: originalCosts.tax,
-                        total: originalCosts.total
+                        total: originalCosts.total,
                     },
                     availableDates: availability || [],
-                    distanceMiles
+                    distanceMiles,
                 });
-
             } catch (err) {
-                console.error("Failed to load comprehensive reschedule data:", err);
+                console.error('Failed to load comprehensive reschedule data:', err);
                 setError(err.message);
             } finally {
                 setLoading(false);

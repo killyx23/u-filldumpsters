@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle, Lock, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { calculateDays } from '@/utils/rescheduleCalculations';
+import { calculateDays, bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
 import { Button } from '@/components/ui/button';
 
@@ -127,22 +127,18 @@ export const ReschedulePricingBreakdown = ({
                     };
                 });
 
-                // Check for insurance in addons JSON
                 let insuranceAddon = null;
-                if (booking.addons && typeof booking.addons === 'object') {
-                    Object.entries(booking.addons).forEach(([key, val]) => {
-                        if (key.toLowerCase().includes('insurance')) {
-                            const price = typeof val === 'object' ? Number(val.price || 25) : Number(val || 25);
-                            insuranceAddon = {
-                                name: 'Premium Insurance',
-                                quantity: 1,
-                                unitPrice: price,
-                                total: price,
-                                type: 'service'
-                            };
-                            console.log('[ReschedulePricing] Original addon: Premium Insurance');
-                        }
-                    });
+                if (bookingHadInsurance(booking.addons)) {
+                    const applied = Number(booking.addons.insurancePriceApplied);
+                    const price = applied > 0 ? applied : 25;
+                    insuranceAddon = {
+                        name: 'Premium Insurance',
+                        quantity: 1,
+                        unitPrice: price,
+                        total: price,
+                        type: 'service',
+                    };
+                    console.log('[ReschedulePricing] Original addon: Premium Insurance');
                 }
 
                 const allOriginalAddons = [...equipmentAddons];
