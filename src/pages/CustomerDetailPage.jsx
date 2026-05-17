@@ -1,5 +1,5 @@
 import React from 'react';
-import { CustomerDetailView } from '@/components/admin/customer-detail/CustomerDetailView';
+import { CustomerDetailView } from '@/pages/CustomerDetailView';
 
 const CustomerDetailPage = () => {
     return <CustomerDetailView />;

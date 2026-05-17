@@ -77,7 +77,7 @@ export const CustomerDetailView = () => {
             setBookings(bookingsData || []);
             setEquipment(equipmentData || []);
             setNotes(notesData || []);
-            setHasUnreadNotes(notesData.some(n => !n.is_read && n.author_type === 'customer'));
+            setHasUnreadNotes((notesData ?? []).some(n => !n.is_read && n.author_type === 'customer'));
 
         } catch(err) {
              toast({ title: "Failed to load customer details", description: err.message, variant: "destructive" });
