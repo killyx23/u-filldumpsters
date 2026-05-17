@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { RescheduleServiceSelectionSection } from './RescheduleServiceSelectionSection';
@@ -260,6 +260,10 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
     return (
       <Dialog open={open} onOpenChange={onClose}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-gray-950 text-white border-gray-800">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Reschedule Booking</DialogTitle>
+            <DialogDescription>Loading booking details for reschedule</DialogDescription>
+          </DialogHeader>
           <div className="flex flex-col items-center justify-center py-20">
             <Loader2 className="w-12 h-12 animate-spin text-gold mb-4" />
             <p className="text-gray-400">Loading booking details...</p>
@@ -370,9 +374,9 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
 
           {currentStep === STEPS.REVIEW && (
             <RescheduleRequestReview
-              bookingId={bookingId}
               originalBooking={data.originalBooking}
               originalService={data.originalService}
+              originalAddonsList={originalAddonsList}
               newService={selectedService}
               newDropOffDate={newDropOffDate}
               newPickupDate={newPickupDate}
