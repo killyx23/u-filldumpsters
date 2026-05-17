@@ -1,11 +1,12 @@
 import React from 'react';
 import { Repeat, AlertTriangle, Bell, ShieldAlert } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 
 export const CustomerProfileHeader = ({ customer, bookingsCount }) => {
     const isRepeatCustomer = bookingsCount > 1;
 
     return (
+        <TooltipProvider>
         <>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <h2 className="text-3xl font-bold text-white">{customer.name}</h2>
@@ -53,5 +54,6 @@ export const CustomerProfileHeader = ({ customer, bookingsCount }) => {
                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-300">{bookingsCount} Total Bookings</span>
             </div>
         </>
+        </TooltipProvider>
     );
 };

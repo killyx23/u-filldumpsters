@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
@@ -10,7 +10,7 @@ import { ReviewsPage } from '@/pages/ReviewsPage';
 import { ContactPage } from '@/pages/ContactPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminLogin } from '@/pages/AdminLogin';
-import { CustomerDetailView } from '@/pages/CustomerDetailView';
+import { CustomerDetailView } from '@/components/admin/customer-detail/CustomerDetailView';
 import { AdminRouteGuard } from '@/components/AdminRouteGuard';
 import { SupabaseAuthProvider } from '@/contexts/SupabaseAuthContext';
 import { CustomerPortalLogin } from '@/pages/CustomerPortalLogin';
@@ -87,18 +87,19 @@ function App() {
               />
 
               <Route
-                path="/admin/*"
+                path="/admin"
                 element={
                   <AdminRouteGuard>
-                    <Routes>
-                      <Route path="dashboard" element={<AdminDashboard />} />
-                      <Route path="customer/:customerId" element={<CustomerDetailView />} />
-                      <Route path="access-codes" element={<AccessCodesPage />} />
-                      <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
-                    </Routes>
+                    <Outlet />
                   </AdminRouteGuard>
                 }
-              />
+              >
+                <Route path="dashboard" element={<AdminDashboard />} />
+                <Route path="customer/:customerId" element={<CustomerDetailView />} />
+                <Route path="access-codes" element={<AccessCodesPage />} />
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="*" element={<Navigate to="dashboard" replace />} />
+              </Route>
               
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
