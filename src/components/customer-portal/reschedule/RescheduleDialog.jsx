@@ -14,6 +14,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { calculateAddonsDifference } from '@/utils/rescheduleCalculations';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
+import { buildRescheduleReason, extractEdgeFunctionError } from '@/utils/rescheduleRequestFormatter';
 
 const STEPS = {
   SERVICE: 1,
@@ -193,15 +194,13 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       console.log('Original add-ons:', originalAddonsList);
       console.log('New add-ons:', selectedAddonsList);
 
-      // Calculate inventory differences
-      const { toReturn, toAllocate, unchanged } = calculateAddonsDifference(
+      const inventoryChanges = await calculateAddonsDifference(
         originalAddonsList,
         selectedAddonsList
       );
 
-      console.log('Inventory changes:', { toReturn, toAllocate, unchanged });
+      console.log('Inventory changes:', inventoryChanges);
 
-      // Format reschedule request data
       const rescheduleData = {
         booking_id: bookingId,
         new_service_id: selectedService?.id,
@@ -212,26 +211,53 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
         original_addons: originalAddonsList,
         new_addons: selectedAddonsList,
         inventory_changes: {
-          to_return: toReturn,
-          to_allocate: toAllocate,
-          unchanged: unchanged
+          to_return: inventoryChanges.toReturn,
+          to_allocate: inventoryChanges.toAllocate,
+          unchanged: inventoryChanges.unchanged,
         },
         new_delivery_address: verifiedAddress,
         distance_miles: distanceMiles,
         is_manual_address: isManualAddress,
         customer_comments: comments,
         agreements_accepted: agreementsAccepted,
-        request_timestamp: new Date().toISOString()
+        request_timestamp: new Date().toISOString(),
       };
 
-      console.log('Submitting reschedule data:', rescheduleData);
-
-      // Submit reschedule request (backend will handle inventory changes)
-      const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
-        body: rescheduleData
+      const reason = buildRescheduleReason({
+        bookingId,
+        originalBooking: data?.originalBooking,
+        originalService: data?.originalService,
+        newService: selectedService,
+        newDropOffDate,
+        newPickupDate,
+        newDropOffTime,
+        newPickupTime,
+        originalAddonsList,
+        selectedAddonsList,
+        verifiedAddress,
+        distanceMiles,
+        isManualAddress,
+        comments,
+        inventoryChanges: rescheduleData.inventory_changes,
       });
 
-      if (requestError) throw requestError;
+      console.log('Submitting reschedule request:', { bookingId, reasonLength: reason.length });
+
+      const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
+        body: {
+          bookingId: Number(bookingId),
+          reason,
+          rescheduleDetails: rescheduleData,
+        },
+      });
+
+      if (requestError) {
+        const message = await extractEdgeFunctionError(requestError, requestData);
+        throw new Error(message);
+      }
+      if (requestData?.error) {
+        throw new Error(requestData.error);
+      }
 
       console.log('Reschedule request successful:', requestData);
       expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
@@ -246,10 +272,14 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       
     } catch (err) {
       console.error('Error submitting reschedule:', err);
+      const description =
+        err instanceof Error
+          ? err.message
+          : await extractEdgeFunctionError(err, null);
       toast({
         title: "Submission Failed",
-        description: err.message || "Could not submit reschedule request. Please try again.",
-        variant: "destructive"
+        description,
+        variant: "destructive",
       });
     } finally {
       setSubmitting(false);
