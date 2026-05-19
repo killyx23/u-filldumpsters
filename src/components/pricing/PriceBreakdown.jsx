@@ -3,6 +3,10 @@ import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { getInsuranceDisplayPrice } from '@/utils/getInsuranceDisplayPrice';
 
 /**
  * Reusable Price Breakdown Component
@@ -18,6 +22,8 @@ export const PriceBreakdown = ({
 }) => {
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
+  const { taxRate } = useTaxRate();
+  const { insurancePrice, loading: loadingInsurance } = useInsurancePricing();
 
   // Load equipment prices from database
   useEffect(() => {
@@ -42,11 +48,6 @@ export const PriceBreakdown = ({
           }
         }
 
-        // Load insurance (ID 7)
-        if (isValidEquipmentId(7)) {
-          prices[7] = await getPriceForEquipment(7);
-        }
-
         setEquipmentPrices(prices);
       } catch (error) {
         console.error('[PriceBreakdown] Error loading prices:', error);
@@ -63,8 +64,8 @@ export const PriceBreakdown = ({
     const deliveryFeeFlat = Number(addons?.deliveryFee || 0);
     const mileageCharge = Number(addons?.mileageCharge || 0);
 
-    // Protection costs
-    const insuranceCost = addons?.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+    // Protection costs (services table / booking snapshot)
+    const insuranceCost = getInsuranceDisplayPrice({ addons }, insurancePrice);
     const drivewayProtectionCost = addons?.drivewayProtection === 'accept' ? 15 : 0;
 
     // Equipment costs
@@ -74,7 +75,7 @@ export const PriceBreakdown = ({
     if (addons?.equipment && Array.isArray(addons.equipment)) {
       addons.equipment.forEach(item => {
         const equipmentId = item.equipment_id || item.dbId || item.id;
-        if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+        if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId)) return;
 
         const price = Number(equipmentPrices[equipmentId] || 0);
         const quantity = Number(item.quantity || 1);
@@ -116,9 +117,13 @@ export const PriceBreakdown = ({
       }
     }
 
-    const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-    const tax = subtotal * 0.07; // 7% tax
-    const total = subtotal + tax;
+    const calculatedSubtotal = Math.max(0, subtotalBeforeDiscount - discount);
+    const taxCalc = calculateTotalWithTax(calculatedSubtotal, taxRate);
+
+    const storedSubtotal = Number(booking?.subtotal_before_tax ?? 0);
+    const storedTax = Number(booking?.tax_amount ?? 0);
+    const storedTotal = Number(booking?.total_price ?? 0);
+    const hasStoredTotals = storedSubtotal > 0 && storedTotal > 0;
 
     return {
       baseRental,
@@ -130,13 +135,14 @@ export const PriceBreakdown = ({
       purchaseItemsCost,
       disposalCost,
       discount,
-      subtotal,
-      tax,
-      total
+      subtotal: hasStoredTotals ? storedSubtotal : taxCalc.subtotal,
+      tax: hasStoredTotals && storedTax > 0 ? storedTax : taxCalc.tax,
+      total: hasStoredTotals ? storedTotal : taxCalc.total,
+      taxRateUsed: booking?.tax_rate_used ?? taxRate
     };
-  }, [basePrice, plan, booking, addons, equipmentPrices]);
+  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate, insurancePrice]);
 
-  if (loading) {
+  if (loading || loadingInsurance) {
     return <div className="text-center text-gray-400 py-4">Loading price breakdown...</div>;
   }
 
@@ -290,7 +296,7 @@ export const PriceBreakdown = ({
             <span className="text-white font-bold">${calculatedTotals.subtotal.toFixed(2)}</span>
           </div>
           <div className="flex justify-between items-center text-sm">
-            <span className="text-blue-200 font-semibold">Tax (7%)</span>
+            <span className="text-blue-200 font-semibold">Tax ({(calculatedTotals.taxRateUsed ?? taxRate ?? 0).toFixed(2)}%)</span>
             <span className="text-white font-bold">${calculatedTotals.tax.toFixed(2)}</span>
           </div>
           <div className="flex justify-between items-center text-lg pt-2 border-t border-white/10">

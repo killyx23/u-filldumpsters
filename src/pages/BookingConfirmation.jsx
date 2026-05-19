@@ -167,7 +167,12 @@ export const BookingConfirmation = () => {
           bookingId,
           data.bookingData.tax_amount,
           data.bookingData.tax_rate_used,
-          data.bookingData.subtotal_before_tax
+          data.bookingData.subtotal_before_tax,
+          {
+            delivery_type: data.bookingData.delivery_type,
+            tax_jurisdiction: data.bookingData.tax_jurisdiction || 'HQ',
+            tax_api_used: 'business_settings',
+          }
         );
 
         if (taxResult.success) {

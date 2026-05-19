@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { resolveTaxRate } from '@/utils/resolveTaxRate';
 
 // Cache for tax rate to avoid repeated database calls
 let taxRateCache = null;
@@ -79,9 +80,10 @@ export async function getEffectiveTaxRate() {
 
 /**
  * React hook to fetch and cache tax rate
+ * @param {Object} [deliveryContext] - Optional context for future ZIP-based rate lookup
  * @returns {Object} { taxRate, loading, error }
  */
-export function useTaxRate() {
+export function useTaxRate(deliveryContext = {}) {
   const [taxRate, setTaxRate] = useState(7.45); // Default fallback
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -92,10 +94,10 @@ export function useTaxRate() {
     const fetchTaxRate = async () => {
       try {
         setLoading(true);
-        const config = await getTaxRate();
+        const resolved = await resolveTaxRate(deliveryContext);
         
         if (isMounted) {
-          setTaxRate(config.tax_rate);
+          setTaxRate(resolved.taxRate);
           setError(null);
         }
       } catch (err) {
@@ -116,7 +118,7 @@ export function useTaxRate() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [deliveryContext.deliveryType, deliveryContext.deliveryZip, deliveryContext.pickupZip]);
 
   return { taxRate, loading, error };
 }

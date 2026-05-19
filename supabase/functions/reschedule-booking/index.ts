@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from './cors.ts';
-import { differenceInCalendarDays } from 'npm:date-fns@2.30.0';
+import { differenceInCalendarDays } from 'https://esm.sh/date-fns@2.30.0';
 // Helper to calculate price based on service and duration
 const calculatePrice = (plan, startDate, endDate, isDelivery)=>{
   const dailyRate = plan.daily_rate || 100; // Default daily rate

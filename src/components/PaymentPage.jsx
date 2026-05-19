@@ -20,6 +20,7 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { deriveDeliveryType } from '@/utils/resolveTaxRate';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -575,6 +576,8 @@ export const PaymentPage = ({ onBack }) => {
         const isUnverifiedDelivery = pendingData.delivery_address && 
                                      !pendingData.delivery_address.isVerified;
 
+        const deliveryType = deriveDeliveryType(pendingData.plan_data, pendingData.delivery_service);
+
         const bookingPayload = {
           name: fullName,
           first_name: retrievedBookingData.firstName,
@@ -597,12 +600,16 @@ export const PaymentPage = ({ onBack }) => {
           subtotal_before_tax: calcResult.subtotal,
           tax_amount: calcResult.tax,
           tax_rate_used: calcResult.taxRate,
+          delivery_type: deliveryType,
           status: 'pending_payment',
           was_verification_skipped: isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
           addons: {
             ...pendingData.addons_data,
             isDelivery: pendingData.delivery_service,
+            ...(pendingData.addons_data?.insurance === 'accept' && calcResult.insuranceCost > 0
+              ? { insurancePriceApplied: calcResult.insuranceCost }
+              : {}),
           },
         };
 
@@ -660,16 +667,17 @@ export const PaymentPage = ({ onBack }) => {
       try {
         console.log(`[${timestamp}] [PaymentPage] Validating pricing before booking creation...`);
         
-        // Calculate expected total with all up-to-date prices
+        // Calculate expected total with all up-to-date prices (tax-inclusive source of truth)
         const calcResult = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
-        
-        // Prefer stored total if it exists and is valid
-        let finalTotal = parseFloat(pendingCustomerData.total_price);
-        if (!Number.isFinite(finalTotal) || finalTotal <= 0) {
-          finalTotal = calcResult.total;
+        const finalTotal = calcResult.total;
+
+        const storedTotal = parseFloat(pendingCustomerData.total_price);
+        if (Number.isFinite(storedTotal) && storedTotal > 0 && Math.abs(storedTotal - finalTotal) > 0.02) {
+          console.warn(
+            `[${timestamp}] [PaymentPage] Stored pending total ($${storedTotal}) differs from calculated tax-inclusive total ($${finalTotal}). Using calculated total.`
+          );
         }
 
-        // Final validation
         if (!Number.isFinite(finalTotal) || finalTotal <= 0) {
           throw new Error('Calculated total is invalid. Cannot create booking. Please check your selections and try again.');
         }

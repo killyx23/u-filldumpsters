@@ -5,6 +5,8 @@ import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { getInsuranceDisplayPrice } from '@/utils/getInsuranceDisplayPrice';
+import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
@@ -46,14 +48,14 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loading, setLoading] = useState(true);
     const [magicLinkToken, setMagicLinkToken] = useState(null);
+    const { insurancePrice, loading: loadingInsurance } = useInsurancePricing();
 
-    // Load equipment prices from database
+    // Load equipment prices from database (IDs 1-6; insurance uses services table)
     useEffect(() => {
         const loadPrices = async () => {
             const prices = {};
             try {
-                // Load all equipment prices (IDs 1-7)
-                for (let id = 1; id <= 7; id++) {
+                for (let id = 1; id <= 6; id++) {
                     if (isValidEquipmentId(id)) {
                         prices[id] = await getPriceForEquipment(id);
                     }
@@ -100,7 +102,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }, [booking]);
     
-    if (!booking || !booking.customers || !booking.plan || loading) {
+    if (!booking || !booking.customers || !booking.plan || loading || loadingInsurance) {
         return <div className="p-8">Loading receipt...</div>;
     }
 
@@ -159,8 +161,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
-    // Protection costs
-    const insuranceCost = addons.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+    // Protection costs (insurance from services table / booking snapshot)
+    const insuranceCost = getInsuranceDisplayPrice(booking, insurancePrice);
     const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
 
     // Equipment costs
@@ -171,7 +173,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     if (addons.equipment && Array.isArray(addons.equipment)) {
         addons.equipment.forEach(item => {
             const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+            if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId)) return;
 
             const price = Number(equipmentPrices[equipmentId] || 0);
             const quantity = Number(item.quantity || 1);
@@ -224,12 +226,20 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }
 
-    const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
-    
-    // Use tax rate from booking record if available, otherwise calculate
+    const calculatedSubtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
+
+    // Prefer stored totals from payment (source of truth)
+    const storedSubtotal = Number(booking.subtotal_before_tax ?? 0);
+    const storedTax = Number(booking.tax_amount ?? 0);
+    const storedTotal = Number(booking.total_price ?? 0);
+    const hasStoredTotals = storedSubtotal > 0 && storedTotal > 0;
+
     const taxRateUsed = booking.tax_rate_used || 7.45;
-    const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
-    const calculatedTotal = subtotal + taxAmount;
+    const subtotal = hasStoredTotals ? storedSubtotal : calculatedSubtotal;
+    const taxAmount = hasStoredTotals && storedTax > 0
+        ? storedTax
+        : (booking.tax_amount || calculateTaxAmount(calculatedSubtotal, taxRateUsed));
+    const displayTotal = hasStoredTotals ? storedTotal : calculatedSubtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
@@ -507,14 +517,14 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             </tr>
                             <tr className="border-t-2 border-gray-400 bg-gray-100">
                                 <td className="py-2 px-3 font-bold text-lg">Total</td>
-                                <td className="text-right py-2 pr-3 font-bold text-lg text-green-600">${calculatedTotal.toFixed(2)}</td>
+                                <td className="text-right py-2 pr-3 font-bold text-lg text-green-600">${displayTotal.toFixed(2)}</td>
                             </tr>
 
                             {isCancelledAndRefunded && (
                                 <>
                                     <tr className="border-t">
                                         <td className="py-1 px-3">Cancellation Fee</td>
-                                        <td className="text-right py-1 pr-3 text-red-600">-${(calculatedTotal - (refund_details.amount || 0)).toFixed(2)}</td>
+                                        <td className="text-right py-1 pr-3 text-red-600">-${(displayTotal - (refund_details.amount || 0)).toFixed(2)}</td>
                                     </tr>
                                     <tr className="bg-green-50">
                                         <td className="py-2 px-3 font-bold">Amount Refunded</td>

@@ -83,6 +83,7 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       is_verified: false,
       verified_at: null,
       total_price: options.totalPrice || null,
+      subtotal_before_tax: options.subtotalBeforeTax ?? null,
       base_price: options.basePrice || null,
       delivery_service: options.deliveryService || false
     };

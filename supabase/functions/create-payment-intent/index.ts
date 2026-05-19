@@ -5,13 +5,6 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
   apiVersion: "2023-10-16",
   httpClient: Stripe.createFetchHttpClient()
 });
-
-const updatablePiStatuses = new Set([
-  "requires_payment_method",
-  "requires_confirmation",
-  "requires_action"
-]);
-
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response(null, {
@@ -21,6 +14,7 @@ Deno.serve(async (req)=>{
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [create-payment-intent] Function invoked.`);
   try {
+    // 1. Parse request body
     let body;
     try {
       body = await req.json();
@@ -30,7 +24,6 @@ Deno.serve(async (req)=>{
     }
     console.log(`[${timestamp}] [create-payment-intent] Received request body:`, JSON.stringify(body));
     const booking_id = body.booking_id || body.bookingId;
-    const sync_amount_only = body.sync_amount_only === true;
     if (!booking_id) {
       console.error(`[${timestamp}] [create-payment-intent] Missing booking_id in request.`);
       return new Response(JSON.stringify({
@@ -50,8 +43,9 @@ Deno.serve(async (req)=>{
       throw new Error("Server misconfiguration: Database connection details missing.");
     }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    // 2. Fetch booking data from database
     console.log(`[${timestamp}] [create-payment-intent] Querying database for booking ID: ${booking_id}`);
-    const { data: booking, error: fetchError } = await supabase.from("bookings").select("id, total_price, status, payment_intent, client_secret").eq("id", booking_id).single();
+    const { data: booking, error: fetchError } = await supabase.from("bookings").select("id, total_price, status").eq("id", booking_id).single();
     if (fetchError || !booking) {
       console.error(`[${timestamp}] [create-payment-intent] Database query failed:`, fetchError || "Booking not found");
       return new Response(JSON.stringify({
@@ -65,34 +59,8 @@ Deno.serve(async (req)=>{
       });
     }
     console.log(`[${timestamp}] [create-payment-intent] Retrieved booking details:`, JSON.stringify(booking));
-    const amountInCents = Math.max(50, Math.round(Number(booking.total_price || 0) * 100));
-
-    // After client persists tax, refresh Stripe amount on the existing PaymentIntent (same client_secret).
-    if (sync_amount_only && booking.payment_intent) {
-      const pi = await stripe.paymentIntents.retrieve(booking.payment_intent);
-      if (updatablePiStatuses.has(pi.status) && pi.amount !== amountInCents) {
-        await stripe.paymentIntents.update(booking.payment_intent, {
-          amount: amountInCents
-        });
-        console.log(`[${timestamp}] [create-payment-intent] Updated PI ${booking.payment_intent} amount to ${amountInCents} cents.`);
-      } else {
-        console.log(`[${timestamp}] [create-payment-intent] PI sync skipped (status=${pi.status}, amount match=${pi.amount === amountInCents}).`);
-      }
-      const clientSecret = pi.client_secret ?? booking.client_secret;
-      return new Response(JSON.stringify({
-        success: true,
-        clientSecret,
-        paymentIntentId: pi.id,
-        synced: true
-      }), {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-
+    // 3. Prepare Stripe API call
+    const amountInCents = Math.round(booking.total_price * 100);
     console.log(`[${timestamp}] [create-payment-intent] Requesting Stripe PaymentIntent for amount: ${amountInCents} cents.`);
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amountInCents,
@@ -102,6 +70,7 @@ Deno.serve(async (req)=>{
       }
     });
     console.log(`[${timestamp}] [create-payment-intent] Stripe PaymentIntent successfully created. ID: ${paymentIntent.id}`);
+    // 4. Update booking with Stripe details
     console.log(`[${timestamp}] [create-payment-intent] Updating booking ${booking_id} with payment_intent and client_secret.`);
     const { error: dbError } = await supabase.from("bookings").update({
       payment_intent: paymentIntent.id,

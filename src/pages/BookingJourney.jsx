@@ -54,6 +54,7 @@ function BookingJourney({ reorderData }) {
 
   const [basePrice, setBasePrice] = useState(0);
   const [finalPrice, setFinalPrice] = useState(0);
+  const [subtotalBeforeTax, setSubtotalBeforeTax] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
 
@@ -157,8 +158,9 @@ function BookingJourney({ reorderData }) {
     window.scrollTo(0, 0);
   };
 
-  const handleAddonsSubmit = (total, _, addons) => {
+  const handleAddonsSubmit = (total, subtotal, addons) => {
     setFinalPrice(total);
+    setSubtotalBeforeTax(subtotal ?? 0);
     setAddonsData(prev => ({ ...prev, ...addons }));
     setCurrentStep(3);
     window.scrollTo(0, 0);
@@ -197,6 +199,7 @@ function BookingJourney({ reorderData }) {
     try {
       const result = await storePendingBooking(bookingData, selectedPlan, addonsData, {
         totalPrice: finalPrice,
+        subtotalBeforeTax: subtotalBeforeTax,
         basePrice: basePrice,
         deliveryService: deliveryService
       });
@@ -239,6 +242,7 @@ function BookingJourney({ reorderData }) {
     try {
       const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...verificationData }, {
         totalPrice: finalPrice,
+        subtotalBeforeTax: subtotalBeforeTax,
         basePrice: basePrice,
         deliveryService: deliveryService
       });

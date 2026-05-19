@@ -6,7 +6,7 @@ import { toast } from '@/components/ui/use-toast';
  * Insurance Pricing Hook
  * Loads Premium Insurance pricing from services table using ID 7
  * Services ID 7 = Premium Insurance
- * Default price: $20.00 (hardcoded fallback)
+ * Default price: $25.00 (hardcoded fallback)
  * 
  * MIGRATION NOTE: Premium Insurance pricing has been moved from equipment table to services table
  * to maintain consistency with other service pricing.
@@ -14,7 +14,7 @@ import { toast } from '@/components/ui/use-toast';
 
 // Premium Insurance Service ID
 const INSURANCE_SERVICE_ID = 7;
-const DEFAULT_INSURANCE_PRICE = 20.00;
+const DEFAULT_INSURANCE_PRICE = 25.00;
 
 export const useInsurancePricing = () => {
     const [insurancePrice, setInsurancePrice] = useState(DEFAULT_INSURANCE_PRICE);

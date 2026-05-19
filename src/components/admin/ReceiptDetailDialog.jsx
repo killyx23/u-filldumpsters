@@ -2,7 +2,7 @@ import React from 'react';
     import { format, parseISO } from 'date-fns';
     import { Button } from '@/components/ui/button';
     import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-    import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag } from 'lucide-react';
+    import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key } from 'lucide-react';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -28,7 +28,7 @@ import React from 'react';
     export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
         if (!booking) return null;
 
-        const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
+        const { customers, plan, drop_off_date, pickup_date, total_price, subtotal_before_tax, tax_amount, tax_rate_used, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
         const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
         const coupon = addons?.coupon;
         const isDelivery = addons?.isDelivery;
@@ -43,26 +43,30 @@ import React from 'react';
             }
         };
 
-        let subtotal = plan.price || 0;
-        if (addons.insurance === 'accept') subtotal += addonPrices.insurance;
-        if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
-        if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
-        addons.equipment?.forEach(item => {
-            const meta = equipmentMeta.find(e => e.id === item.id);
-            if (meta) subtotal += meta.price * item.quantity;
-        });
-
-        const getDiscountAmount = () => {
+        let subtotal = subtotal_before_tax;
+        if (subtotal == null || subtotal === 0) {
+            subtotal = plan.price || 0;
+            if (addons.insurance === 'accept') {
+                const insuranceCharged = Number(addons.insurancePriceApplied) || addonPrices.insurance;
+                subtotal += insuranceCharged;
+            }
+            if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
+            if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
+            addons.equipment?.forEach(item => {
+                const meta = equipmentMeta.find(e => e.id === item.id);
+                if (meta) subtotal += meta.price * item.quantity;
+            });
             if (coupon && coupon.isValid) {
                 if (coupon.discountType === 'fixed') {
-                    return Math.min(subtotal, coupon.discountValue);
+                    subtotal = Math.max(0, subtotal - coupon.discountValue);
                 } else if (coupon.discountType === 'percentage') {
-                    return subtotal * (coupon.discountValue / 100);
+                    subtotal = subtotal - (subtotal * (coupon.discountValue / 100));
                 }
             }
-            return 0;
-        };
-        const discountAmount = getDiscountAmount();
+        }
+
+        const taxAmount = tax_amount ?? Math.max(0, total_price - subtotal);
+        const taxRate = tax_rate_used ?? 0;
 
         return (
             <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -140,11 +144,13 @@ import React from 'react';
                         )}
 
                         <div className="border-t-2 border-yellow-400 pt-4 mt-4">
-                            {discountAmount > 0 && (
-                                <>
-                                    <DetailRow icon={<DollarSign />} label="Subtotal" value={`$${subtotal.toFixed(2)}`} />
-                                    <DetailRow icon={<Tag />} label={`Coupon (${coupon.code})`} value={`- $${discountAmount.toFixed(2)}`} className="text-green-400" />
-                                </>
+                            <DetailRow icon={<DollarSign />} label="Subtotal" value={`$${Number(subtotal).toFixed(2)}`} />
+                            {taxAmount > 0 && (
+                                <DetailRow
+                                    icon={<DollarSign />}
+                                    label={`Tax${taxRate ? ` (${Number(taxRate).toFixed(2)}%)` : ''}`}
+                                    value={`$${Number(taxAmount).toFixed(2)}`}
+                                />
                             )}
                             <DetailRow icon={<DollarSign />} label="Grand Total Paid" value={`$${total_price.toFixed(2)}`} className="text-xl font-bold" />
                         </div>

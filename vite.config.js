@@ -286,9 +286,7 @@ export default defineConfig({
 	],
 	server: {
 		cors: true,
-		headers: {
-			'Cross-Origin-Embedder-Policy': 'credentialless',
-		},
+		// Do not set Cross-Origin-Embedder-Policy here — it blocks Stripe PaymentElement iframes locally.
 		allowedHosts: [
 			'.app-preview.com',
 			'.app-preview.io',

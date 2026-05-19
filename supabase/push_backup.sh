@@ -14,6 +14,12 @@
 #
 # The datetime argument must match a folder under supabase/backups/
 # in the format: functions_YYYY-MM-DD_HH-MM-SS
+#
+# Expected backup layout (created by backup.sh):
+#   supabase/backups/functions_<datetime>/supabase/functions/<fn>/index.ts
+#
+# Deploy/staging destination:
+#   supabase/functions/<fn>/index.ts
 # =============================================================================
 
 set -euo pipefail
@@ -50,19 +56,38 @@ shift  # remaining args (if any) are function names
 # ---------------------------------------------------------------------------
 # Resolve paths relative to this script's location
 # ---------------------------------------------------------------------------
+# This script lives in the `supabase/` directory (alongside backup.sh).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPABASE_DIR="$SCRIPT_DIR"
-BACKUP_DIR="$SUPABASE_DIR/backups/functions_${DATETIME}"
+
+# Backup root: supabase/backups/functions_<datetime>
+BACKUP_ROOT="$SUPABASE_DIR/backups/functions_${DATETIME}"
+
+# backup.sh ran `supabase functions download --workdir "$BACKUP_DIR/functions_$DATE"`,
+# which produces the nested layout: <workdir>/supabase/functions/<fn>/...
+# So the actual folder containing the function directories is:
+BACKUP_FUNCTIONS_DIR="$BACKUP_ROOT/supabase/functions"
+
+# Staging/deploy destination — where Supabase CLI expects functions to live.
 STAGING_DIR="$SUPABASE_DIR/functions"
 
 # ---------------------------------------------------------------------------
 # Validate backup folder exists
 # ---------------------------------------------------------------------------
-if [[ ! -d "$BACKUP_DIR" ]]; then
-  error "Backup folder not found: $BACKUP_DIR"
+if [[ ! -d "$BACKUP_ROOT" ]]; then
+  error "Backup folder not found: $BACKUP_ROOT"
   echo ""
   echo "Available backups:"
   ls "$SUPABASE_DIR/backups/" 2>/dev/null | grep "^functions_" || echo "  (none found)"
+  exit 1
+fi
+
+if [[ ! -d "$BACKUP_FUNCTIONS_DIR" ]]; then
+  error "Functions directory not found inside backup: $BACKUP_FUNCTIONS_DIR"
+  error "Expected layout: $BACKUP_ROOT/supabase/functions/<fn>/..."
+  echo ""
+  echo "Contents of $BACKUP_ROOT:"
+  ls -la "$BACKUP_ROOT" 2>/dev/null || true
   exit 1
 fi
 
@@ -75,9 +100,9 @@ if [[ $# -gt 0 ]]; then
   info "Deploying specific functions: ${FUNCTIONS[*]}"
 else
   # No functions specified — deploy everything in the backup folder
-  mapfile -t FUNCTIONS < <(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
+  mapfile -t FUNCTIONS < <(find "$BACKUP_FUNCTIONS_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
   if [[ ${#FUNCTIONS[@]} -eq 0 ]]; then
-    error "No function folders found inside $BACKUP_DIR"
+    error "No function folders found inside $BACKUP_FUNCTIONS_DIR"
     exit 1
   fi
   info "No functions specified — deploying all: ${FUNCTIONS[*]}"
@@ -88,16 +113,19 @@ fi
 # ---------------------------------------------------------------------------
 MISSING=()
 for fn in "${FUNCTIONS[@]}"; do
-  if [[ ! -d "$BACKUP_DIR/$fn" ]]; then
+  if [[ ! -d "$BACKUP_FUNCTIONS_DIR/$fn" ]]; then
     MISSING+=("$fn")
   fi
 done
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
-  error "The following functions were not found in $BACKUP_DIR:"
+  error "The following functions were not found in $BACKUP_FUNCTIONS_DIR:"
   for fn in "${MISSING[@]}"; do
     echo "  - $fn"
   done
+  echo ""
+  echo "Available functions in this backup:"
+  find "$BACKUP_FUNCTIONS_DIR" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sed 's/^/  - /'
   exit 1
 fi
 
@@ -108,13 +136,17 @@ mkdir -p "$STAGING_DIR"
 
 # ---------------------------------------------------------------------------
 # Copy functions into staging
+#   FROM: supabase/backups/functions_<datetime>/supabase/functions/<fn>/
+#   TO:   supabase/functions/<fn>/
 # ---------------------------------------------------------------------------
 echo ""
 info "Copying functions into staging: $STAGING_DIR"
 for fn in "${FUNCTIONS[@]}"; do
-  SRC="$BACKUP_DIR/$fn"
+  SRC="$BACKUP_FUNCTIONS_DIR/$fn"
   DEST="$STAGING_DIR/$fn"
   info "  Copying $fn …"
+  info "    from: $SRC"
+  info "    to:   $DEST"
   rm -rf "$DEST"
   cp -r "$SRC" "$DEST"
   success "  $fn staged."
@@ -172,9 +204,9 @@ echo ""
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
   error "${#FAILED[@]} function(s) failed to deploy. Backup preserved at:"
-  echo "  $BACKUP_DIR"
+  echo "  $BACKUP_ROOT"
   exit 1
 else
   success "All ${#DEPLOYED[@]} function(s) deployed successfully."
-  info "Backup preserved at: $BACKUP_DIR"
+  info "Backup preserved at: $BACKUP_ROOT"
 fi

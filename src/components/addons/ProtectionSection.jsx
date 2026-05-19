@@ -39,8 +39,8 @@ export const ProtectionSection = ({
     // Hide driveway protection for dump loader services
     const showDrivewayProtection = isDeliveryRequired && !isDumpLoaderTrailerRental && !isDumpLoaderWithDelivery;
     
-    // Use insurance price from addonPrices (loaded from database via hook)
-    const insurancePrice = addonPrices?.insurance || 20;
+    // Use insurance price from addonPrices (loaded from services table via hook)
+    const insurancePrice = Number(addonPrices?.insurance ?? 0);
     const drivewayPrice = addonPrices?.drivewayProtection || 15;
 
     // Service-specific insurance info text

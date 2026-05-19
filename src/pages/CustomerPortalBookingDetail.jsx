@@ -199,6 +199,20 @@ export const CustomerPortalBookingDetail = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {Number(booking.subtotal_before_tax) > 0 && Number(booking.tax_amount) > 0 ? (
+              <>
+                <div className="flex justify-between items-center py-2 border-b border-white/10">
+                  <span className="text-gray-300">Subtotal</span>
+                  <span className="text-white">${Number(booking.subtotal_before_tax).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-white/10">
+                  <span className="text-gray-300">
+                    Tax{booking.tax_rate_used ? ` (${Number(booking.tax_rate_used).toFixed(2)}%)` : ''}
+                  </span>
+                  <span className="text-white">${Number(booking.tax_amount).toFixed(2)}</span>
+                </div>
+              </>
+            ) : null}
             <div className="flex justify-between items-center py-3 border-b border-white/10">
               <span className="text-gray-300">Total Price</span>
               <span className="text-2xl font-bold text-white">${Number(booking.total_price || 0).toFixed(2)}</span>
