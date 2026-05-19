@@ -20,11 +20,6 @@ import React from 'react';
       { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
     ];
 
-    const addonPrices = {
-      insurance: 25,
-      drivewayProtection: 20,
-    };
-
     export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
         if (!booking) return null;
 
@@ -47,10 +42,11 @@ import React from 'react';
         if (subtotal == null || subtotal === 0) {
             subtotal = plan.price || 0;
             if (addons.insurance === 'accept') {
-                const insuranceCharged = Number(addons.insurancePriceApplied) || addonPrices.insurance;
-                subtotal += insuranceCharged;
+                subtotal += Number(addons.insurancePriceApplied ?? 0);
             }
-            if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
+            if (addons.drivewayProtection === 'accept') {
+                subtotal += Number(addons.drivewayPriceApplied ?? 0);
+            }
             if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
             addons.equipment?.forEach(item => {
                 const meta = equipmentMeta.find(e => e.id === item.id);

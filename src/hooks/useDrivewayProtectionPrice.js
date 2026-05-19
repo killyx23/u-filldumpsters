@@ -16,6 +16,7 @@ const SETTING_KEY = 'driveway_protection_price';
 
 export const useDrivewayProtectionPrice = () => {
     const [drivewayPrice, setDrivewayPrice] = useState(DEFAULT_DRIVEWAY_PRICE);
+    const [drivewayIsTaxable, setDrivewayIsTaxable] = useState(true);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -37,14 +38,18 @@ export const useDrivewayProtectionPrice = () => {
                 console.warn('[Driveway Protection Pricing] Error fetching setting:', fetchError.message);
                 // Use default on error
                 setDrivewayPrice(DEFAULT_DRIVEWAY_PRICE);
+                setDrivewayIsTaxable(true);
                 console.log('[Driveway Protection Pricing] Using default price:', DEFAULT_DRIVEWAY_PRICE);
             } else if (data && data.setting_value && data.setting_value.price) {
                 const price = Number(data.setting_value.price);
+                const isTaxable = data.setting_value.is_taxable !== false;
                 setDrivewayPrice(price);
+                setDrivewayIsTaxable(isTaxable);
                 console.log('[Driveway Protection Pricing] ✓ Loaded price from database:', price);
             } else {
                 // No setting found, use default
                 setDrivewayPrice(DEFAULT_DRIVEWAY_PRICE);
+                setDrivewayIsTaxable(true);
                 console.log('[Driveway Protection Pricing] No setting found, using default:', DEFAULT_DRIVEWAY_PRICE);
             }
         } catch (err) {
@@ -52,6 +57,7 @@ export const useDrivewayProtectionPrice = () => {
             setError(err.message);
             // Use default price on error
             setDrivewayPrice(DEFAULT_DRIVEWAY_PRICE);
+            setDrivewayIsTaxable(true);
         } finally {
             setLoading(false);
         }
@@ -82,7 +88,7 @@ export const useDrivewayProtectionPrice = () => {
                 const { error } = await supabase
                     .from('business_settings')
                     .update({
-                        setting_value: { price: Number(newPrice) },
+                        setting_value: { price: Number(newPrice), is_taxable: drivewayIsTaxable },
                         updated_at: new Date().toISOString()
                     })
                     .eq('setting_key', SETTING_KEY);
@@ -104,7 +110,8 @@ export const useDrivewayProtectionPrice = () => {
     };
 
     return { 
-        drivewayPrice, 
+        drivewayPrice,
+        drivewayIsTaxable,
         loading, 
         error,
         updateDrivewayPrice, 

@@ -15,6 +15,7 @@ import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
 import { useTaxRate } from '@/utils/getTaxRate';
+import { useBookingTaxConfig, buildTaxCalcOptions } from '@/hooks/useBookingTaxConfig';
 
 // Equipment metadata (IDs 1-6 only - ID 7 is Premium Insurance service, not equipment)
 const equipmentMeta = [
@@ -41,9 +42,17 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
 
   // Load insurance and driveway protection prices from hooks
-  const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
-  const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
+  const { insurancePrice, insuranceIsTaxable, loading: insuranceLoading } = useInsurancePricing();
+  const { drivewayPrice, drivewayIsTaxable, loading: drivewayLoading } = useDrivewayProtectionPrice();
   const { taxRate } = useTaxRate();
+  const { serviceTaxFlags, equipmentTaxFlags } = useBookingTaxConfig(plan?.id);
+  const taxCalcOptions = buildTaxCalcOptions({
+    serviceTaxFlags,
+    equipmentTaxFlags,
+    insuranceIsTaxable,
+    drivewayPrice,
+    drivewayIsTaxable,
+  });
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
 
@@ -242,7 +251,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       equipmentPrices,
       taxRate,
       deliveryService,
-      insurancePrice
+      insurancePrice,
+      taxCalcOptions
     );
 
     console.log('[AddonsForm] Subtotal calculated:', calcResult.subtotal);

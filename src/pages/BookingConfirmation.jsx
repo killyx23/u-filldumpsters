@@ -160,17 +160,21 @@ export const BookingConfirmation = () => {
         bookingUpdated: data?.bookingUpdated
       });
 
-      if (data?.bookingData) {
+      const finalizedBooking = data?.booking ?? data?.bookingData;
+      if (finalizedBooking?.tax_amount != null) {
         console.log(`[${timestamp}] [BookingConfirmation] Creating tax record...`);
-        
+
+        const addons = finalizedBooking.addons ?? {};
         const taxResult = await createTaxRecord(
           bookingId,
-          data.bookingData.tax_amount,
-          data.bookingData.tax_rate_used,
-          data.bookingData.subtotal_before_tax,
+          Number(finalizedBooking.tax_amount ?? 0),
+          Number(finalizedBooking.tax_rate_used ?? 0),
+          Number(finalizedBooking.subtotal_before_tax ?? 0),
           {
-            delivery_type: data.bookingData.delivery_type,
-            tax_jurisdiction: data.bookingData.tax_jurisdiction || 'HQ',
+            taxable_subtotal: Number(addons.taxableSubtotal ?? 0) || undefined,
+            non_taxable_subtotal: Number(addons.nonTaxableSubtotal ?? 0) || undefined,
+            line_items: addons.taxLineItemsSnapshot ?? undefined,
+            tax_jurisdiction: finalizedBooking.tax_jurisdiction || 'HQ',
             tax_api_used: 'business_settings',
           }
         );

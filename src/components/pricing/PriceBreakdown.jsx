@@ -3,10 +3,11 @@ import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
-import { getInsuranceDisplayPrice } from '@/utils/getInsuranceDisplayPrice';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { useBookingTaxConfig, buildTaxCalcOptions } from '@/hooks/useBookingTaxConfig';
+import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
 
 /**
  * Reusable Price Breakdown Component
@@ -23,7 +24,17 @@ export const PriceBreakdown = ({
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
   const { taxRate } = useTaxRate();
-  const { insurancePrice, loading: loadingInsurance } = useInsurancePricing();
+  const { insurancePrice, insuranceIsTaxable, loading: loadingInsurance } = useInsurancePricing();
+  const { drivewayPrice, drivewayIsTaxable } = useDrivewayProtectionPrice();
+  const planId = plan?.id ?? booking?.plan?.id;
+  const { serviceTaxFlags, equipmentTaxFlags } = useBookingTaxConfig(planId);
+  const taxCalcOptions = buildTaxCalcOptions({
+    serviceTaxFlags,
+    equipmentTaxFlags,
+    insuranceIsTaxable,
+    drivewayPrice,
+    drivewayIsTaxable,
+  });
 
   // Load equipment prices from database
   useEffect(() => {
@@ -60,65 +71,21 @@ export const PriceBreakdown = ({
   }, []);
 
   const calculatedTotals = useMemo(() => {
-    const baseRental = Number(basePrice || plan?.price || booking?.plan?.base_price || 0);
-    const deliveryFeeFlat = Number(addons?.deliveryFee || 0);
-    const mileageCharge = Number(addons?.mileageCharge || 0);
+    const planWithPrice = {
+      ...(plan || booking?.plan || {}),
+      price: Number(basePrice || plan?.price || booking?.plan?.price || booking?.plan?.base_price || 0),
+    };
+    const deliveryService = addons?.isDelivery ?? addons?.deliveryService ?? false;
 
-    // Protection costs (services table / booking snapshot)
-    const insuranceCost = getInsuranceDisplayPrice({ addons }, insurancePrice);
-    const drivewayProtectionCost = addons?.drivewayProtection === 'accept' ? 15 : 0;
-
-    // Equipment costs
-    let rentEquipmentCost = 0;
-    let purchaseItemsCost = 0;
-
-    if (addons?.equipment && Array.isArray(addons.equipment)) {
-      addons.equipment.forEach(item => {
-        const equipmentId = item.equipment_id || item.dbId || item.id;
-        if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId)) return;
-
-        const price = Number(equipmentPrices[equipmentId] || 0);
-        const quantity = Number(item.quantity || 1);
-        const itemTotal = price * quantity;
-
-        // ID 3 is Working Gloves (purchase item)
-        if (equipmentId === 3) {
-          purchaseItemsCost += itemTotal;
-        } else {
-          rentEquipmentCost += itemTotal;
-        }
-      });
-    }
-
-    // Disposal costs
-    let disposalCost = 0;
-    if (addons?.mattressDisposal && addons.mattressDisposal > 0) {
-      disposalCost += Number(equipmentPrices[4] || 25) * addons.mattressDisposal;
-    }
-    if (addons?.tvDisposal && addons.tvDisposal > 0) {
-      disposalCost += Number(equipmentPrices[5] || 15) * addons.tvDisposal;
-    }
-    if (addons?.applianceDisposal && addons.applianceDisposal > 0) {
-      disposalCost += Number(equipmentPrices[6] || 35) * addons.applianceDisposal;
-    }
-
-    // Calculate subtotal before discount
-    const subtotalBeforeDiscount = baseRental + deliveryFeeFlat + mileageCharge + 
-                                    insuranceCost + drivewayProtectionCost + 
-                                    rentEquipmentCost + purchaseItemsCost + disposalCost;
-
-    // Apply discount
-    let discount = 0;
-    if (addons?.coupon?.isValid) {
-      if (addons.coupon.discountType === 'fixed') {
-        discount = Number(addons.coupon.discountValue || 0);
-      } else if (addons.coupon.discountType === 'percentage') {
-        discount = (subtotalBeforeDiscount * Number(addons.coupon.discountValue || 0)) / 100;
-      }
-    }
-
-    const calculatedSubtotal = Math.max(0, subtotalBeforeDiscount - discount);
-    const taxCalc = calculateTotalWithTax(calculatedSubtotal, taxRate);
+    const computed = calculateBookingTotal(
+      planWithPrice,
+      addons,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxCalcOptions
+    );
 
     const storedSubtotal = Number(booking?.subtotal_before_tax ?? 0);
     const storedTax = Number(booking?.tax_amount ?? 0);
@@ -126,21 +93,21 @@ export const PriceBreakdown = ({
     const hasStoredTotals = storedSubtotal > 0 && storedTotal > 0;
 
     return {
-      baseRental,
-      deliveryFeeFlat,
-      mileageCharge,
-      insuranceCost,
-      drivewayProtectionCost,
-      rentEquipmentCost,
-      purchaseItemsCost,
-      disposalCost,
-      discount,
-      subtotal: hasStoredTotals ? storedSubtotal : taxCalc.subtotal,
-      tax: hasStoredTotals && storedTax > 0 ? storedTax : taxCalc.tax,
-      total: hasStoredTotals ? storedTotal : taxCalc.total,
-      taxRateUsed: booking?.tax_rate_used ?? taxRate
+      baseRental: computed.basePriceAmount,
+      deliveryFeeFlat: computed.deliveryFeeFlat,
+      mileageCharge: computed.tripMileageCost,
+      insuranceCost: computed.insuranceCost,
+      drivewayProtectionCost: computed.drivewayProtectionCost,
+      rentEquipmentCost: computed.rentEquipmentCost,
+      purchaseItemsCost: computed.purchaseItemsCost,
+      disposalCost: computed.disposalCost,
+      discount: computed.discount,
+      subtotal: hasStoredTotals ? storedSubtotal : computed.subtotal,
+      tax: hasStoredTotals && storedTax > 0 ? storedTax : computed.tax,
+      total: hasStoredTotals ? storedTotal : computed.total,
+      taxRateUsed: booking?.tax_rate_used ?? taxRate,
     };
-  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate, insurancePrice]);
+  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate, insurancePrice, taxCalcOptions]);
 
   if (loading || loadingInsurance) {
     return <div className="text-center text-gray-400 py-4">Loading price breakdown...</div>;

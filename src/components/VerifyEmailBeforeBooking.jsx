@@ -16,8 +16,10 @@ import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormat
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
+import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { useBookingTaxConfig, buildTaxCalcOptions } from '@/hooks/useBookingTaxConfig';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
 
@@ -44,7 +46,17 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
-    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { insurancePrice, insuranceIsTaxable, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { drivewayPrice, drivewayIsTaxable } = useDrivewayProtectionPrice();
+    const { serviceTaxFlags, equipmentTaxFlags } = useBookingTaxConfig(plan?.id);
+    const taxCalcOptions = buildTaxCalcOptions({
+        serviceTaxFlags,
+        equipmentTaxFlags,
+        insuranceIsTaxable,
+        drivewayPrice,
+        drivewayIsTaxable,
+    });
+    const deliveryService = addonsData?.deliveryService ?? addonsData?.isDelivery ?? false;
 
     // Cleanup timeouts on unmount
     useEffect(() => {
@@ -205,77 +217,19 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     }, [plan?.id, isDelivery, bookingData?.dropOffDate, bookingData?.pickupDate, plan, bookingData]);
 
     // Calculate pricing breakdown
-    const calculatedTotals = useMemo(() => {
-        const basePriceAmount = plan?.price || plan?.base_price || 0;
-        const deliveryFeeFlat = addonsData?.deliveryFee || 0;
-        const tripMileageCost = addonsData?.mileageCharge || 0;
-
-        const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
-        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
-
-        let rentEquipmentCost = 0;
-        let purchaseItemsCost = 0;
-
-        if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
-            addonsData.equipment.forEach(item => {
-                const equipmentId = item.equipment_id || item.dbId || item.id;
-                if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
-
-                const price = Number(equipmentPrices[equipmentId] || 0);
-                const quantity = Number(item.quantity || 1);
-                const itemTotal = price * quantity;
-
-                if (equipmentId === 3) {
-                    purchaseItemsCost += itemTotal;
-                } else {
-                    rentEquipmentCost += itemTotal;
-                }
-            });
-        }
-
-        let disposalCost = 0;
-        if (addonsData?.mattressDisposal && addonsData.mattressDisposal > 0) {
-            disposalCost += Number(equipmentPrices[4] || 25) * addonsData.mattressDisposal;
-        }
-        if (addonsData?.tvDisposal && addonsData.tvDisposal > 0) {
-            disposalCost += Number(equipmentPrices[5] || 15) * addonsData.tvDisposal;
-        }
-        if (addonsData?.applianceDisposal && addonsData.applianceDisposal > 0) {
-            disposalCost += Number(equipmentPrices[6] || 35) * addonsData.applianceDisposal;
-        }
-
-        const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost +
-            insuranceCost + drivewayProtectionCost +
-            rentEquipmentCost + purchaseItemsCost + disposalCost;
-
-        let discount = 0;
-        if (addonsData?.coupon?.isValid) {
-            if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
-            } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
-            }
-        }
-
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        const taxCalc = calculateTotalWithTax(subtotal, taxRate);
-
-        return {
-            basePriceAmount,
-            deliveryFeeFlat,
-            tripMileageCost,
-            insuranceCost,
-            drivewayProtectionCost,
-            rentEquipmentCost,
-            purchaseItemsCost,
-            disposalCost,
-            discount,
-            subtotal: taxCalc.subtotal,
-            tax: taxCalc.tax,
-            taxRate: taxRate,
-            total: taxCalc.total
-        };
-    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
+    const calculatedTotals = useMemo(
+        () =>
+            calculateBookingTotal(
+                plan,
+                addonsData,
+                equipmentPrices,
+                taxRate,
+                deliveryService,
+                insurancePrice,
+                taxCalcOptions
+            ),
+        [plan, addonsData, equipmentPrices, deliveryService, taxRate, insurancePrice, taxCalcOptions]
+    );
 
     const handleSendCode = async () => {
         const timestamp = new Date().toISOString();

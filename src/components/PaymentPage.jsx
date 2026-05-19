@@ -13,6 +13,8 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { useBookingTaxConfig, buildTaxCalcOptions } from '@/hooks/useBookingTaxConfig';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
@@ -460,7 +462,17 @@ export const PaymentPage = ({ onBack }) => {
   const [validatedTotal, setValidatedTotal] = useState(0);
 
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
-  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+  const { insurancePrice, insuranceIsTaxable, loading: loadingInsurancePrice } = useInsurancePricing();
+  const { drivewayPrice, drivewayIsTaxable, loading: loadingDrivewayPrice } = useDrivewayProtectionPrice();
+  const { serviceTaxFlags, equipmentTaxFlags, loading: loadingTaxConfig } = useBookingTaxConfig(plan?.id);
+
+  const taxCalcOptions = buildTaxCalcOptions({
+    serviceTaxFlags,
+    equipmentTaxFlags,
+    insuranceIsTaxable,
+    drivewayPrice,
+    drivewayIsTaxable,
+  });
 
   // Load equipment prices
   useEffect(() => {
@@ -564,7 +576,17 @@ export const PaymentPage = ({ onBack }) => {
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
-    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingInsurancePrice || bookingCreated) return;
+    if (
+      loadingBookingData ||
+      loadingPrices ||
+      loadingTaxRate ||
+      loadingInsurancePrice ||
+      loadingDrivewayPrice ||
+      loadingTaxConfig ||
+      bookingCreated
+    ) {
+      return;
+    }
     if (!pendingCustomerData) return;
 
     const createActualBooking = async (retrievedBookingData, pendingData, validatedTotalAmount, calcResult) => {
@@ -610,6 +632,12 @@ export const PaymentPage = ({ onBack }) => {
             ...(pendingData.addons_data?.insurance === 'accept' && calcResult.insuranceCost > 0
               ? { insurancePriceApplied: calcResult.insuranceCost }
               : {}),
+            ...(calcResult.drivewayProtectionCost > 0
+              ? { drivewayPriceApplied: calcResult.drivewayProtectionCost }
+              : {}),
+            taxLineItemsSnapshot: calcResult.lineItems,
+            taxableSubtotal: calcResult.taxableSubtotal,
+            nonTaxableSubtotal: calcResult.nonTaxableSubtotal,
           },
         };
 
@@ -668,7 +696,15 @@ export const PaymentPage = ({ onBack }) => {
         console.log(`[${timestamp}] [PaymentPage] Validating pricing before booking creation...`);
         
         // Calculate expected total with all up-to-date prices (tax-inclusive source of truth)
-        const calcResult = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
+        const calcResult = calculateBookingTotal(
+          plan,
+          addonsData,
+          equipmentPrices,
+          taxRate,
+          deliveryService,
+          insurancePrice,
+          taxCalcOptions
+        );
         const finalTotal = calcResult.total;
 
         const storedTotal = parseFloat(pendingCustomerData.total_price);
@@ -693,7 +729,24 @@ export const PaymentPage = ({ onBack }) => {
     };
     
     createBooking();
-  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingInsurancePrice, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, bookingData]);
+  }, [
+    loadingBookingData,
+    loadingPrices,
+    loadingTaxRate,
+    loadingInsurancePrice,
+    loadingDrivewayPrice,
+    loadingTaxConfig,
+    bookingCreated,
+    pendingCustomerData,
+    plan,
+    addonsData,
+    equipmentPrices,
+    taxRate,
+    deliveryService,
+    insurancePrice,
+    taxCalcOptions,
+    bookingData,
+  ]);
 
   // Load availability times for self-service
   useEffect(() => {
@@ -851,7 +904,15 @@ export const PaymentPage = ({ onBack }) => {
     }
   };
 
-  const pricingBreakdown = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
+  const pricingBreakdown = calculateBookingTotal(
+    plan,
+    addonsData,
+    equipmentPrices,
+    taxRate,
+    deliveryService,
+    insurancePrice,
+    taxCalcOptions
+  );
 
   return (
     <motion.div 

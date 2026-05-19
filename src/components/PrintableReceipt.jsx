@@ -163,7 +163,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
     // Protection costs (insurance from services table / booking snapshot)
     const insuranceCost = getInsuranceDisplayPrice(booking, insurancePrice);
-    const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
+    const drivewayProtectionCost = Number(addons.drivewayPriceApplied ?? 0);
 
     // Equipment costs
     let rentEquipmentCost = 0;
