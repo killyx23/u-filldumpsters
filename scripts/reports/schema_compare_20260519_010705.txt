@@ -1,0 +1,99 @@
+
+==============================================
+ 1. Migration files (supabase/migrations/)
+==============================================
+  20240101000000_baseline_prod_schema.sql
+  20260518120000_tax_plumbing.sql
+  20260518130000_verification_storage_policies.sql
+  20260519120000_sync_insurance_pricing.sql
+✓ 4 migration file(s) on disk
+
+==============================================
+ 2. Migration history (npx supabase migration list --linked)
+==============================================
+⚠ Could not run migration list --linked
+177 | `),_m=(w,_)=>{let D=w.stack.split(`
+178 | `),R=`${_}[cause]: ${D[0]}`;for(let J=1,Y=D.length;J<Y;J++)R+=`
+179 | ${_}${D[J]}`;if(w.cause)R+=` {
+180 | ${_m(w.cause,`${_}  `)}
+181 | ${_}}`;return R},EQ=`~effect/Fiber/${jS}`,nS0={_A:w0,_E:w0},oS0={id:0},x5=()=>globalThis[DY];class gT{constructor(w,_=!0){this[EQ]=nS0,this.setContext(w),this.id=++oS0.id,this.currentOpCount=0,this.currentLoopCount=0,this.interruptible=_,this._stack=[],this._observers=[],this._exit=void 0,this._children=void 0,this._interruptedCause=void 0,this._yielded=void 0,this.runtimeMetrics?.recordFiberStart(this.context)}[EQ];id;interruptible;currentOpCount;currentLoopCount;_stack;_observers;_exit;_currentExit;_children;_interruptedCause;_yielded;context;currentScheduler;currentTracerContext;currentSpan;currentLogLevel;minimumLogLevel;currentStackFrame;runtimeMetrics;maxOpsBeforeYield;currentPreventYield;_dispatcher=void 0;get currentDispatcher(){return this._dispatcher??=this.currentScheduler.makeDispatcher()}getRef(w){return wT(this.context,w)}addObserver(w){if(this._exit)return w(this._exit),b1;return this._observers.push(w),()=>{let _=this._observers.indexOf(w);if(_>=0)this._observers.splice(_,1)}}interruptUnsafe(w
+182 |   at ${D}`}return _}function PZ(w){switch(w._tag){case"InvalidType":case"OneOf":case"Composite":case"AnyOf":return MZ(w.ast.annotations);case"InvalidValue":case"Forbidden":return MZ(w.annotations);case"MissingKey":return MZ(w.annotations,"messageMissingKey");case"UnexpectedKey":return MZ(w.ast.annotations,"messageUnexpectedKey");case"Filter":return MZ(w.filter.annotations);case"Encoding":return PZ(w.issue)}}function MZ(w,_="message"){let D=w?.[_];if(typeof D==="string")return D}function $u(w){if(z0(w))return"no value provided";return L0(w.value)}function nG(w){switch(w._tag){case"MissingKey":return w;case"Forbidden":return new rY(b9(w.actual,Y7),w.annotations);case"Filter":return new oG(Y7(w.actual),w.filter,nG(w.issue));case"Pointer":return new J9(w.path,nG(w.issue));case"Encoding":case"InvalidType":case"InvalidValue":case"Composite":return new Nw(b9(w.actual,Y7));case"AnyOf":case"OneOf":case"UnexpectedKey":return new Nw(h(Y7(w.actual)))}}class t5 extends ID{run;constructor(w){super();this.run=w}map(w){retur
+
+error: PermissionDenied: FileSystem.writeFile (/home/razmataz23/.supabase/telemetry.json)
+       _tag: "PlatformError",
+ ~effect/platform/PlatformError: "~effect/platform/PlatformError",
+
+      at i6 (/$bunfs/root/supabase:182:35041)
+      at <anonymous> (/$bunfs/root/supabase:189:14106)
+
+177 | `),_m=(w,_)=>{let D=w.stack.split(`
+178 | `),R=`${_}[cause]: ${D[0]}`;for(let J=1,Y=D.length;J<Y;J++)R+=`
+179 | ${_}${D[J]}`;if(w.cause)R+=` {
+180 | ${_m(w.cause,`${_}  `)}
+181 | ${_}}`;return R},EQ=`~effect/Fiber/${jS}`,nS0={_A:w0,_E:w0},oS0={id:0},x5=()=>globalThis[DY];class gT{constructor(w,_=!0){this[EQ]=nS0,this.setContext(w),this.id=++oS0.id,this.currentOpCount=0,this.currentLoopCount=0,this.interruptible=_,this._stack=[],this._observers=[],this._exit=void 0,this._children=void 0,this._interruptedCause=void 0,this._yielded=void 0,this.runtimeMetrics?.recordFiberStart(this.context)}[EQ];id;interruptible;currentOpCount;currentLoopCount;_stack;_observers;_exit;_currentExit;_children;_interruptedCause;_yielded;context;currentScheduler;currentTracerContext;currentSpan;currentLogLevel;minimumLogLevel;currentStackFrame;runtimeMetrics;maxOpsBeforeYield;currentPreventYield;_dispatcher=void 0;get currentDispatcher(){return this._dispatcher??=this.currentScheduler.makeDispatcher()}getRef(w){return wT(this.context,w)}addObserver(w){if(this._exit)return w(this._exit),b1;return this._observers.push(w),()=>{let _=this._observers.indexOf(w);if(_>=0)this._observers.splice(_,1)}}interruptUnsafe(w
+182 |   at ${D}`}return _}function PZ(w){switch(w._tag){case"InvalidType":case"OneOf":case"Composite":case"AnyOf":return MZ(w.ast.annotations);case"InvalidValue":case"Forbidden":return MZ(w.annotations);case"MissingKey":return MZ(w.annotations,"messageMissingKey");case"UnexpectedKey":return MZ(w.ast.annotations,"messageUnexpectedKey");case"Filter":return MZ(w.filter.annotations);case"Encoding":return PZ(w.issue)}}function MZ(w,_="message"){let D=w?.[_];if(typeof D==="string")return D}function $u(w){if(z0(w))return"no value provided";return L0(w.value)}function nG(w){switch(w._tag){case"MissingKey":return w;case"Forbidden":return new rY(b9(w.actual,Y7),w.annotations);case"Filter":return new oG(Y7(w.actual),w.filter,nG(w.issue));case"Pointer":return new J9(w.path,nG(w.issue));case"Encoding":case"InvalidType":case"InvalidValue":case"Composite":return new Nw(b9(w.actual,Y7));case"AnyOf":case"OneOf":case"UnexpectedKey":return new Nw(h(Y7(w.actual)))}}class t5 extends ID{run;constructor(w){super();this.run=w}map(w){retur
+
+error: PermissionDenied: FileSystem.writeFile (/home/razmataz23/.supabase/telemetry.json)
+       _tag: "PermissionDenied",
+     module: "FileSystem",
+     method: "writeFile",
+ pathOrDescriptor: "/home/razmataz23/.supabase/telemetry.json",
+    syscall: "open",
+
+      at i6 (/$bunfs/root/supabase:182:35048)
+      at <anonymous> (/$bunfs/root/supabase:189:14106)
+
+EACCES: permission denied, open '/home/razmataz23/.supabase/telemetry.json'
+    path: "/home/razmataz23/.supabase/telemetry.json",
+ syscall: "open",
+   errno: -13,
+    code: "EACCES"
+
+
+EACCES: permission denied, open '/home/razmataz23/.supabase/telemetry.json'
+    path: "/home/razmataz23/.supabase/telemetry.json",
+ syscall: "open",
+   errno: -13,
+    code: "EACCES"
+
+
+Bun v1.3.13 (Linux x64)
+  Fix: npx supabase login && npx supabase link --project-ref $PROJECT_REF
+  Optional: export SUPABASE_DB_PASSWORD for direct remote schema compare
+
+==============================================
+ 3. Live schema inventory (information_schema + policies)
+==============================================
+⚠ Local DB not reachable
+psql: error: connection to server at "127.0.0.1", port 54322 failed: Connection refused
+	Is the server running on that host and accepting TCP/IP connections?
+  Start and reset: npx supabase start && npx supabase db reset
+⚠ Remote URL not configured — skipping live remote inventory
+  Export: SUPABASE_DB_PASSWORD=...  or  REMOTE_DATABASE_URL=postgresql://...
+  PROJECT_REF from supabase/.env: essesdjgtmralbkglpzw
+
+==============================================
+ 4. supabase db diff --linked (CLI schema diff)
+==============================================
+Note: db diff compares the RUNNING local DB to remote — run 'npx supabase db reset' first.
+
+⚠ db diff --linked failed
+177 | `),_m=(w,_)=>{let D=w.stack.split(`
+178 | `),R=`${_}[cause]: ${D[0]}`;for(let J=1,Y=D.length;J<Y;J++)R+=`
+179 | ${_}${D[J]}`;if(w.cause)R+=` {
+180 | ${_m(w.cause,`${_}  `)}
+181 | ${_}}`;return R},EQ=`~effect/Fiber/${jS}`,nS0={_A:w0,_E:w0},oS0={id:0},x5=()=>globalThis[DY];class gT{constructor(w,_=!0){this[EQ]=nS0,this.setContext(w),this.id=++oS0.id,this.currentOpCount=0,this.currentLoopCount=0,this.interruptible=_,this._stack=[],this._observers=[],this._exit=void 0,this._children=void 0,this._interruptedCause=void 0,this._yielded=void 0,this.runtimeMetrics?.recordFiberStart(this.context)}[EQ];id;interruptible;currentOpCount;currentLoopCount;_stack;_observers;_exit;_currentExit;_children;_interruptedCause;_yielded;context;currentScheduler;currentTracerContext;currentSpan;currentLogLevel;minimumLogLevel;currentStackFrame;runtimeMetrics;maxOpsBeforeYield;currentPreventYield;_dispatcher=void 0;get currentDispatcher(){return this._dispatcher??=this.currentScheduler.makeDispatcher()}getRef(w){return wT(this.context,w)}addObserver(w){if(this._exit)return w(this._exit),b1;return this._observers.push(w),()=>{let _=this._observers.indexOf(w);if(_>=0)this._observers.splice(_,1)}}interruptUnsafe(w
+182 |   at ${D}`}return _}function PZ(w){switch(w._tag){case"InvalidType":case"OneOf":case"Composite":case"AnyOf":return MZ(w.ast.annotations);case"InvalidValue":case"Forbidden":return MZ(w.annotations);case"MissingKey":return MZ(w.annotations,"messageMissingKey");case"UnexpectedKey":return MZ(w.ast.annotations,"messageUnexpectedKey");case"Filter":return MZ(w.filter.annotations);case"Encoding":return PZ(w.issue)}}function MZ(w,_="message"){let D=w?.[_];if(typeof D==="string")return D}function $u(w){if(z0(w))return"no value provided";return L0(w.value)}function nG(w){switch(w._tag){case"MissingKey":return w;case"Forbidden":return new rY(b9(w.actual,Y7),w.annotations);case"Filter":return new oG(Y7(w.actual),w.filter,nG(w.issue));case"Pointer":return new J9(w.path,nG(w.issue));case"Encoding":case"InvalidType":case"InvalidValue":case"Composite":return new Nw(b9(w.actual,Y7));case"AnyOf":case"OneOf":case"UnexpectedKey":return new Nw(h(Y7(w.actual)))}}class t5 extends ID{run;constructor(w){super();this.run=w}map(w){retur
+
+error: PermissionDenied: FileSystem.writeFile (/home/razmataz23/.supabase/telemetry.json)
+       _tag: "PlatformError",
+ ~effect/platform/PlatformError: "~effect/platform/PlatformError",
+
+      at i6 (/$bunfs/root/supabase:182:35041)
+      at <anonymous> (/$bunfs/root/supabase:189:14106)
+
+177 | `),_m=(w,_)=>{let D=w.stack.split(`
+
+==============================================
+ 5. Applied migrations (supabase_migrations.schema_migrations)
+==============================================
