@@ -1,0 +1,52 @@
+---
+alwaysApply: false
+---
+## Querying Local Database
+
+Use Supabase Studio SQL editor (easiest):
+http://localhost:54323
+
+Or via CLI:
+```bash
+npx supabase db query "SELECT * FROM your_table LIMIT 10;"
+```
+
+Or via REST:
+```bash
+curl 'http://localhost:54321/rest/v1/your_table?select=*&limit=10' \
+  --header 'apikey: $VITE_SUPABASE_ANON_KEY' \
+  --header 'Authorization: Bearer $VITE_SUPABASE_ANON_KEY'
+```
+## Deploying Edge Functions to Production
+
+Deploy a single function:
+```bash
+npx supabase functions deploy 
+```
+
+Deploy all functions:
+```bash
+npx supabase functions deploy
+```
+
+Deploy with env vars (if not already set in Supabase dashboard):
+```bash
+npx supabase functions deploy  --env-file supabase/functions/.env
+```
+
+## Local vs Production
+
+- Local dev: `npx supabase functions serve` — hot-reloads on file save, no deploy needed
+- Production: must explicitly run `npx supabase functions deploy <function-name>` after changes
+- New functions: create folder + index.ts at `supabase/functions/<function-name>/index.ts`, then deploy please always ask me before doing this
+
+## Creating a New Edge Function
+
+```bash
+# Scaffold a new function
+npx supabase functions new 
+
+# Then edit: supabase/functions//index.ts
+# Test locally via functions serve, then deploy when ready
+npx supabase functions deploy 
+```

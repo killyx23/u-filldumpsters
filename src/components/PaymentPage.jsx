@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
@@ -459,7 +459,7 @@ export const PaymentPage = ({ onBack }) => {
   const [validatedTotal, setValidatedTotal] = useState(0);
 
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
-  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+  const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
   // Load equipment prices
   useEffect(() => {
@@ -563,7 +563,7 @@ export const PaymentPage = ({ onBack }) => {
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
-    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingInsurancePrice || bookingCreated) return;
+    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || bookingCreated) return;
     if (!pendingCustomerData) return;
 
     const createActualBooking = async (retrievedBookingData, pendingData, validatedTotalAmount, calcResult) => {
@@ -661,7 +661,15 @@ export const PaymentPage = ({ onBack }) => {
         console.log(`[${timestamp}] [PaymentPage] Validating pricing before booking creation...`);
         
         // Calculate expected total with all up-to-date prices
-        const calcResult = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
+        const calcResult = calculateBookingTotal(
+          plan,
+          addonsData,
+          equipmentPrices,
+          taxRate,
+          deliveryService,
+          insurancePrice,
+          taxOptions
+        );
         
         // Prefer stored total if it exists and is valid
         let finalTotal = parseFloat(pendingCustomerData.total_price);
@@ -685,7 +693,7 @@ export const PaymentPage = ({ onBack }) => {
     };
     
     createBooking();
-  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingInsurancePrice, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, bookingData]);
+  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingTaxOptions, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingData]);
 
   // Load availability times for self-service
   useEffect(() => {
@@ -796,7 +804,7 @@ export const PaymentPage = ({ onBack }) => {
   }
 
   // Loading states
-  if (loadingBookingData || loadingPrices || loadingTaxRate || loadingInsurancePrice || !bookingData || !bookingCreated) {
+  if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || !bookingData || !bookingCreated) {
     return (
       <div className="flex flex-col justify-center items-center h-96 text-white">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -843,7 +851,15 @@ export const PaymentPage = ({ onBack }) => {
     }
   };
 
-  const pricingBreakdown = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
+  const pricingBreakdown = calculateBookingTotal(
+    plan,
+    addonsData,
+    equipmentPrices,
+    taxRate,
+    deliveryService,
+    insurancePrice,
+    taxOptions
+  );
 
   return (
     <motion.div 
