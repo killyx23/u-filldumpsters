@@ -276,6 +276,9 @@ export const OrderSummary = ({
             }
         }
 
+        const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
+        discount += loyaltyDiscount;
+
         // Subtotal after discount (before tax)
         const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
         
@@ -295,6 +298,7 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            loyaltyDiscount,
             subtotal,
             tax,
             taxRate,
