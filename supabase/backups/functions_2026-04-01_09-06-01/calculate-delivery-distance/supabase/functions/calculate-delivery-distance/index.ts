@@ -66,6 +66,7 @@ Deno.serve(async (req)=>{
     });
     return withCorsHeaders(resp);
   } catch (err) {
+    console.log('its me mario', err);
     console.error(err);
     const resp = new Response(JSON.stringify({
       error: String(err)
