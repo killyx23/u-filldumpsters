@@ -92,7 +92,7 @@ export const ReturningCustomerBenefits = ({ serviceId }) => {
                   </div>
                   
                   <p className="text-xs text-yellow-200 italic">
-                    💡 This code will be automatically applied at checkout!
+                    Enter this code in the coupon field on the order summary when you book.
                   </p>
                 </div>
               ) : (

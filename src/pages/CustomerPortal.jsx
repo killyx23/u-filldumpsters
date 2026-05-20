@@ -23,6 +23,10 @@ import { VerificationManager } from '@/components/customer-portal/VerificationMa
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
 import AccessCodesPage from '@/pages/AccessCodesPage';
+import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoyaltyBadge';
+import { PortalLoyaltySummary } from '@/components/customer-portal/PortalLoyaltySummary';
+import { PortalReferralsSection } from '@/components/customer-portal/PortalReferralsSection';
+import { ReturningCustomerBenefits } from '@/components/ReturningCustomerBenefits';
 
 export const CustomerPortal = () => {
     const { user, signOut, loading: authLoading, session } = useAuth();
@@ -372,8 +376,7 @@ export const CustomerPortal = () => {
 
     const handleQuickReorder = (booking) => {
         console.log('[CustomerPortal] Quick reorder clicked for booking:', booking.id);
-        localStorage.setItem('booking_email', booking.email);
-        navigate(`/?email=${encodeURIComponent(booking.email)}`);
+        navigate('/', { state: { reorderBooking: booking } });
     };
 
     if (loading || authLoading) {
@@ -469,6 +472,31 @@ export const CustomerPortal = () => {
             />
 
             <div className="flex-1 lg:pl-4 min-w-0">
+                {activeTab === 'welcome' && (
+                    <div className="space-y-0">
+                        <ReturningCustomerLoyaltyBadge
+                            customerName={
+                                customerData.first_name ||
+                                customerData.name?.split(' ')[0] ||
+                                'Valued Customer'
+                            }
+                            bookingCount={
+                                bookings.filter(
+                                    (b) => b.status === 'Completed' || b.status === 'flagged'
+                                ).length
+                            }
+                        />
+                        <PortalLoyaltySummary customerId={customerData.id} />
+                        <PortalReferralsSection
+                            customerId={customerData.id}
+                            customerEmail={customerData.email}
+                        />
+                        {bookings[0]?.plan_id && (
+                            <ReturningCustomerBenefits serviceId={bookings[0].plan_id} />
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6">
                         <PortalDashboard 

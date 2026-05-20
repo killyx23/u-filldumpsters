@@ -11,14 +11,30 @@ import { format } from 'date-fns';
 
 export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderSelect }) => {
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState([]);
-  const [step, setStep] = useState('email'); // 'email' or 'bookings'
+  const [step, setStep] = useState('email'); // email | code | bookings
   const [error, setError] = useState('');
 
-  const handleEmailSubmit = async (e) => {
-    e.preventDefault();
-    if (!email || !email.includes('@')) {
+  const resetState = () => {
+    setEmail('');
+    setCode('');
+    setBookings([]);
+    setStep('email');
+    setError('');
+  };
+
+  const handleClose = () => {
+    resetState();
+    onClose();
+  };
+
+  const handleSendCode = async (e) => {
+    e?.preventDefault();
+    const normalizedEmail = email.toLowerCase().trim();
+
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
       setError('Please enter a valid email address');
       return;
     }
@@ -27,61 +43,98 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
     setError('');
 
     try {
-      console.log('[ReturningCustomerVerificationModal] Fetching bookings for email:', email);
+      const { data, error: fnError } = await supabase.functions.invoke('send-verification-email', {
+        body: {
+          email: normalizedEmail,
+          name: 'Valued Customer',
+          pending_customer_id: null,
+        },
+      });
+
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
+
+      setStep('code');
+      toast({
+        title: 'Code Sent',
+        description: `We sent a verification code to ${normalizedEmail}.`,
+      });
+    } catch (err) {
+      console.error('[ReturningCustomerVerificationModal] Send code error:', err);
+      setError(err.message || 'Failed to send verification code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async (e) => {
+    e?.preventDefault();
+
+    if (!code || code.length < 5) {
+      setError('Please enter the complete verification code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const normalizedEmail = email.toLowerCase().trim();
+
+      const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
+        body: { email: normalizedEmail, code },
+      });
+
+      if (verifyError) throw verifyError;
+      if (!verifyData?.success) {
+        throw new Error(verifyData?.error || 'Invalid verification code');
+      }
 
       const { data, error: fetchError } = await supabase
         .from('bookings')
-        .select('*, customers(*)')
-        .eq('email', email.toLowerCase())
+        .select('*, plan:plans(*)')
+        .eq('email', normalizedEmail)
         .order('created_at', { ascending: false })
         .limit(10);
 
       if (fetchError) throw fetchError;
 
-      console.log('[ReturningCustomerVerificationModal] Found bookings:', data?.length || 0);
-
       if (!data || data.length === 0) {
         setError('No previous bookings found for this email address');
-        setLoading(false);
         return;
       }
 
       setBookings(data);
       setStep('bookings');
     } catch (err) {
-      console.error('[ReturningCustomerVerificationModal] Error fetching bookings:', err);
-      setError('Failed to fetch booking history. Please try again.');
+      console.error('[ReturningCustomerVerificationModal] Verify error:', err);
+      setError(err.message || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleReorder = (booking) => {
-    console.log('[ReturningCustomerVerificationModal] Reordering booking:', booking.id);
-    
     if (onReorderSelect) {
       onReorderSelect(booking);
     }
 
     toast({
       title: 'Booking Loaded',
-      description: 'Your previous booking details have been pre-filled. Please review and update as needed.',
+      description: 'Your previous booking details have been pre-filled. Please select new dates to continue.',
     });
 
     handleClose();
   };
 
-  const handleClose = () => {
-    setEmail('');
-    setBookings([]);
-    setStep('email');
-    setError('');
-    onClose();
-  };
-
   const handleBack = () => {
-    setBookings([]);
-    setStep('email');
+    if (step === 'bookings') {
+      setBookings([]);
+      setStep('code');
+    } else if (step === 'code') {
+      setStep('email');
+      setCode('');
+    }
     setError('');
   };
 
@@ -94,10 +147,11 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'completed':
         return 'text-green-400 bg-green-900/20 border-green-500/30';
-      case 'active':
+      case 'delivered':
+      case 'confirmed':
         return 'text-blue-400 bg-blue-900/20 border-blue-500/30';
       case 'cancelled':
         return 'text-red-400 bg-red-900/20 border-red-500/30';
@@ -107,27 +161,30 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl">
-            {step === 'email' ? 'Welcome Back!' : 'Your Previous Bookings'}
+            {step === 'email' && 'Welcome Back!'}
+            {step === 'code' && 'Verify Your Email'}
+            {step === 'bookings' && 'Your Previous Bookings'}
           </DialogTitle>
           <DialogDescription>
-            {step === 'email'
-              ? 'Enter your email to view your booking history and quickly reorder.'
-              : 'Select a previous booking to reorder with pre-filled details.'}
+            {step === 'email' &&
+              'Enter your email to receive a verification code and access your booking history.'}
+            {step === 'code' && `Enter the code we sent to ${email}.`}
+            {step === 'bookings' && 'Select a previous booking to reorder with pre-filled details.'}
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'email' ? (
-          <form onSubmit={handleEmailSubmit} className="space-y-4 mt-4">
+        {step === 'email' && (
+          <form onSubmit={handleSendCode} className="space-y-4 mt-4">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-white">Email Address</Label>
+              <Label htmlFor="returning-email">Email Address</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-300" />
                 <Input
-                  id="email"
+                  id="returning-email"
                   type="email"
                   placeholder="your.email@example.com"
                   value={email}
@@ -135,45 +192,86 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
                     setEmail(e.target.value);
                     setError('');
                   }}
-                  className="pl-10 text-white"
+                  className="pl-10"
                   required
                 />
               </div>
             </div>
 
-            {error && (
-              <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 flex items-start gap-2">
-                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-200">{error}</p>
-              </div>
-            )}
+            {error && <ErrorBanner message={error} />}
 
             <div className="flex gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleClose}
-                className="flex-1"
-              >
+              <Button type="button" variant="outline" onClick={handleClose} className="flex-1">
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={loading || !email}
-                className="flex-1 bg-blue-600 hover:bg-blue-700"
-              >
+              <Button type="submit" disabled={loading || !email} className="flex-1 bg-blue-600 hover:bg-blue-700">
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Searching...
+                    Sending...
                   </>
                 ) : (
-                  'View Bookings'
+                  'Send Verification Code'
                 )}
               </Button>
             </div>
           </form>
-        ) : (
+        )}
+
+        {step === 'code' && (
+          <form onSubmit={handleVerifyCode} className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label htmlFor="verification-code">Verification Code</Label>
+              <Input
+                id="verification-code"
+                type="text"
+                maxLength={6}
+                placeholder="123456"
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/\D/g, ''));
+                  setError('');
+                }}
+                className="text-center text-2xl tracking-[0.5em] font-mono"
+                autoFocus
+              />
+            </div>
+
+            {error && <ErrorBanner message={error} />}
+
+            <div className="flex gap-3 pt-4">
+              <Button type="button" variant="outline" onClick={handleBack} className="flex-1">
+                Back
+              </Button>
+              <Button
+                type="submit"
+                disabled={loading || code.length < 5}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  'Verify & View Bookings'
+                )}
+              </Button>
+            </div>
+
+            <Button
+              type="button"
+              variant="link"
+              onClick={handleSendCode}
+              disabled={loading}
+              className="w-full text-sm"
+            >
+              Resend code
+            </Button>
+          </form>
+        )}
+
+        {step === 'bookings' && (
           <div className="space-y-4 mt-4">
             <div className="grid gap-3">
               {bookings.map((booking) => (
@@ -181,12 +279,10 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div>
-                        <CardTitle className="text-lg text-white">
+                        <CardTitle className="text-lg">
                           {booking.plan?.name || 'Service'}
                         </CardTitle>
-                        <CardDescription className="text-blue-200/80">
-                          Order #{booking.id}
-                        </CardDescription>
+                        <CardDescription>Order #{booking.id}</CardDescription>
                       </div>
                       <span className={`text-xs px-2 py-1 rounded border ${getStatusColor(booking.status)}`}>
                         {booking.status}
@@ -194,16 +290,17 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm text-gray-300">
-                      <Calendar className="h-4 w-4 text-blue-400" />
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Calendar className="h-4 w-4" />
                       <span>
-                        {formatBookingDate(booking.drop_off_date)}
-                        {booking.pickup_date && ` - ${formatBookingDate(booking.pickup_date)}`}
+                        {booking.drop_off_date
+                          ? formatBookingDate(booking.drop_off_date)
+                          : formatBookingDate(booking.created_at)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-300">
-                      <Package className="h-4 w-4 text-blue-400" />
-                      <span>Total: ${booking.total_price?.toFixed(2) || '0.00'}</span>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Package className="h-4 w-4" />
+                      <span>Total: ${Number(booking.total_price || 0).toFixed(2)}</span>
                     </div>
                     <Button
                       onClick={() => handleReorder(booking)}
@@ -217,19 +314,11 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
               ))}
             </div>
 
-            <div className="flex gap-3 pt-4 border-t border-white/10">
-              <Button
-                variant="outline"
-                onClick={handleBack}
-                className="flex-1"
-              >
+            <div className="flex gap-3 pt-4 border-t">
+              <Button variant="outline" onClick={handleBack} className="flex-1">
                 Back
               </Button>
-              <Button
-                variant="ghost"
-                onClick={handleClose}
-                className="flex-1"
-              >
+              <Button variant="ghost" onClick={handleClose} className="flex-1">
                 Close
               </Button>
             </div>
@@ -239,3 +328,10 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
     </Dialog>
   );
 };
+
+const ErrorBanner = ({ message }) => (
+  <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-3 flex items-start gap-2">
+    <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+    <p className="text-sm text-red-200">{message}</p>
+  </div>
+);
