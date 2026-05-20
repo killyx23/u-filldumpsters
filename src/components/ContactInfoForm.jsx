@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2, Sparkles } from 'lucide-react';
+import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from '@/components/ui/use-toast';
@@ -8,6 +9,9 @@ import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.
 
 export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack }) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
+    const { isReturning, pastBookingsCount, loading: detectingReturning } = useReturningCustomerDetection(
+        bookingData.email
+    );
 
     const handleInputChange = e => {
         const { name, value } = e.target;
@@ -99,6 +103,20 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                             </div>
                             <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
                             <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
+
+                            {isReturning && !detectingReturning && (
+                                <div className="flex items-start gap-3 bg-blue-900/30 border border-blue-500/40 rounded-lg p-4">
+                                    <Sparkles className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-white font-semibold">Welcome back, valued customer!</p>
+                                        <p className="text-sm text-blue-200 mt-1">
+                                            We found {pastBookingsCount} previous{' '}
+                                            {pastBookingsCount === 1 ? 'order' : 'orders'} on this account.
+                                            Use &quot;Returning Customer?&quot; on the booking form to pre-fill from a past order.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="bg-black/20 p-6 rounded-xl border border-white/10 space-y-4">

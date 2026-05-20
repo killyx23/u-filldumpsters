@@ -1,8 +1,14 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useLocation } from 'react-router-dom';
 import { Award, Gift, Headphones as HeadphonesIcon, Tag, Sparkles } from 'lucide-react';
 
-export const ReturningCustomerLoyaltyBadge = ({ customerName, bookingCount }) => {
+export const ReturningCustomerLoyaltyBadge = ({ customerName, bookingCount, embedded = false }) => {
+  const { pathname } = useLocation();
+
+  if (!embedded && !pathname.startsWith('/customer-portal')) {
+    return null;
+  }
   const benefits = [
     {
       icon: Tag,
@@ -39,23 +45,23 @@ export const ReturningCustomerLoyaltyBadge = ({ customerName, bookingCount }) =>
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="bg-gradient-to-br from-yellow-900/30 via-orange-900/20 to-yellow-900/30 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl mb-6"
+      className="w-full bg-gradient-to-br from-yellow-900/30 via-orange-900/20 to-yellow-900/30 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl mb-6"
     >
-      <div className="flex items-center justify-center mb-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6 text-left">
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-          className="bg-yellow-500/20 rounded-full p-4 mr-4"
+          className="bg-yellow-500/20 rounded-full p-4 flex-shrink-0"
         >
           <Award className="h-10 w-10 text-yellow-400" />
         </motion.div>
-        <div className="text-center">
+        <div className="min-w-0 flex-1">
           <motion.h3
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="text-2xl font-bold text-white"
+            className="text-xl sm:text-2xl font-bold text-white"
           >
             Welcome Back, {customerName}!
           </motion.h3>

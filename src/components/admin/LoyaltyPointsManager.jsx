@@ -120,19 +120,26 @@ export const LoyaltyPointsManager = () => {
     }
 
     try {
-      const { data: loyalty } = await supabase
+      let { data: loyalty } = await supabase
         .from('loyalty_points')
         .select('points_balance, total_points_earned, total_points_redeemed')
         .eq('customer_id', customerId)
-        .single();
+        .maybeSingle();
 
       if (!loyalty) {
-        toast({
-          title: 'Error',
-          description: 'Customer loyalty record not found',
-          variant: 'destructive',
-        });
-        return;
+        const { data: created, error: createError } = await supabase
+          .from('loyalty_points')
+          .insert({
+            customer_id: customerId,
+            points_balance: 0,
+            total_points_earned: 0,
+            total_points_redeemed: 0,
+          })
+          .select('points_balance, total_points_earned, total_points_redeemed')
+          .single();
+
+        if (createError) throw createError;
+        loyalty = created;
       }
 
       const newBalance = loyalty.points_balance + pointsDelta;

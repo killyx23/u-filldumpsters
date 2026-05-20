@@ -13,6 +13,7 @@ import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
 
 // Equipment metadata (IDs 1-6 only - ID 7 is Premium Insurance service, not equipment)
 const equipmentMeta = [
@@ -27,7 +28,8 @@ const disposalMeta = [
   { id: 'applianceDisposal', dbId: 6, label: 'Appliance Disposal', price: 0, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
 ];
 
-export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress }) => {
+export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress, customerEmail }) => {
+  const [customerId, setCustomerId] = useState(null);
   const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
   const [showDrivewayDeclineWarning, setShowDrivewayDeclineWarning] = useState(false);
   const [showDisposalInfo, setShowDisposalInfo] = useState(false);
@@ -43,6 +45,30 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
+
+  useEffect(() => {
+    const lookupCustomer = async () => {
+      if (!customerEmail?.includes('@')) {
+        setCustomerId(null);
+        return;
+      }
+      const { data } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('email', customerEmail.toLowerCase().trim())
+        .maybeSingle();
+      setCustomerId(data?.id ?? null);
+    };
+    lookupCustomer();
+  }, [customerEmail]);
+
+  const handlePointsRedemption = (points, discountAmount) => {
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: points,
+      loyaltyDiscountAmount: discountAmount,
+    }));
+  };
 
   console.log('[AddonsForm] Insurance price from hook:', insurancePrice);
   console.log('[AddonsForm] Driveway protection price from hook:', drivewayPrice);
@@ -410,7 +436,14 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
               </div>
             </div>
 
-            <div className="lg:col-span-1 z-0 relative">
+            <div className="lg:col-span-1 z-0 relative space-y-4">
+              {customerId && (
+                <LoyaltyPointsRedemption
+                  customerId={customerId}
+                  onPointsRedemption={handlePointsRedemption}
+                  currentTotal={basePrice}
+                />
+              )}
               <OrderSummary
                   plan={{...plan, price: basePrice}}
                   addons={addonsData}
