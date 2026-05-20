@@ -8,11 +8,10 @@ import { toast } from '@/components/ui/use-toast';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
-import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 
 export const OrderSummary = ({
     plan,
@@ -31,8 +30,7 @@ export const OrderSummary = ({
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(false);
     
-    const { insurancePrice } = useInsurancePricing();
-    const { drivewayPrice } = useDrivewayProtectionPrice();
+    const { insurancePrice, taxOptions, drivewayPrice } = useBookingTaxOptions(plan?.id);
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
@@ -263,27 +261,34 @@ export const OrderSummary = ({
             }
         }
 
-        // Calculate subtotal before discount
-        let subtotalBeforeDiscount = baseRental + deliveryFeeAmount + mileageCharge + insuranceCost + drivewayProtectionCost + equipmentCost + purchaseItemsCost + disposalCost;
+        const addonsWithDelivery = {
+            ...addons,
+            deliveryFee: deliveryFeeAmount,
+            mileageCharge,
+            deliveryDistance: addons?.deliveryDistance,
+            coupon: appliedCoupon,
+        };
 
-        // Apply coupon discount
+        const taxBreakdown = calculateBookingTaxBreakdown({
+            plan,
+            addonsData: addonsWithDelivery,
+            equipmentPrices,
+            taxRate,
+            deliveryService: deliveryService ?? false,
+            insurancePrice,
+            drivewayPrice,
+            ...taxOptions,
+        });
+
         let discount = 0;
+        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (appliedCoupon?.isValid) {
             if (appliedCoupon.discountType === 'fixed') {
                 discount = Number(appliedCoupon.discountValue);
             } else if (appliedCoupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
+                discount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
             }
         }
-
-        // Subtotal after discount (before tax)
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        
-        // Tax: use dynamic tax rate from database
-        const tax = calculateTaxAmount(subtotal, taxRate);
-        
-        // Total: subtotal + tax
-        const total = subtotal + tax;
 
         return {
             baseRental,
@@ -295,12 +300,14 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
-            subtotal,
-            tax,
-            taxRate,
-            total
+            subtotal: taxBreakdown.subtotalBeforeTax,
+            taxableSubtotal: taxBreakdown.taxableSubtotal,
+            nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
+            tax: taxBreakdown.tax,
+            taxRate: taxBreakdown.taxRate,
+            total: taxBreakdown.total,
         };
-    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate]);
+    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions]);
 
     const handleProceedClick = () => {
         if (!isDeliveryRequired) {
