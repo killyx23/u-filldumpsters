@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
@@ -74,6 +74,24 @@ const CheckoutForm = ({
   const [delivery_location_verified, setDeliveryLocation_Verified] = useState(false);
   const [formError, setFormError] = useState(null);
   const [isPaymentElementReady, setIsPaymentElementReady] = useState(false);
+  const [paymentElementError, setPaymentElementError] = useState(null);
+
+  // PaymentElement only becomes interactive after Stripe.js and Elements finish loading.
+  useEffect(() => {
+    if (!stripe || !elements) {
+      setIsPaymentElementReady(false);
+    }
+  }, [stripe, elements]);
+
+  useEffect(() => {
+    if (isPaymentElementReady || paymentElementError) return undefined;
+    const timeoutId = window.setTimeout(() => {
+      setPaymentElementError(
+        'The secure card form is taking longer than expected. Try refreshing the page or disabling ad blockers for this site.'
+      );
+    }, 20000);
+    return () => window.clearTimeout(timeoutId);
+  }, [isPaymentElementReady, paymentElementError]);
   
   const isDelivery = plan?.id === 2 && deliveryService;
   const currentPlan = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : (plan || {});
@@ -356,22 +374,50 @@ const CheckoutForm = ({
       </div>
 
       <form onSubmit={handlePayment}>
-        <div className="mb-6">
-          <PaymentElement 
-            onReady={() => setIsPaymentElementReady(true)} 
-            options={{ 
-              layout: 'tabs', 
-              fields: { 
-                billingDetails: { 
-                  name: 'never', 
-                  email: 'never', 
-                  phone: 'never', 
-                  address: 'never' 
+        <div className="mb-6 min-h-[120px]">
+          {stripe && elements ? (
+            <PaymentElement 
+              onReady={() => {
+                setPaymentElementError(null);
+                setIsPaymentElementReady(true);
+              }}
+              onLoadError={(event) => {
+                console.error('[PaymentPage] PaymentElement load error:', event);
+                setIsPaymentElementReady(false);
+                setPaymentElementError(event?.error?.message || 'Failed to load payment form. Please refresh the page.');
+              }}
+              options={{ 
+                layout: 'accordion',
+                fields: { 
+                  billingDetails: { 
+                    name: 'never', 
+                    email: 'never', 
+                    phone: 'never', 
+                    address: 'never' 
+                  } 
                 } 
-              } 
-            }} 
-          />
+              }} 
+            />
+          ) : (
+            <p className="text-sm text-blue-200/70 flex items-center">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Connecting to secure payment...
+            </p>
+          )}
+          {stripe && elements && !isPaymentElementReady && !paymentElementError && (
+            <p className="text-sm text-blue-200/70 mt-2 flex items-center">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading secure card form...
+            </p>
+          )}
         </div>
+        
+        {paymentElementError && (
+          <div className="mb-6 flex items-start text-red-400 text-sm bg-red-950/40 p-3 rounded border border-red-500/30">
+            <span className="mr-2 flex-shrink-0">⚠</span>
+            <p>{paymentElementError}</p>
+          </div>
+        )}
         
         {formError && (
           <div className="mb-6 flex items-start text-red-400 text-sm bg-red-950/40 p-3 rounded border border-red-500/30">
@@ -384,7 +430,7 @@ const CheckoutForm = ({
           <Checkbox 
             id="confirm-details" 
             checked={isConfirmed} 
-            onCheckedChange={setIsConfirmed} 
+            onCheckedChange={(checked) => setIsConfirmed(checked === true)} 
             disabled={isProcessing} 
             className="border-white/50 data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500" 
           />
@@ -446,6 +492,7 @@ export const PaymentPage = ({ onBack }) => {
   const [clientSecret, setClientSecret] = useState(null);
   const [bookingId, setBookingId] = useState(null);
   const [bookingCreated, setBookingCreated] = useState(false);
+  const paymentIntentInitRef = useRef(false);
   
   // Retrieved booking data from pending_customers
   const [pendingCustomerData, setPendingCustomerData] = useState(null);
@@ -603,6 +650,15 @@ export const PaymentPage = ({ onBack }) => {
           addons: {
             ...pendingData.addons_data,
             isDelivery: pendingData.delivery_service,
+            taxableSubtotal: calcResult.taxableSubtotal,
+            nonTaxableSubtotal: calcResult.nonTaxableSubtotal,
+            taxLineItemsSnapshot: (calcResult.lineItems || []).map((line) => ({
+              key: line.key,
+              label: line.label,
+              amount: line.amount,
+              is_taxable: line.is_taxable,
+              amountAfterDiscount: line.amountAfterDiscount,
+            })),
           },
         };
 
@@ -670,11 +726,13 @@ export const PaymentPage = ({ onBack }) => {
           insurancePrice,
           taxOptions
         );
-        
-        // Prefer stored total if it exists and is valid
-        let finalTotal = parseFloat(pendingCustomerData.total_price);
-        if (!Number.isFinite(finalTotal) || finalTotal <= 0) {
-          finalTotal = calcResult.total;
+
+        const finalTotal = calcResult.total;
+        const pendingTotal = parseFloat(pendingCustomerData.total_price);
+        if (Number.isFinite(pendingTotal) && pendingTotal > 0 && Math.abs(pendingTotal - finalTotal) > 0.02) {
+          console.warn(
+            `[${timestamp}] [PaymentPage] Pending total ($${pendingTotal}) differs from calculated total ($${finalTotal}); using calculated total.`
+          );
         }
 
         // Final validation
@@ -720,7 +778,8 @@ export const PaymentPage = ({ onBack }) => {
 
   // Initialize payment intent once booking is created
   useEffect(() => {
-    if (!bookingId || !bookingCreated) return;
+    if (!bookingId || !bookingCreated || clientSecret || paymentIntentInitRef.current) return;
+    paymentIntentInitRef.current = true;
 
     const initPaymentIntent = async () => {
       const timestamp = new Date().toISOString();
@@ -749,6 +808,7 @@ export const PaymentPage = ({ onBack }) => {
           errorMessage = `Payment Setup Error: ${err.message}`;
         }
         setDataError(errorMessage);
+        paymentIntentInitRef.current = false;
         toast({ 
           title: 'Payment Error', 
           description: errorMessage, 
@@ -758,7 +818,51 @@ export const PaymentPage = ({ onBack }) => {
     };
 
     initPaymentIntent();
-  }, [bookingId, bookingCreated]);
+  }, [bookingId, bookingCreated, clientSecret]);
+
+  const pricingBreakdown = useMemo(() => {
+    if (!plan || !addonsData || !bookingCreated) return null;
+    return calculateBookingTotal(
+      plan,
+      addonsData,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+  }, [plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingCreated]);
+
+  const elementsOptions = useMemo(() => {
+    if (!clientSecret) return null;
+    return {
+      clientSecret,
+      appearance: {
+        theme: 'night',
+        variables: { 
+          colorPrimary: '#facc15', 
+          colorBackground: '#1e293b', 
+          colorText: '#f1f5f9', 
+          colorDanger: '#ef4444', 
+          fontFamily: '"Inter", system-ui, sans-serif', 
+          borderRadius: '8px' 
+        },
+        rules: { 
+          '.Input': { 
+            backgroundColor: '#0f172a', 
+            border: '1px solid rgba(255,255,255,0.15)' 
+          }, 
+          '.Input:focus': { 
+            border: '1px solid #facc15', 
+            boxShadow: '0 0 0 2px rgba(250,204,21,0.2)' 
+          }, 
+          '.Label': { 
+            color: '#94a3b8' 
+          } 
+        }
+      }
+    };
+  }, [clientSecret]);
 
   if (!stripePromise) {
     return (
@@ -803,8 +907,16 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  // Loading states
-  if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || !bookingData || !bookingCreated) {
+  // Initial load only — once we have a clientSecret, keep Stripe Elements mounted
+  const isBootstrapping =
+    loadingBookingData ||
+    loadingPrices ||
+    loadingTaxRate ||
+    loadingTaxOptions ||
+    !bookingData ||
+    !bookingCreated;
+
+  if (isBootstrapping && !clientSecret) {
     return (
       <div className="flex flex-col justify-center items-center h-96 text-white">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -813,7 +925,7 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  if (!clientSecret) {
+  if (!clientSecret || !elementsOptions || !pricingBreakdown) {
     return (
       <div className="flex flex-col justify-center items-center h-96 text-white">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -823,53 +935,17 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  const elementsOptions = {
-    clientSecret,
-    appearance: {
-      theme: 'night',
-      variables: { 
-        colorPrimary: '#facc15', 
-        colorBackground: '#1e293b', 
-        colorText: '#f1f5f9', 
-        colorDanger: '#ef4444', 
-        fontFamily: '"Inter", system-ui, sans-serif', 
-        borderRadius: '8px' 
-      },
-      rules: { 
-        '.Input': { 
-          backgroundColor: '#0f172a', 
-          border: '1px solid rgba(255,255,255,0.15)' 
-        }, 
-        '.Input:focus': { 
-          border: '1px solid #facc15', 
-          boxShadow: '0 0 0 2px rgba(250,204,21,0.2)' 
-        }, 
-        '.Label': { 
-          color: '#94a3b8' 
-        } 
-      }
-    }
-  };
-
-  const pricingBreakdown = calculateBookingTotal(
-    plan,
-    addonsData,
-    equipmentPrices,
-    taxRate,
-    deliveryService,
-    insurancePrice,
-    taxOptions
-  );
+  const displayTotal = validatedTotal > 0 ? validatedTotal : pricingBreakdown.total;
 
   return (
     <motion.div 
-      initial={{ opacity: 0, x: 100 }} 
+      initial={false}
       animate={{ opacity: 1, x: 0 }} 
       exit={{ opacity: 0, x: -100 }} 
       transition={{ duration: 0.5 }} 
       className="container mx-auto py-16 px-4"
     >
-      <Elements stripe={stripePromise} options={elementsOptions}>
+      <Elements stripe={stripePromise} options={elementsOptions} key={clientSecret}>
         <CheckoutForm 
           onBack={onBack}
           bookingId={bookingId}
@@ -877,7 +953,7 @@ export const PaymentPage = ({ onBack }) => {
           plan={plan}
           addonsData={addonsData}
           deliveryService={deliveryService}
-          validatedTotal={validatedTotal}
+          validatedTotal={displayTotal}
           pricingBreakdown={pricingBreakdown}
           availabilityTimes={availabilityTimes}
         />
