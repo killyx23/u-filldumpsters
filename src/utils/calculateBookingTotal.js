@@ -64,6 +64,9 @@ export function calculateBookingTotal(
     }
   }
 
+  const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
+  discount += loyaltyDiscount;
+
   return {
     basePriceAmount: lineByKey.base_rental?.amount ?? Number(plan?.price || plan?.base_price || 0),
     deliveryFeeFlat: lineByKey.delivery_fee?.amount ?? 0,
@@ -74,6 +77,7 @@ export function calculateBookingTotal(
     purchaseItemsCost,
     disposalCost,
     discount,
+    loyaltyDiscount,
     subtotal: breakdown.subtotalBeforeTax,
     taxableSubtotal: breakdown.taxableSubtotal,
     nonTaxableSubtotal: breakdown.nonTaxableSubtotal,

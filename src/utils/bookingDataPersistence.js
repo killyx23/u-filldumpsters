@@ -167,6 +167,52 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 }
 
 /**
+ * Maps a pending_customers row into BookingJourney state shape.
+ * @param {Object} pending - Row from pending_customers
+ * @returns {Object}
+ */
+export function mapPendingToBookingState(pending) {
+  const addons = pending.addons_data || {};
+  const bookingData = pending.booking_data || {
+    firstName: pending.first_name,
+    lastName: pending.last_name,
+    email: pending.email,
+    phone: pending.phone,
+    contactAddress: pending.contact_address,
+    dropOffDate: pending.drop_off_date,
+    pickupDate: pending.pickup_date,
+    dropOffTimeSlot: pending.drop_off_time_slot,
+    pickupTimeSlot: pending.pickup_time_slot,
+    notes: pending.notes,
+    termsAccepted: false,
+    addressVerified: Boolean(pending.contact_address?.isVerified),
+  };
+
+  const plan = pending.plan_data;
+  const deliveryService =
+    pending.delivery_service || addons.deliveryService || (plan?.id === 2 && addons.isDelivery) || false;
+
+  return {
+    bookingData,
+    selectedPlan: plan,
+    addonsData: {
+      insurance: addons.insurance || 'decline',
+      drivewayProtection: addons.drivewayProtection || 'decline',
+      equipment: addons.equipment || [],
+      coupon: addons.coupon || null,
+      deliveryAddress: addons.deliveryAddress || null,
+      deliveryDistance: addons.deliveryDistance || 0,
+      deliveryFee: addons.deliveryFee || 0,
+      ...addons,
+    },
+    basePrice: pending.base_price || 0,
+    finalPrice: pending.total_price || 0,
+    deliveryService,
+    requiresDriverVerification: plan?.id === 2 && !deliveryService,
+  };
+}
+
+/**
  * Retrieves a pending booking by token (UUID)
  * @param {string} token - The pending_customers UUID
  * @returns {Promise<{success: boolean, bookingData?: Object, error?: string}>}

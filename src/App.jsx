@@ -13,6 +13,7 @@ import { AdminLogin } from '@/pages/AdminLogin';
 import { CustomerDetailView } from '@/components/admin/customer-detail/CustomerDetailView';
 import { AdminRouteGuard } from '@/components/AdminRouteGuard';
 import { SupabaseAuthProvider } from '@/contexts/SupabaseAuthContext';
+import { BookingFlowProvider } from '@/contexts/BookingFlowContext';
 import { CustomerPortalLogin } from '@/pages/CustomerPortalLogin';
 import { CustomerLogin } from '@/pages/CustomerLogin';
 import { CustomerPortal } from '@/pages/CustomerPortal';
@@ -43,6 +44,7 @@ function App() {
   return (
     <SupabaseAuthProvider>
       <Router>
+        <BookingFlowProvider>
         <Helmet>
           <title>Dumpster Rental Services | Book Online Today</title>
           <meta name="description" content="Professional dumpster rental services for residential and commercial projects. Easy online booking, competitive rates, and reliable service." />
@@ -52,7 +54,15 @@ function App() {
           <Header onReorderSelect={handleReorderSelect} />
           <main className="flex-grow">
             <Routes>
-              <Route path="/" element={<BookingJourney reorderData={reorderData} />} />
+              <Route
+                path="/"
+                element={
+                  <BookingJourney
+                    reorderData={reorderData}
+                    onReorderApplied={() => setReorderData(null)}
+                  />
+                }
+              />
               <Route path="/faqs" element={<FaqPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
               <Route path="/contact" element={<ContactPage />} />
@@ -107,6 +117,7 @@ function App() {
           <Footer />
           <Toaster />
         </div>
+        </BookingFlowProvider>
       </Router>
     </SupabaseAuthProvider>
   );

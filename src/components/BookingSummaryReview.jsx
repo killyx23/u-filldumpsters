@@ -174,6 +174,9 @@ export const BookingSummaryReview = ({
             }
         }
 
+        const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
+        discount += loyaltyDiscount;
+
         return {
             basePriceAmount,
             deliveryFeeFlat,
@@ -184,6 +187,7 @@ export const BookingSummaryReview = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            loyaltyDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,

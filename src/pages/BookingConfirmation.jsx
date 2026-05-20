@@ -229,11 +229,15 @@ export const BookingConfirmation = () => {
       const result = await awardPoints(points, bookingId);
       
       if (result.success) {
+        if (result.alreadyAwarded) {
+          console.log(`[${timestamp}] [BookingConfirmation] Points already awarded for booking ${bookingId}`);
+          return;
+        }
         console.log(`[${timestamp}] [BookingConfirmation] ✓ Awarded ${points} loyalty points`);
         setPointsAwarded(points);
         
         toast({
-          title: 'Loyalty Points Earned! 🎉',
+          title: 'Loyalty Points Earned!',
           description: `You earned ${points} points with this booking!`,
         });
       } else {
