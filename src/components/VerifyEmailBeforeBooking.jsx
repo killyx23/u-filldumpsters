@@ -270,6 +270,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
         }
 
+        const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
+        discount += loyaltyDiscount;
+
         return {
             basePriceAmount,
             deliveryFeeFlat,
@@ -280,6 +283,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             purchaseItemsCost,
             disposalCost,
             discount,
+            loyaltyDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
