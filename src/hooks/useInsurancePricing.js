@@ -18,6 +18,7 @@ const DEFAULT_INSURANCE_PRICE = 20.00;
 
 export const useInsurancePricing = () => {
     const [insurancePrice, setInsurancePrice] = useState(DEFAULT_INSURANCE_PRICE);
+    const [insuranceIsTaxable, setInsuranceIsTaxable] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -31,7 +32,7 @@ export const useInsurancePricing = () => {
             // Get price from services table using ID 7
             const { data: insuranceService, error: serviceError } = await supabase
                 .from('services')
-                .select('base_price, name')
+                .select('base_price, name, is_taxable')
                 .eq('id', INSURANCE_SERVICE_ID)
                 .maybeSingle();
 
@@ -40,20 +41,27 @@ export const useInsurancePricing = () => {
                 throw serviceError;
             }
 
-            if (insuranceService && insuranceService.base_price !== null && insuranceService.base_price !== undefined) {
-                const priceFromService = Number(insuranceService.base_price);
-                setInsurancePrice(priceFromService);
-                console.log('[Insurance Pricing] ✓ Loaded Premium Insurance price from services table:', priceFromService);
+            if (insuranceService) {
+                if (insuranceService.base_price !== null && insuranceService.base_price !== undefined) {
+                    const priceFromService = Number(insuranceService.base_price);
+                    setInsurancePrice(priceFromService);
+                    console.log('[Insurance Pricing] ✓ Loaded Premium Insurance price from services table:', priceFromService);
+                } else {
+                    console.warn('[Insurance Pricing] Premium Insurance service (ID 7) has no price, using default:', DEFAULT_INSURANCE_PRICE);
+                    setInsurancePrice(DEFAULT_INSURANCE_PRICE);
+                }
+                setInsuranceIsTaxable(insuranceService.is_taxable === true);
             } else {
-                // Service record doesn't exist or has no price - use default
-                console.warn('[Insurance Pricing] Premium Insurance service (ID 7) not found or has no price, using default:', DEFAULT_INSURANCE_PRICE);
+                console.warn('[Insurance Pricing] Premium Insurance service (ID 7) not found, using defaults');
                 setInsurancePrice(DEFAULT_INSURANCE_PRICE);
+                setInsuranceIsTaxable(false);
             }
         } catch (err) {
             console.error('[Insurance Pricing] Error loading insurance pricing:', err.message);
             setError(err.message);
             // Use hardcoded default on error
             setInsurancePrice(DEFAULT_INSURANCE_PRICE);
+            setInsuranceIsTaxable(false);
         } finally {
             setLoading(false);
         }
@@ -107,7 +115,8 @@ export const useInsurancePricing = () => {
     };
 
     return { 
-        insurancePrice, 
+        insurancePrice,
+        insuranceIsTaxable,
         insuranceServiceId: INSURANCE_SERVICE_ID,
         loading, 
         error,
