@@ -16,8 +16,9 @@ import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormat
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
 
@@ -44,7 +45,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
-    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
+    const { drivewayPrice } = useDrivewayProtectionPrice();
 
     // Cleanup timeouts on unmount
     useEffect(() => {
@@ -211,7 +213,10 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         const tripMileageCost = addonsData?.mileageCharge || 0;
 
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
-        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+        const drivewayProtectionCost =
+            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+                ? Number(drivewayPrice)
+                : 0;
 
         let rentEquipmentCost = 0;
         let purchaseItemsCost = 0;
@@ -244,21 +249,26 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             disposalCost += Number(equipmentPrices[6] || 35) * addonsData.applianceDisposal;
         }
 
-        const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost +
-            insuranceCost + drivewayProtectionCost +
-            rentEquipmentCost + purchaseItemsCost + disposalCost;
+        const taxBreakdown = calculateBookingTaxBreakdown({
+            plan,
+            addonsData,
+            equipmentPrices,
+            taxRate,
+            deliveryService: addonsData?.deliveryService ?? isDelivery,
+            insurancePrice,
+            drivewayPrice,
+            ...taxOptions,
+        });
 
         let discount = 0;
+        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (addonsData?.coupon?.isValid) {
             if (addonsData.coupon.discountType === 'fixed') {
                 discount = Number(addonsData.coupon.discountValue || 0);
             } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+                discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
             }
         }
-
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        const taxCalc = calculateTotalWithTax(subtotal, taxRate);
 
         return {
             basePriceAmount,
@@ -270,12 +280,14 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             purchaseItemsCost,
             disposalCost,
             discount,
-            subtotal: taxCalc.subtotal,
-            tax: taxCalc.tax,
-            taxRate: taxRate,
-            total: taxCalc.total
+            subtotal: taxBreakdown.subtotalBeforeTax,
+            taxableSubtotal: taxBreakdown.taxableSubtotal,
+            nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
+            tax: taxBreakdown.tax,
+            taxRate: taxBreakdown.taxRate,
+            total: taxBreakdown.total,
         };
-    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
+    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, taxOptions]);
 
     const handleSendCode = async () => {
         const timestamp = new Date().toISOString();
@@ -526,7 +538,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     };
 
     // Loading state with proper spinner
-    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingInsurancePrice) {
+    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingTaxOptions) {
         return (
             <div className="container mx-auto py-16 px-4">
                 <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
