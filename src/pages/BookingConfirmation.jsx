@@ -13,6 +13,7 @@ import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/
 import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
+import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 
 export const BookingConfirmation = () => {
   const [searchParams] = useSearchParams();
@@ -362,8 +363,8 @@ export const BookingConfirmation = () => {
         await finalizeBooking();
 
         // Award loyalty points after finalization
-        if (booking.customer_id && booking.total_price) {
-          await awardLoyaltyPoints(booking.customer_id, booking.total_price);
+        if (booking.customer_id && resolveBookingGrandTotal(booking)) {
+          await awardLoyaltyPoints(booking.customer_id, resolveBookingGrandTotal(booking));
         }
 
       } catch (err) {
@@ -524,7 +525,7 @@ export const BookingConfirmation = () => {
   const taxRateUsed = bookingDetails.tax_rate_used || 7.45;
   const taxAmount = bookingDetails.tax_amount || 0;
   const subtotalBeforeTax = bookingDetails.subtotal_before_tax || 0;
-  const totalPaid = bookingDetails.total_price || 0;
+  const totalPaid = resolveBookingGrandTotal(bookingDetails);
 
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${

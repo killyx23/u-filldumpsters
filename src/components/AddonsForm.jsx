@@ -14,6 +14,9 @@ import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
+import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 
 // Equipment metadata (IDs 1-6 only - ID 7 is Premium Insurance service, not equipment)
 const equipmentMeta = [
@@ -43,6 +46,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   // Load insurance and driveway protection prices from hooks
   const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
   const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
+  const { taxRate, loading: loadingTaxRate } = useTaxRate();
+  const { taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
 
@@ -214,55 +219,23 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
     }
 
-    let finalTotal = basePrice || 0;
-    
-    if (isDeliveryRequired) {
-        finalTotal += appliedDeliveryFeeFlat || 0;
-    }
-
-    // Dynamic insurance price from database (via hook - services table ID 7)
-    if (addonsData?.insurance === 'accept') {
-      finalTotal += insurancePrice;
-      console.log('[AddonsForm] Adding insurance cost (from services table):', insurancePrice);
-    }
-    
-    // Dynamic driveway protection price from database (via hook)
-    if (addonsData?.drivewayProtection === 'accept' && isDeliveryRequired) {
-      finalTotal += drivewayPrice;
-      console.log('[AddonsForm] Adding driveway protection cost:', drivewayPrice);
-    }
-    
-    // Equipment prices from database (IDs 1-6 only)
-    if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
-        addonsData.equipment.forEach(item => {
-          const meta = equipmentMetaWithPrices.find(e => e.id === item.id);
-          if (meta) {
-            finalTotal += meta.price * item.quantity;
-            console.log('[AddonsForm] Adding equipment cost:', meta.label, meta.price * item.quantity);
-          }
-        });
-    }
-
     let totalDisposalFee = 0;
     let disposalItemsList = [];
-    
+
     // Do not process disposal items for Dump Loader Trailer (ID 2)
     if (plan?.id !== 2) {
       if (addonsData?.mattressDisposal > 0) {
           const mattressPrice = disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25;
-          finalTotal += mattressPrice * addonsData.mattressDisposal;
           totalDisposalFee += mattressPrice * addonsData.mattressDisposal;
           disposalItemsList.push(`${addonsData.mattressDisposal}x Mattress Disposal`);
       }
       if (addonsData?.tvDisposal > 0) {
           const tvPrice = disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15;
-          finalTotal += tvPrice * addonsData.tvDisposal;
           totalDisposalFee += tvPrice * addonsData.tvDisposal;
           disposalItemsList.push(`${addonsData.tvDisposal}x TV Disposal`);
       }
       if (addonsData?.applianceDisposal > 0) {
           const appliancePrice = disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35;
-          finalTotal += appliancePrice * addonsData.applianceDisposal;
           totalDisposalFee += appliancePrice * addonsData.applianceDisposal;
           disposalItemsList.push(`${addonsData.applianceDisposal}x Appliance Disposal`);
       }
@@ -271,22 +244,10 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate);
     const resolvedMileageCharge = calculatedMileageCharge !== undefined ? calculatedMileageCharge : (feeResult.trip_mileage_cost || 0);
 
-    if (resolvedMileageCharge > 0 && isDeliveryRequired) {
-      finalTotal += resolvedMileageCharge;
-    }
-
-    if (addonsData?.coupon && addonsData.coupon.isValid) {
-      if (addonsData.coupon.discountType === 'fixed') {
-        finalTotal = Math.max(0, finalTotal - (addonsData.coupon.discountValue || 0));
-      } else if (addonsData.coupon.discountType === 'percentage') {
-        finalTotal = finalTotal - (finalTotal * ((addonsData.coupon.discountValue || 0) / 100));
-      }
-    }
-    
-    const updatedAddons = { 
-        ...addonsData, 
+    const updatedAddons = {
+        ...addonsData,
         deliveryFee: isDeliveryRequired ? appliedDeliveryFeeFlat : 0,
-        mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0, 
+        mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0,
         distanceFeeDisplay: feeResult.displayText,
         insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0,
         drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0
@@ -298,7 +259,26 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         updatedAddons.disposalNotes = null;
     }
 
-    console.log('[AddonsForm] Final total calculated:', finalTotal);
+    const equipmentPrices = {};
+    equipmentMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+    disposalMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+
+    const calcResult = calculateBookingTotal(
+      plan,
+      updatedAddons,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+    const finalTotal = calcResult.total;
+
+    console.log('[AddonsForm] Final total calculated (tax-inclusive):', finalTotal);
     console.log('[AddonsForm] Updated addons:', updatedAddons);
 
     onSubmit(finalTotal, null, updatedAddons);

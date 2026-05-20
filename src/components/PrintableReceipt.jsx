@@ -5,6 +5,7 @@ import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
@@ -229,7 +230,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     // Use tax rate from booking record if available, otherwise calculate
     const taxRateUsed = booking.tax_rate_used || 7.45;
     const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
-    const calculatedTotal = subtotal + taxAmount;
+    const calculatedTotal = resolveBookingGrandTotal(booking) || subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
