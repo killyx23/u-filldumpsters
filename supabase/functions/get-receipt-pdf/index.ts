@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from './cors.ts';
 import { PDFDocument, rgb, StandardFonts } from 'https://esm.sh/pdf-lib@1.17.1';
 import { format } from 'https://deno.land/std@0.208.0/datetime/mod.ts';
+import { resolveBookingGrandTotal } from '../_shared/resolveBookingGrandTotal.ts';
 
 const formatDate = (dateStr: string | null) =>
   dateStr ? format(new Date(dateStr), 'MM/dd/yyyy') : 'N/A';
@@ -142,7 +143,7 @@ async function generatePDFReceipt(booking: any) {
   drawDivider(page, y, col2X, width, lightGray);
   y -= 14;
   drawText('TOTAL PAID:', col2X, y, { font: fontBold, size: 12, color: navy });
-  drawText(formatCurrency(booking.total_price || 0), width - margin, y, { font: fontBold, size: 12, color: navy, align: 'right' });
+  drawText(formatCurrency(resolveBookingGrandTotal(booking)), width - margin, y, { font: fontBold, size: 12, color: navy, align: 'right' });
 
   // ── Footer ────────────────────────────────────────────────────────────
   y -= 40;

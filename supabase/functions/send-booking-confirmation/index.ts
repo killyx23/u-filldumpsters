@@ -1,6 +1,6 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
@@ -42,7 +42,77 @@ const formatTime = (timeString)=>{
     return timeString;
   }
 };
-const generateEmailHTML = (booking, serviceDetails)=>{
+const INSURANCE_SERVICE_ID = 7;
+const DEFAULT_INSURANCE_PRICE = 25;
+const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE) => {
+  if (addons?.insurance !== "accept") return 0;
+  const snap = Number(addons.insurancePriceApplied);
+  if (snap > 0) return snap;
+  return Number(fallbackPrice) || DEFAULT_INSURANCE_PRICE;
+};
+const buildPriceSummaryHTML = (booking, insuranceAmount) => {
+  const plan = booking.plan || {};
+  const addons = booking.addons || {};
+  const basePrice = Number(plan.base_price ?? plan.price ?? 0);
+  const subtotal = Number(booking.subtotal_before_tax ?? 0);
+  const tax = Number(booking.tax_amount ?? 0);
+  const total = resolveBookingGrandTotal(booking);
+  const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  let rows = "";
+  if (basePrice > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Base Rental</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(basePrice)}</td>
+    </tr>`;
+  }
+  if (insuranceAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Rental Insurance</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(insuranceAmount)}</td>
+    </tr>`;
+  }
+  if (addons.drivewayProtection === "accept") {
+    const drivewayAmt = Number(addons.drivewayPriceApplied ?? 15);
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Driveway Protection</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(drivewayAmt)}</td>
+    </tr>`;
+  }
+  if (addons.deliveryFee > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Delivery Fee</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(addons.deliveryFee)}</td>
+    </tr>`;
+  }
+  const mileageFee = addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0;
+  if (mileageFee > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Mileage Charge</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(mileageFee)}</td>
+    </tr>`;
+  }
+  return `
+      <div style="margin-top: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Price Summary</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          ${rows}
+          <tr style="border-top: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold;">Subtotal</td>
+            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold; text-align: right;">${formatCurrency(subtotal)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #4b5563;">Tax (${taxRate.toFixed(2)}%)</td>
+            <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(tax)}</td>
+          </tr>
+          <tr style="border-top: 2px solid #3b82f6;">
+            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px;">Total Paid</td>
+            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(total)}</td>
+          </tr>
+        </table>
+      </div>`;
+};
+const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
+  const grandTotal = resolveBookingGrandTotal(booking);
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
@@ -176,10 +246,12 @@ const generateEmailHTML = (booking, serviceDetails)=>{
       </div>
       ` : ""}
 
+      ${buildPriceSummaryHTML(booking, insuranceAmount)}
+
       <!-- Total -->
       <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">
         <p style="margin: 0; color: #6b7280; font-size: 16px;">Total Amount Paid</p>
-        <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(booking.total_price)}</p>
+        <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(grandTotal)}</p>
       </div>
 
       <!-- Special Notes -->
@@ -397,7 +469,13 @@ Deno.serve(async (req)=>{
       });
     }
     console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
-    const emailHTML = generateEmailHTML(booking, serviceDetails);
+    let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
+    const { data: insuranceService } = await supabase.from("services").select("base_price").eq("id", INSURANCE_SERVICE_ID).maybeSingle();
+    if (insuranceService?.base_price != null) {
+      insuranceFallbackPrice = Number(insuranceService.base_price);
+    }
+    const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
+    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount);
     const subject = `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
     console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail}`);
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
