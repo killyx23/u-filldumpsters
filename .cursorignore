@@ -1,0 +1,19 @@
+# Cursor will not index or send these paths to the AI (same syntax as .gitignore).
+.env
+.env.*
+!.env.example
+.env.local
+.env.prod
+.env.*.local
+supabase/.env
+supabase/functions/.env
+**/.env
+**/.env.local
+**/.env.prod
+**/secrets/**
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json

@@ -4,5 +4,8 @@ supabase/.temp/
 supabase/.env
  *:Zone.Identifier
 dist/
+.env
 .env.local
-.env*
+.env.prod
+.env.*.local
+!.env.example
