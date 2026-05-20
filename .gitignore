@@ -9,3 +9,4 @@ dist/
 .env.prod
 .env.*.local
 !.env.example
+.idea/workspace.xml
