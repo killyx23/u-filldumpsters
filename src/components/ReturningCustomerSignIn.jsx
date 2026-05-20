@@ -339,6 +339,7 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
                 className="space-y-6"
               >
                 <ReturningCustomerLoyaltyBadge
+                  embedded
                   customerName={customerData.first_name || customerData.name || 'Valued Customer'}
                   bookingCount={pastBookings.length}
                 />

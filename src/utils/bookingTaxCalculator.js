@@ -200,5 +200,7 @@ export function calculateBookingTaxBreakdown(options) {
     }
   }
 
+  discount += Number(addonsData?.loyaltyDiscountAmount || 0);
+
   return calculateTaxFromLineItems(lineItems, options.taxRate, discount);
 }

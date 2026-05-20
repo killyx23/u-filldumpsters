@@ -290,6 +290,9 @@ export const OrderSummary = ({
             }
         }
 
+        const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
+        discount += loyaltyDiscount;
+
         return {
             baseRental,
             deliveryFee: deliveryFeeAmount,
@@ -300,6 +303,7 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            loyaltyDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
