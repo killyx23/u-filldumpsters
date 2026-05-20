@@ -5,16 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71f66781-56e3-4aa3-be4b-b40376397561" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20240101000000_baseline_prod_schema.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260518120000_tax_plumbing.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260518130000_verification_storage_policies.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260519120000_sync_insurance_pricing.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260519155036_remote_schema.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260520120000_restore_tax_flags.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260520130000_seed_driveway_protection_price.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260520140000_restore_tax_plumbing.sql" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/supabase/migrations/20260520150000_fix_verification_storage.sql" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260520181837_remote_schema.sql" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/migrations/20260520181837_remote_schema.sql" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -57,7 +51,7 @@
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "main",
+    "git-widget-placeholder": "order-confirmation-page",
     "kotlin-language-version-configured": "true",
     "node.js.detected.package.eslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
