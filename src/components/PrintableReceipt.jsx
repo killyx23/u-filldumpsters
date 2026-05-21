@@ -160,8 +160,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
-    // Protection costs
-    const insuranceCost = addons.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
+    const DEFAULT_INSURANCE_PRICE = 25;
+    // Protection costs — prefer snapshotted price from checkout
+    const insuranceCost = addons.insurance === 'accept'
+      ? Number(addons.insurancePriceApplied || addons.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
+      : 0;
     const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
 
     // Equipment costs
@@ -366,8 +369,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p>Pickup: {formatBookingDateOnly(reschedule_history[0].from_pickup_date)} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
                             </div>
                         )}
-                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, timeOptions)}`}</p>
-                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, timeOptions)}`}</p>}
+                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, { ...timeOptions, isReturnBy: false })}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, { ...timeOptions, isReturnBy: isSelfService })}`}</p>}
                     </div>
 
                     {/* 8-Category Breakdown */}

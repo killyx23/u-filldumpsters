@@ -28,6 +28,7 @@ import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
 import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortalGuard';
+import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 
 const PortalRedirect = ({ to }) => {
   const { search } = useLocation();
@@ -82,10 +83,20 @@ function App() {
               
               <Route path="/customer-portal" element={<CustomerPortal />} />
               <Route path="/portal" element={<PortalRedirect to="/customer-portal" />} />
+              <Route path="/customer-portal/resources" element={<PortalRedirect to="/customer-portal?tab=resources" />} />
               
               {/* Backward compatibility routes */}
               <Route path="/customer-portal/dashboard" element={<PortalRedirect to="/customer-portal" />} />
               <Route path="/customer-portal/login" element={<PortalRedirect to="/customer-portal-login" />} />
+
+              <Route
+                path="/customer-portal/resources/:id"
+                element={
+                  <CustomerPortalGuard>
+                    <CustomerPortalResourceDetailPage />
+                  </CustomerPortalGuard>
+                }
+              />
 
               <Route
                 path="/portal/bookings/:id"

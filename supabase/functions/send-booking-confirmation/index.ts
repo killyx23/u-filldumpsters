@@ -1,6 +1,8 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
+import { formatBookingTime } from "../_shared/formatBookingTime.ts";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
@@ -26,21 +28,28 @@ const formatDate = (dateString)=>{
     return dateString;
   }
 };
-const formatTime = (timeString)=>{
-  if (!timeString) return "N/A";
-  try {
-    const [hours, minutes] = timeString.split(":");
-    const date = new Date();
-    date.setHours(parseInt(hours, 10));
-    date.setMinutes(parseInt(minutes || "0", 10));
-    return date.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true
-    });
-  } catch  {
-    return timeString;
-  }
+const EQUIPMENT_LABELS: Record<string, string> = {
+  wheelbarrow: "Wheelbarrow",
+  handTruck: "Hand Truck",
+  gloves: "Working Gloves (Pair)",
+  "1": "Wheelbarrow",
+  "2": "Hand Truck",
+  "3": "Working Gloves (Pair)",
+};
+const resolveEquipmentLabel = (item: { id?: string | number; dbId?: number; label?: string; name?: string }) => {
+  if (item.label) return item.label;
+  if (item.name) return item.name;
+  const bySlug = item.id != null ? EQUIPMENT_LABELS[String(item.id)] : undefined;
+  if (bySlug) return bySlug;
+  const byDb = item.dbId != null ? EQUIPMENT_LABELS[String(item.dbId)] : undefined;
+  if (byDb) return byDb;
+  return "Equipment";
+};
+const isTrailerSelfService = (booking: { plan?: { id?: number; service_type?: string }; addons?: { isDelivery?: boolean; deliveryService?: boolean } }) => {
+  const plan = booking.plan || {};
+  const addons = booking.addons || {};
+  const isDelivery = addons.isDelivery || addons.deliveryService;
+  return Number(plan.id) === 2 && plan.service_type === "hourly" && !isDelivery;
 };
 const INSURANCE_SERVICE_ID = 7;
 const DEFAULT_INSURANCE_PRICE = 25;
@@ -58,38 +67,64 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const tax = Number(booking.tax_amount ?? 0);
   const total = resolveBookingGrandTotal(booking);
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
   let rows = "";
-  if (basePrice > 0) {
-    rows += `<tr>
+  if (snapshot.length > 0) {
+    for (const line of snapshot) {
+      const amount = Number(line.amountAfterDiscount ?? line.amount ?? 0);
+      if (amount <= 0) continue;
+      const label = line.label || line.key || "Charge";
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">${label}</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
+    </tr>`;
+    }
+  } else {
+    if (basePrice > 0) {
+      rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Base Rental</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(basePrice)}</td>
     </tr>`;
-  }
-  if (insuranceAmount > 0) {
-    rows += `<tr>
+    }
+    if (insuranceAmount > 0) {
+      rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Rental Insurance</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(insuranceAmount)}</td>
     </tr>`;
-  }
-  if (addons.drivewayProtection === "accept") {
-    const drivewayAmt = Number(addons.drivewayPriceApplied ?? 15);
-    rows += `<tr>
+    }
+    if (addons.drivewayProtection === "accept") {
+      const drivewayAmt = Number(addons.drivewayPriceApplied ?? 15);
+      rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Driveway Protection</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(drivewayAmt)}</td>
     </tr>`;
-  }
-  if (addons.deliveryFee > 0) {
-    rows += `<tr>
+    }
+    if (addons.deliveryFee > 0) {
+      rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Delivery Fee</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(addons.deliveryFee)}</td>
     </tr>`;
-  }
-  const mileageFee = addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0;
-  if (mileageFee > 0) {
-    rows += `<tr>
+    }
+    const mileageFee = addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0;
+    if (mileageFee > 0) {
+      rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Mileage Charge</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(mileageFee)}</td>
     </tr>`;
+    }
+    if (addons.equipment && Array.isArray(addons.equipment)) {
+      for (const item of addons.equipment) {
+        const dbId = item.dbId ?? item.equipment_id;
+        const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
+        const qty = Number(item.quantity || 1);
+        const amount = unitPrice > 0 ? unitPrice * qty : 0;
+        if (amount <= 0) continue;
+        rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">${resolveEquipmentLabel(item)}</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
+    </tr>`;
+      }
+    }
   }
   return `
       <div style="margin-top: 25px;">
@@ -132,7 +167,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
         <ul style="list-style: none; padding: 0;">
           ${addons.equipment.map((item)=>`
             <li style="padding: 5px 0; border-bottom: 1px solid #e5e7eb;">
-              ${item.label || item.name} (Quantity: ${item.quantity})
+              ${resolveEquipmentLabel(item)} (Quantity: ${item.quantity})
             </li>
           `).join("")}
         </ul>
@@ -149,18 +184,18 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
   let nextStepsHTML = "";
   if (serviceType === 'trailer_rental' || serviceName.toLowerCase().includes('dump loader') || serviceName.toLowerCase().includes('trailer')) {
     nextStepsHTML = `
-      <li>Pick up the trailer at our location on ${formatDate(booking.drop_off_date)} at ${formatTime(booking.drop_off_time_slot)}.</li>
+      <li>Pick up the trailer at our location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}.</li>
       <li>Ensure your towing vehicle meets the minimum requirements (usually a 1/2-ton truck or larger with a 2" ball hitch).</li>
       <li>Fill the trailer at your convenience during the rental period.</li>
-      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatTime(booking.pickup_time_slot)}.</li>
+      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}.</li>
       <li>Make sure the trailer is empty and clean before returning.</li>
      `;
   } else {
     nextStepsHTML = `
-      <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} at ${formatTime(booking.drop_off_time_slot)}.</li>
+      <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}.</li>
       <li>Our team will place the dumpster in your designated area.</li>
       <li>Fill the dumpster at your convenience during the rental period.</li>
-      <li>We'll pick up the dumpster on ${formatDate(booking.pickup_date)} by ${formatTime(booking.pickup_time_slot)}.</li>
+      <li>We'll pick up the dumpster on ${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot)}.</li>
      `;
   }
   return `
@@ -226,11 +261,11 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
             <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Drop-off:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.drop_off_date)} at ${formatTime(booking.drop_off_time_slot)}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: false })}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Pickup:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.pickup_date)} by ${formatTime(booking.pickup_time_slot)}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: true })}</td>
           </tr>
         </table>
       </div>
