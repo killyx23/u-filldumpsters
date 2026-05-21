@@ -29,6 +29,7 @@ export const BookingsManager = ({ initialBookings }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [selectedBooking, setSelectedBooking] = useState(null);
+    const [editedBooking, setEditedBooking] = useState(null);
     const [isEditMode, setIsEditMode] = useState(false);
     const [isDeleteDialogOpen, setIsDeleteDialogOpne] = useState(false);
     const [bookingToDelete, setBookingToDelete] = useState(null);
@@ -36,6 +37,45 @@ export const BookingsManager = ({ initialBookings }) => {
     React.useEffect(() => {
         setBookings(initialBookings);
     }, [initialBookings]);
+
+    const bookingToEditForm = (booking) => ({
+        name: booking.name ?? '',
+        email: booking.email ?? '',
+        phone: booking.phone ?? '',
+        dropOffDate: booking.drop_off_date,
+        pickupDate: booking.pickup_date,
+        notes: booking.notes || '',
+    });
+
+    const openEditMode = (booking) => {
+        setSelectedBooking(booking);
+        setEditedBooking(bookingToEditForm(booking));
+        setIsEditMode(true);
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setEditedBooking((prev) => (prev ? { ...prev, [name]: value } : prev));
+    };
+
+    const handleDateChange = (date, field) => {
+        if (!date) return;
+        setEditedBooking((prev) =>
+            prev ? { ...prev, [field]: format(date, 'yyyy-MM-dd') } : prev
+        );
+    };
+
+    const handleSaveEdit = () => {
+        if (!editedBooking) return;
+        handleUpdateBooking({
+            name: editedBooking.name,
+            email: editedBooking.email,
+            phone: editedBooking.phone,
+            drop_off_date: editedBooking.dropOffDate,
+            pickup_date: editedBooking.pickupDate,
+            notes: editedBooking.notes,
+        });
+    };
 
     const handleUpdateBooking = async (updatedData) => {
         try {
@@ -52,6 +92,7 @@ export const BookingsManager = ({ initialBookings }) => {
             setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedData } : b));
             toast({ title: 'Success', description: 'Booking updated successfully' });
             setIsEditMode(false);
+            setEditedBooking(null);
             setSelectedBooking(null);
         } catch (error) {
             toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -238,7 +279,7 @@ export const BookingsManager = ({ initialBookings }) => {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => { setSelectedBooking(booking); setIsEditMode(true); }}
+                                                onClick={() => openEditMode(booking)}
                                                 className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/20"
                                             >
                                                 <Edit className="h-4 w-4" />
@@ -267,7 +308,13 @@ export const BookingsManager = ({ initialBookings }) => {
                 </Table>
             </div>
 
-            <Dialog open={!!selectedBooking} onOpenChange={(open) => !open && setSelectedBooking(null)}>
+            <Dialog open={!!selectedBooking} onOpenChange={(open) => {
+                if (!open) {
+                    setSelectedBooking(null);
+                    setIsEditMode(false);
+                    setEditedBooking(null);
+                }
+            }}>
                 <DialogContent className="max-w-4xl bg-gray-900 border-gray-700 text-white max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="text-2xl text-yellow-400">
@@ -276,16 +323,21 @@ export const BookingsManager = ({ initialBookings }) => {
                     </DialogHeader>
 
                     {selectedBooking && (
-                        isEditMode ? (
+                        isEditMode && editedBooking ? (
                             <BookingEditForm
-                                booking={selectedBooking}
-                                onSave={handleUpdateBooking}
-                                onCancel={() => setIsEditMode(false)}
+                                editedBooking={editedBooking}
+                                onInputChange={handleInputChange}
+                                onDateChange={handleDateChange}
+                                onSave={handleSaveEdit}
+                                onCancel={() => {
+                                    setIsEditMode(false);
+                                    setEditedBooking(null);
+                                }}
                             />
                         ) : (
                             <BookingDetails
                                 booking={selectedBooking}
-                                onEdit={() => setIsEditMode(true)}
+                                onEdit={() => openEditMode(selectedBooking)}
                             />
                         )
                     )}

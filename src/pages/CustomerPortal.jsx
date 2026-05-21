@@ -38,6 +38,13 @@ export const CustomerPortal = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dashboard');
+
+    useEffect(() => {
+        const tabFromUrl = searchParams.get('tab');
+        if (tabFromUrl) {
+            setActiveTab(tabFromUrl);
+        }
+    }, [searchParams]);
     const [customerData, setCustomerData] = useState(null);
     const [bookings, setBookings] = useState([]);
     const [notes, setNotes] = useState([]);
