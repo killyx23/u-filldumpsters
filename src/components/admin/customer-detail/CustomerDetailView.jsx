@@ -213,7 +213,7 @@ export const CustomerDetailView = () => {
                     </TabsTrigger>
                     <TabsTrigger value="verification" className="relative">
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification
-                        {pendingAddressBookings.length > 0 && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
+                        {(pendingAddressBookings.length > 0 || verificationBookings.length > 0) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
                     </TabsTrigger>
                     <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                     <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>

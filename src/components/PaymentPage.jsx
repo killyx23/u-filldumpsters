@@ -628,7 +628,8 @@ export const PaymentPage = ({ onBack }) => {
 
       try {
         const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
-        const isUnverifiedDelivery = pendingData.delivery_address && 
+        const driverVerificationSkipped = Boolean(pendingData.addons_data?.wasVerificationSkipped);
+        const isUnverifiedDelivery = pendingData.delivery_address &&
                                      !pendingData.delivery_address.isVerified;
 
         const bookingPayload = {
@@ -654,10 +655,11 @@ export const PaymentPage = ({ onBack }) => {
           tax_amount: calcResult.tax,
           tax_rate_used: calcResult.taxRate,
           status: 'pending_payment',
-          was_verification_skipped: isUnverifiedDelivery,
+          was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
           addons: {
             ...pendingData.addons_data,
+            verificationSkipped: driverVerificationSkipped,
             isDelivery: pendingData.delivery_service,
             taxableSubtotal: calcResult.taxableSubtotal,
             nonTaxableSubtotal: calcResult.nonTaxableSubtotal,
