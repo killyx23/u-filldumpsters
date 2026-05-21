@@ -141,8 +141,13 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Step 4: Determine final booking status
     // ----------------------------------------------------------------
+    const verificationSkipped = Boolean(
+      booking.was_verification_skipped ||
+      booking.addons?.verificationSkipped ||
+      booking.addons?.wasVerificationSkipped
+    );
     let finalStatus = "Confirmed";
-    if (booking.was_verification_skipped) {
+    if (verificationSkipped) {
       finalStatus = "pending_verification";
     } else if (booking.addons?.addressVerificationSkipped) {
       finalStatus = "pending_review";
@@ -151,13 +156,38 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Step 5: Update booking status
     // ----------------------------------------------------------------
-    const { data: updatedBooking, error: updateError } = await supabase.from("bookings").update({
-      status: finalStatus
-    }).eq("id", bookingId).select("*, customers!inner(*)").single();
+    const bookingUpdatePayload: Record<string, unknown> = { status: finalStatus };
+    if (verificationSkipped && !booking.was_verification_skipped) {
+      bookingUpdatePayload.was_verification_skipped = true;
+    }
+    const { data: updatedBooking, error: updateError } = await supabase.from("bookings").update(bookingUpdatePayload).eq("id", bookingId).select("*, customers!inner(*)").single();
     if (updateError || !updatedBooking) {
       throw new Error(`Failed to update booking status: ${updateError?.message ?? "unknown"}`);
     }
     log("Booking status updated", finalStatus);
+    // ----------------------------------------------------------------
+    // Step 5b: Notify admin chat when verification was skipped
+    // ----------------------------------------------------------------
+    if (finalStatus === "pending_verification") {
+      const skipReason = updatedBooking.verification_notes?.trim() || "No reason provided.";
+      const chatContent =
+        `Driver & Vehicle Verification was skipped for Booking #${bookingId}. ` +
+        `Reason: ${skipReason} ` +
+        `This booking requires admin review before it can be confirmed.`;
+      const { error: chatError } = await supabase.from("chat_messages").insert({
+        conversation_id: `cust_${updatedBooking.customer_id}`,
+        customer_id: updatedBooking.customer_id,
+        booking_id: bookingId,
+        sender_type: "customer",
+        message_content: chatContent,
+        is_read: false
+      });
+      if (chatError) {
+        console.error("[finalize-booking] chat_messages insert failed:", chatError);
+      } else {
+        log("Verification skip chat message inserted.");
+      }
+    }
     // ----------------------------------------------------------------
     // Step 6: Insert equipment rental records
     // ----------------------------------------------------------------

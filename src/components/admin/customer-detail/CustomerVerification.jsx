@@ -55,6 +55,18 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
 
             if (refundError) throw refundError;
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
+
+            const refundMessage =
+                `Your booking #${booking.id} has been cancelled. ` +
+                `A refund of $${refundAmount} has been processed. Reason: ${reason}`;
+            await supabase.from('chat_messages').insert({
+                conversation_id: `cust_${customer.id}`,
+                customer_id: customer.id,
+                booking_id: booking.id,
+                sender_type: 'admin',
+                message_content: refundMessage,
+                is_read: false,
+            });
             
             const updatedBookingForEmail = {
                 ...booking, 
