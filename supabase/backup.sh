@@ -14,27 +14,23 @@ DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 # On db pull — run it once manually to sync migrations folder:
 # npx supabase db pull --linked
 
-mkdir -p $BACKUP_DIR
-mkdir -p $DB_BACKUP_DIR
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$DB_BACKUP_DIR"
 echo "🚀 Starting Supabase backup for project: $PROJECT_REF"
-
 
 rm -rf supabase/.temp
 npx supabase link --project-ref "$PROJECT_REF"
 sleep 2  # let the link settle
 
-# Dump the database schema using Supabase CLI (avoids direct IPv6 connections) echo "🗄 Dumping latest database schema..."
-#npx supabase db dump --linked > "$DB_BACKUP_DIR/schema_$DATE.sql"
-# npx supabase db dump \
-#   --db-url "postgresql://postgres.${PROJECT_REF}:${SUPABASE_DB_PASSWORD}@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require" \
-#   --file "$DB_BACKUP_DIR/schema_$DATE.sql"
-
+# ---------------------------------------------------------------------------
+# Database schema dump
+# ---------------------------------------------------------------------------
+echo "🗄 Dumping latest database schema..."
 for attempt in 1 2 3; do
   npx supabase db dump --linked > "$DB_BACKUP_DIR/schema_$DATE.sql" && break
   echo "⚠ Dump attempt $attempt failed, retrying..."
   sleep 3
 done
-
 
 # ---------------------------------------------------------------------------
 # Database delta (changes since last migration)
@@ -43,14 +39,12 @@ echo "🔍 Generating database diff (delta changes)..."
 DIFF_FILE="$DB_BACKUP_DIR/db_${DATE}_changes.sql"
 npx supabase db diff --linked > "$DIFF_FILE" 2>/dev/null || true
 
-# Check if diff produced any content
 if [[ -f "$DIFF_FILE" && -s "$DIFF_FILE" ]]; then
   echo "✅ Schema changes detected and saved to: $DIFF_FILE"
 else
   echo "ℹ️  No schema changes detected since last migration — diff file skipped."
   rm -f "$DIFF_FILE"
 fi
-
 
 # ---------------------------------------------------------------------------
 # Save TypeScript types
@@ -59,23 +53,22 @@ echo "📑 Saving auth policies and types..."
 npx supabase gen types typescript --linked > "$DB_BACKUP_DIR/types_$DATE.ts"
 
 # ---------------------------------------------------------------------------
-# Edge Functions
+# Edge Functions — download
 # ---------------------------------------------------------------------------
 echo "⚡ Backing up Edge Functions..."
-mkdir -p $BACKUP_DIR/functions_$DATE
+FUNCTIONS_DIR="$BACKUP_DIR/functions_$DATE"
+mkdir -p "$FUNCTIONS_DIR"
 
-# Get function names from the list
-FUNCTIONS=$(npx supabase functions list --project-ref $PROJECT_REF --output json | jq -r '.[].name')
+FUNCTIONS=$(npx supabase functions list --project-ref "$PROJECT_REF" --output json | jq -r '.[].name')
 
 echo "Detected functions:"
 echo "$FUNCTIONS"
 
-# Download each function
 while read -r fn; do
-    if [ -n "$fn" ]; then
-        echo "   - Downloading function: $fn"
-        npx supabase functions download "$fn" --project-ref $PROJECT_REF --workdir "$BACKUP_DIR/functions_$DATE" || echo "      ⚠ Failed to download $fn"
-    fi
+  if [ -n "$fn" ]; then
+    echo "   - Downloading function: $fn"
+    npx supabase functions download "$fn" --project-ref "$PROJECT_REF" --workdir "$FUNCTIONS_DIR" || echo "      ⚠ Failed to download $fn"
+  fi
 done <<< "$FUNCTIONS"
 
 # ---------------------------------------------------------------------------
@@ -84,24 +77,46 @@ done <<< "$FUNCTIONS"
 echo "🧩 Consolidating all Edge Functions into a single file..."
 ALL_FUNCTIONS_FILE="$BACKUP_DIR/all_edge_functions_$DATE.ts"
 
+# Write header
 echo "// Consolidated Edge Functions Backup" > "$ALL_FUNCTIONS_FILE"
-echo "// Each function is separated by headers for clarity" >> "$ALL_FUNCTIONS_FILE"
-echo "" >> "$ALL_FUNCTIONS_FILE"
+echo "// Each function/shared module is separated by headers for clarity" >> "$ALL_FUNCTIONS_FILE"
 
+# Helper: append all .ts/.js/.json files under a given directory
+append_dir_files() {
+  local base_dir="$1"   # root dir to search under
+  local label="$2"      # label prefix for the file header
+  local out="$3"        # output file
+
+  mapfile -d '' files < <(find "$base_dir" -type f \( -name "*.ts" -o -name "*.js" -o -name "*.json" \) -print0 | sort -z)
+
+  for f in "${files[@]}"; do
+    local rel="${f#"$base_dir"/}"
+    printf '\n// --- File: %s/%s ---\n\n' "$label" "$rel" >> "$out"
+    cat "$f" >> "$out"
+    printf '\n' >> "$out"
+  done
+}
+
+# --- Shared directories first ---
+for SHARED_NAME in _shared shared; do
+  SHARED_PATH="$FUNCTIONS_DIR/$SHARED_NAME"
+  if [ -d "$SHARED_PATH" ]; then
+    echo "   📂 Including $SHARED_NAME directory..."
+    printf '\n// ============================\n// Shared Files (%s)\n// ============================\n' "$SHARED_NAME" >> "$ALL_FUNCTIONS_FILE"
+    append_dir_files "$SHARED_PATH" "$SHARED_NAME" "$ALL_FUNCTIONS_FILE"
+    echo "   ✅ $SHARED_NAME files included"
+  fi
+done
+
+# --- Individual functions ---
 while read -r fn; do
   if [ -n "$fn" ]; then
-    FUNC_PATH="$BACKUP_DIR/functions_$DATE/$fn"
+    FUNC_PATH="$FUNCTIONS_DIR/$fn"
     if [ -d "$FUNC_PATH" ]; then
-      echo -e "\n\n// ----------------------------" >> "$ALL_FUNCTIONS_FILE"
-      echo "// Function: $fn" >> "$ALL_FUNCTIONS_FILE"
-      echo "// ----------------------------" >> "$ALL_FUNCTIONS_FILE"
-      find "$FUNC_PATH" -type f \( -name "*.ts" -o -name "*.js" \) -exec sh -c '
-        for f; do
-          echo "\n// --- File: ${f##*/} ---\n" >> "$0"
-          cat "$f" >> "$0"
-          echo "" >> "$0"
-        done
-      ' "$ALL_FUNCTIONS_FILE" {} +
+      printf '\n// ============================\n// Function: %s\n// ============================\n' "$fn" >> "$ALL_FUNCTIONS_FILE"
+      append_dir_files "$FUNC_PATH" "$fn" "$ALL_FUNCTIONS_FILE"
+    else
+      echo "   ⚠ Directory not found for function: $fn (skipping)"
     fi
   fi
 done <<< "$FUNCTIONS"

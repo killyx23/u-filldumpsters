@@ -3,6 +3,21 @@ import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
+const EQUIPMENT_LABELS = {
+  1: 'Wheelbarrow',
+  2: 'Hand Truck',
+  3: 'Working Gloves (Pair)',
+  wheelbarrow: 'Wheelbarrow',
+  handTruck: 'Hand Truck',
+  gloves: 'Working Gloves (Pair)',
+};
+
+const resolveEquipmentLabel = (item, equipmentId) =>
+  item.label ||
+  EQUIPMENT_LABELS[item.id] ||
+  EQUIPMENT_LABELS[equipmentId] ||
+  `Equipment ${equipmentId}`;
+
 /**
  * Build charge line items for tax calculation.
  */
@@ -90,7 +105,7 @@ export function buildBookingLineItems({
       const flag = equipmentTaxFlags[equipmentId];
       lines.push({
         key: `equipment_${equipmentId}`,
-        label: item.label || `Equipment ${equipmentId}`,
+        label: resolveEquipmentLabel(item, equipmentId),
         amount: itemTotal,
         is_taxable: flag !== false,
       });

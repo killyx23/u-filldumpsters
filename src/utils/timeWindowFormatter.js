@@ -3,51 +3,78 @@
  * Standardizes time window formatting across the entire website
  */
 
-import { format, parseISO, isValid, addHours } from 'date-fns';
+import { format, parseISO, isValid, addHours, parse } from 'date-fns';
+
+/**
+ * Parse booking time slots stored as 24h (HH:mm / HH:mm:ss) or 12h (h:mm a).
+ * @param {string} timeString
+ * @returns {Date|null}
+ */
+export function parseBookingTimeToDate(timeString) {
+  if (!timeString || typeof timeString !== 'string') return null;
+  const trimmed = timeString.trim();
+  if (!trimmed) return null;
+
+  const ref = new Date(2000, 0, 1);
+
+  try {
+    const parsed24Sec = parse(trimmed, 'HH:mm:ss', ref);
+    if (isValid(parsed24Sec)) return parsed24Sec;
+  } catch (_) { /* continue */ }
+
+  try {
+    const parsed24 = parse(trimmed, 'HH:mm', ref);
+    if (isValid(parsed24) && !/\s*(AM|PM)/i.test(trimmed)) return parsed24;
+  } catch (_) { /* continue */ }
+
+  try {
+    const parsed12 = parse(trimmed, 'h:mm a', ref);
+    if (isValid(parsed12)) return parsed12;
+  } catch (_) { /* continue */ }
+
+  return null;
+}
 
 /**
  * Format time window for display
- * @param {string} timeString - Time string (HH:mm format)
+ * @param {string} timeString - Time string (24h HH:mm or 12h h:mm a)
  * @param {object} options - Formatting options
  * @param {boolean} options.isWindow - Whether to show as a 2-hour window
  * @param {boolean} options.isSelfService - Whether this is self-service (trailer)
+ * @param {boolean} options.isReturnBy - For self-service return/pickup-by line
  * @param {string} options.serviceType - Service type (window, hourly, etc.)
  * @returns {string} Formatted time window
  */
 export function formatTimeWindow(timeString, options = {}) {
-  const { isWindow = false, isSelfService = false, serviceType = '' } = options;
-  
-  if (!timeString || !/^\d{2}:\d{2}/.test(timeString)) {
+  const { isWindow = false, isSelfService = false, isReturnBy = false, serviceType = '' } = options;
+
+  if (!timeString) {
     return 'Time not specified';
   }
 
+  const date = parseBookingTimeToDate(timeString);
+  if (!date || !isValid(date)) {
+    return typeof timeString === 'string' ? timeString : 'Time not specified';
+  }
+
   try {
-    const [hours, minutes] = timeString.split(':');
-    const date = new Date();
-    date.setHours(parseInt(hours, 10));
-    date.setMinutes(parseInt(minutes || '0', 10));
-
-    if (!isValid(date)) {
-      return timeString;
-    }
-
-    // Self-service trailer: show "after 8:00 AM" or "by 10:00 PM"
     if (isSelfService) {
-      if (timeString.startsWith('08:00')) {
-        return `after ${format(date, 'h:mm a')}`;
-      }
-      if (timeString.startsWith('22:00') || timeString.startsWith('10:00')) {
+      const hour24 = date.getHours();
+      const minute = date.getMinutes();
+      if (isReturnBy || hour24 >= 22 || (hour24 === 23 && minute === 0)) {
         return `by ${format(date, 'h:mm a')}`;
       }
+      if (hour24 <= 8 || (hour24 === 6 && minute === 0)) {
+        return `after ${format(date, 'h:mm a')}`;
+      }
+      return format(date, 'h:mm a');
     }
 
-    // Window service or isWindow flag: show 2-hour window
     if (isWindow || serviceType === 'window' || serviceType === 'material_delivery') {
       const endTime = addHours(date, 2);
       return `${format(date, 'h:mm a')} - ${format(endTime, 'h:mm a')}`;
     }
 
-    // Default: show single time with AM/PM
     return format(date, 'h:mm a');
   } catch (e) {
     console.error('[timeWindowFormatter] Error formatting time:', e);
@@ -87,13 +114,12 @@ export function formatBookingDateTime(date, timeSlot, options = {}) {
  */
 export function shouldShowTimeWindow(plan, isDelivery = false) {
   if (!plan) return false;
-  
-  // Delivery services and window-based services show time windows
-  return isDelivery || 
-         plan.service_type === 'window' || 
+
+  return isDelivery ||
+         plan.service_type === 'window' ||
          plan.service_type === 'material_delivery' ||
-         plan.id === 1 || // Dumpster Rental (always delivery)
-         plan.id === 4;   // Dump Loader with Delivery
+         plan.id === 1 ||
+         plan.id === 4;
 }
 
 /**

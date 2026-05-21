@@ -228,7 +228,16 @@ const CheckoutForm = ({
 
   const getDisplayTime = (timeSlot, isDropOff) => {
     if (plan?.id === 2 && !deliveryService) {
-      return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
+      const fromAvailability = isDropOff
+        ? availabilityTimes.pickupStartTime
+        : availabilityTimes.returnByTime;
+      if (fromAvailability && fromAvailability !== 'Time not specified') {
+        return fromAvailability;
+      }
+      return formatTimeWindow(timeSlot, {
+        ...timeOptions,
+        isReturnBy: !isDropOff,
+      });
     }
     return formatTimeWindow(timeSlot, timeOptions);
   };
