@@ -9,8 +9,15 @@ import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
+import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 
-const AgreementText = ({ booking }) => {
+const LIABILITY_EQUIPMENT_DEFAULT =
+    'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
+
+const LIABILITY_EQUIPMENT_WITH_INSURANCE =
+    'Customer purchased optional Rental Insurance applicable to rented Equipment during the Rental Period. Subject to the terms, limitations, and exclusions of the Rental Agreement, purchased protection may apply a credit toward qualifying accidental damage to covered rental hardware as described in the agreement (including applicable per-incident limits). Customer remains fully responsible for any damage, loss, or theft not covered by the purchased protection and authorizes U-Fill Dumpsters LLC to charge the payment method on file for repair or replacement costs exceeding applicable coverage.';
+
+const AgreementText = ({ booking, hasInsurance }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
         ? `${booking.first_name} ${booking.last_name}` 
         : booking?.name;
@@ -19,11 +26,17 @@ const AgreementText = ({ booking }) => {
         <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
             <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
             <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
+            {hasInsurance && (
+                <p><strong>Rental Insurance Purchased:</strong> Customer elected and paid for optional Rental Insurance on this booking as part of the Rental Agreement.</p>
+            )}
             
             <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
-                <p><strong>Liability for Equipment:</strong> Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.</p>
+                <p><strong>Liability for Equipment:</strong> {hasInsurance ? LIABILITY_EQUIPMENT_WITH_INSURANCE : LIABILITY_EQUIPMENT_DEFAULT}</p>
                 <p className="mt-1"><strong>Prohibited Materials:</strong> Customer agrees not to place any hazardous materials (including paints, chemicals, oils, tires, batteries) in the equipment. Fees and penalties apply for violations.</p>
                 <p className="mt-1"><strong>Property Damage:</strong> Customer assumes all risk of damage to their property (driveways, lawns, etc.) from equipment placement. U-Fill Dumpsters LLC is not liable for such damages.</p>
+                {hasInsurance && (
+                    <p className="mt-1 text-gray-600">For complete insurance coverage details, limitations, and exclusions, refer to your customer portal or contact support.</p>
+                )}
             </div>
 
             <div className="flex items-center justify-between text-sm mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -109,6 +122,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
     const isDelivery = addons?.deliveryService || addons?.isDelivery;
     const coupon = addons?.coupon;
+    const hasInsurance = bookingHadInsurance(addons);
     
     const currentPlan = addons?.plan || plan;
     const serviceName = currentPlan.name;
@@ -608,10 +622,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             <footer className="text-xs text-gray-500 pt-4 mt-6" style={{ pageBreakInside: 'avoid' }}>
                 <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
                 {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver's license and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
-                {addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
+                {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
+                {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
                 {addons.addressVerificationSkipped && <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>}
-                <AgreementText booking={booking} />
+                <AgreementText booking={booking} hasInsurance={hasInsurance} />
                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
             </footer>
         </div>

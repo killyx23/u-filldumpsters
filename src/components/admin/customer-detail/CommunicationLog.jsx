@@ -8,7 +8,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import EmojiPicker from 'emoji-picker-react';
 import { format, parseISO } from 'date-fns';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
+import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 
 const CHAT_NOTE_SOURCES = new Set([
@@ -46,6 +48,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
     const fileInputRef = useRef(null);
 
     const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
+    const { isOtherUserTyping, setIsTyping, clearTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'admin');
 
     useEffect(() => {
         setNotes(initialNotes);
@@ -100,7 +103,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [feedItems]);
+    }, [feedItems, isOtherUserTyping]);
 
     useEffect(() => {
         const unreadIds = messages.filter((m) => m.sender_type === 'customer' && !m.is_read).map((m) => m.id);
@@ -118,6 +121,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
         try {
             await sendMessage(input.trim(), 'admin', attachment);
             setInput('');
+            clearTyping();
         } catch (error) {
             toast({ title: 'Send Failed', description: error.message, variant: 'destructive' });
         }
@@ -125,6 +129,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
 
     const handleInputChange = (e) => {
         setInput(e.target.value);
+        setIsTyping();
     };
 
     const handleFileUpload = async (e) => {
@@ -138,8 +143,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
             const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
             if (uploadError) throw uploadError;
 
-            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-            await handleSend({ url: publicUrl, name: file.name });
+            await handleSend({ path: filePath, name: file.name });
         } catch (error) {
             toast({ title: 'Attachment Failed', description: error.message, variant: 'destructive' });
         } finally {
@@ -157,6 +161,7 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
 
     const onEmojiClick = (emojiObject) => {
         setInput((prev) => prev + emojiObject.emoji);
+        setIsTyping();
     };
 
     return (
@@ -182,18 +187,21 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
                         <p>No messages yet. Start the conversation!</p>
                     </div>
                 ) : (
-                    feedItems.map((item) =>
-                        item.kind === 'chat' ? (
-                            <MessageBubble
-                                key={item.id}
-                                message={item.data}
-                                isCurrentUser={item.data.sender_type === 'admin'}
-                                senderName={customer.name}
-                            />
-                        ) : (
-                            <NoteFeedItem key={item.id} note={item.data} customerName={customer.name} />
-                        )
-                    )
+                    <>
+                        {feedItems.map((item) =>
+                            item.kind === 'chat' ? (
+                                <MessageBubble
+                                    key={item.id}
+                                    message={item.data}
+                                    isCurrentUser={item.data.sender_type === 'admin'}
+                                    senderName={customer.name}
+                                />
+                            ) : (
+                                <NoteFeedItem key={item.id} note={item.data} customerName={customer.name} />
+                            )
+                        )}
+                        <TypingIndicator isTyping={isOtherUserTyping} text={typingIndicatorText} />
+                    </>
                 )}
             </div>
 
