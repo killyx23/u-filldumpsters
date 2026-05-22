@@ -3,7 +3,7 @@ import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -127,6 +127,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         isSelfService: isSelfService,
         serviceType: currentPlan?.service_type
     };
+
+    const formatPlainBookingTime = (timeSlot) => {
+        const date = parseBookingTimeToDate(timeSlot);
+        return date && isValid(date) ? format(date, 'h:mm a') : 'Time not specified';
+    };
+    const pickupStartTime = formatPlainBookingTime(drop_off_time_slot);
+    const returnByTime = formatPlainBookingTime(pickup_time_slot);
 
     const displayName = (first_name && last_name) ? `${first_name} ${last_name}` : name;
     const fullAddress = street && city ? `${street}, ${city}, ${state} ${zip}` : "N/A";
@@ -375,7 +382,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
                 {isSelfService && !isCancelledAndRefunded && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
-                        <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
+                        <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Trailer Rental Instructions</h3>
                         {isPendingReview ? (
                             <p className="font-semibold text-orange-700">Your booking is currently under review. Pickup location and instructions will be provided once your booking is confirmed. Please check your Customer Portal for updates.</p>
                     ) : isPendingPayment ? (
@@ -385,9 +392,15 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         </p>
                         ) : (
                             <div className="text-sm text-gray-700 space-y-2">
-                                <p><strong>Pickup Location:</strong> Your rental trailer is scheduled for pickup at <span className="font-semibold">227 W. Casi Way, Saratoga Springs, UT 84045.</span></p>
-                                <p><strong>Pickup & Return Times:</strong> The rental is available for pickup starting at <span className="font-semibold">8:00 a.m.</span> on your scheduled pickup date. The trailer must be returned to the same location no later than <span className="font-semibold">10:00 p.m.</span> on the designated return date.</p>
-                                <p><strong>Cleaning Requirement:</strong> To ensure a smooth process for all our customers, the trailer must be returned clean and free of debris. Failure to do so may result in the assessment of cleaning fines. Thank you for your cooperation and your rental.</p>
+                                <p><strong>Pickup Location:</strong> Your rental trailer is scheduled for pickup on the south side of Saratoga Springs, UT 84045. The exact address and unlock code will be sent via text and email at least 12 hours before your scheduled pickup time. Please check our Customer Portal for additional details.</p>
+                                <div>
+                                    <p><strong>Pickup & Return Times</strong></p>
+                                    <p className="mt-1">Pickup: Available starting at <span className="font-semibold">{pickupStartTime}</span> on your scheduled pickup date.</p>
+                                    <p>Return: The trailer must be returned to the same location no later than <span className="font-semibold">{returnByTime}</span> on your designated return date.</p>
+                                    <p className="mt-1"><strong>Note:</strong> Please ensure the trailer is locked securely upon return to avoid late fees.</p>
+                                </div>
+                                <p><strong>Cleaning Requirement:</strong> To ensure a smooth process for all customers, the trailer must be returned clean and free of debris. Failure to do so will result in a cleaning fine.</p>
+                                <p>Thank you for your business and cooperation!</p>
                             </div>
                         )}
                     </section>

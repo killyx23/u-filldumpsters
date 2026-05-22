@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -290,6 +291,8 @@ export const AccessCodesPage = ({ customerData }) => {
       return;
     }
 
+    setRetryCount(0);
+
     try {
       setGeneratingPin(true);
 
@@ -300,7 +303,9 @@ export const AccessCodesPage = ({ customerData }) => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
       if (data?.success === false || !data?.pin) {
         throw new Error(data?.error || 'Failed to generate access PIN');
       }

@@ -1,7 +1,7 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
-import { formatBookingTime } from "../_shared/formatBookingTime.ts";
+import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -181,13 +181,39 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
   if (addons.drivewayProtection === "accept") {
     addonsHTML += `<li style="padding: 5px 0;">✓ Driveway Protection</li>`;
   }
+  const selfService = isTrailerSelfService(booking);
+  const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
+  const returnScheduleLabel = selfService ? "Return by:" : "Pickup:";
+  const pickupScheduleValue = selfService
+    ? `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
+    : `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}`;
+  const returnScheduleValue = selfService
+    ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
+    : `${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot)}`;
+
+  const pickupDateFormatted = formatDate(booking.drop_off_date);
+  const pickupStartTimeFormatted = formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false });
+  const returnDateFormatted = formatDate(booking.pickup_date);
+  const returnByTimePlain = formatPlainBookingTime(booking.pickup_time_slot);
+
   let nextStepsHTML = "";
-  if (serviceType === 'trailer_rental' || serviceName.toLowerCase().includes('dump loader') || serviceName.toLowerCase().includes('trailer')) {
+  if (selfService) {
+    nextStepsHTML = `
+      <li><strong>🔑 Access Codes:</strong> At least 12 hours before your scheduled pickup time, you will receive a text and email with the exact location address and unlock code.</li>
+      <li><strong>🗓️ Pickup:</strong> You can pick up the trailer at our location on the south side of Saratoga Springs on ${pickupDateFormatted} at ${pickupStartTimeFormatted}.</li>
+      <li><strong>🛻 Towing Requirements:</strong> Ensure your towing vehicle meets the minimum requirements. Your truck must have a 2-5/16 inch ball hitch.</li>
+      <li><strong>📖 Safety & Operation:</strong> Follow all safety and operating instructions. Detailed operating instructions and videos can be found in the Customer Portal.</li>
+      <li><strong>🪵 Usage:</strong> Fill the trailer at your convenience during your rental period.</li>
+      <li><strong>⏳ Return:</strong> Return the trailer by ${returnDateFormatted} at ${returnByTimePlain}.</li>
+      <li><strong>🔒 Drop-off & Security:</strong> Ensure the trailer is returned to the exact same location and is securely locked.</li>
+      <li><strong>🧹 Cleaning:</strong> Ensure the trailer is empty and clean before returning it to avoid cleaning fees.</li>
+     `;
+  } else if (serviceType === 'trailer_rental' || serviceName.toLowerCase().includes('dump loader') || serviceName.toLowerCase().includes('trailer')) {
     nextStepsHTML = `
       <li>Pick up the trailer at our location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}.</li>
       <li>Ensure your towing vehicle meets the minimum requirements (usually a 1/2-ton truck or larger with a 2" ball hitch).</li>
       <li>Fill the trailer at your convenience during the rental period.</li>
-      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}.</li>
+      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatPlainBookingTime(booking.pickup_time_slot)}.</li>
       <li>Make sure the trailer is empty and clean before returning.</li>
      `;
   } else {
@@ -260,12 +286,12 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
         
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
-            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Drop-off:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: false })}</td>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${pickupScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${pickupScheduleValue}</td>
           </tr>
           <tr>
-            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Pickup:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: true })}</td>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${returnScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${returnScheduleValue}</td>
           </tr>
         </table>
       </div>

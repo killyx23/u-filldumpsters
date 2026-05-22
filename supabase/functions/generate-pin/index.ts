@@ -2,6 +2,19 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { corsHeaders } from "./cors.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
+
+/** Statuses eligible for customer portal + daily pin jobs */
+const ELIGIBLE_BOOKING_STATUSES = [
+  "Confirmed",
+  "confirmed",
+  "Delivered",
+  "delivered",
+  "waiting_to_be_returned",
+  "Rescheduled",
+  "rescheduled",
+  "pending_verification",
+  "pending_review",
+];
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -318,14 +331,37 @@ Deno.serve(async (req)=>{
       }
     }
     if (callerType === "customer") {
-      const { data: customer } = await supabase.from("customers").select("id").eq("user_id", user.id).single();
-      if (!customer) {
+      const metadataCustomerId = user.user_metadata?.customer_db_id;
+      let customerId = null;
+
+      if (metadataCustomerId != null && metadataCustomerId !== "") {
+        const parsed = Number.parseInt(String(metadataCustomerId), 10);
+        if (Number.isFinite(parsed)) customerId = parsed;
+      }
+
+      if (!customerId) {
+        const { data: customer } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        customerId = customer?.id ?? null;
+      }
+
+      if (!customerId) {
         return jsonResponse({
           success: false,
           error: "Customer not found"
         }, 403);
       }
-      const { data: ownerCheck } = await supabase.from("bookings").select("id").eq("id", bookingId).eq("customer_id", customer.id).single();
+
+      const { data: ownerCheck } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("id", bookingId)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
       if (!ownerCheck) {
         return jsonResponse({
           success: false,
@@ -336,16 +372,28 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Fetch and validate booking
     // ----------------------------------------------------------------
-    const { data: booking, error: fetchError } = await supabase.from("bookings").select("*").eq("id", bookingId).eq("status", "Confirmed").is("pin_generated_at", null).single();
+    const { data: booking, error: fetchError } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .in("status", ELIGIBLE_BOOKING_STATUSES)
+      .single();
+
     if (fetchError || !booking) {
       return jsonResponse({
         success: false,
-        error: "Booking not found, not confirmed, or already has a PIN"
+        error: "Booking not found or not eligible for PIN generation"
       }, 404);
     }
-    // Guard: check rental_access_codes directly as a second layer
-    const { data: existingPin } = await supabase.from("rental_access_codes").select("id, access_pin").eq("order_id", bookingId).eq("status", "active").single();
-    if (existingPin) {
+
+    const { data: existingPin } = await supabase
+      .from("rental_access_codes")
+      .select("id, access_pin")
+      .eq("order_id", bookingId)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (existingPin?.access_pin) {
       return jsonResponse({
         success: false,
         error: "An active PIN already exists for this booking"
