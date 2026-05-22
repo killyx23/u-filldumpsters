@@ -8,6 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { showDirectionsMap } from '@/utils/bookingPickupWindow';
+import { PickupLocationSection } from '@/components/customer-portal/PickupLocationSection';
+import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectionsMap';
 
 const PORTAL_BOOKINGS_PATH = '/customer-portal?tab=bookings';
 
@@ -19,6 +23,7 @@ export const CustomerPortalBookingDetail = () => {
   const [loading, setLoading] = useState(true);
   const [distanceInfo, setDistanceInfo] = useState({ distance: 0, travelTime: 0, loading: true, error: null });
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+  const [businessAddress, setBusinessAddress] = useState(null);
 
   const fetchBookingAndDistance = async () => {
     const customerDbId = user?.user_metadata?.customer_db_id;
@@ -72,6 +77,37 @@ export const CustomerPortalBookingDetail = () => {
     if (id && user) fetchBookingAndDistance();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user]);
+
+  const isPickupService = booking
+    ? isCustomerPickupService(booking.plan, booking.addons)
+    : false;
+
+  const customerAddress = booking
+    ? (booking.delivery_address?.formatted_address ||
+        `${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`)
+    : '';
+
+  const shouldShowMap = booking && isPickupService && showDirectionsMap(booking);
+
+  useEffect(() => {
+    if (!shouldShowMap) {
+      setBusinessAddress(null);
+      return;
+    }
+
+    let cancelled = false;
+    getBusinessAddress()
+      .then((addr) => {
+        if (!cancelled) setBusinessAddress(addr);
+      })
+      .catch(() => {
+        if (!cancelled) setBusinessAddress(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldShowMap, booking?.id]);
 
   if (loading) {
     return (
@@ -154,14 +190,18 @@ export const CustomerPortalBookingDetail = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <p className="text-sm text-gray-400">Delivery Address</p>
+              <p className="text-sm text-gray-400 flex items-center">
+                <span aria-hidden className="mr-1">🏠</span>
+                {isPickupService ? 'Your Address' : 'Delivery Address'}
+              </p>
               <p className="text-white mt-1">
-                {booking.delivery_address?.formatted_address || `${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`}
+                {customerAddress || 'Not provided'}
               </p>
             </div>
             <div className="bg-black/20 p-3 rounded-lg border border-white/5">
                 <p className="text-sm text-gray-400 flex items-center mb-1">
-                    <Navigation className="mr-2 h-4 w-4 text-blue-400" /> Delivery Distance
+                    <Navigation className="mr-2 h-4 w-4 text-blue-400" />
+                    {isPickupService ? 'Pickup Distance' : 'Delivery Distance'}
                 </p>
                 {distanceInfo.loading ? (
                     <div className="flex items-center text-gray-300 text-sm">
@@ -182,13 +222,23 @@ export const CustomerPortalBookingDetail = () => {
                             )}
                         </div>
                         <p className="text-sm text-gray-400 mt-1">Est. Travel Time: {distanceInfo.travelTime} mins</p>
+                        {shouldShowMap && (
+                          <PickupDirectionsMap
+                            customerAddress={customerAddress}
+                            businessAddress={businessAddress}
+                          />
+                        )}
                     </div>
                 )}
             </div>
-            <div>
-              <p className="text-sm text-gray-400">Contact Details</p>
-              <p className="text-white mt-1">{booking.name} • {booking.phone}</p>
-            </div>
+            {isPickupService ? (
+              <PickupLocationSection booking={booking} />
+            ) : (
+              <div>
+                <p className="text-sm text-gray-400">Contact Details</p>
+                <p className="text-white mt-1">{booking.name} • {booking.phone}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
