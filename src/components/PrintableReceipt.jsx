@@ -105,7 +105,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return <div className="p-8">Loading receipt...</div>;
     }
 
-    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues } = booking;
+    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues, payment_delta_details, receipt_original_snapshot, receipt_status_history } = booking;
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
     const isDelivery = addons?.deliveryService || addons?.isDelivery;
     const coupon = addons?.coupon;
@@ -142,6 +142,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return 'Pending Manual Review';
     };
     const pendingReason = getPendingReason();
+    const isPendingPayment = bookingStatus === 'pending_payment';
+    const paymentDeltaAmount = Number(payment_delta_details?.amount_due || 0);
+    const paymentDeltaReason = payment_delta_details?.reason || '';
     
     const dropOff = parseISO(drop_off_date);
     const pickup = parseISO(pickup_date);
@@ -273,9 +276,38 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <p><span className="font-bold">Payment Date:</span> {format(parseISO(booking.created_at), 'PPP')}</p>
                         {isCancelledAndRefunded && <p className="text-red-600"><span className="font-bold">Refund Date:</span> {format(parseISO(refund_details.created_at), 'PPP')}</p>}
                         {isPendingReview && <p className="font-bold text-orange-600">Status: {pendingReason}</p>}
+                        {isPendingPayment && (
+                            <p className="font-bold text-red-600">
+                                Status: Pending Payment Adjustment
+                                {paymentDeltaAmount > 0 ? ` ($${paymentDeltaAmount.toFixed(2)})` : ''}
+                            </p>
+                        )}
                         {isRescheduled && <p className="font-bold text-blue-600 flex items-center justify-end"><Repeat className="mr-2 h-4 w-4"/> Status: Rescheduled</p>}
                     </div>
                 </section>
+
+                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0)) && (
+                    <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
+                        <h3 className="font-bold text-lg mb-2 text-blue-800">Receipt History</h3>
+                        {receipt_original_snapshot && (
+                            <p className="text-sm text-blue-900">
+                                Original receipt snapshot stored on {format(parseISO(receipt_original_snapshot.captured_at), 'PPP p')}
+                                {receipt_original_snapshot.status ? ` (status: ${receipt_original_snapshot.status})` : ''}.
+                            </p>
+                        )}
+                        {Array.isArray(receipt_status_history) && receipt_status_history.length > 0 && (
+                            <div className="mt-2 space-y-1 text-xs text-blue-900">
+                                {receipt_status_history.slice(-3).reverse().map((entry, idx) => (
+                                    <p key={idx}>
+                                        • {entry.at ? format(parseISO(entry.at), 'PPP p') : 'Timeline update'} — {entry.type || 'status_update'}
+                                        {entry.status ? ` (${entry.status})` : ''}
+                                        {entry.amount ? ` $${Number(entry.amount).toFixed(2)}` : ''}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+                    </section>
+                )}
                 
                 {/* QR Codes Section - For Dump Loader Trailer Rentals Only */}
                 {isDumpLoaderRental && !isCancelledAndRefunded && magicLinkUrl && (
@@ -346,6 +378,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
                         {isPendingReview ? (
                             <p className="font-semibold text-orange-700">Your booking is currently under review. Pickup location and instructions will be provided once your booking is confirmed. Please check your Customer Portal for updates.</p>
+                    ) : isPendingPayment ? (
+                        <p className="font-semibold text-red-700">
+                            Your booking is pending a payment adjustment{paymentDeltaAmount > 0 ? ` of $${paymentDeltaAmount.toFixed(2)}` : ''}.
+                            {paymentDeltaReason ? ` Reason: ${paymentDeltaReason}` : ''} Please check your Customer Portal messages for next steps.
+                        </p>
                         ) : (
                             <div className="text-sm text-gray-700 space-y-2">
                                 <p><strong>Pickup Location:</strong> Your rental trailer is scheduled for pickup at <span className="font-semibold">227 W. Casi Way, Saratoga Springs, UT 84045.</span></p>

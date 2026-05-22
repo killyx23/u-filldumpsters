@@ -20,6 +20,8 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -483,6 +485,11 @@ const CheckoutForm = ({
           <Lock className="h-3 w-3 mr-1.5 text-blue-400" /> 
           Secure 256-bit SSL Encrypted Payment
         </p>
+        <UiControlGuide
+          stepTitle="Payment"
+          entries={getBookingGuideEntries('payment', { isDeliveryService })}
+          className="mt-3 flex justify-end"
+        />
       </form>
     </div>
   );

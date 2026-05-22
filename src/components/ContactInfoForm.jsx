@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from '@/components/ui/use-toast';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack }) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
@@ -161,6 +163,11 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                             <Button type="submit" className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50">
                                 Continue to Terms & Conditions <ArrowRight className="ml-2 h-5 w-5" />
                             </Button>
+                            <UiControlGuide
+                                stepTitle="Contact Info"
+                                entries={getBookingGuideEntries('contact')}
+                                className="mt-3 flex justify-end"
+                            />
                         </div>
                     </form>
                 </div>
