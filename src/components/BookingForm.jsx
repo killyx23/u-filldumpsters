@@ -18,6 +18,8 @@ import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
 
@@ -871,8 +873,16 @@ export const BookingForm = ({
             <div className="flex items-center justify-between mb-1">
               <h4 className="font-bold text-white text-base">Service Terms</h4>
               <span 
+                role="button"
+                tabIndex={0}
                 onClick={toggleServiceTerms}
-                className="text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleServiceTerms();
+                  }
+                }}
+                className="cursor-pointer text-sm font-medium underline-offset-2 hover:underline animate-see-more-pulse"
               >
                 {isServiceTermsExpanded ? 'see less' : 'see more'}
               </span>
@@ -1283,6 +1293,11 @@ export const BookingForm = ({
               <Button type="submit" disabled={!isFormValid} className="w-full py-4 text-lg font-semibold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-50 mt-6 shadow-lg shadow-green-900/50 hover:from-green-400 hover:to-emerald-500 transition-all">
                 Choose Add-ons <ArrowRight className="ml-2" />
               </Button>
+              <UiControlGuide
+                stepTitle="Booking Details"
+                entries={getBookingGuideEntries('details', { planId: plan?.id, isDelivery })}
+                className="mt-3 flex justify-end"
+              />
             </motion.div>
           </form>
         </div>

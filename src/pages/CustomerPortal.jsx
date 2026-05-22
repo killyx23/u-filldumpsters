@@ -23,6 +23,8 @@ import { VerificationManager } from '@/components/customer-portal/VerificationMa
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
 import AccessCodesPage from '@/pages/AccessCodesPage';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getPortalGuideEntries } from '@/config/uiControlGuideEntries';
 import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoyaltyBadge';
 import { PortalLoyaltySummary } from '@/components/customer-portal/PortalLoyaltySummary';
 import { PortalReferralsSection } from '@/components/customer-portal/PortalReferralsSection';
@@ -510,7 +512,8 @@ export const CustomerPortal = () => {
                             bookings={bookings} 
                             customerData={customerData} 
                             lastUpdated={lastUpdated} 
-                            onRefresh={() => fetchData(true)} 
+                            onRefresh={() => fetchData(true)}
+                            onNavigateToTab={handleTabChange}
                         />
 
                         {/* Quick Reorder Section */}
@@ -620,6 +623,12 @@ export const CustomerPortal = () => {
                         onRefreshData={() => fetchData(false)} 
                     />
                 )}
+                <UiControlGuide
+                    variant="compact"
+                    stepTitle="Customer Portal"
+                    entries={getPortalGuideEntries()}
+                    className="mt-6 flex justify-end"
+                />
             </div>
 
             {selectedBookingForCancel && (

@@ -5,10 +5,20 @@ import { Check, CheckCircle2, Clock, FileText, AlertCircle } from 'lucide-react'
 export const MessageBubble = ({ message, isCurrentUser, senderName }) => {
     const isTemp = message.id.toString().startsWith('temp_');
     const isError = message.status === 'error';
+    const severity = message.message_severity || message.message_context?.severity || null;
+
+    const severityStyles = {
+        success: 'bg-green-700 text-green-50 border border-green-400/40',
+        warning: 'bg-yellow-700 text-yellow-50 border border-yellow-300/50',
+        urgent: 'bg-red-700 text-red-50 border border-red-300/60',
+        info: 'bg-indigo-700 text-indigo-50 border border-indigo-300/40',
+    };
     
     const bubbleClasses = isCurrentUser
         ? 'bg-blue-600 text-white rounded-br-none'
-        : 'bg-gray-700 text-white rounded-bl-none';
+        : severity && severityStyles[severity]
+            ? `${severityStyles[severity]} rounded-bl-none`
+            : 'bg-gray-700 text-white rounded-bl-none';
         
     const alignClasses = isCurrentUser ? 'items-end' : 'items-start';
 
@@ -20,6 +30,11 @@ export const MessageBubble = ({ message, isCurrentUser, senderName }) => {
                 </p>
                 {message.message_content && (
                     <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.message_content}</p>
+                )}
+                {!isCurrentUser && severity && (
+                    <p className="text-[10px] uppercase tracking-wider mt-2 opacity-80 font-semibold">
+                        {severity}
+                    </p>
                 )}
                 {message.attachment_url && (
                     <a href={message.attachment_url} target="_blank" rel="noopener noreferrer" className="mt-2 block bg-black/20 p-2 rounded-lg flex items-center gap-2 hover:bg-black/40 transition-colors">

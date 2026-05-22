@@ -6,6 +6,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertTriangle, ClipboardSignature as Signature, ArrowLeft, Loader2, ArrowRight } from 'lucide-react';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 const AgreementText = () => (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
@@ -252,6 +254,11 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                             </div>
                         )}
                     </Button>
+                    <UiControlGuide
+                        stepTitle="Rental Agreement"
+                        entries={getBookingGuideEntries('agreement')}
+                        className="mt-3 flex justify-end"
+                    />
                 </div>
             </div>
         </motion.div>

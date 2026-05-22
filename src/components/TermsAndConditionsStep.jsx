@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, FileText, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 const TermSection = ({
   id,
   title,
@@ -155,6 +157,11 @@ export const TermsAndConditionsStep = ({
                     Accept All & Continue
                 </Button>
             </div>
+            <UiControlGuide
+                stepTitle="Terms & Conditions"
+                entries={getBookingGuideEntries('terms')}
+                className="mt-3 flex justify-end"
+            />
         </div>
     </motion.div>;
 };

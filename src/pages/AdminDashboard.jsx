@@ -306,7 +306,7 @@ export const AdminDashboard = () => {
                                     </Tabs>
                                 </div>
                             </TabsContent>
-                            <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
+                            <TabsContent value="bookings"><BookingsManager initialBookings={bookings} adminEmail={user?.email} onBookingsChange={fetchDashboardData} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>
                             <TabsContent value="pricing"><PricingManager /></TabsContent>
