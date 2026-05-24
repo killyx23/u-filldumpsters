@@ -1,6 +1,7 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import Stripe from "https://esm.sh/stripe@14.14.0?target=deno";
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', {

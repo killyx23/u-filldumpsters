@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 import { differenceInCalendarDays } from 'npm:date-fns@2.30.0';
 // Helper to calculate price based on service and duration
 const calculatePrice = (plan, startDate, endDate, isDelivery)=>{
@@ -22,6 +22,7 @@ const calculatePrice = (plan, startDate, endDate, isDelivery)=>{
   return total;
 };
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders

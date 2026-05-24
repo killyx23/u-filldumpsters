@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { Stripe } from 'npm:stripe@15.8.0';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -53,6 +53,7 @@ async function sendChatMessage(params: {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
