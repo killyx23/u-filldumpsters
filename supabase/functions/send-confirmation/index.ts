@@ -1,6 +1,7 @@
 // send-confirmation/index.ts
 // Update: remove the secondary receipt link; keep a single portal link or a single direct receipt link (if provided)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.1';
+import { getCorsHeaders } from './cors.ts';
 const BREVO_API_KEY = (Deno.env.get('BREVO_API_KEY') ?? '').trim();
 const FROM_EMAIL = (Deno.env.get('BREVO_FROM_EMAIL') ?? '').trim();
 // Optional URLs
@@ -8,9 +9,17 @@ const PORTAL_URL = (Deno.env.get('PORTAL_URL') ?? 'https://www.u-filldumpsters.c
 const RECEIPT_URL = (Deno.env.get('RECEIPT_URL') ?? 'https://www.u-filldumpsters.com/receipt').trim();
 const MAX_ATTACHMENT_BASE64_BYTES = 8 * 1024 * 1024; // 8MB
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
+  const json = (obj, status = 200) => new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json'
+    }
+  });
   try {
     if (req.method === 'OPTIONS') return new Response('ok', {
-      headers: corsHeaders()
+      headers: corsHeaders
     });
     if (req.method !== 'POST') {
       return json({
@@ -149,20 +158,6 @@ Deno.serve(async (req)=>{
   }
 });
 // Helpers
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Content-Type': 'application/json'
-  };
-}
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: corsHeaders()
-  });
-}
 async function tryGeneratePdf(admin, bookingId) {
   const pdfDiagnostics = [];
   let pdfBase64 = null;

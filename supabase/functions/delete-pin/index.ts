@@ -1,9 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
+function makeJsonResponse(corsHeaders) {
+  return (body, status = 200) => new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
@@ -88,6 +88,8 @@ async function deletePinFromLock(accessToken, lockId, bridgeId, pin) {
   };
 }
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
+  const jsonResponse = makeJsonResponse(corsHeaders);
   if (req.method === "OPTIONS") return new Response(null, {
     headers: corsHeaders
   });

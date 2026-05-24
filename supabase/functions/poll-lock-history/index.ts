@@ -1,11 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.30.0';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 const IGLOOHOME_API_KEY = Deno.env.get('IGLOOHOME_API_KEY') || 'REDACTED_IGLOOHOME_SECRET';
 const LOCK_ID = Deno.env.get('IGLOOHOME_LOCK_ID') || 'REDACTED_LOCK_ID';
 const IGLOOHOME_API_BASE = 'https://connect.igloohome.co/v2';
 const BREVO_API_KEY = Deno.env.get('BREVO_API_KEY');
 const BREVO_FROM_EMAIL = Deno.env.get('BREVO_FROM_EMAIL');
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders

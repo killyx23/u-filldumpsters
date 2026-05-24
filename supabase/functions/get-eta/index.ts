@@ -1,7 +1,8 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 const GOOGLE_MAPS_API_KEY = Deno.env.get("GOOGLE_MAPS_API_KEY");
 const ORIGIN_ADDRESS = "227 West Casi Way, Saratoga Springs, Utah 84045";
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders

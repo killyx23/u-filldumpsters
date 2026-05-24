@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -24,6 +24,7 @@ function isAdminUser(user: { user_metadata?: Record<string, unknown>; app_metada
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

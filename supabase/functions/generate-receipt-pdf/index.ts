@@ -1,9 +1,10 @@
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 // This function is now a simple pass-through. 
 // The actual HTML generation and PDF conversion logic has been moved to 'get-receipt-pdf'
 // to simplify the function chain and reduce potential points of failure.
 // This function can be deprecated or repurposed later if needed.
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders

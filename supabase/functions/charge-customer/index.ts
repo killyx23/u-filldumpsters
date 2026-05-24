@@ -1,11 +1,7 @@
+import { getCorsHeaders } from "./cors.ts";
 // charge-customer Edge Function (auto-collection fix)
 // Change: Do not call invoices.pay on charge_automatically invoices.
 // After finalize, poll once to confirm auto-charge and persist payment refs.
-export const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
-};
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
@@ -167,6 +163,7 @@ async function handleRefund({ bookingId, amount, reason, paymentIntentId, charge
   };
 }
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", {
     headers: corsHeaders
   });
