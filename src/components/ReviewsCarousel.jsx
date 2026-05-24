@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
+import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
+import { reviewNeedsExpand } from '@/utils/reviewDisplayHelper';
 
 const StarRating = ({ rating }) => (
     <div className="flex">
@@ -22,8 +25,10 @@ const ReviewCard = ({ review, onReadMore }) => {
     // Safely access nested properties to prevent crashes
     const isDeliveryTrailer = review.bookings?.plan?.id === 2 && review.bookings?.addons?.isDelivery;
     const serviceName = review.bookings?.plan?.name ? (isDeliveryTrailer ? 'Dump Loader Trailer Rental Service with Delivery' : review.bookings.plan.name) : 'Service';
-    const isLongReview = review.content.length > 120;
     const customerName = review.customers?.name || 'Valued Customer';
+    const hasMedia = review.image_urls?.length > 0 || review.video_url;
+    const needsExpand = reviewNeedsExpand(review);
+    const displayTitle = review.title || 'Great Service!';
 
     return (
         <motion.div
@@ -41,11 +46,27 @@ const ReviewCard = ({ review, onReadMore }) => {
                 <StarRating rating={review.rating} />
                 <p className="text-sm text-blue-200">{new Date(review.created_at).toLocaleDateString()}</p>
             </div>
-            <h4 className="text-lg font-bold text-white mb-2 truncate">{review.title || 'Great Service!'}</h4>
+            <h4
+                className="text-lg font-bold text-white mb-2 line-clamp-2"
+                title={displayTitle}
+            >
+                {displayTitle}
+            </h4>
             <p className="text-blue-100 text-sm flex-grow line-clamp-3">"{review.content}"</p>
+            {hasMedia && (
+                <ReviewMediaDisplay
+                    imageUrls={review.image_urls}
+                    videoUrl={review.video_url}
+                    maxImages={3}
+                    className="mt-3"
+                    imageClassName="h-14 w-14 rounded-md object-cover border border-white/20"
+                    videoClassName="w-full max-h-28 rounded-md border border-white/20"
+                />
+            )}
+            <ReviewAdminResponse review={review} />
             <div className="flex justify-between items-end mt-4">
                 <p className="text-right font-semibold text-white">- {customerName}</p>
-                {isLongReview && (
+                {needsExpand && (
                     <Button variant="link" size="sm" className="p-0 h-auto text-yellow-400" onClick={() => onReadMore(review)}>
                         Read More
                     </Button>
@@ -189,7 +210,7 @@ export const ReviewsCarousel = () => {
             
             {selectedReview && (
                 <Dialog open={!!selectedReview} onOpenChange={() => setSelectedReview(null)}>
-                    <DialogContent>
+                    <DialogContent className="max-w-2xl">
                         <DialogHeader>
                             <DialogTitle>{selectedReview.title || 'A Great Experience'}</DialogTitle>
                             <DialogDescription className="flex flex-col gap-2">
@@ -205,6 +226,15 @@ export const ReviewsCarousel = () => {
                         </DialogHeader>
                         <ScrollArea className="max-h-[60vh] pr-4">
                             <p className="text-blue-100 whitespace-pre-wrap">{selectedReview.content}</p>
+                            <ReviewMediaDisplay
+                                imageUrls={selectedReview.image_urls}
+                                videoUrl={selectedReview.video_url}
+                                maxImages={12}
+                                className="mt-4"
+                                imageClassName="h-28 w-28 rounded-md object-cover border border-white/20"
+                                videoClassName="w-full max-h-64 rounded-md border border-white/20"
+                            />
+                            <ReviewAdminResponse review={selectedReview} className="mt-4" />
                         </ScrollArea>
                     </DialogContent>
                 </Dialog>

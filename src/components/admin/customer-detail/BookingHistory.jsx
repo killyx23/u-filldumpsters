@@ -7,7 +7,7 @@ import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPin, Clock } from 'lucide-react';
-import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
+import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 
 const DetailCard = ({ icon, title, children }) => (
@@ -51,7 +51,7 @@ const DistanceWarning = ({ booking, customer }) => {
     );
 };
 
-const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted }) => {
+const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
     const [isSending, setIsSending] = useState(false);
     const receiptRef = useRef();
     
@@ -121,18 +121,23 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                 <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleResendConfirmation(booking)} disabled={isSending === booking.id}>
                     {isSending === booking.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Send className="mr-2 h-4 w-4"/>} Resend
                 </Button>
-                <SecureDeleteDialog bookingId={booking.id} onDeleted={onBookingDeleted} />
+                <BookingRemovalDialog
+                    booking={booking}
+                    adminEmail={adminEmail}
+                    onComplete={onBookingDeleted}
+                    onHardDeleted={onBookingDeleted}
+                />
             </div>
         </div>
     );
 }
 
-export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted }) => {
+export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
     return (
         <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History">
             <div className="space-y-4">
                 {bookings.length > 0 ? bookings.map(booking => (
-                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} />
+                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} adminEmail={adminEmail} />
                 )) : <p className="text-center text-blue-200 py-8">This customer has no booking history.</p>}
             </div>
         </DetailCard>

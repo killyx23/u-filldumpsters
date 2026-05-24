@@ -20,6 +20,8 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -483,6 +485,11 @@ const CheckoutForm = ({
           <Lock className="h-3 w-3 mr-1.5 text-blue-400" /> 
           Secure 256-bit SSL Encrypted Payment
         </p>
+        <UiControlGuide
+          stepTitle="Payment"
+          entries={getBookingGuideEntries('payment', { isDeliveryService })}
+          className="mt-3 flex justify-end"
+        />
       </form>
     </div>
   );
@@ -628,7 +635,8 @@ export const PaymentPage = ({ onBack }) => {
 
       try {
         const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
-        const isUnverifiedDelivery = pendingData.delivery_address && 
+        const driverVerificationSkipped = Boolean(pendingData.addons_data?.wasVerificationSkipped);
+        const isUnverifiedDelivery = pendingData.delivery_address &&
                                      !pendingData.delivery_address.isVerified;
 
         const bookingPayload = {
@@ -654,10 +662,11 @@ export const PaymentPage = ({ onBack }) => {
           tax_amount: calcResult.tax,
           tax_rate_used: calcResult.taxRate,
           status: 'pending_payment',
-          was_verification_skipped: isUnverifiedDelivery,
+          was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
           addons: {
             ...pendingData.addons_data,
+            verificationSkipped: driverVerificationSkipped,
             isDelivery: pendingData.delivery_service,
             taxableSubtotal: calcResult.taxableSubtotal,
             nonTaxableSubtotal: calcResult.nonTaxableSubtotal,

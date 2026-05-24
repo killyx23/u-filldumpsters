@@ -13,6 +13,8 @@ import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
@@ -884,6 +886,11 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                         </AnimatePresence>
                     </div>
                 </div>
+                <UiControlGuide
+                    stepTitle="Verify Email"
+                    entries={getBookingGuideEntries('email')}
+                    className="mt-6 flex justify-end"
+                />
             </div>
         </motion.div>
     );

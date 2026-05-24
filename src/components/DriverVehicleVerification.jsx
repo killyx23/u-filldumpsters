@@ -9,6 +9,8 @@ import { toast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { uploadVerificationImage, saveVerificationDocumentToDb, updateVerificationStatus, getVerificationDocumentsByCustomerId } from '@/utils/verificationImageHelper';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 const FilePreview = ({ file, url, onRemove }) => {
     if (!file && !url) return null;
@@ -354,6 +356,11 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                             {isUploading ? <Loader2 className="mr-2 h-5 w-5 animate-spin"/> : <>Submit & Continue <ArrowRight className="ml-2 h-5 w-5"/></>}
                         </Button>
                     </div>
+                    <UiControlGuide
+                        stepTitle="Driver & Vehicle Verification"
+                        entries={getBookingGuideEntries('verification')}
+                        className="mt-4 flex justify-end"
+                    />
                 </div>
             </motion.div>
         </TooltipProvider>

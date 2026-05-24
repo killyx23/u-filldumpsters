@@ -21,18 +21,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format, parseISO } from 'date-fns';
 import { BookingDetails } from './BookingDetails';
 import { BookingEditForm } from './BookingEditForm';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { BookingRemovalDialog } from './BookingRemovalDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { expireActiveRentalAccessCodesForOrder, shouldDeletePinForStatus } from '@/utils/bookingPinReinstate';
 
-export const BookingsManager = ({ initialBookings }) => {
+export const BookingsManager = ({ initialBookings, adminEmail, onBookingsChange }) => {
     const [bookings, setBookings] = useState(initialBookings);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [selectedBooking, setSelectedBooking] = useState(null);
     const [editedBooking, setEditedBooking] = useState(null);
     const [isEditMode, setIsEditMode] = useState(false);
-    const [isDeleteDialogOpen, setIsDeleteDialogOpne] = useState(false);
-    const [bookingToDelete, setBookingToDelete] = useState(null);
+    const [bookingForRemoval, setBookingForRemoval] = useState(null);
 
     React.useEffect(() => {
         setBookings(initialBookings);
@@ -101,29 +101,19 @@ export const BookingsManager = ({ initialBookings }) => {
 
     const handleDeleteClick = (booking, e) => {
         e.stopPropagation();
-        setBookingToDelete(booking);
-        setIsDeleteDialogOpne(true);
+        setBookingForRemoval(booking);
     };
 
-    const confirmDelete = async () => {
-        if (!bookingToDelete) return;
-
-        try {
-            const { error } = await supabase
-                .from('bookings')
-                .delete()
-                .eq('id', bookingToDelete.id);
-
-            if (error) throw error;
-
-            setBookings(prev => prev.filter(b => b.id !== bookingToDelete.id));
-            toast({ title: 'Success', description: 'Booking deleted successfully' });
-        } catch (error) {
-            toast({ title: 'Error', description: error.message, variant: 'destructive' });
-        } finally {
-            setIsDeleteDialogOpne(false);
-            setBookingToDelete(null);
+    const handleRemovalComplete = (result) => {
+        if (result?.action === 'deleted') {
+            setBookings(prev => prev.filter(b => b.id !== result.bookingId));
+        } else if (result?.action === 'cancelled' || result?.action === 'rescheduled') {
+            setBookings(prev => prev.map(b =>
+                b.id === result.bookingId ? { ...b, status: result.action === 'cancelled' ? 'Cancelled' : 'Rescheduled' } : b
+            ));
         }
+        setBookingForRemoval(null);
+        onBookingsChange?.(false);
     };
 
     const filteredBookings = useMemo(() => {
@@ -184,6 +174,9 @@ export const BookingsManager = ({ initialBookings }) => {
         if (booking.status === 'Cancelled') {
             return <span className="text-red-400 bg-red-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Cancelled</span>;
         }
+        if (booking.status === 'Rescheduled') {
+            return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Rescheduled</span>;
+        }
         return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">{booking.status}</span>;
     };
 
@@ -214,6 +207,7 @@ export const BookingsManager = ({ initialBookings }) => {
                             <SelectItem value="Delivered">Active (Delivered)</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
                             <SelectItem value="Cancelled">Cancelled</SelectItem>
+                            <SelectItem value="Rescheduled">Rescheduled</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -344,23 +338,22 @@ export const BookingsManager = ({ initialBookings }) => {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpne}>
-                <DialogContent className="bg-gray-900 border-red-500 text-white">
-                    <DialogHeader>
-                        <DialogTitle className="text-red-500 flex items-center">
-                            <AlertTriangle className="mr-2 h-5 w-5" />
-                            Confirm Deletion
-                        </DialogTitle>
-                        <DialogDescription className="text-gray-300">
-                            Are you sure you want to permanently delete Booking #{bookingToDelete?.id}? This action cannot be undone and will remove all associated records including payment history and customer notes tied specifically to this booking.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="ghost" onClick={() => setIsDeleteDialogOpne(false)}>Cancel</Button>
-                        <Button variant="destructive" onClick={confirmDelete}>Yes, Delete Booking</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            {bookingForRemoval && (
+                <BookingRemovalDialog
+                    booking={bookingForRemoval}
+                    adminEmail={adminEmail}
+                    open={true}
+                    onOpenChange={(isOpen) => { if (!isOpen) setBookingForRemoval(null); }}
+                    onComplete={(result) => {
+                        handleRemovalComplete(result);
+                        setBookingForRemoval(null);
+                    }}
+                    onHardDeleted={(id) => {
+                        handleRemovalComplete({ action: 'deleted', bookingId: id });
+                        setBookingForRemoval(null);
+                    }}
+                />
+            )}
         </div>
     );
 };
