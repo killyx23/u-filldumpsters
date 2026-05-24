@@ -64,3 +64,15 @@ export function formatBookingTime(
 
   return formatted;
 }
+
+/** 12-hour time only (no "after" / "by" prefix) for copy that already includes those words. */
+export function formatPlainBookingTime(timeString: string): string {
+  if (!timeString) return "N/A";
+  const parsed = parseBookingTimeToDate(timeString);
+  if (!parsed) return timeString;
+  return parsed.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}

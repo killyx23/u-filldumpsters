@@ -1,43 +1,127 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { MessageSquare, Loader2, Send, Paperclip, Smile } from 'lucide-react';
+import { MessageSquare, Loader2, Send, Paperclip, Smile, BookOpen, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import EmojiPicker from 'emoji-picker-react';
+import { format, parseISO } from 'date-fns';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
+import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 
-export const CommunicationLog = ({ customer }) => {
+const CHAT_NOTE_SOURCES = new Set([
+    'Verification Skip Reason',
+    'Change Request',
+    'Booking Special Instructions',
+    'Booking Cancellation & Refund',
+]);
+
+const NoteFeedItem = ({ note, customerName }) => (
+    <div className={`mb-4 p-4 rounded-lg ${note.is_read ? 'bg-white/5' : 'bg-yellow-900/30 border border-yellow-500/50'}`}>
+        <div className="flex items-center gap-2 mb-2">
+            <BookOpen className="h-4 w-4 text-yellow-400" />
+            <span className="font-semibold text-yellow-300 text-sm">{note.source}</span>
+            <span className="text-xs text-gray-400 flex items-center ml-auto">
+                <Clock className="h-3 w-3 mr-1" />
+                {format(parseISO(note.created_at), 'MMM d, yyyy @ h:mm a')}
+            </span>
+        </div>
+        <p className="text-white whitespace-pre-wrap">{note.content}</p>
+        {note.booking_id && (
+            <p className="text-xs text-gray-500 mt-2">Related to Booking #{note.booking_id}</p>
+        )}
+        {!note.is_read && (
+            <p className="text-xs text-yellow-400 mt-2">From {customerName} — needs review</p>
+        )}
+    </div>
+);
+
+export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
     const [input, setInput] = useState('');
     const [isUploading, setIsUploading] = useState(false);
+    const [notes, setNotes] = useState(initialNotes);
     const chatContainerRef = useRef(null);
     const fileInputRef = useRef(null);
 
     const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
+    const { isOtherUserTyping, setIsTyping, clearTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'admin');
 
-    // Auto-scroll to bottom
+    useEffect(() => {
+        setNotes(initialNotes);
+    }, [initialNotes]);
+
+    const relevantNotes = useMemo(
+        () => notes.filter((note) => CHAT_NOTE_SOURCES.has(note.source)),
+        [notes]
+    );
+
+    const feedItems = useMemo(() => {
+        const chatItems = messages.map((msg) => ({
+            kind: 'chat',
+            id: `chat-${msg.id}`,
+            created_at: msg.created_at,
+            data: msg,
+        }));
+        const noteItems = relevantNotes.map((note) => ({
+            kind: 'note',
+            id: `note-${note.id}`,
+            created_at: note.created_at,
+            data: note,
+        }));
+        return [...chatItems, ...noteItems].sort(
+            (a, b) => new Date(a.created_at) - new Date(b.created_at)
+        );
+    }, [messages, relevantNotes]);
+
+    const markNotesAsRead = useCallback(async () => {
+        const unreadNoteIds = relevantNotes.filter((note) => !note.is_read).map((note) => note.id);
+        if (unreadNoteIds.length === 0) return;
+
+        const { error } = await supabase
+            .from('customer_notes')
+            .update({ is_read: true })
+            .in('id', unreadNoteIds);
+
+        if (error) {
+            console.error('Failed to mark notes as read:', error);
+            return;
+        }
+
+        setNotes((prev) =>
+            prev.map((note) =>
+                unreadNoteIds.includes(note.id) ? { ...note, is_read: true } : note
+            )
+        );
+        onUpdate?.();
+    }, [relevantNotes, onUpdate]);
+
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messages]);
+    }, [feedItems, isOtherUserTyping]);
 
-    // Mark unread messages from customer as read when viewing them
     useEffect(() => {
-        const unreadIds = messages.filter(m => m.sender_type === 'customer' && !m.is_read).map(m => m.id);
+        const unreadIds = messages.filter((m) => m.sender_type === 'customer' && !m.is_read).map((m) => m.id);
         if (unreadIds.length > 0) {
             markAsRead(unreadIds);
         }
     }, [messages, markAsRead]);
+
+    useEffect(() => {
+        markNotesAsRead();
+    }, [markNotesAsRead]);
 
     const handleSend = async (attachment = null) => {
         if (!input.trim() && !attachment) return;
         try {
             await sendMessage(input.trim(), 'admin', attachment);
             setInput('');
+            clearTyping();
         } catch (error) {
             toast({ title: 'Send Failed', description: error.message, variant: 'destructive' });
         }
@@ -45,6 +129,7 @@ export const CommunicationLog = ({ customer }) => {
 
     const handleInputChange = (e) => {
         setInput(e.target.value);
+        setIsTyping();
     };
 
     const handleFileUpload = async (e) => {
@@ -53,15 +138,14 @@ export const CommunicationLog = ({ customer }) => {
 
         setIsUploading(true);
         const filePath = `chat-attachments/${customer.id}/${Date.now()}-${file.name}`;
-        
+
         try {
             const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
             if (uploadError) throw uploadError;
 
-            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-            await handleSend({ url: publicUrl, name: file.name });
+            await handleSend({ path: filePath, name: file.name });
         } catch (error) {
-            toast({ title: "Attachment Failed", description: error.message, variant: "destructive" });
+            toast({ title: 'Attachment Failed', description: error.message, variant: 'destructive' });
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -76,7 +160,8 @@ export const CommunicationLog = ({ customer }) => {
     };
 
     const onEmojiClick = (emojiObject) => {
-        setInput(prev => prev + emojiObject.emoji);
+        setInput((prev) => prev + emojiObject.emoji);
+        setIsTyping();
     };
 
     return (
@@ -92,24 +177,31 @@ export const CommunicationLog = ({ customer }) => {
             </header>
 
             <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto chat-scroll-container">
-                {isLoading && messages.length === 0 ? (
+                {isLoading && feedItems.length === 0 ? (
                     <div className="flex justify-center items-center h-full">
                         <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
                     </div>
-                ) : messages.length === 0 ? (
+                ) : feedItems.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3">
                         <MessageSquare className="h-12 w-12 opacity-20" />
                         <p>No messages yet. Start the conversation!</p>
                     </div>
                 ) : (
-                    messages.map((msg) => (
-                        <MessageBubble 
-                            key={msg.id} 
-                            message={msg} 
-                            isCurrentUser={msg.sender_type === 'admin'} 
-                            senderName={customer.name} 
-                        />
-                    ))
+                    <>
+                        {feedItems.map((item) =>
+                            item.kind === 'chat' ? (
+                                <MessageBubble
+                                    key={item.id}
+                                    message={item.data}
+                                    isCurrentUser={item.data.sender_type === 'admin'}
+                                    senderName={customer.name}
+                                />
+                            ) : (
+                                <NoteFeedItem key={item.id} note={item.data} customerName={customer.name} />
+                            )
+                        )}
+                        <TypingIndicator isTyping={isOtherUserTyping} text={typingIndicatorText} />
+                    </>
                 )}
             </div>
 

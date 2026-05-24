@@ -12,6 +12,8 @@ import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCateg
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 export const OrderSummary = ({
     plan,
@@ -590,6 +592,11 @@ export const OrderSummary = ({
                     </>
                 )}
             </Button>
+            <UiControlGuide
+                stepTitle="Add-ons"
+                entries={getBookingGuideEntries('addons')}
+                className="mt-3 flex justify-end"
+            />
         </motion.div>
     );
 };

@@ -13,6 +13,8 @@ import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -468,6 +470,11 @@ export const BookingSummaryReview = ({
                         >
                             Continue to Contact Info <ArrowRight className="ml-2 h-5 w-5" />
                         </Button>
+                        <UiControlGuide
+                            stepTitle="Review"
+                            entries={getBookingGuideEntries('review')}
+                            className="mt-3 flex justify-end"
+                        />
                     </div>
                 </div>
             </div>

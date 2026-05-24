@@ -18,8 +18,11 @@ import { CustomerVerification } from './CustomerVerification';
 import { CustomerProfileHeader } from './CustomerProfileHeader';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { format, parseISO } from 'date-fns';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
 
 export const CustomerDetailView = () => {
+    const { user } = useAuth();
     const { customerId } = useParams();
     const id = customerId;
     const [searchParams, setSearchParams] = useSearchParams();
@@ -151,14 +154,16 @@ export const CustomerDetailView = () => {
     };
 
 
-    const { activeBookings, completedBookings, verificationBookings, cancelledBookings, pendingAddressBookings } = useMemo(() => {
-        if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], pendingAddressBookings: [] };
+    const { activeBookings, completedBookings, verificationBookings, cancelledBookings, rescheduledBookings, pendingAddressBookings, historyActiveBookings } = useMemo(() => {
+        if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], rescheduledBookings: [], pendingAddressBookings: [], historyActiveBookings: [] };
         const pendingAddr = bookings.filter(b => b.pending_address_verification);
-        const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
+        const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'Rescheduled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
         const verification = bookings.filter(b => !b.pending_address_verification && (b.status === 'pending_verification' || b.status === 'pending_review' || b.status === 'pending_payment'));
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
-        return { activeBookings: active, completedBookings: completed, verificationBookings: verification, cancelledBookings: cancelled, pendingAddressBookings: pendingAddr };
+        const rescheduled = bookings.filter(b => b.status === 'Rescheduled');
+        const historyActive = bookings.filter(isActiveBookingForHistory);
+        return { activeBookings: active, completedBookings: completed, verificationBookings: verification, cancelledBookings: cancelled, rescheduledBookings: rescheduled, pendingAddressBookings: pendingAddr, historyActiveBookings: historyActive };
     }, [bookings]);
     
     if (loading) {
@@ -213,7 +218,7 @@ export const CustomerDetailView = () => {
                     </TabsTrigger>
                     <TabsTrigger value="verification" className="relative">
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification
-                        {pendingAddressBookings.length > 0 && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
+                        {(pendingAddressBookings.length > 0 || verificationBookings.length > 0) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
                     </TabsTrigger>
                     <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                     <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
@@ -268,8 +273,8 @@ export const CustomerDetailView = () => {
                     </div>
                 </TabsContent>
                 <TabsContent value="history">
-                    <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} />
-                    <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
+                    <BookingHistory bookings={historyActiveBookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} adminEmail={user?.email} />
+                    <CompletedBookings bookings={[...completedBookings, ...cancelledBookings, ...rescheduledBookings]} equipment={equipment} customerId={customer.id} />
                 </TabsContent>
             </Tabs>
             
