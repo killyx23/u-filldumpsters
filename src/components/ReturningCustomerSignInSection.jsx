@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect }) => {
   const [mode, setMode] = useState('input'); // input, sending, sent, verifying, authenticated
@@ -77,10 +78,11 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [ReturningCustomerSignIn] Verifying code:`, code);
 
-    if (!code || code.length < 5) {
+    const trimmedCode = code.trim();
+    if (!trimmedCode || trimmedCode.length !== 6) {
       toast({
         title: 'Invalid Code',
-        description: 'Please enter the complete verification code.',
+        description: 'Please enter the complete 6-digit verification code.',
         variant: 'destructive'
       });
       return;
@@ -89,15 +91,20 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
     setMode('verifying');
 
     try {
+      const normalizedEmail = email.toLowerCase().trim();
       const { data, error } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: email.toLowerCase().trim(), code }
+        body: { email: normalizedEmail, code: trimmedCode }
       });
 
       const responseTs = new Date().toISOString();
       console.log(`[${responseTs}] [ReturningCustomerSignIn] verify-email-code response:`, { data, error });
 
-      if (error || !data?.success) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error || data?.error);
+      if (error) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error);
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
+      if (!data?.success) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, data?.error);
         throw new Error(data?.error || 'Invalid verification code');
       }
 

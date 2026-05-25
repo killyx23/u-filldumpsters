@@ -8,6 +8,7 @@ import { Loader2, Mail, Calendar, Package, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderSelect }) => {
   const [email, setEmail] = useState('');
@@ -51,7 +52,9 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         },
       });
 
-      if (fnError) throw fnError;
+      if (fnError) {
+        throw new Error(await parseEdgeFunctionError(fnError, data));
+      }
       if (data?.error) throw new Error(data.error);
 
       setStep('code');
@@ -70,8 +73,9 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
   const handleVerifyCode = async (e) => {
     e?.preventDefault();
 
-    if (!code || code.length < 5) {
-      setError('Please enter the complete verification code');
+    const trimmedCode = code.trim();
+    if (!trimmedCode || trimmedCode.length !== 6) {
+      setError('Please enter the complete 6-digit verification code');
       return;
     }
 
@@ -82,17 +86,19 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
       const normalizedEmail = email.toLowerCase().trim();
 
       const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: normalizedEmail, code },
+        body: { email: normalizedEmail, code: trimmedCode },
       });
 
-      if (verifyError) throw verifyError;
+      if (verifyError) {
+        throw new Error(await parseEdgeFunctionError(verifyError, verifyData));
+      }
       if (!verifyData?.success) {
         throw new Error(verifyData?.error || 'Invalid verification code');
       }
 
       const { data, error: fetchError } = await supabase
         .from('bookings')
-        .select('*, plan:plans(*)')
+        .select('*')
         .eq('email', normalizedEmail)
         .order('created_at', { ascending: false })
         .limit(10);
@@ -245,7 +251,7 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
               </Button>
               <Button
                 type="submit"
-                disabled={loading || code.length < 5}
+                disabled={loading || code.trim().length !== 6}
                 className="flex-1 bg-green-600 hover:bg-green-700"
               >
                 {loading ? (
