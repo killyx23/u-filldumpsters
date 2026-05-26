@@ -48,7 +48,6 @@ Deno.serve(async (req)=>{
         password: tempPassword,
         email_confirm: true,
         user_metadata: {
-          is_admin: false,
           full_name: customer.name,
           customer_db_id: customerId
         }

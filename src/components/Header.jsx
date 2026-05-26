@@ -11,10 +11,9 @@ import { ReturningCustomerVerificationModal } from '@/components/ReturningCustom
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
   const bookingFlow = useBookingFlowOptional();
-  const { user, signOut } = useAuth();
+  const { user, isAdmin, signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
-  const isAdmin = user?.user_metadata?.is_admin;
   const isCustomer = user && !isAdmin;
 
   const handleAdminClick = () => {
