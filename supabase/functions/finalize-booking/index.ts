@@ -36,13 +36,59 @@ Deno.serve(async (req)=>{
     if (fetchError || !booking) {
       throw new Error(`Could not fetch booking ${bookingId}: ${fetchError?.message ?? "not found"}`);
     }
-    // If already past pending_payment the function has already run — return early.
+    // If already past pending_payment, run catch-up steps (email/loyalty may have failed mid-flight).
     if (booking.status !== "pending_payment") {
-      log(`Booking ${bookingId} already finalized. Status: ${booking.status}`);
+      log(`Booking ${bookingId} already finalized. Status: ${booking.status}. Running catch-up.`);
+
+      let emailSent = false;
+      let pointsAwarded = 0;
+
+      const bookingTotal = Number(booking.total_price || 0);
+      const { data: loyaltySettings } = await supabase
+        .from("loyalty_settings")
+        .select("points_per_dollar")
+        .maybeSingle();
+      const pointsPerDollar = Number(loyaltySettings?.points_per_dollar || 10);
+
+      if (booking.customer_id && bookingTotal > 0) {
+        const pointsToAward = Math.floor(bookingTotal * pointsPerDollar);
+        if (pointsToAward > 0) {
+          const { data: awardResult, error: awardError } = await supabase.rpc("adjust_loyalty_points", {
+            p_customer_id: booking.customer_id,
+            p_points: pointsToAward,
+            p_transaction_type: "earned",
+            p_booking_id: booking.id,
+            p_referral_id: null,
+            p_notes: "Booking completion points"
+          });
+          if (awardError) {
+            console.error("[finalize-booking] Loyalty catch-up failed:", awardError);
+          } else {
+            const award = Array.isArray(awardResult) ? awardResult[0] : awardResult;
+            if (!award?.already_processed) {
+              pointsAwarded = pointsToAward;
+            }
+          }
+        }
+      }
+
+      const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
+        body: { bookingId: booking.id }
+      });
+      if (emailError) {
+        console.error("[finalize-booking] send-booking-confirmation catch-up failed:", emailError);
+      } else {
+        emailSent = true;
+        log("Confirmation email catch-up invoked successfully.");
+      }
+
       return new Response(JSON.stringify({
         success: true,
         message: "Booking already finalized.",
-        alreadyProcessed: true
+        alreadyProcessed: true,
+        emailSent,
+        status: booking.status,
+        loyalty: { pointsAwarded, pointsRedeemed: 0, referralBonusAwarded: 0, referralApplied: false }
       }), {
         headers: {
           ...corsHeaders,
@@ -340,6 +386,7 @@ Deno.serve(async (req)=>{
     // Step 9: Send confirmation email
     // ----------------------------------------------------------------
     log("Invoking send-booking-confirmation…");
+    let emailSent = false;
     const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
       body: {
         bookingId: updatedBooking.id
@@ -348,6 +395,7 @@ Deno.serve(async (req)=>{
     if (emailError) {
       console.error("[finalize-booking] send-booking-confirmation failed:", emailError);
     } else {
+      emailSent = true;
       log("Confirmation email invoked successfully.");
     }
     // ----------------------------------------------------------------
@@ -355,11 +403,13 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     log("Finalization complete", {
       bookingId,
-      finalStatus
+      finalStatus,
+      emailSent
     });
     return new Response(JSON.stringify({
       success: true,
       status: finalStatus,
+      emailSent,
       booking: updatedBooking,
       loyalty: loyaltyOutcome
     }), {

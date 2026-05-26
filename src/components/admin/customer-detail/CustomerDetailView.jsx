@@ -159,7 +159,15 @@ export const CustomerDetailView = () => {
         const pendingAddr = bookings.filter(b => b.pending_address_verification);
         const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'Rescheduled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
-        const verification = bookings.filter(b => !b.pending_address_verification && (b.status === 'pending_verification' || b.status === 'pending_review' || b.status === 'pending_payment'));
+        const hasPaymentDelta = (b) => {
+            const details = b.payment_delta_details;
+            return details && (Number(details.amount_due) > 0 || details.state === 'pending');
+        };
+        const verification = bookings.filter(b => !b.pending_address_verification && (
+            b.status === 'pending_verification' ||
+            b.status === 'pending_review' ||
+            (b.status === 'pending_payment' && hasPaymentDelta(b))
+        ));
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
         const rescheduled = bookings.filter(b => b.status === 'Rescheduled');
         const historyActive = bookings.filter(isActiveBookingForHistory);

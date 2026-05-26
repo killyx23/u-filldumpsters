@@ -163,9 +163,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return 'Pending Manual Review';
     };
     const pendingReason = getPendingReason();
-    const isPendingPayment = bookingStatus === 'pending_payment';
     const paymentDeltaAmount = Number(payment_delta_details?.amount_due || 0);
     const paymentDeltaReason = payment_delta_details?.reason || '';
+    const hasPaymentDelta = Boolean(
+        payment_delta_details &&
+        (paymentDeltaAmount > 0 || payment_delta_details.state === 'pending')
+    );
+    const isPendingPaymentAdjustment = bookingStatus === 'pending_payment' && hasPaymentDelta;
     
     const dropOff = parseISO(drop_off_date);
     const pickup = parseISO(pickup_date);
@@ -299,7 +303,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <p><span className="font-bold">Payment Date:</span> {format(parseISO(booking.created_at), 'PPP')}</p>
                         {isCancelledAndRefunded && <p className="text-red-600"><span className="font-bold">Refund Date:</span> {format(parseISO(refund_details.created_at), 'PPP')}</p>}
                         {isPendingReview && <p className="font-bold text-orange-600">Status: {pendingReason}</p>}
-                        {isPendingPayment && (
+                        {isPendingPaymentAdjustment && (
                             <p className="font-bold text-red-600">
                                 Status: Pending Payment Adjustment
                                 {paymentDeltaAmount > 0 ? ` ($${paymentDeltaAmount.toFixed(2)})` : ''}
@@ -401,7 +405,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Trailer Rental Instructions</h3>
                         {isPendingReview ? (
                             <p className="font-semibold text-orange-700">Your booking is currently under review. Pickup location and instructions will be provided once your booking is confirmed. Please check your Customer Portal for updates.</p>
-                    ) : isPendingPayment ? (
+                    ) : isPendingPaymentAdjustment ? (
                         <p className="font-semibold text-red-700">
                             Your booking is pending a payment adjustment{paymentDeltaAmount > 0 ? ` of $${paymentDeltaAmount.toFixed(2)}` : ''}.
                             {paymentDeltaReason ? ` Reason: ${paymentDeltaReason}` : ''} Please check your Customer Portal messages for next steps.

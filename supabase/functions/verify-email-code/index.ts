@@ -1,13 +1,19 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
-const jsonResponse = (body: Record<string, unknown>, status: number) =>
+const jsonResponse = (
+  corsHeaders: Record<string, string>,
+  body: Record<string, unknown>,
+  status: number,
+) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -17,6 +23,7 @@ Deno.serve(async (req) => {
 
     if (!email || typeof email !== "string") {
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Email is required" },
         400,
       );
@@ -24,6 +31,7 @@ Deno.serve(async (req) => {
 
     if (!code || typeof code !== "string") {
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Verification code is required" },
         400,
       );
@@ -34,6 +42,7 @@ Deno.serve(async (req) => {
 
     if (!emailLower.includes("@")) {
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Invalid email address" },
         400,
       );
@@ -41,6 +50,7 @@ Deno.serve(async (req) => {
 
     if (!/^\d{6}$/.test(trimmedCode)) {
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Invalid code format. Enter the 6-digit code from your email." },
         400,
       );
@@ -52,6 +62,7 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !supabaseKey) {
       console.error("[verify-email-code] Missing Supabase configuration");
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Server configuration error" },
         500,
       );
@@ -71,6 +82,7 @@ Deno.serve(async (req) => {
     if (fetchError) {
       console.error("[verify-email-code] Database query error:", fetchError);
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Verification failed. Please try again." },
         500,
       );
@@ -79,6 +91,7 @@ Deno.serve(async (req) => {
     if (!verification) {
       console.warn("[verify-email-code] No matching record for email + code");
       return jsonResponse(
+        corsHeaders,
         { success: false, error: "Invalid verification code" },
         400,
       );
@@ -90,6 +103,7 @@ Deno.serve(async (req) => {
     if (now > expiresAt) {
       console.warn("[verify-email-code] Code expired:", { email: emailLower, expiresAt });
       return jsonResponse(
+        corsHeaders,
         {
           success: false,
           error: "Verification code has expired. Please request a new one.",
@@ -108,6 +122,7 @@ Deno.serve(async (req) => {
       if (updateError) {
         console.error("[verify-email-code] Update error:", updateError);
         return jsonResponse(
+          corsHeaders,
           { success: false, error: "Failed to mark email as verified" },
           500,
         );
@@ -141,6 +156,7 @@ Deno.serve(async (req) => {
     console.log("[verify-email-code] ✓ Verified:", emailLower, "booking_id:", booking?.id ?? null);
 
     return jsonResponse(
+      corsHeaders,
       {
         success: true,
         message: verification.is_verified
@@ -155,6 +171,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("[verify-email-code] Error:", error);
     return jsonResponse(
+      corsHeaders,
       {
         success: false,
         error: error instanceof Error ? error.message : "Verification failed",

@@ -89,7 +89,11 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
         targetTab: 'verification',
       });
     }
-    const pendingPayment = bookings.filter((b) => b.status === 'pending_payment');
+    const hasPaymentDelta = (b) => {
+      const details = b.payment_delta_details;
+      return details && (Number(details.amount_due) > 0 || details.state === 'pending');
+    };
+    const pendingPayment = bookings.filter((b) => b.status === 'pending_payment' && hasPaymentDelta(b));
     if (pendingPayment.length > 0) {
       attention.push({
         id: 'pending-payment',
