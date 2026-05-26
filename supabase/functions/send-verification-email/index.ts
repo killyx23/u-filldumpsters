@@ -1,6 +1,7 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
 const SITE_URL = "https://u-filldumpsters.com";
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
@@ -16,6 +17,30 @@ Deno.serve(async (req)=>{
         error: "Email is required"
       }), {
         status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    if (!BREVO_API_KEY || BREVO_API_KEY.trim().length === 0) {
+      console.error("[send-verification-email] Missing BREVO_API_KEY");
+      return new Response(JSON.stringify({
+        error: "Email service is not configured. Please contact support."
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    if (!BREVO_FROM_EMAIL || BREVO_FROM_EMAIL.trim().length === 0) {
+      console.error("[send-verification-email] Missing BREVO_FROM_EMAIL");
+      return new Response(JSON.stringify({
+        error: "Sender email is not configured. Please contact support."
+      }), {
+        status: 500,
         headers: {
           ...corsHeaders,
           "Content-Type": "application/json"
@@ -59,7 +84,7 @@ Deno.serve(async (req)=>{
       body: JSON.stringify({
         sender: {
           name: "U-Fill Dumpsters",
-          email: Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com"
+          email: BREVO_FROM_EMAIL
         },
         to: [
           {

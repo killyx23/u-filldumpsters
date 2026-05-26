@@ -196,7 +196,7 @@ export function mapPendingToBookingState(pending) {
     bookingData,
     selectedPlan: plan,
     addonsData: {
-      insurance: addons.insurance || 'decline',
+      insurance: addons.insurance || 'accept',
       drivewayProtection: addons.drivewayProtection || 'decline',
       equipment: addons.equipment || [],
       coupon: addons.coupon || null,

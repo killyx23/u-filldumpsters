@@ -5,7 +5,7 @@ import { supabase } from '@/lib/customSupabaseClient';
  * Hook for managing customer loyalty points
  * Provides methods to fetch, calculate, and redeem loyalty points
  */
-export const useCustomerLoyaltyPoints = (customerId) => {
+export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
   const [pointsBalance, setPointsBalance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -40,21 +40,43 @@ export const useCustomerLoyaltyPoints = (customerId) => {
 
   // Fetch customer's loyalty points balance
   const getPointsBalance = useCallback(async () => {
-    if (!customerId) return 0;
+    if (!customerId && !verifiedEmail) return 0;
 
     setLoading(true);
     setError(null);
 
     try {
+      const loadVerifiedRewards = async () => {
+        if (!verifiedEmail) return null;
+        const { data, error } = await supabase.functions.invoke('get-returning-customer-rewards', {
+          body: { email: verifiedEmail },
+        });
+        if (error || !data?.success) return null;
+        if (data?.conversionRates) {
+          setConversionRates({
+            pointsPerDollar: Number(data.conversionRates.pointsPerDollar || DEFAULT_POINTS_PER_DOLLAR),
+            pointsToDollar: Number(data.conversionRates.pointsToDollar || DEFAULT_POINTS_TO_DOLLAR),
+          });
+        }
+        return Number(data?.pointsBalance || 0);
+      };
+
       const { data, error } = await supabase
         .from('loyalty_points')
         .select('points_balance')
         .eq('customer_id', customerId)
         .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        const fallbackBalance = await loadVerifiedRewards();
+        if (fallbackBalance !== null) {
+          setPointsBalance(fallbackBalance);
+          return fallbackBalance;
+        }
+        throw error;
+      }
 
-      const balance = data?.points_balance || 0;
+      const balance = data?.points_balance ?? (await loadVerifiedRewards()) ?? 0;
       setPointsBalance(balance);
       return balance;
     } catch (err) {
@@ -64,7 +86,7 @@ export const useCustomerLoyaltyPoints = (customerId) => {
     } finally {
       setLoading(false);
     }
-  }, [customerId]);
+  }, [customerId, verifiedEmail]);
 
   // Calculate points earned from booking amount
   const calculatePointsEarned = useCallback((amount) => {
@@ -151,10 +173,10 @@ export const useCustomerLoyaltyPoints = (customerId) => {
 
   // Fetch points balance when customerId changes
   useEffect(() => {
-    if (customerId) {
+    if (customerId || verifiedEmail) {
       getPointsBalance();
     }
-  }, [customerId, getPointsBalance]);
+  }, [customerId, verifiedEmail, getPointsBalance]);
 
   return {
     pointsBalance,

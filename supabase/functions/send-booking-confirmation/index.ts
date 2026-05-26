@@ -118,6 +118,10 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const tax = Number(booking.tax_amount ?? 0);
   const total = resolveBookingGrandTotal(booking);
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
+  const couponDiscountAmount = Number(addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0);
+  const couponCode = addons?.coupon?.code || null;
+  const totalRewardsDiscount = Math.max(0, loyaltyDiscountAmount + couponDiscountAmount);
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
   let rows = "";
   if (snapshot.length > 0) {
@@ -177,6 +181,23 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
       }
     }
   }
+  if (couponDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Coupon Discount${couponCode ? ` (${couponCode})` : ""}</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(couponDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (loyaltyDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Loyalty Points Discount (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(loyaltyDiscountAmount)}</td>
+    </tr>`;
+  }
+  const thankYouRewardsHTML = totalRewardsDiscount > 0 ? `
+    <div style="margin-top: 12px; padding: 10px 12px; background: #ecfdf5; border: 1px solid #86efac; border-radius: 8px; color: #065f46; font-size: 13px;">
+      Thank you for your loyalty and continued business. Your rewards discount has been applied to this booking.
+    </div>
+  ` : "";
   return `
       <div style="margin-top: 25px;">
         <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Price Summary</h2>
@@ -195,6 +216,7 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
             <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(total)}</td>
           </tr>
         </table>
+        ${thankYouRewardsHTML}
       </div>`;
 };
 const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {

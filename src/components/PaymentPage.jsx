@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle, Gift } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -20,6 +20,7 @@ import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/servi
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
@@ -31,6 +32,21 @@ const stripePromise =
 
 const formatMoney = (amount) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount ?? 0);
+
+const formatPaymentSetupError = (message) => {
+  if (!message) {
+    return 'Payment processing is temporarily unavailable. Please try again later.';
+  }
+
+  if (/STRIPE_SECRET_KEY|Stripe is not configured|did not provide an API key/i.test(message)) {
+    if (import.meta.env.DEV) {
+      return 'Stripe secret key is missing. Add STRIPE_SECRET_KEY to .env.local, run npm run supabase:sync-local-env, then restart Supabase functions.';
+    }
+    return 'Payment processing is not configured yet. Please contact support.';
+  }
+
+  return message;
+};
 
 const ConfirmationLine = ({ label, value }) => (
   <div className="flex justify-between items-start py-1.5 border-b border-white/5 last:border-0">
@@ -526,8 +542,11 @@ export const PaymentPage = ({ onBack }) => {
   const [deliveryService, setDeliveryService] = useState(false);
   const [loadingBookingData, setLoadingBookingData] = useState(true);
   const [dataError, setDataError] = useState(null);
+  const [dataErrorTitle, setDataErrorTitle] = useState('Booking Creation Failed');
   
   const [validatedTotal, setValidatedTotal] = useState(0);
+  const [rewardsOffer, setRewardsOffer] = useState(null);
+  const [rewardsChoiceResolved, setRewardsChoiceResolved] = useState(false);
 
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
   const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
@@ -569,6 +588,7 @@ export const PaymentPage = ({ onBack }) => {
       const pendingId = searchParams.get('bookingId');
       
       if (!pendingId) {
+        setDataErrorTitle('Booking Creation Failed');
         setDataError('Missing booking ID. Cannot retrieve your booking data.');
         setLoadingBookingData(false);
         return;
@@ -591,6 +611,17 @@ export const PaymentPage = ({ onBack }) => {
 
         if (!data) {
           throw new Error('Booking not found. Please restart the booking process.');
+        }
+
+        if (!data.is_verified) {
+          toast({
+            title: 'Verification required',
+            description: 'Please complete email verification before payment.',
+            variant: 'destructive',
+          });
+          navigate(`/verify-email?token=${pendingId}`);
+          setLoadingBookingData(false);
+          return;
         }
 
         console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, data);
@@ -623,6 +654,7 @@ export const PaymentPage = ({ onBack }) => {
 
       } catch (error) {
         console.error(`[${timestamp}] [PaymentPage] Failed to retrieve booking:`, error);
+        setDataErrorTitle('Booking Creation Failed');
         setDataError(error.message);
       } finally {
         setLoadingBookingData(false);
@@ -634,7 +666,7 @@ export const PaymentPage = ({ onBack }) => {
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
-    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || bookingCreated) return;
+    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || bookingCreated || !rewardsChoiceResolved) return;
     if (!pendingCustomerData) return;
 
     const createActualBooking = async (retrievedBookingData, pendingData, validatedTotalAmount, calcResult) => {
@@ -752,6 +784,10 @@ export const PaymentPage = ({ onBack }) => {
     const createBooking = async () => {
       const timestamp = new Date().toISOString();
       try {
+        if (!pendingCustomerData?.is_verified) {
+          throw new Error('Verification is required before creating a booking. Please complete verification first.');
+        }
+
         console.log(`[${timestamp}] [PaymentPage] Validating pricing before booking creation...`);
         
         // Calculate expected total with all up-to-date prices
@@ -784,12 +820,85 @@ export const PaymentPage = ({ onBack }) => {
         setBookingCreated(true);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Pricing validation/booking creation failed:`, err);
+        setDataErrorTitle('Booking Creation Failed');
         setDataError(err.message);
       }
     };
     
     createBooking();
-  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingTaxOptions, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingData]);
+  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingTaxOptions, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingData, rewardsChoiceResolved]);
+
+  useEffect(() => {
+    const initializeRewardsOffer = async () => {
+      if (loadingBookingData || !bookingData || !addonsData) return;
+
+      if (Number(addonsData?.loyaltyPointsToRedeem || 0) > 0) {
+        setRewardsChoiceResolved(true);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.functions.invoke('get-returning-customer-rewards', {
+          body: { email: bookingData.email },
+        });
+
+        if (!error && data?.success && Number(data.pointsBalance || 0) > 0) {
+          setRewardsOffer({
+            pointsBalance: Number(data.pointsBalance || 0),
+            pointsToDollar: Number(data.conversionRates?.pointsToDollar || 100),
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('[PaymentPage] Rewards lookup failed:', err);
+      }
+
+      setRewardsChoiceResolved(true);
+    };
+
+    initializeRewardsOffer();
+  }, [loadingBookingData, bookingData, addonsData]);
+
+  const handleApplyRewards = () => {
+    if (!rewardsOffer) {
+      setRewardsChoiceResolved(true);
+      return;
+    }
+
+    const pointsToDollar = Number(rewardsOffer.pointsToDollar || 100);
+    const currentTotal = Number(pendingCustomerData?.total_price || 0);
+    const maxPointsForOrder = Math.floor(currentTotal * pointsToDollar);
+    const pointsToRedeem = Math.min(Number(rewardsOffer.pointsBalance || 0), maxPointsForOrder);
+    const loyaltyDiscountAmount = Number((pointsToRedeem / pointsToDollar).toFixed(2));
+
+    if (pointsToRedeem > 0 && loyaltyDiscountAmount > 0) {
+      setAddonsData((prev) => ({
+        ...prev,
+        loyaltyPointsToRedeem: pointsToRedeem,
+        loyaltyDiscountAmount,
+      }));
+      setPendingCustomerData((prev) => ({
+        ...prev,
+        addons_data: {
+          ...(prev?.addons_data || {}),
+          loyaltyPointsToRedeem: pointsToRedeem,
+          loyaltyDiscountAmount,
+        },
+      }));
+      toast({
+        title: 'Rewards Applied',
+        description: `${pointsToRedeem} points applied for a $${loyaltyDiscountAmount.toFixed(2)} discount.`,
+      });
+    }
+
+    setRewardsOffer(null);
+    setRewardsChoiceResolved(true);
+  };
+
+  const handleSkipRewards = () => {
+    setRewardsOffer(null);
+    setRewardsChoiceResolved(true);
+  };
 
   // Load availability times for self-service
   useEffect(() => {
@@ -841,10 +950,9 @@ export const PaymentPage = ({ onBack }) => {
         setClientSecret(secret);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Payment intent error:`, err);
-        let errorMessage = 'Failed to initialize payment gateway. Please try again later.';
-        if (err.message && !err.message.includes('Failed to fetch')) {
-          errorMessage = `Payment Setup Error: ${err.message}`;
-        }
+        const parsedMessage = await parseEdgeFunctionError(err, null);
+        const errorMessage = `Payment Setup Error: ${formatPaymentSetupError(parsedMessage)}`;
+        setDataErrorTitle('Payment Setup Failed');
         setDataError(errorMessage);
         paymentIntentInitRef.current = false;
         toast({ 
@@ -920,7 +1028,7 @@ export const PaymentPage = ({ onBack }) => {
         <div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-8 rounded-lg shadow-lg">
           <div className="flex items-center text-red-200 font-bold text-2xl mb-6">
             <AlertTriangle className="h-10 w-10 mr-3 text-red-400" />
-            Booking Creation Failed
+            {dataErrorTitle}
           </div>
           <p className="text-red-100 mb-8 text-lg">
             {dataError}
@@ -953,6 +1061,49 @@ export const PaymentPage = ({ onBack }) => {
     loadingTaxOptions ||
     !bookingData ||
     !bookingCreated;
+
+  if (!rewardsChoiceResolved && !rewardsOffer) {
+    return (
+      <div className="flex flex-col justify-center items-center h-96 text-white">
+        <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
+        <span className="text-xl font-medium">Checking available rewards...</span>
+      </div>
+    );
+  }
+
+  if (rewardsOffer && !bookingCreated) {
+    return (
+      <motion.div
+        initial={false}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -100 }}
+        transition={{ duration: 0.5 }}
+        className="container mx-auto py-16 px-4"
+      >
+        <div className="max-w-3xl mx-auto bg-purple-900/20 border border-purple-500/40 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <Gift className="h-5 w-5 text-purple-300 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-purple-100 font-semibold">
+                You have {rewardsOffer.pointsBalance} rewards points available.
+              </p>
+              <p className="text-xs text-purple-200 mt-1">
+                Would you like to apply your rewards to this booking before payment?
+              </p>
+              <div className="flex gap-2 mt-3">
+                <Button onClick={handleApplyRewards} className="bg-purple-600 hover:bg-purple-700">
+                  Apply Rewards
+                </Button>
+                <Button onClick={handleSkipRewards} variant="outline">
+                  Not Now
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   if (isBootstrapping && !clientSecret) {
     return (

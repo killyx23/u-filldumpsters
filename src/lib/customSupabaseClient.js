@@ -20,7 +20,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   const message =
-    '[Supabase] Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Copy .env.example to .env.local and set values for local dev (e.g. http://127.0.0.1:54321).';
+    '[Supabase] Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Copy .env.example to .env.local, then run `npm run supabase:sync-local-env` after `npx supabase start`.';
   console.error(message);
   throw new Error(message);
 }

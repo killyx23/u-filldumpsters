@@ -4,6 +4,7 @@ import path from "node:path";
 
 const projectRoot = process.cwd();
 const frontendEnvPath = path.join(projectRoot, ".env.local");
+const supabaseEnvPath = path.join(projectRoot, "supabase", ".env");
 const functionsEnvPath = path.join(projectRoot, "supabase", "functions", ".env");
 
 /** Keys we set in .env.local — never write raw CLI names like PUBLISHABLE_KEY here. */
@@ -19,6 +20,21 @@ function parseEnvValue(raw) {
     value = value.slice(1, -1);
   }
   return value;
+}
+
+function parseEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  const values = {};
+  for (const rawLine of fs.readFileSync(filePath, "utf8").split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eqIndex = line.indexOf("=");
+    if (eqIndex < 1) continue;
+    const key = line.slice(0, eqIndex).trim();
+    const value = parseEnvValue(line.slice(eqIndex + 1));
+    values[key] = value;
+  }
+  return values;
 }
 
 function parseStatusEnv(output) {
@@ -129,11 +145,21 @@ function run() {
     FRONTEND_KEYS,
   );
 
-  upsertEnvValues(functionsEnvPath, {
+  const localEnv = parseEnvFile(frontendEnvPath);
+  const supabaseEnv = parseEnvFile(supabaseEnvPath);
+  const stripeSecretKey =
+    localEnv.STRIPE_SECRET_KEY?.trim() || supabaseEnv.STRIPE_SECRET_KEY?.trim();
+
+  const functionEnvUpdates = {
     SUPABASE_URL: apiUrl,
     SUPABASE_ANON_KEY: publishableKey,
     SUPABASE_SERVICE_ROLE_KEY: secretKey,
-  });
+  };
+  if (stripeSecretKey) {
+    functionEnvUpdates.STRIPE_SECRET_KEY = stripeSecretKey;
+  }
+
+  upsertEnvValues(functionsEnvPath, functionEnvUpdates);
 
   console.log("[sync-local-supabase-env] Updated (local Supabase only):");
   console.log(`- ${frontendEnvPath}`);
@@ -141,6 +167,13 @@ function run() {
   console.log("    VITE_SUPABASE_ANON_KEY  <- publishable key (sb_publishable_...)");
   console.log(`- ${functionsEnvPath}`);
   console.log("    SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY");
+  if (stripeSecretKey) {
+    console.log("    STRIPE_SECRET_KEY");
+  } else {
+    console.warn(
+      "[sync-local-supabase-env] STRIPE_SECRET_KEY not found in .env.local or supabase/.env — payment step will fail until you add it.",
+    );
+  }
   console.log("");
   console.log("Frontend must NOT use SECRET_KEY / service role — that stays in functions .env only.");
 }
