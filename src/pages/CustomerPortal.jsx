@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -30,8 +30,29 @@ import { PortalLoyaltySummary } from '@/components/customer-portal/PortalLoyalty
 import { PortalReferralsSection } from '@/components/customer-portal/PortalReferralsSection';
 import { ReturningCustomerBenefits } from '@/components/ReturningCustomerBenefits';
 
+const isPortalAuthError = (error, data) => {
+    const message = String(data?.error || data?.msg || error?.message || '').toLowerCase();
+    const errorCode = String(data?.error_code || '').toLowerCase();
+    const status = error?.context?.status;
+    return (
+        message.includes('invalid session') ||
+        message.includes('authentication required') ||
+        message.includes('unauthorized') ||
+        message.includes('user_not_found') ||
+        message.includes('sub claim') ||
+        message.includes('does not exist') ||
+        errorCode === 'user_not_found' ||
+        status === 401 ||
+        status === 403
+    );
+};
+
+const clearLocalSession = async () => {
+    await supabase.auth.signOut({ scope: 'local' });
+};
+
 export const CustomerPortal = () => {
-    const { user, signOut, loading: authLoading, session } = useAuth();
+    const { user, loading: authLoading, session } = useAuth();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -56,6 +77,50 @@ export const CustomerPortal = () => {
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
+    const autoLoginAttemptedRef = useRef(false);
+
+    const getDeeplinkCredentials = useCallback(() => {
+        const portalId =
+            searchParams.get('portal_id') ||
+            searchParams.get('portal_number') ||
+            searchParams.get('cid') ||
+            '';
+        const phone = searchParams.get('phone') || '';
+        return { portalId: portalId.trim(), phone: phone.trim() };
+    }, [searchParams]);
+
+    const performPortalLogin = useCallback(async (portalId, phone) => {
+        const rawPhone = String(phone).replace(/\D/g, '');
+        if (!portalId || rawPhone.length !== 10) {
+            throw new Error('Invalid portal credentials.');
+        }
+
+        await clearLocalSession();
+
+        const { data, error } = await supabase.functions.invoke('customer-portal-login', {
+            body: {
+                portal_number: portalId,
+                phone: rawPhone,
+            },
+        });
+
+        if (error) {
+            throw error;
+        }
+        if (data?.error) {
+            throw new Error(data.error);
+        }
+        if (!data?.session) {
+            throw new Error('Invalid response from server.');
+        }
+
+        const { error: sessionError } = await supabase.auth.setSession(data.session);
+        if (sessionError) {
+            throw sessionError;
+        }
+
+        return data;
+    }, []);
 
     useEffect(() => {
         const handleMagicLink = async () => {
@@ -135,10 +200,11 @@ export const CustomerPortal = () => {
     const fetchData = useCallback(async (isInitialLoad = true) => {
         const timestamp = new Date().toISOString();
         
-        if (!user || !session) {
-            console.log(`[${timestamp}] [CustomerPortal] No user/session, skipping fetch`, {
+        if (!user || !session?.access_token) {
+            console.log(`[${timestamp}] [CustomerPortal] No user/session token, skipping fetch`, {
                 hasUser: !!user,
-                hasSession: !!session
+                hasSession: !!session,
+                hasAccessToken: !!session?.access_token,
             });
             if (isInitialLoad) setLoading(false);
             return;
@@ -170,7 +236,7 @@ export const CustomerPortal = () => {
             });
             
             if (isInitialLoad) setLoading(false);
-            await signOut();
+            await clearLocalSession();
             return;
         }
 
@@ -178,7 +244,10 @@ export const CustomerPortal = () => {
             console.log(`[${timestamp}] [CustomerPortal] Calling get-customer-details edge function...`);
 
             const { data, error } = await supabase.functions.invoke('get-customer-details', {
-                body: { customerId: parsedId }
+                body: { customerId: parsedId },
+                headers: {
+                    Authorization: `Bearer ${session.access_token}`,
+                },
             });
 
             console.log(`[${timestamp}] [CustomerPortal] Edge function response:`, {
@@ -192,11 +261,29 @@ export const CustomerPortal = () => {
 
             if (error) {
                 console.error(`[${timestamp}] [CustomerPortal] Edge function error:`, error);
+                if (isPortalAuthError(error, null)) {
+                    await clearLocalSession();
+                    toast({
+                        title: 'Session expired',
+                        description: 'Please sign in again with your Portal ID and phone number.',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
                 throw new Error(error.message);
             }
 
-            if (data.error) {
+            if (data?.error) {
                 console.error(`[${timestamp}] [CustomerPortal] API error:`, data.error);
+                if (isPortalAuthError(null, data)) {
+                    await clearLocalSession();
+                    toast({
+                        title: 'Session expired',
+                        description: 'Please sign in again with your Portal ID and phone number.',
+                        variant: 'destructive',
+                    });
+                    return;
+                }
                 throw new Error(data.error);
             }
 
@@ -220,15 +307,24 @@ export const CustomerPortal = () => {
                 stack: error.stack
             });
 
-            toast({ 
-                title: "Failed to load data", 
-                description: error.message, 
-                variant: "destructive" 
-            });
+            if (isPortalAuthError(error, null)) {
+                await clearLocalSession();
+                toast({
+                    title: 'Session expired',
+                    description: 'Please sign in again with your Portal ID and phone number.',
+                    variant: 'destructive',
+                });
+            } else {
+                toast({ 
+                    title: "Failed to load data", 
+                    description: error.message, 
+                    variant: "destructive" 
+                });
+            }
         } finally {
             if (isInitialLoad) setLoading(false);
         }
-    }, [user, session, signOut]);
+    }, [user, session]);
 
     useEffect(() => {
         const timestamp = new Date().toISOString();
@@ -239,19 +335,75 @@ export const CustomerPortal = () => {
             hasSession: !!session
         });
 
-        if (!authLoading) {
-            if (user && session) {
+        if (authLoading) {
+            return;
+        }
+
+        const run = async () => {
+            const { portalId } = getDeeplinkCredentials();
+
+            if (user && session?.access_token && portalId) {
+                const expectedEmail = `${portalId.toLowerCase()}@ufilldumpsters.com`;
+                if ((user.email ?? '').toLowerCase() !== expectedEmail) {
+                    console.warn('[CustomerPortal] Stale session for different customer, clearing locally');
+                    await clearLocalSession();
+                    setLoading(false);
+                    return;
+                }
+            }
+
+            if (user && session?.access_token) {
                 console.log(`[${timestamp}] [CustomerPortal] User authenticated, fetching data...`);
                 fetchData();
             } else {
                 console.log(`[${timestamp}] [CustomerPortal] No user/session, showing login`);
                 setLoading(false);
             }
-        }
-    }, [user, session, authLoading, fetchData]);
+        };
+
+        run();
+    }, [user, session, authLoading, fetchData, getDeeplinkCredentials]);
 
     useEffect(() => {
-        if (!user || !session) return;
+        if (authLoading || user || isLoggingIn) {
+            return;
+        }
+
+        const { portalId, phone } = getDeeplinkCredentials();
+        if (!portalId || !phone || autoLoginAttemptedRef.current) {
+            return;
+        }
+
+        autoLoginAttemptedRef.current = true;
+
+        const runAutoLogin = async () => {
+            setIsLoggingIn(true);
+            try {
+                console.log('[CustomerPortal] Auto-login from deeplink params');
+                await performPortalLogin(portalId, phone);
+                setSearchParams({ tab: 'dashboard' });
+                toast({
+                    title: 'Login Successful',
+                    description: 'Welcome to your customer portal.',
+                });
+            } catch (err) {
+                console.error('[CustomerPortal] Deeplink auto-login failed:', err);
+                autoLoginAttemptedRef.current = false;
+                toast({
+                    title: 'Login Failed',
+                    description: err.message || 'Could not sign in automatically. Use the form below.',
+                    variant: 'destructive',
+                });
+            } finally {
+                setIsLoggingIn(false);
+            }
+        };
+
+        runAutoLogin();
+    }, [authLoading, user, isLoggingIn, getDeeplinkCredentials, performPortalLogin, setSearchParams]);
+
+    useEffect(() => {
+        if (!user || !session?.access_token) return;
         
         console.log('[CustomerPortal] Setting up auto-refresh interval (30s)');
         
@@ -319,45 +471,12 @@ export const CustomerPortal = () => {
         setIsLoggingIn(true);
 
         try {
-            console.log(`[${timestamp}] [CustomerPortal] Calling customer-portal-login edge function...`);
+            await performPortalLogin(loginPortalId, loginPhone);
 
-            const { data, error } = await supabase.functions.invoke('customer-portal-login', {
-                body: { 
-                    portal_number: loginPortalId, 
-                    phone: rawPhone 
-                }
+            toast({
+                title: 'Login Successful',
+                description: 'Welcome to your customer portal.',
             });
-
-            console.log(`[${timestamp}] [CustomerPortal] Login response:`, {
-                hasData: !!data,
-                hasError: !!error,
-                error,
-                hasSession: !!data?.session,
-                dataError: data?.error
-            });
-
-            if (error) {
-                console.error(`[${timestamp}] [CustomerPortal] Edge function error:`, error);
-                throw error;
-            }
-
-            if (data?.error) {
-                console.error(`[${timestamp}] [CustomerPortal] Login failed:`, data.error);
-                throw new Error(data.error);
-            }
-
-            if (data?.session) {
-                console.log(`[${timestamp}] [CustomerPortal] ✓ Login successful, setting session...`);
-                
-                await supabase.auth.setSession(data.session);
-                
-                console.log(`[${timestamp}] [CustomerPortal] Session set, reloading page...`);
-                window.location.reload();
-            } else {
-                console.error(`[${timestamp}] [CustomerPortal] Invalid response - no session`);
-                throw new Error("Invalid response from server.");
-            }
-
         } catch (err) {
             const errorTimestamp = new Date().toISOString();
             console.error(`[${errorTimestamp}] [CustomerPortal] Login error:`, {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle, Home, AlertTriangle, Calendar, MapPin,
   Mail, Loader2, RefreshCw, Key, Printer, Sparkles
@@ -35,7 +35,9 @@ export const BookingConfirmation = () => {
 
   const [errorMsg, setErrorMsg] = useState(null);
   const [pointsAwarded, setPointsAwarded] = useState(0);
+  const [isPortalNavigating, setIsPortalNavigating] = useState(false);
 
+  const navigate = useNavigate();
   const receiptRef = useRef();
 
   const handlePrint = useReactToPrint({
@@ -257,26 +259,20 @@ export const BookingConfirmation = () => {
       try {
         console.log(`[${timestamp}] [BookingConfirmation] Fetching booking data for ID: ${bookingId}`);
 
-        const { data: booking, error: fetchError } = await supabase
-          .from('bookings')
-          .select('*, customers(*)')
-          .eq('id', bookingId)
-          .single();
-
-        console.log(`[${timestamp}] [BookingConfirmation] Booking fetch result:`, {
-          hasData: !!booking,
-          hasError: !!fetchError,
-          error: fetchError,
-          bookingStatus: booking?.status,
-          customerId: booking?.customer_id,
-          customerData: booking?.customers,
-          hasTaxData: !!(booking?.tax_amount && booking?.tax_rate_used)
+        const { data: payload, error: fetchError } = await supabase.rpc('get_booking_for_post_checkout', {
+          p_booking_id: Number.parseInt(String(bookingId), 10),
+          p_payment_intent: paymentIntentId || null,
         });
 
-        if (fetchError || !booking) {
+        if (fetchError || !payload?.booking) {
           console.error(`[${timestamp}] [BookingConfirmation] Booking fetch failed:`, fetchError);
           throw new Error(fetchError?.message ?? 'Could not find the requested booking.');
         }
+
+        const booking = {
+          ...payload.booking,
+          customers: payload.customers,
+        };
 
         if (!isMounted) return;
         
@@ -356,82 +352,121 @@ export const BookingConfirmation = () => {
 
   const handleGoToPortal = async () => {
     const timestamp = new Date().toISOString();
-    const portalId = bookingDetails?.customers?.customer_id_text ?? '';
-    const phone    = bookingDetails?.customers?.phone ?? bookingDetails?.phone ?? '';
 
-    console.log(`[${timestamp}] [BookingConfirmation] Portal access initiated`, {
-      portalId,
-      phone,
-      hasCustomerData: !!bookingDetails?.customers,
-      customerId: bookingDetails?.customer_id
-    });
+    const resolvePortalCredentials = async () => {
+      let portalId = bookingDetails?.customers?.customer_id_text ?? '';
+      let phone = bookingDetails?.customers?.phone ?? bookingDetails?.phone ?? '';
 
-    if (!portalId || !phone) {
-      console.error(`[${timestamp}] [BookingConfirmation] ⚠ Missing portal credentials`, {
-        portalId,
-        phone
-      });
-      
-      toast({
-        title: 'Portal Access Error',
-        description: 'Missing portal credentials. Please contact support.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    console.log(`[${timestamp}] [BookingConfirmation] Waiting 500ms for data commit...`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    try {
-      console.log(`[${timestamp}] [BookingConfirmation] Verifying customer exists in database...`);
-      
-      const { data: customer, error } = await supabase
-        .from('customers')
-        .select('id, customer_id_text, phone, email')
-        .eq('customer_id_text', portalId)
-        .single();
-
-      console.log(`[${timestamp}] [BookingConfirmation] Customer verification result:`, {
-        found: !!customer,
-        error,
-        customerId: customer?.id,
-        portalId: customer?.customer_id_text
-      });
-
-      if (error || !customer) {
-        console.error(`[${timestamp}] [BookingConfirmation] ⚠ Customer not found, adding retry delay...`);
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const { data: retryCustomer, error: retryError } = await supabase
-          .from('customers')
-          .select('id, customer_id_text, phone, email')
-          .eq('customer_id_text', portalId)
-          .single();
-
-        console.log(`[${timestamp}] [BookingConfirmation] Retry verification result:`, {
-          found: !!retryCustomer,
-          error: retryError
-        });
-
-        if (retryError || !retryCustomer) {
-          throw new Error('Customer record not ready. Please wait a moment and try again.');
-        }
+      if (portalId && phone) {
+        return { portalId, phone };
       }
 
-      console.log(`[${timestamp}] [BookingConfirmation] ✓ Customer verified, navigating to portal...`);
-      
-      window.location.href = `/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`;
-      
+      const parsedBookingId = Number.parseInt(String(bookingId), 10);
+      if (!Number.isFinite(parsedBookingId)) {
+        return { portalId: '', phone: '' };
+      }
+
+      const fetchViaRpc = async () => {
+        const { data: payload, error } = await supabase.rpc('get_booking_for_post_checkout', {
+          p_booking_id: parsedBookingId,
+          p_payment_intent: paymentIntentId || null,
+        });
+
+        if (error || !payload?.customers) {
+          return null;
+        }
+
+        return {
+          portalId: payload.customers.customer_id_text ?? '',
+          phone: payload.customers.phone ?? payload.booking?.phone ?? '',
+        };
+      };
+
+      console.log(`[${timestamp}] [BookingConfirmation] Customer data missing, retrying via secure RPC...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      let result = await fetchViaRpc();
+      if (!result?.portalId || !result?.phone) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        result = await fetchViaRpc();
+      }
+
+      return result ?? { portalId: '', phone: '' };
+    };
+
+    try {
+      const { portalId, phone } = await resolvePortalCredentials();
+
+      console.log(`[${timestamp}] [BookingConfirmation] Portal access initiated`, {
+        portalId,
+        phone,
+        hasCustomerData: !!bookingDetails?.customers,
+        customerId: bookingDetails?.customer_id,
+      });
+
+      if (!portalId || !phone) {
+        console.error(`[${timestamp}] [BookingConfirmation] Missing portal credentials after RPC retry`);
+        toast({
+          title: 'Portal Access Error',
+          description: 'Missing portal credentials. Please contact support.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const rawPhone = String(phone).replace(/\D/g, '');
+      if (rawPhone.length !== 10) {
+        toast({
+          title: 'Portal Access Error',
+          description: 'Invalid phone number on this booking. Please contact support.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setIsPortalNavigating(true);
+
+      console.log(`[${timestamp}] [BookingConfirmation] Clearing stale session and logging into portal...`);
+      await supabase.auth.signOut({ scope: 'local' });
+
+      const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
+        body: {
+          portal_number: portalId,
+          phone: rawPhone,
+        },
+      });
+
+      if (loginError) {
+        throw new Error(loginError.message);
+      }
+      if (loginData?.error) {
+        throw new Error(loginData.error);
+      }
+      if (!loginData?.session) {
+        throw new Error('Could not create a portal session. Please try again.');
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession(loginData.session);
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      console.log(`[${timestamp}] [BookingConfirmation] Portal login successful, navigating...`);
+      toast({
+        title: 'Welcome to your portal',
+        description: 'Loading your account...',
+      });
+      navigate('/customer-portal?tab=dashboard');
     } catch (err) {
       console.error(`[${timestamp}] [BookingConfirmation] Portal navigation error:`, err);
-      
+
       toast({
-        title: 'Portal Access Delayed',
-        description: 'Your account is being set up. Please wait 10 seconds and try again.',
-        variant: 'destructive'
+        title: 'Portal Access Error',
+        description: err.message || 'Your account is being set up. Please wait a moment and try again.',
+        variant: 'destructive',
       });
+    } finally {
+      setIsPortalNavigating(false);
     }
   };
 
@@ -690,9 +725,15 @@ export const BookingConfirmation = () => {
           <div className="flex flex-col sm:flex-row gap-4 w-full mt-10">
             <Button
               onClick={handleGoToPortal}
+              disabled={isPortalNavigating}
               className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-6 flex-1 text-lg border-none"
             >
-              <Key className="mr-2 h-5 w-5" /> Access Portal
+              {isPortalNavigating ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <Key className="mr-2 h-5 w-5" />
+              )}
+              Access Portal
             </Button>
             <Button
               onClick={handlePrint}
