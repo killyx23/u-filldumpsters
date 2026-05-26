@@ -9,10 +9,10 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
-import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 
 export const BookingConfirmation = () => {
@@ -37,9 +37,6 @@ export const BookingConfirmation = () => {
   const [pointsAwarded, setPointsAwarded] = useState(0);
 
   const receiptRef = useRef();
-
-  // Loyalty points hook (only if we have booking details)
-  const { calculatePointsEarned, awardPoints } = useCustomerLoyaltyPoints(bookingDetails?.customer_id);
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
@@ -179,6 +176,15 @@ export const BookingConfirmation = () => {
         console.warn(`[${timestamp}] [BookingConfirmation] ⚠ Email was not sent`, data);
       }
 
+      const awardedFromFinalize = Number(data?.loyalty?.pointsAwarded || 0);
+      if (awardedFromFinalize > 0) {
+        setPointsAwarded(awardedFromFinalize);
+        toast({
+          title: 'Loyalty Points Earned!',
+          description: `You earned ${awardedFromFinalize} points with this booking!`,
+        });
+      }
+
     } catch (err) {
       const errorTimestamp = new Date().toISOString();
       console.error(`[${errorTimestamp}] [BookingConfirmation] Finalization error:`, {
@@ -199,42 +205,6 @@ export const BookingConfirmation = () => {
       }
     } finally {
       if (isRetry) setIsRefinalizing(false);
-    }
-  };
-
-  // Award loyalty points after successful booking
-  const awardLoyaltyPoints = async (customerId, totalAmount) => {
-    if (!customerId || !totalAmount) return;
-
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [BookingConfirmation] Awarding loyalty points for booking ${bookingId}`);
-
-    try {
-      const points = calculatePointsEarned(totalAmount);
-      if (points <= 0) {
-        console.log(`[${timestamp}] [BookingConfirmation] No points to award for amount ${totalAmount}`);
-        return;
-      }
-
-      const result = await awardPoints(points, bookingId);
-      
-      if (result.success) {
-        if (result.alreadyAwarded) {
-          console.log(`[${timestamp}] [BookingConfirmation] Points already awarded for booking ${bookingId}`);
-          return;
-        }
-        console.log(`[${timestamp}] [BookingConfirmation] ✓ Awarded ${points} loyalty points`);
-        setPointsAwarded(points);
-        
-        toast({
-          title: 'Loyalty Points Earned!',
-          description: `You earned ${points} points with this booking!`,
-        });
-      } else {
-        console.error(`[${timestamp}] [BookingConfirmation] Failed to award points:`, result.error);
-      }
-    } catch (err) {
-      console.error(`[${timestamp}] [BookingConfirmation] Exception awarding points:`, err);
     }
   };
 
@@ -350,11 +320,6 @@ export const BookingConfirmation = () => {
 
         console.log(`[${timestamp}] [BookingConfirmation] Triggering finalization process...`);
         await finalizeBooking();
-
-        // Award loyalty points after finalization
-        if (booking.customer_id && resolveBookingGrandTotal(booking)) {
-          await awardLoyaltyPoints(booking.customer_id, resolveBookingGrandTotal(booking));
-        }
 
       } catch (err) {
         const errorTimestamp = new Date().toISOString();
@@ -614,9 +579,12 @@ export const BookingConfirmation = () => {
               data-magic-link-ready={Boolean(magicLinkUrl)}
               data-magic-link-loading={generatingMagicLink}
             >
-              <h3 className="text-xl font-bold text-blue-400 mb-2 flex items-center">
-                <Key className="mr-2 h-5 w-5" /> View Your Access Code
-              </h3>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-xl font-bold text-blue-400 flex items-center">
+                  <Key className="mr-2 h-5 w-5" /> View Your Access Code
+                </h3>
+                <PickupLocationInfoButton />
+              </div>
               <p className="text-blue-100/80 text-sm">
                 To view your access code, see the customer portal below or refer to your receipt.
               </p>

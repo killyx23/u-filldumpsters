@@ -6,6 +6,11 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
 });
 const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
 const log = (msg, data)=>console.log(`[finalize-booking] ${msg}`, data !== undefined ? data : "");
+const toPositiveInt = (value: unknown): number => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.floor(n);
+};
 Deno.serve(async (req)=>{
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -166,7 +171,89 @@ Deno.serve(async (req)=>{
     }
     log("Booking status updated", finalStatus);
     // ----------------------------------------------------------------
-    // Step 5b: Notify admin chat when verification was skipped
+    // Step 5b: Loyalty, coupon, and referral side effects
+    // ----------------------------------------------------------------
+    const loyaltyOutcome = {
+      pointsAwarded: 0,
+      pointsRedeemed: 0,
+      referralBonusAwarded: 0,
+      referralApplied: false
+    };
+    const bookingTotal = Number(updatedBooking.total_price || 0);
+    const redeemedPoints = toPositiveInt(updatedBooking.addons?.loyaltyPointsToRedeem);
+    const referralCode = (updatedBooking.addons?.referralCode || updatedBooking.addons?.referral_code || "").trim();
+    const couponId = Number(updatedBooking.addons?.coupon?.id || 0);
+    const { data: loyaltySettings } = await supabase.from("loyalty_settings").select("points_per_dollar, referral_bonus_points").maybeSingle();
+    const pointsPerDollar = Number(loyaltySettings?.points_per_dollar || 10);
+    const referralBonusPoints = toPositiveInt(loyaltySettings?.referral_bonus_points || 100);
+    if (updatedBooking.customer_id && redeemedPoints > 0) {
+      const { data: redeemResult, error: redeemError } = await supabase.rpc("adjust_loyalty_points", {
+        p_customer_id: updatedBooking.customer_id,
+        p_points: redeemedPoints,
+        p_transaction_type: "redeemed",
+        p_booking_id: updatedBooking.id,
+        p_referral_id: null,
+        p_notes: "Redeemed during checkout"
+      });
+      if (redeemError) {
+        throw new Error(`Loyalty redemption failed: ${redeemError.message}`);
+      }
+      const redemption = Array.isArray(redeemResult) ? redeemResult[0] : redeemResult;
+      if (!redemption?.already_processed) {
+        loyaltyOutcome.pointsRedeemed = redeemedPoints;
+      }
+    }
+    if (updatedBooking.customer_id && bookingTotal > 0) {
+      const pointsToAward = Math.floor(bookingTotal * pointsPerDollar);
+      if (pointsToAward > 0) {
+        const { data: awardResult, error: awardError } = await supabase.rpc("adjust_loyalty_points", {
+          p_customer_id: updatedBooking.customer_id,
+          p_points: pointsToAward,
+          p_transaction_type: "earned",
+          p_booking_id: updatedBooking.id,
+          p_referral_id: null,
+          p_notes: "Booking completion points"
+        });
+        if (awardError) {
+          throw new Error(`Loyalty award failed: ${awardError.message}`);
+        }
+        const award = Array.isArray(awardResult) ? awardResult[0] : awardResult;
+        if (!award?.already_processed) {
+          loyaltyOutcome.pointsAwarded = pointsToAward;
+        }
+      }
+    }
+    if (updatedBooking.customer_id && referralCode) {
+      const { data: referralResult, error: referralError } = await supabase.rpc("complete_referral_for_booking", {
+        p_booking_id: updatedBooking.id,
+        p_referee_customer_id: updatedBooking.customer_id,
+        p_referral_code: referralCode,
+        p_bonus_points: referralBonusPoints
+      });
+      if (referralError) {
+        console.error("[finalize-booking] Referral completion failed:", referralError);
+      } else {
+        const referral = Array.isArray(referralResult) ? referralResult[0] : referralResult;
+        if (referral?.referral_id) {
+          loyaltyOutcome.referralApplied = true;
+          if (referral?.rewarded) {
+            loyaltyOutcome.referralBonusAwarded = referralBonusPoints;
+          }
+        }
+      }
+    }
+    if (couponId > 0) {
+      const { data: couponRow } = await supabase.from("coupons").select("id, usage_count").eq("id", couponId).maybeSingle();
+      const nextUsage = Number(couponRow?.usage_count || 0) + 1;
+      const { error: couponError } = await supabase.from("coupons").update({
+        usage_count: nextUsage
+      }).eq("id", couponId);
+      if (couponError) {
+        console.error("[finalize-booking] coupon usage increment failed:", couponError);
+      }
+    }
+    // ----------------------------------------------------------------
+    // Step 5c: Notify admin chat when verification was skipped
     // ----------------------------------------------------------------
     if (finalStatus === "pending_verification") {
       const skipReason = updatedBooking.verification_notes?.trim() || "No reason provided.";
@@ -272,7 +359,8 @@ Deno.serve(async (req)=>{
     return new Response(JSON.stringify({
       success: true,
       status: finalStatus,
-      booking: updatedBooking
+      booking: updatedBooking,
+      loyalty: loyaltyOutcome
     }), {
       headers: {
         ...corsHeaders,

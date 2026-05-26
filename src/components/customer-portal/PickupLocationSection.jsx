@@ -4,6 +4,7 @@ import { Clock, CheckCircle2, Loader2, Building2 } from 'lucide-react';
 import { getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getPickupLocationPhase } from '@/utils/bookingPickupWindow';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 
 export const PickupLocationSection = ({ booking }) => {
   const [businessAddress, setBusinessAddress] = useState(null);
@@ -46,10 +47,13 @@ export const PickupLocationSection = ({ booking }) => {
 
   return (
     <div>
-      <p className="text-sm text-gray-400 flex items-center">
-        <Building2 className="mr-2 h-4 w-4 text-yellow-400" />
-        Pickup Location
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-gray-400 flex items-center">
+          <Building2 className="mr-2 h-4 w-4 text-yellow-400" />
+          Pickup Location
+        </p>
+        <PickupLocationInfoButton />
+      </div>
 
       {phase === 'pending' && (
         <div className="mt-2 bg-black/20 p-3 rounded-lg border border-white/5">

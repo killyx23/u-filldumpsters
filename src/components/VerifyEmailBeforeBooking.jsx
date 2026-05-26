@@ -23,6 +23,7 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
+const RECENT_VERIFICATION_TTL_MS = 30 * 60 * 1000;
 
 export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [searchParams] = useSearchParams();
@@ -124,10 +125,31 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 setBookingData(reconstructedBookingData);
                 setPlan(pending.plan_data);
                 setAddonsData(pending.addons_data || {});
-                
+
+                const recentVerifiedAt = Number(
+                  typeof window !== 'undefined'
+                    ? window.sessionStorage.getItem(`verified_email_${String(reconstructedBookingData?.email || '').toLowerCase()}`)
+                    : 0
+                );
+                const recentlyVerified =
+                  Number.isFinite(recentVerifiedAt) &&
+                  recentVerifiedAt > 0 &&
+                  Date.now() - recentVerifiedAt < RECENT_VERIFICATION_TTL_MS;
+
                 clearTimeout(loadingTimeoutRef.current);
-                setStatus('idle');
-                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
+                if (recentlyVerified) {
+                  setStatus('verified');
+                  toast({
+                    title: 'Email already verified',
+                    description: 'Skipping code entry and continuing to payment.',
+                  });
+                  setTimeout(() => {
+                    navigate(`/payment?bookingId=${token}`);
+                  }, 1200);
+                } else {
+                  setStatus('idle');
+                  console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
+                }
 
             } catch (error) {
                 const catchTs = new Date().toISOString();
@@ -139,7 +161,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         };
 
         loadPendingBooking();
-    }, [token, retryCount]);
+    }, [token, retryCount, navigate]);
 
     // Load equipment prices with error handling
     useEffect(() => {
@@ -262,18 +284,18 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             ...taxOptions,
         });
 
-        let discount = 0;
+        let couponDiscount = 0;
         const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (addonsData?.coupon?.isValid) {
             if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
+                couponDiscount = Number(addonsData.coupon.discountValue || 0);
             } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
             }
         }
 
         const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-        discount += loyaltyDiscount;
+        const discount = couponDiscount + loyaltyDiscount;
 
         return {
             basePriceAmount,
@@ -285,6 +307,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             purchaseItemsCost,
             disposalCost,
             discount,
+            couponDiscount,
             loyaltyDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
@@ -386,6 +409,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Email verified successfully!`);
+            if (typeof window !== 'undefined') {
+                window.sessionStorage.setItem(`verified_email_${String(bookingData.email || '').toLowerCase()}`, String(Date.now()));
+            }
             setStatus('verified');
 
             toast({
@@ -516,10 +542,17 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({
             label: `Coupon (${addonsData.coupon?.code || 'Applied'})`,
-            amount: -calculatedTotals.discount,
+            amount: -calculatedTotals.couponDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
             highlight: true
         });
     }

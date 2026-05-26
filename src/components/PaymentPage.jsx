@@ -352,10 +352,18 @@ const CheckoutForm = ({
           {pricingBreakdown.discount > 0 && (
             <>
               <CategoryHeader icon="🏷️" title="Discounts" />
-              <BreakdownLine 
-                label={`Coupon (${addonsData?.coupon?.code || 'Applied'})`} 
-                value={-pricingBreakdown.discount} 
-              />
+              {pricingBreakdown.couponDiscount > 0 && (
+                <BreakdownLine
+                  label={`Coupon (${addonsData?.coupon?.code || 'Applied'})`}
+                  value={-pricingBreakdown.couponDiscount}
+                />
+              )}
+              {pricingBreakdown.loyaltyDiscount > 0 && (
+                <BreakdownLine
+                  label={`Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`}
+                  value={-pricingBreakdown.loyaltyDiscount}
+                />
+              )}
             </>
           )}
           
@@ -634,6 +642,14 @@ export const PaymentPage = ({ onBack }) => {
       console.log(`[${timestamp}] [PaymentPage] Creating actual booking from pending customer data with total $${validatedTotalAmount}...`);
 
       try {
+        const referralCodeFromStorage =
+          typeof window !== 'undefined' ? window.localStorage.getItem('referral_code') : null;
+        const normalizedReferralCode = String(
+          pendingData.addons_data?.referralCode ||
+          pendingData.addons_data?.referral_code ||
+          referralCodeFromStorage ||
+          ''
+        ).trim();
         const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
         const driverVerificationSkipped = Boolean(pendingData.addons_data?.wasVerificationSkipped);
         const isUnverifiedDelivery = pendingData.delivery_address &&
@@ -668,6 +684,7 @@ export const PaymentPage = ({ onBack }) => {
             ...pendingData.addons_data,
             verificationSkipped: driverVerificationSkipped,
             isDelivery: pendingData.delivery_service,
+            referralCode: normalizedReferralCode || null,
             taxableSubtotal: calcResult.taxableSubtotal,
             nonTaxableSubtotal: calcResult.nonTaxableSubtotal,
             taxLineItemsSnapshot: (calcResult.lineItems || []).map((line) => ({
@@ -698,6 +715,9 @@ export const PaymentPage = ({ onBack }) => {
 
         console.log(`[${timestamp}] [PaymentPage] ✓ Booking created with ID: ${data.id}`);
         setBookingId(data.id);
+        if (normalizedReferralCode && typeof window !== 'undefined') {
+          window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
+        }
 
         // Handle license images if present
         if (pendingData.addons_data?.licenseImageUrls?.length > 0) {
