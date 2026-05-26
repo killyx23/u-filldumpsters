@@ -144,6 +144,7 @@ export const OrderSummary = ({
             if (data.isValid) {
                 const couponData = {
                     isValid: true,
+                    id: data.id,
                     code: data.code,
                     discountType: data.discountType,
                     discountValue: parseFloat(data.discountValue)
@@ -282,18 +283,18 @@ export const OrderSummary = ({
             ...taxOptions,
         });
 
-        let discount = 0;
+        let couponDiscount = 0;
         const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (appliedCoupon?.isValid) {
             if (appliedCoupon.discountType === 'fixed') {
-                discount = Number(appliedCoupon.discountValue);
+                couponDiscount = Number(appliedCoupon.discountValue);
             } else if (appliedCoupon.discountType === 'percentage') {
-                discount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
             }
         }
 
         const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
-        discount += loyaltyDiscount;
+        const discount = couponDiscount + loyaltyDiscount;
 
         return {
             baseRental,
@@ -305,6 +306,7 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            couponDiscount,
             loyaltyDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
@@ -433,10 +435,17 @@ export const OrderSummary = ({
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({ 
             label: `Coupon (${appliedCoupon.code})`, 
-            amount: -calculatedTotals.discount, 
+            amount: -calculatedTotals.couponDiscount, 
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
             highlight: true 
         });
     }
