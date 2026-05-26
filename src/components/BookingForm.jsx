@@ -22,6 +22,8 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
+import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
+import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 
 export const BookingForm = ({
   plan,
@@ -31,7 +33,8 @@ export const BookingForm = ({
   onBack,
   deliveryService,
   setDeliveryService,
-  onReorderSelect
+  onReorderSelect,
+  onCustomerVerified
 }) => {
   const [allPlans, setAllPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
@@ -73,6 +76,13 @@ export const BookingForm = ({
 
   const handleReorderSelect = async (pastBooking) => {
     if (onReorderSelect) onReorderSelect(pastBooking);
+    setIsReturningCustomerModalOpen(false);
+  };
+
+  const handleCustomerVerified = (customerData) => {
+    if (onCustomerVerified) {
+      onCustomerVerified(customerData);
+    }
     setIsReturningCustomerModalOpen(false);
   };
 
@@ -486,6 +496,11 @@ export const BookingForm = ({
     }
     return dates;
   }, [availability]);
+
+  const showNextMonthHint = useMemo(
+    () => isMonthFullyUnavailable(currentMonth, availability, { loading: loadingAvailability }),
+    [currentMonth, availability, loadingAvailability]
+  );
   
   const timeSlots = useMemo(() => {
     if (!currentPlan || !plan) return { dropOff: [], pickup: [] };
@@ -893,9 +908,12 @@ export const BookingForm = ({
     }
 
     if (currentPlan?.id === 2) {
-      const rentalHoursText = trailerRentalHours.pickupStart && trailerRentalHours.returnBy 
-        ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
-        : 'gives you the trailer for a full rental day.';
+      const hasPickupDate = Boolean(bookingData.dropOffDate);
+      const rentalHoursText = !hasPickupDate
+        ? 'includes flexible same-day pickup and return hours. Select a pickup date to view exact times.'
+        : trailerRentalHours.pickupStart && trailerRentalHours.returnBy
+          ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
+          : 'will show your exact pickup and return hours once availability is loaded.';
 
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
@@ -1209,7 +1227,7 @@ export const BookingForm = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
-                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
+                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                   {currentPlan?.id === 2 && !isDelivery ? (
                       <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} />
                   ) : (
@@ -1220,7 +1238,7 @@ export const BookingForm = ({
                   )}
                   
                   {currentPlan?.id !== 3 && <>
-                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
+                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                           {currentPlan?.id === 2 && !isDelivery ? (
                               <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} />
                           ) : (
@@ -1252,6 +1270,7 @@ export const BookingForm = ({
       isOpen={isReturningCustomerModalOpen}
       onClose={() => setIsReturningCustomerModalOpen(false)}
       onReorderSelect={handleReorderSelect}
+      onCustomerVerified={handleCustomerVerified}
     />
   </>;
 };
@@ -1270,12 +1289,23 @@ const DatePickerField = ({
   date,
   setDate,
   disabledDates,
-  onMonthChange
+  onMonthChange,
+  showNextMonthHint = false
 }) => <div className="md:col-span-1">
     <label className="text-sm font-medium text-white mb-2 block">{label}</label>
     <Popover>
       <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4" />{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger>
-      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent>
+      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white">
+        <Calendar
+          mode="single"
+          selected={date}
+          onSelect={setDate}
+          disabled={disabledDates}
+          initialFocus
+          onMonthChange={onMonthChange}
+          components={showNextMonthHint ? { Footer: CalendarNextMonthHint } : undefined}
+        />
+      </PopoverContent>
     </Popover>
   </div>;
 

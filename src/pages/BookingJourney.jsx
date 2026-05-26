@@ -22,6 +22,7 @@ import {
   retrievePendingBooking,
   mapPendingToBookingState,
 } from '@/utils/bookingDataPersistence';
+import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 
@@ -41,7 +42,7 @@ const INITIAL_BOOKING_DATA = {
 };
 
 const INITIAL_ADDONS_DATA = {
-  insurance: 'decline',
+  insurance: 'accept',
   drivewayProtection: 'decline',
   equipment: [],
   coupon: null,
@@ -162,6 +163,23 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.reorderBooking]);
 
+  useEffect(() => {
+    const returningCustomerProfile = location.state?.returningCustomerProfile;
+    if (!returningCustomerProfile) return;
+
+    const mapped = mapCustomerToBookingData(returningCustomerProfile.customer, returningCustomerProfile.email);
+    setBookingData((prev) => ({
+      ...prev,
+      ...mapped,
+      contactAddress: {
+        ...prev.contactAddress,
+        ...mapped.contactAddress,
+      },
+    }));
+
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   const handleReorderService = async (pastBooking) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] Reordering service from booking:`, pastBooking.id);
@@ -188,6 +206,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         console.error(`[${timestamp}] [BookingJourney] Error fetching customer:`, customerError);
       }
 
+      const hasCustomerProfile = Boolean(customer?.id);
+
       setBookingData({
         firstName: customer?.first_name || pastBooking.first_name || '',
         lastName: customer?.last_name || pastBooking.last_name || '',
@@ -199,9 +219,9 @@ function BookingJourney({ reorderData, onReorderApplied }) {
           state: customer?.state || pastBooking.state || '',
           zip: customer?.zip || pastBooking.zip || '',
           customerId: customer?.id || null,
-          isVerified: true,
+          isVerified: hasCustomerProfile,
         },
-        addressVerified: true,
+        addressVerified: hasCustomerProfile,
         dropOffDate: null,
         pickupDate: null,
         dropOffTimeSlot: '',
@@ -211,7 +231,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       });
 
       setAddonsData({
-        insurance: addons.insurance || 'decline',
+        insurance: addons.insurance || 'accept',
         drivewayProtection: addons.drivewayProtection || 'decline',
         equipment: addons.equipment || [],
         coupon: null,
@@ -256,6 +276,17 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setDeliveryService(planData.deliveryService);
     setCurrentStep(2);
     window.scrollTo(0, 0);
+  };
+
+  const handleReturningCustomerVerified = (customerData) => {
+    setBookingData((prev) => ({
+      ...prev,
+      ...customerData,
+      contactAddress: {
+        ...prev.contactAddress,
+        ...(customerData?.contactAddress || {}),
+      },
+    }));
   };
 
   const handleAddonsSubmit = (total, _, addons) => {
@@ -415,6 +446,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             deliveryService={deliveryService}
             setDeliveryService={setDeliveryService}
             onReorderSelect={handleReorderService}
+            onCustomerVerified={handleReturningCustomerVerified}
           />
         );
       case 2:

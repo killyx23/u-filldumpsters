@@ -579,6 +579,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                             </td>
                                         </tr>
                                     )}
+                                    {loyaltyDiscountAmount > 0 && (
+                                        <tr>
+                                            <td colSpan="2" className="py-2 px-6 text-xs text-green-800 italic">
+                                                Thank you for your loyalty. We appreciate your continued business.
+                                            </td>
+                                        </tr>
+                                    )}
                                 </>
                             )}
 

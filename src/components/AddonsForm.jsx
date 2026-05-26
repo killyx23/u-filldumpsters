@@ -52,6 +52,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
 
   useEffect(() => {
+    if (contactAddress?.customerId) {
+      setCustomerId(contactAddress.customerId);
+      return;
+    }
+
     const lookupCustomer = async () => {
       if (!customerEmail?.includes('@')) {
         setCustomerId(null);
@@ -65,7 +70,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       setCustomerId(data?.id ?? null);
     };
     lookupCustomer();
-  }, [customerEmail]);
+  }, [customerEmail, contactAddress?.customerId]);
 
   const handlePointsRedemption = (points, discountAmount) => {
     setAddonsData((prev) => ({
@@ -452,6 +457,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
               {customerId && (
                 <LoyaltyPointsRedemption
                   customerId={customerId}
+                  verifiedEmail={customerEmail?.toLowerCase().trim()}
                   onPointsRedemption={handlePointsRedemption}
                   currentTotal={loyaltyPreviewTotal}
                 />

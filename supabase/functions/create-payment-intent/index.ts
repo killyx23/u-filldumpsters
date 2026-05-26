@@ -2,10 +2,19 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import Stripe from "https://esm.sh/stripe@14.14.0?target=deno";
 
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") || "", {
-  apiVersion: "2023-10-16",
-  httpClient: Stripe.createFetchHttpClient(),
-});
+function getStripeClient() {
+  const stripeSecretKey = Deno.env.get("STRIPE_SECRET_KEY")?.trim();
+  if (!stripeSecretKey) {
+    throw new Error(
+      "Stripe is not configured on the server. Set STRIPE_SECRET_KEY in Supabase Edge Function secrets (production) or supabase/functions/.env (local).",
+    );
+  }
+
+  return new Stripe(stripeSecretKey, {
+    apiVersion: "2023-10-16",
+    httpClient: Stripe.createFetchHttpClient(),
+  });
+}
 
 const updatablePiStatuses = new Set([
   "requires_payment_method",
@@ -74,6 +83,8 @@ Deno.serve(async (req) => {
   console.log(`[${timestamp}] [create-payment-intent] Function invoked.`);
 
   try {
+    const stripe = getStripeClient();
+
     let body: Record<string, unknown>;
     try {
       body = await req.json();

@@ -23,7 +23,6 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
-const RECENT_VERIFICATION_TTL_MS = 30 * 60 * 1000;
 
 export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [searchParams] = useSearchParams();
@@ -126,30 +125,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 setPlan(pending.plan_data);
                 setAddonsData(pending.addons_data || {});
 
-                const recentVerifiedAt = Number(
-                  typeof window !== 'undefined'
-                    ? window.sessionStorage.getItem(`verified_email_${String(reconstructedBookingData?.email || '').toLowerCase()}`)
-                    : 0
-                );
-                const recentlyVerified =
-                  Number.isFinite(recentVerifiedAt) &&
-                  recentVerifiedAt > 0 &&
-                  Date.now() - recentVerifiedAt < RECENT_VERIFICATION_TTL_MS;
-
                 clearTimeout(loadingTimeoutRef.current);
-                if (recentlyVerified) {
-                  setStatus('verified');
-                  toast({
-                    title: 'Email already verified',
-                    description: 'Skipping code entry and continuing to payment.',
-                  });
-                  setTimeout(() => {
-                    navigate(`/payment?bookingId=${token}`);
-                  }, 1200);
-                } else {
-                  setStatus('idle');
-                  console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
-                }
+                setStatus('idle');
+                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
 
             } catch (error) {
                 const catchTs = new Date().toISOString();

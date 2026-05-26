@@ -184,6 +184,27 @@ export const Header = ({ onReorderSelect }) => {
           onReorderSelect?.(booking);
           navigate('/');
         }}
+        onCustomerVerified={(customerData) => {
+          navigate('/', {
+            state: {
+              returningCustomerProfile: {
+                customer: {
+                  id: customerData?.contactAddress?.customerId || null,
+                  first_name: customerData?.firstName || '',
+                  last_name: customerData?.lastName || '',
+                  email: customerData?.email || '',
+                  phone: customerData?.phone || '',
+                  street: customerData?.contactAddress?.street || '',
+                  city: customerData?.contactAddress?.city || '',
+                  state: customerData?.contactAddress?.state || '',
+                  zip: customerData?.contactAddress?.zip || '',
+                },
+                email: customerData?.email || '',
+              },
+            },
+          });
+          setIsReturningCustomerModalOpen(false);
+        }}
       />
     </>
   );
