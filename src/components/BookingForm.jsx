@@ -72,66 +72,8 @@ export const BookingForm = ({
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
   const handleReorderSelect = async (pastBooking) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [BookingForm] Reordering service from booking:`, pastBooking.id);
-
-    try {
-      const planData = pastBooking.plan;
-      const addons = pastBooking.addons || {};
-
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', pastBooking.email)
-        .maybeSingle();
-
-      if (customerError) {
-        console.error(`[${timestamp}] [BookingForm] Error fetching customer:`, customerError);
-      }
-
-      setBookingData(prev => ({
-        ...prev,
-        firstName: customer?.first_name || pastBooking.first_name || '',
-        lastName: customer?.last_name || pastBooking.last_name || '',
-        email: pastBooking.email,
-        phone: customer?.phone || pastBooking.phone || '',
-        contactAddress: {
-          street: customer?.street || pastBooking.street || '',
-          city: customer?.city || pastBooking.city || '',
-          state: customer?.state || pastBooking.state || '',
-          zip: customer?.zip || pastBooking.zip || '',
-          isVerified: true
-        },
-        addressVerified: true,
-        dropOffDate: null,
-        pickupDate: null,
-        dropOffTimeSlot: '',
-        pickupTimeSlot: '',
-        notes: pastBooking.notes || '',
-        termsAccepted: false
-      }));
-
-      if (onReorderSelect) {
-        onReorderSelect(pastBooking);
-      }
-
-      toast({
-        title: 'Booking Pre-filled',
-        description: 'Your previous booking details have been loaded. Please select new dates.',
-        duration: 5000
-      });
-
-      setIsReturningCustomerModalOpen(false);
-
-    } catch (error) {
-      const catchTs = new Date().toISOString();
-      console.error(`[${catchTs}] [BookingForm] Error in handleReorderSelect:`, error);
-      toast({
-        title: 'Reorder Failed',
-        description: 'Could not load your previous booking.',
-        variant: 'destructive'
-      });
-    }
+    if (onReorderSelect) onReorderSelect(pastBooking);
+    setIsReturningCustomerModalOpen(false);
   };
 
   // Fetch disposal fees from equipment_pricing table

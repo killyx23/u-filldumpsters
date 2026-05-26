@@ -45,11 +45,62 @@ const resolveEquipmentLabel = (item: { id?: string | number; dbId?: number; labe
   if (byDb) return byDb;
   return "Equipment";
 };
-const isTrailerSelfService = (booking: { plan?: { id?: number; service_type?: string }; addons?: { isDelivery?: boolean; deliveryService?: boolean } }) => {
+/** Dump Loader customer pickup (plan 2, no delivery) — matches src/utils/customerPickupService.js */
+const CUSTOMER_PICKUP_PLAN_IDS = [2];
+
+const parseJsonField = (value: unknown) => {
+  if (value == null) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value as Record<string, unknown>;
+  return {};
+};
+
+const normalizeBookingJsonFields = (booking: { plan?: unknown; addons?: unknown }) => {
+  booking.plan = parseJsonField(booking.plan);
+  booking.addons = parseJsonField(booking.addons);
+  return booking;
+};
+
+const isTrailerSelfService = (booking: {
+  plan?: { id?: number; service_type?: string };
+  addons?: { isDelivery?: boolean; deliveryService?: boolean };
+  delivery_type?: string | null;
+}) => {
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const isDelivery = addons.isDelivery || addons.deliveryService;
-  return Number(plan.id) === 2 && plan.service_type === "hourly" && !isDelivery;
+  if (isDelivery) return false;
+  if (booking.delivery_type === "self_service_trailer" || booking.delivery_type === "self_pickup") {
+    return true;
+  }
+  return CUSTOMER_PICKUP_PLAN_IDS.includes(Number(plan.id));
+};
+
+/** Merge service row into booking.plan when JSON snapshot is missing fields. */
+const hydrateBookingPlanFromService = async (supabase, booking) => {
+  const planId = booking.plan?.id ?? booking.plan?.service_id;
+  if (!planId) return booking;
+  const { data: service } = await supabase
+    .from("services")
+    .select("id, name, description, service_type, base_price")
+    .eq("id", planId)
+    .maybeSingle();
+  if (!service) return booking;
+  booking.plan = {
+    ...booking.plan,
+    id: booking.plan?.id ?? service.id,
+    name: booking.plan?.name ?? service.name,
+    description: booking.plan?.description ?? service.description,
+    service_type: booking.plan?.service_type ?? service.service_type,
+    base_price: booking.plan?.base_price ?? service.base_price,
+  };
+  return booking;
 };
 const INSURANCE_SERVICE_ID = 7;
 const DEFAULT_INSURANCE_PRICE = 25;
@@ -182,6 +233,9 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
     addonsHTML += `<li style="padding: 5px 0;">✓ Driveway Protection</li>`;
   }
   const selfService = isTrailerSelfService(booking);
+  console.log(
+    `[send-booking-confirmation] selfService=${selfService} planId=${plan.id} serviceType=${serviceType} isDelivery=${Boolean(addons.isDelivery || addons.deliveryService)}`,
+  );
   const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
   const returnScheduleLabel = selfService ? "Return by:" : "Pickup:";
   const pickupScheduleValue = selfService
@@ -208,14 +262,6 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       <li><strong>🔒 Drop-off & Security:</strong> Ensure the trailer is returned to the exact same location and is securely locked.</li>
       <li><strong>🧹 Cleaning:</strong> Ensure the trailer is empty and clean before returning it to avoid cleaning fees.</li>
      `;
-  } else if (serviceType === 'trailer_rental' || serviceName.toLowerCase().includes('dump loader') || serviceName.toLowerCase().includes('trailer')) {
-    nextStepsHTML = `
-      <li>Pick up the trailer at our location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}.</li>
-      <li>Ensure your towing vehicle meets the minimum requirements (usually a 1/2-ton truck or larger with a 2" ball hitch).</li>
-      <li>Fill the trailer at your convenience during the rental period.</li>
-      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatPlainBookingTime(booking.pickup_time_slot)}.</li>
-      <li>Make sure the trailer is empty and clean before returning.</li>
-     `;
   } else {
     nextStepsHTML = `
       <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}.</li>
@@ -225,6 +271,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
      `;
   }
   return `
+<!-- email-template: self-service-v2 -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -511,12 +558,15 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    normalizeBookingJsonFields(booking);
+    await hydrateBookingPlanFromService(supabase, booking);
+    const serviceId = booking.plan?.id ?? booking.plan?.service_id;
     let serviceDetails = null;
-    if (booking.plan && booking.plan.service_id) {
-      const { data: service } = await supabase.from('services').select('*').eq('id', booking.plan.service_id).single();
+    if (serviceId) {
+      const { data: service } = await supabase.from("services").select("*").eq("id", serviceId).maybeSingle();
       serviceDetails = service;
     }
-    console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully`);
+    console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully planId=${booking.plan?.id} serviceType=${booking.plan?.service_type}`);
     const recipientEmail = email || booking.email;
     if (!recipientEmail) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: No email address available`);

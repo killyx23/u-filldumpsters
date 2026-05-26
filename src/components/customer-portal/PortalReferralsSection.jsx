@@ -54,6 +54,16 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
     if (!customerId) return;
     setCreating(true);
     try {
+      const existingActive = referrals.find((ref) => ref.referral_code);
+      if (existingActive?.referral_code) {
+        setPrimaryCode(existingActive.referral_code);
+        toast({
+          title: 'Referral link already active',
+          description: 'You already have a referral link. Share it to start earning rewards.',
+        });
+        return;
+      }
+
       const code = generateReferralCode(customerId);
       const { data, error } = await supabase
         .from('referrals')
@@ -173,8 +183,8 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
                 <ul className="space-y-1 text-sm text-gray-300">
                   {referrals.slice(0, 5).map((ref) => (
                     <li key={ref.id} className="flex justify-between">
-                      <span>{ref.referral_code}</span>
-                      <span className="capitalize">{ref.status}</span>
+                      <span className="truncate mr-2">{ref.referral_code}</span>
+                      <span className="capitalize">{String(ref.status || 'pending').replace(/_/g, ' ')}</span>
                     </li>
                   ))}
                 </ul>

@@ -180,7 +180,10 @@ export const Header = ({ onReorderSelect }) => {
       <ReturningCustomerVerificationModal
         isOpen={isReturningCustomerModalOpen}
         onClose={() => setIsReturningCustomerModalOpen(false)}
-        onReorderSelect={onReorderSelect}
+        onReorderSelect={(booking) => {
+          onReorderSelect?.(booking);
+          navigate('/');
+        }}
       />
     </>
   );

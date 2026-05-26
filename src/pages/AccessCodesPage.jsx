@@ -9,6 +9,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -419,10 +420,13 @@ export const AccessCodesPage = ({ customerData }) => {
         >
           <Card className="bg-white/10 backdrop-blur-lg border-white/20">
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-yellow-400" />
-                Rental Details
-              </CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-yellow-400" />
+                  Rental Details
+                </CardTitle>
+                <PickupLocationInfoButton />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-white">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

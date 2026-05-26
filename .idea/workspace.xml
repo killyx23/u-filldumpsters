@@ -5,8 +5,53 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="71f66781-56e3-4aa3-be4b-b40376397561" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/backup.sh" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/backup.sh" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/AddonsForm.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/AddonsForm.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/BookingForm.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/BookingForm.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/BookingSummaryReview.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/BookingSummaryReview.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/Header.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/Header.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/PaymentPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/PaymentPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/PrintableReceipt.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/PrintableReceipt.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/ReturningCustomerVerificationModal.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/ReturningCustomerVerificationModal.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/ReviewAdminResponse.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/ReviewMediaDisplay.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/UiControlGuide.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/VerifyEmailBeforeBooking.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/VerifyEmailBeforeBooking.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/addons/OrderSummary.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/addons/OrderSummary.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/BookingRemovalDialog.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/admin/LoyaltyPointsManager.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/admin/LoyaltyPointsManager.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/PickupDirectionsMap.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/PickupLocationSection.jsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/components/customer-portal/PortalReferralsSection.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/components/customer-portal/PortalReferralsSection.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/config/uiControlGuideEntries.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/lib/customSupabaseClient.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/lib/customSupabaseClient.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/AccessCodesPage.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/AccessCodesPage.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/AdminDashboard.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/AdminDashboard.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/BookingConfirmation.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/BookingConfirmation.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pages/BookingJourney.jsx" beforeDir="false" afterPath="$PROJECT_DIR$/src/pages/BookingJourney.jsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/bookingArchiveHelper.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/bookingPickupWindow.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/calculateBookingTotal.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/calculateBookingTotal.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/customerPickupService.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/parseEdgeFunctionError.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/reviewDisplayHelper.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/reviewMediaHelper.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/reviewNotificationHelper.js" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/admin-complete-reschedule/cors.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/admin-complete-reschedule/index.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/charge-booking-difference/cors.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/charge-booking-difference/index.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/finalize-booking/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/functions/finalize-booking/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/functions/loyalty-points/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/functions/loyalty-points/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260521140000_fix_verification_skip_flag.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260521180000_booking_archive_metadata.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522022600_verification_attention_enhancements.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522120000_customer_uploads_chat_policies.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522140000_fix_customer_uploads_storage_policies.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522160000_review_media.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522170000_review_media_extra_mime.sql" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/supabase/migrations/20260522180000_admin_review_response.sql" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -42,22 +87,24 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "burner-branch",
-    "kotlin-language-version-configured": "true",
-    "node.js.detected.package.eslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "ts.external.directory.path": "C:\\Program Files\\JetBrains\\IntelliJ IDEA 2026.1.1\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;Customer-Portal&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;vcs.Git&quot;,
+    &quot;ts.external.directory.path&quot;: &quot;C:\\Program Files\\JetBrains\\IntelliJ IDEA 2026.1.1\\plugins\\javascript-plugin\\jsLanguageServicesImpl\\external&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
       <changelist id="71f66781-56e3-4aa3-be4b-b40376397561" name="Changes" comment="" />
@@ -65,6 +112,10 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1779218238393</updated>
+      <workItem from="1779682559550" duration="3000" />
+      <workItem from="1779688184229" duration="1007000" />
+      <workItem from="1779769295524" duration="826000" />
+      <workItem from="1779770131694" duration="123000" />
     </task>
     <servers />
   </component>
@@ -72,8 +123,30 @@
     <option name="version" value="3" />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
+    <option name="OPEN_GENERIC_TABS">
+      <map>
+        <entry key="9dc8c616-1136-475a-accd-41627641dcd4" value="TOOL_WINDOW" />
+      </map>
+    </option>
     <option name="TAB_STATES">
       <map>
+        <entry key="9dc8c616-1136-475a-accd-41627641dcd4">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="main" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
         <entry key="MAIN">
           <value>
             <State>
