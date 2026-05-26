@@ -243,14 +243,16 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     rentEquipmentCost + purchaseItemsCost + disposalCost;
 
     // Discount
-    let discountAmount = 0;
+    let couponDiscountAmount = 0;
     if (coupon && coupon.isValid) {
         if (coupon.discountType === 'fixed') {
-            discountAmount = Number(coupon.discountValue || 0);
+            couponDiscountAmount = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'percentage') {
-            discountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
+            couponDiscountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
         }
     }
+    const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount || 0);
+    const discountAmount = couponDiscountAmount + loyaltyDiscountAmount;
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
     
@@ -557,10 +559,22 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     <tr className="bg-green-50">
                                         <td colSpan="2" className="py-2 px-3 font-bold text-green-700">🏷️ Discounts</td>
                                     </tr>
-                                    <tr className="border-b">
-                                        <td className="py-1 px-6 text-green-700">Coupon ({coupon.code})</td>
-                                        <td className="text-right py-1 pr-3 text-green-700 font-semibold">-${discountAmount.toFixed(2)}</td>
-                                    </tr>
+                                    {couponDiscountAmount > 0 && coupon?.code && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">Coupon ({coupon.code})</td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">-${couponDiscountAmount.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {loyaltyDiscountAmount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">
+                                                Loyalty Points ({Number(addons?.loyaltyPointsToRedeem || 0)} pts)
+                                            </td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">
+                                                -${loyaltyDiscountAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    )}
                                 </>
                             )}
 

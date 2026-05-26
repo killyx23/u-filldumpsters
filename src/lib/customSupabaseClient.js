@@ -25,6 +25,24 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(message);
 }
 
+if (import.meta.env.DEV) {
+  let host = "";
+  try {
+    host = new URL(supabaseUrl).hostname;
+  } catch {
+    host = "";
+  }
+
+  const isLocalHost = host === "127.0.0.1" || host === "localhost";
+  if (!isLocalHost) {
+    const message =
+      `[Supabase] Dev mode requires a local Supabase URL. Received "${supabaseUrl}". ` +
+      "Run `npm run supabase:sync-local-env` after `npx supabase start`.";
+    console.error(message);
+    throw new Error(message);
+  }
+}
+
 const customSupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
 
 export default customSupabaseClient;

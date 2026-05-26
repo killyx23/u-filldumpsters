@@ -96,6 +96,13 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         throw new Error(verifyData?.error || 'Invalid verification code');
       }
 
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          `verified_email_${normalizedEmail}`,
+          String(Date.now())
+        );
+      }
+
       const { data, error: fetchError } = await supabase
         .from('bookings')
         .select('*')
@@ -110,7 +117,30 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         return;
       }
 
-      setBookings(data);
+      const planIds = [...new Set((data || []).map((row) => row.plan_id).filter(Boolean))];
+      let plansById = {};
+      if (planIds.length > 0) {
+        const { data: planRows, error: planError } = await supabase
+          .from('plans')
+          .select('id, name')
+          .in('id', planIds);
+
+        if (planError) {
+          console.warn('[ReturningCustomerVerificationModal] Could not load plan names:', planError);
+        } else {
+          plansById = (planRows || []).reduce((acc, row) => {
+            acc[row.id] = row;
+            return acc;
+          }, {});
+        }
+      }
+
+      const enrichedBookings = (data || []).map((row) => ({
+        ...row,
+        plan: plansById[row.plan_id] || row.plan || null,
+      }));
+
+      setBookings(enrichedBookings);
       setStep('bookings');
     } catch (err) {
       console.error('[ReturningCustomerVerificationModal] Verify error:', err);

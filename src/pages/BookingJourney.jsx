@@ -198,6 +198,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
           city: customer?.city || pastBooking.city || '',
           state: customer?.state || pastBooking.state || '',
           zip: customer?.zip || pastBooking.zip || '',
+          customerId: customer?.id || null,
           isVerified: true,
         },
         addressVerified: true,

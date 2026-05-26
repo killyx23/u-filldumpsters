@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Gift, TrendingUp, Users, Settings, Plus, Minus } from 'lucide-react';
+import { Loader2, TrendingUp, Users, Settings, Plus, Minus } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 export const LoyaltyPointsManager = () => {
@@ -16,13 +16,16 @@ export const LoyaltyPointsManager = () => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [adjustmentPoints, setAdjustmentPoints] = useState(0);
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [transactions, setTransactions] = useState([]);
+  const [loadingTransactions, setLoadingTransactions] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchSettings();
     fetchCustomersWithPoints();
+    fetchTransactions();
   }, []);
 
   const fetchSettings = async () => {
@@ -68,6 +71,29 @@ export const LoyaltyPointsManager = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTransactions = async () => {
+    setLoadingTransactions(true);
+    try {
+      const { data, error } = await supabase
+        .from('loyalty_transactions')
+        .select('id, customer_id, transaction_type, points_amount, booking_id, notes, created_at, customers(name, email)')
+        .order('created_at', { ascending: false })
+        .limit(250);
+
+      if (error) throw error;
+      setTransactions(data || []);
+    } catch (err) {
+      console.error('[LoyaltyPointsManager] Error fetching transactions:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to load loyalty transaction history',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingTransactions(false);
     }
   };
 
@@ -120,63 +146,12 @@ export const LoyaltyPointsManager = () => {
     }
 
     try {
-      let { data: loyalty } = await supabase
-        .from('loyalty_points')
-        .select('points_balance, total_points_earned, total_points_redeemed')
-        .eq('customer_id', customerId)
-        .maybeSingle();
-
-      if (!loyalty) {
-        const { data: created, error: createError } = await supabase
-          .from('loyalty_points')
-          .insert({
-            customer_id: customerId,
-            points_balance: 0,
-            total_points_earned: 0,
-            total_points_redeemed: 0,
-          })
-          .select('points_balance, total_points_earned, total_points_redeemed')
-          .single();
-
-        if (createError) throw createError;
-        loyalty = created;
-      }
-
-      const newBalance = loyalty.points_balance + pointsDelta;
-      if (newBalance < 0) {
-        toast({
-          title: 'Invalid Adjustment',
-          description: 'Cannot reduce points below zero',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const updates = {
-        points_balance: newBalance,
-        last_updated: new Date().toISOString(),
-      };
-
-      if (pointsDelta > 0) {
-        updates.total_points_earned = loyalty.total_points_earned + pointsDelta;
-      } else {
-        updates.total_points_redeemed = loyalty.total_points_redeemed + Math.abs(pointsDelta);
-      }
-
-      const { error: updateError } = await supabase
-        .from('loyalty_points')
-        .update(updates)
-        .eq('customer_id', customerId);
-
-      if (updateError) throw updateError;
-
-      // Log transaction
-      await supabase.from('loyalty_transactions').insert({
-        customer_id: customerId,
-        transaction_type: pointsDelta > 0 ? 'admin_adjustment_add' : 'admin_adjustment_remove',
-        points_amount: Math.abs(pointsDelta),
-        notes: reason || 'Manual admin adjustment',
+      const { data, error } = await supabase.rpc('admin_adjust_loyalty_points', {
+        p_customer_id: customerId,
+        p_points_delta: pointsDelta,
+        p_reason: reason || 'Manual admin adjustment',
       });
+      if (error) throw error;
 
       toast({
         title: 'Points Adjusted',
@@ -184,7 +159,7 @@ export const LoyaltyPointsManager = () => {
       });
 
       fetchCustomersWithPoints();
-      setSelectedCustomer(null);
+      fetchTransactions();
       setAdjustmentPoints(0);
       setAdjustmentReason('');
     } catch (err) {
@@ -196,6 +171,21 @@ export const LoyaltyPointsManager = () => {
       });
     }
   };
+
+  const filteredTransactions = transactions.filter((tx) => {
+    const haystack = [
+      tx.customers?.name,
+      tx.customers?.email,
+      tx.transaction_type,
+      tx.notes,
+      tx.booking_id ? String(tx.booking_id) : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return haystack.includes(searchTerm.toLowerCase().trim());
+  });
 
   return (
     <div className="space-y-6">
@@ -304,7 +294,7 @@ export const LoyaltyPointsManager = () => {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setSelectedCustomer(customer)}
+                        onClick={() => setAdjustmentPoints(0)}
                       >
                         Adjust Points
                       </Button>
@@ -368,6 +358,57 @@ export const LoyaltyPointsManager = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-gray-800/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <TrendingUp className="h-5 w-5" />
+            Loyalty Transaction History
+          </CardTitle>
+          <CardDescription className="text-gray-400">
+            Searchable ledger of earned, redeemed, referral, and admin-adjustment events
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Input
+            placeholder="Search by customer, type, booking id, or notes..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="text-white"
+          />
+          {loadingTransactions ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+            </div>
+          ) : filteredTransactions.length === 0 ? (
+            <p className="text-gray-400 text-center py-8">No loyalty transactions found</p>
+          ) : (
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              {filteredTransactions.map((tx) => (
+                <div key={tx.id} className="bg-gray-900/50 border border-gray-700 rounded-lg p-3">
+                  <div className="flex justify-between items-start gap-3">
+                    <div>
+                      <p className="text-white text-sm font-semibold">
+                        {tx.customers?.name || tx.customers?.email || `Customer #${tx.customer_id}`}
+                      </p>
+                      <p className="text-xs text-gray-400">{tx.customers?.email || 'No email'}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(tx.created_at).toLocaleString()}
+                        {tx.booking_id ? ` • Booking #${tx.booking_id}` : ''}
+                      </p>
+                      {tx.notes && <p className="text-xs text-gray-300 mt-1">{tx.notes}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs uppercase text-blue-300">{String(tx.transaction_type || '').replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-bold text-green-400">{tx.points_amount} pts</p>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
