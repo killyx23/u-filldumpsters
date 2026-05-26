@@ -58,14 +58,24 @@ export const CustomerPortalDashboard = () => {
         return;
       }
 
-      // Fetch booking data
-      const { data: bookingData, error: bookingError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('id', targetOrderId)
-        .single();
+      const sessionPhone =
+        localStorage.getItem('customerPortalPhone') ||
+        (sessionStr ? JSON.parse(sessionStr).phone : null);
 
-      if (bookingError || !bookingData) {
+      if (!sessionPhone) {
+        navigate('/customer-portal-login');
+        return;
+      }
+
+      const bookingData = await supabase.rpc('verify_portal_booking_access', {
+        p_booking_id: targetOrderId,
+        p_phone: sessionPhone,
+      }).then(({ data, error }) => {
+        if (error) throw error;
+        return data;
+      });
+
+      if (!bookingData?.id) {
         throw new Error('Booking not found. Please check your Order ID.');
       }
 

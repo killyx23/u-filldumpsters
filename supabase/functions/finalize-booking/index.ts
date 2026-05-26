@@ -82,6 +82,18 @@ Deno.serve(async (req)=>{
         log("Confirmation email catch-up invoked successfully.");
       }
 
+      if (booking.customer_id && !booking.customers?.user_id) {
+        log("Invoking handle-booking-account-creation (catch-up)…");
+        const { error: accountError } = await supabase.functions.invoke("handle-booking-account-creation", {
+          body: { customerId: booking.customer_id },
+        });
+        if (accountError) {
+          console.error("[finalize-booking] handle-booking-account-creation catch-up failed:", accountError);
+        } else {
+          log("Account creation catch-up invoked successfully.");
+        }
+      }
+
       return new Response(JSON.stringify({
         success: true,
         message: "Booking already finalized.",

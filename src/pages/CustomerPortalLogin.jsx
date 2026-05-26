@@ -11,6 +11,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 
+async function verifyPortalBookingAccess(bookingId, phone) {
+  const { data, error } = await supabase.rpc('verify_portal_booking_access', {
+    p_booking_id: bookingId,
+    p_phone: phone,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export const CustomerPortalLogin = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -45,15 +54,10 @@ export const CustomerPortalLogin = () => {
         throw new Error('Invalid booking number');
       }
 
-      // Verify booking exists
-      const { data: booking, error } = await supabase
-        .from('bookings')
-        .select('id, email, phone, drop_off_date, pickup_date')
-        .eq('id', parsedBookingId)
-        .single();
+      // Verify booking exists and phone matches
+      const booking = await verifyPortalBookingAccess(parsedBookingId, urlPhone);
 
-      if (error || !booking) {
-        console.error('[CustomerPortalLogin] Booking not found:', error);
+      if (!booking?.id) {
         throw new Error('Invalid access link');
       }
 
@@ -152,23 +156,16 @@ export const CustomerPortalLogin = () => {
 
       console.log('[CustomerPortalLogin] Querying database for booking:', bookingId);
 
-      // Query database to find matching order
-      const { data: booking, error } = await supabase
-        .from('bookings')
-        .select('id, email, phone, drop_off_date, pickup_date, status')
-        .eq('id', bookingId)
-        .single();
+      const booking = await verifyPortalBookingAccess(bookingId, normalizedPhone);
 
-      if (error || !booking) {
-        console.error('[CustomerPortalLogin] Booking not found:', error);
+      if (!booking?.id) {
         throw new Error('Order ID or Phone Number not found');
       }
 
       console.log('[CustomerPortalLogin] Booking found:', booking.id);
 
-      // Verify phone number matches (last 4 digits or full number)
-      const bookingPhone = booking.phone?.replace(/\D/g, '') || '';
-      const phoneMatch = bookingPhone.endsWith(normalizedPhone.slice(-4)) || bookingPhone === normalizedPhone;
+      // Phone already validated by verify_portal_booking_access RPC
+      const phoneMatch = true;
 
       console.log('[CustomerPortalLogin] Phone validation:', {
         providedPhone: normalizedPhone,

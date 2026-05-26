@@ -103,14 +103,7 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         );
       }
 
-      const { data, error: fetchError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', normalizedEmail)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (fetchError) throw fetchError;
+      const data = verifyData.bookings || [];
 
       if (!data || data.length === 0) {
         setError('No previous bookings found for this email address');
