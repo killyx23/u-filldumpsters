@@ -147,14 +147,23 @@ export const BookingConfirmation = () => {
         bookingUpdated: data?.bookingUpdated
       });
 
-      if (data?.bookingData) {
+      if (data?.booking) {
+        setBookingDetails((prev) => ({
+          ...prev,
+          ...data.booking,
+          customers: data.booking.customers ?? prev?.customers,
+        }));
+      }
+
+      const bookingForTax = data?.booking ?? data?.bookingData;
+      if (bookingForTax) {
         console.log(`[${timestamp}] [BookingConfirmation] Creating tax record...`);
         
         const taxResult = await createTaxRecord(
           bookingId,
-          data.bookingData.tax_amount,
-          data.bookingData.tax_rate_used,
-          data.bookingData.subtotal_before_tax
+          bookingForTax.tax_amount,
+          bookingForTax.tax_rate_used,
+          bookingForTax.subtotal_before_tax
         );
 
         if (taxResult.success) {
@@ -687,8 +696,9 @@ export const BookingConfirmation = () => {
             </Button>
             <Button
               onClick={handlePrint}
+              disabled={finalizeStatus !== 'done'}
               variant="outline"
-              className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white hover:border-blue-500 font-semibold py-6 flex-1 text-lg transition-colors"
+              className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white hover:border-blue-500 font-semibold py-6 flex-1 text-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Printer className="mr-2 h-5 w-5" /> Save / Print Receipt
             </Button>
