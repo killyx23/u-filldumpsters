@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useResolvedBookingService } from '@/hooks/useResolvedBookingService';
 import { format, parseISO, addDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2, Send, Truck, CheckCircle, PlusCircle, Loader2 } from 'lucide-react';
@@ -29,20 +30,21 @@ const formatTime = (timeString) => {
 };
 
 export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, onStatusUpdate, onRentalExtended }) => {
+    const { displayName: serviceDisplayName, planForLogic } = useResolvedBookingService(booking);
     const [showExtendModal, setShowExtendModal] = useState(false);
     const [extendDays, setExtendDays] = useState(1);
     const [isExtending, setIsExtending] = useState(false);
     
     const handleExtendRental = async () => {
         setIsExtending(true);
-        const dailyRate = booking.plan?.id === 1 ? 50 : 150;
+        const dailyRate = planForLogic?.id === 1 ? 50 : 150;
         
         const { error: functionError } = await supabase.functions.invoke('extend-rental', {
             body: { 
                 customerId: booking.customers?.stripe_customer_id, 
                 days: extendDays, 
                 pricePerDay: dailyRate,
-                planName: booking.plan?.name
+                planName: serviceDisplayName
             }
         });
         
@@ -66,7 +68,9 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
         setShowExtendModal(false);
     };
 
-    const isDeliveryService = booking.plan?.id === 2 && booking.addons?.distanceInfo?.deliveryService;
+    const isDeliveryService =
+        (planForLogic?.id === 2 || planForLogic?.id === 4) &&
+        (booking.addons?.distanceInfo?.deliveryService || booking.addons?.isDelivery);
     
     // Safely extract Stripe Charge ID
     const stripeChargeId = 
@@ -113,7 +117,7 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 <DetailItem label="Email" value={booking.email} />
                 <DetailItem label="Phone" value={booking.phone} />
                 <DetailItem label="Address" value={`${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`} />
-                <DetailItem label="Service" value={booking.plan?.name || 'N/A'} />
+                <DetailItem label="Service" value={serviceDisplayName || 'N/A'} />
                 {isDeliveryService && <DetailItem label="Service Type" value="Delivery Service" />}
                 <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
                 <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />

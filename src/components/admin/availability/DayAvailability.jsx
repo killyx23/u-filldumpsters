@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { generateTimeSlotOptions, getIncrementForService } from '@/components/admin/availability/time-helpers';
+import { AVAILABILITY_UI, getServiceAvailabilityUiKind } from '@/utils/availabilityServiceUi';
 
 const TimeRangeSelector = ({ label, startValue, endValue, onStartChange, onEndChange, options }) => (
     <div>
@@ -50,7 +51,11 @@ export const DayAvailability = ({ day, dayIndex, onUpdate, serviceId }) => {
     };
 
     const renderSelectors = () => {
-        if (serviceId === 1 || serviceId === 4) {
+        const uiKind = getServiceAvailabilityUiKind(serviceId);
+        if (uiKind === AVAILABILITY_UI.NONE) {
+            return null;
+        }
+        if (uiKind === AVAILABILITY_UI.DELIVERY_WINDOW) {
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <TimeRangeSelector
@@ -71,7 +76,8 @@ export const DayAvailability = ({ day, dayIndex, onUpdate, serviceId }) => {
                     />
                 </div>
             );
-        } else if (serviceId === 2) {
+        }
+        if (uiKind === AVAILABILITY_UI.HOURLY_PICKUP) {
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <TimeRangeSelector
@@ -92,7 +98,8 @@ export const DayAvailability = ({ day, dayIndex, onUpdate, serviceId }) => {
                     />
                 </div>
             );
-        } else if (serviceId === 3) {
+        }
+        if (uiKind === AVAILABILITY_UI.DELIVERY_ONLY) {
             return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <TimeRangeSelector

@@ -21,7 +21,9 @@ import {
   storePendingBooking,
   retrievePendingBooking,
   mapPendingToBookingState,
+  hydratePlanFromPending,
 } from '@/utils/bookingDataPersistence';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 
@@ -70,7 +72,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
 
-  const requiresDriverVerification = selectedPlan?.id === 2 && !deliveryService;
+  const requiresDriverVerification = isCustomerPickupService(selectedPlan, {
+    deliveryService,
+    isDelivery: deliveryService,
+  });
 
   const resetBookingState = useCallback(() => {
     setCurrentStep(0);
@@ -103,9 +108,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     });
   }, [currentStep, highestStep, requiresDriverVerification, updateFlowProgress]);
 
-  const applyPendingBookingState = useCallback((pending, resumeStep) => {
-    const mapped = mapPendingToBookingState(pending);
-    setBookingData(mapped.bookingData);
+  const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
+    const hydratedPlan = await hydratePlanFromPending(pending);
+    const mapped = mapPendingToBookingState(pending, hydratedPlan);
+    setBookingData(mapped.contactInfo);
     setSelectedPlan(mapped.selectedPlan);
     setAddonsData(mapped.addonsData);
     setBasePrice(mapped.basePrice);
@@ -297,7 +303,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleAgreementAccept triggered`);
 
-    if (selectedPlan?.id === 2 && !deliveryService) {
+    if (requiresDriverVerification) {
       console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
       setCurrentStep(7);
       window.scrollTo(0, 0);

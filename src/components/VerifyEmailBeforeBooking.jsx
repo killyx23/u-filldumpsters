@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid } from 'date-fns';
-import { retrievePendingBooking } from '@/utils/bookingDataPersistence';
+import { retrievePendingBooking, hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
@@ -119,11 +119,12 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 };
 
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Reconstructed booking data:`, reconstructedBookingData);
-                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Plan data:`, pending.plan_data);
+                const hydratedPlan = await hydratePlanFromPending(pending);
+                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Service id:`, pending.service_id);
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Addons data:`, pending.addons_data);
 
                 setBookingData(reconstructedBookingData);
-                setPlan(pending.plan_data);
+                setPlan(hydratedPlan);
                 setAddonsData(pending.addons_data || {});
 
                 const recentVerifiedAt = Number(

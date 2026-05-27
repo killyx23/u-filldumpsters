@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
-import { retrievePendingBooking, mapPendingToBookingState } from '@/utils/bookingDataPersistence';
+import {
+  retrievePendingBooking,
+  mapPendingToBookingState,
+  hydratePlanFromPending,
+} from '@/utils/bookingDataPersistence';
 
 /**
  * Shared stepper/back navigation for verify-email and payment routes.
@@ -28,7 +32,8 @@ export function useBookingStepperNavigation(routeStep) {
       if (token) {
         const result = await retrievePendingBooking(token);
         if (result.success) {
-          const mapped = mapPendingToBookingState(result.bookingData);
+          const hydrated = await hydratePlanFromPending(result.bookingData);
+          const mapped = mapPendingToBookingState(result.bookingData, hydrated);
           requiresDriver = mapped.requiresDriverVerification;
         }
       }
