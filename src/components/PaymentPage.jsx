@@ -22,6 +22,8 @@ import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
+import { buildPlanSnapshot } from '@/utils/servicePlan';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -610,9 +612,11 @@ export const PaymentPage = ({ onBack }) => {
           ...pendingRecord.booking_data
         };
 
+        const hydratedPlan = await hydratePlanFromPending(pendingRecord);
+
         setPendingCustomerData(pendingRecord);
         setBookingData(retrievedBookingData);
-        setPlan(pendingRecord.plan_data);
+        setPlan(hydratedPlan);
         setAddonsData(pendingRecord.addons_data || {});
         setDeliveryService(pendingRecord.delivery_service || false);
 
@@ -650,6 +654,14 @@ export const PaymentPage = ({ onBack }) => {
         const isUnverifiedDelivery = pendingData.delivery_address &&
                                      !pendingData.delivery_address.isVerified;
 
+        const liveService = await hydratePlanFromPending(pendingData);
+        const quotedPrice = Number(pendingData.base_price ?? 0);
+        const auditPlan = buildPlanSnapshot(liveService, {
+          price: quotedPrice,
+          mileage_rate: liveService?.mileage_rate,
+          delivery_fee: liveService?.delivery_fee,
+        });
+
         const bookingPayload = {
           name: fullName,
           first_name: retrievedBookingData.firstName,
@@ -667,7 +679,7 @@ export const PaymentPage = ({ onBack }) => {
           pickup_date: pendingData.pickup_date,
           drop_off_time_slot: pendingData.drop_off_time_slot,
           pickup_time_slot: pendingData.pickup_time_slot,
-          plan: pendingData.plan_data,
+          plan: auditPlan,
           total_price: validatedTotalAmount,
           subtotal_before_tax: calcResult.subtotal,
           tax_amount: calcResult.tax,

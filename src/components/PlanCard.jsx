@@ -28,14 +28,22 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
             border: 'from-blue-400 to-indigo-500',
             highlightBg: 'from-blue-400 to-indigo-500',
         },
+        5: {
+            bg: 'bg-gradient-to-br from-emerald-400/10 via-blue-900 to-indigo-900',
+            title: 'text-emerald-300',
+            button: 'bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 text-white',
+            border: 'from-emerald-400 to-teal-500',
+            highlightBg: 'from-emerald-400 to-teal-500',
+        },
     };
 
     const currentStyle = cardStyles[plan?.id] || cardStyles[3];
 
-    // Safely extract properties to prevent React "Objects are not valid as a React child" errors
-    const displayDescription = plan?.homepage_description || plan?.description || '';
-    const displayPrice = plan?.base_price || 0;
-    const displayPriceUnit = plan?.price_unit || '';
+    const displayDescription =
+        plan?.displayDescription || plan?.homepage_description || plan?.description || '';
+    const displayPrice = plan?.displayPrice ?? plan?.homepage_price ?? plan?.base_price ?? 0;
+    const displayPriceUnit =
+        plan?.displayPriceUnit || plan?.homepage_price_unit || plan?.price_unit || '';
     const planName = plan?.name || 'Service Plan';
 
     const features = plan?.features ? (typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features) : [];
@@ -62,7 +70,9 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     </div>
                 </div>
             )}
-            <div className={cn(
+            <div
+                data-service-id={plan?.id}
+                className={cn(
                 "relative p-0.5 overflow-hidden rounded-2xl h-full shadow-2xl transition-all duration-300",
                 "bg-gradient-to-r", currentStyle.border
             )}>

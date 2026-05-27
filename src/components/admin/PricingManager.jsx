@@ -577,7 +577,7 @@ export const PricingManager = () => {
         setLoading(true);
         try {
             const [servicesRes, couponsRes, insuranceRes] = await Promise.all([
-                supabase.from('services').select('*').in('id', [1, 2, 3, 4, 7]).order('id'),
+                supabase.from('services').select('*').order('display_order', { ascending: true }).order('id'),
                 supabase.from('coupons').select('*').order('created_at', { ascending: false }),
                 supabase.from('equipment').select('*').eq('type', 'insurance').order('name')
             ]);
