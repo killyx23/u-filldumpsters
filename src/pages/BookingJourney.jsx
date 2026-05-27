@@ -70,6 +70,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const [finalPrice, setFinalPrice] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
+  const [agreementFeeSnapshot, setAgreementFeeSnapshot] = useState([]);
 
   const requiresDriverVerification = selectedPlan?.id === 2 && !deliveryService;
 
@@ -83,6 +84,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setFinalPrice(0);
     setIsProcessing(false);
     setDeliveryService(false);
+    setAgreementFeeSnapshot([]);
   }, []);
 
   useEffect(() => {
@@ -324,9 +326,13 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     navigate(`/verify-email?token=${token}`);
   };
 
-  const handleAgreementAccept = async () => {
+  const handleAgreementAccept = async (agreementMeta = {}) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleAgreementAccept triggered`);
+
+    if (Array.isArray(agreementMeta.agreementFeeSnapshot)) {
+      setAgreementFeeSnapshot(agreementMeta.agreementFeeSnapshot);
+    }
 
     if (selectedPlan?.id === 2 && !deliveryService) {
       console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
@@ -343,6 +349,9 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         totalPrice: finalPrice,
         basePrice: basePrice,
         deliveryService: deliveryService,
+        agreementFeeSnapshot: Array.isArray(agreementMeta.agreementFeeSnapshot)
+          ? agreementMeta.agreementFeeSnapshot
+          : agreementFeeSnapshot,
       });
 
       const resultTs = new Date().toISOString();
@@ -384,6 +393,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         totalPrice: finalPrice,
         basePrice: basePrice,
         deliveryService: deliveryService,
+        agreementFeeSnapshot,
       });
 
       const resultTs = new Date().toISOString();

@@ -14,6 +14,7 @@ import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 export const OrderSummary = ({
     plan,
@@ -37,22 +38,6 @@ export const OrderSummary = ({
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
     const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
-
-    // Detect if this is a dump loader service
-    const isDumpLoaderService = plan?.name && 
-                                (plan.name.toLowerCase().includes('dump loader') ||
-                                 plan.name.toLowerCase().includes('dump trailer') ||
-                                 plan.name.toLowerCase().includes('loader trailer')) &&
-                                !plan.name.toLowerCase().includes('16 yard') &&
-                                !plan.name.toLowerCase().includes('dumpster');
-
-    // Service-specific Protection Options info text
-    const getProtectionOptionsInfoText = () => {
-        if (isDumpLoaderService) {
-            return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";
-        }
-        return "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
-    };
 
     // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {
@@ -473,8 +458,7 @@ export const OrderSummary = ({
                     items={protectionItems}
                     showInfoButton={true}
                     infoTitle="Protection Options"
-                    infoDescription={getProtectionOptionsInfoText()}
-                    serviceName={plan?.name}
+                    infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
                 />
 
                 {/* 3. Rent Equipment */}

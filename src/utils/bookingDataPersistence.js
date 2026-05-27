@@ -59,6 +59,13 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
     }
 
     // Prepare the booking data payload
+    const agreementFeeSnapshot = Array.isArray(options.agreementFeeSnapshot)
+      ? options.agreementFeeSnapshot
+      : [];
+    const addonsWithFeeSnapshot = agreementFeeSnapshot.length
+      ? { ...addonsData, agreementFeeSnapshot }
+      : addonsData;
+
     const bookingPayload = {
       email: email,
       first_name: bookingData.firstName?.trim() || null,
@@ -78,8 +85,11 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       notes: bookingData.notes || null,
       service_id: plan?.id || null,
       plan_data: plan || null,
-      addons_data: addonsData || null,
-      booking_data: bookingData || null,
+      addons_data: addonsWithFeeSnapshot || null,
+      booking_data: {
+        ...(bookingData || {}),
+        agreementAcceptedAt: new Date().toISOString(),
+      },
       is_verified: false,
       verified_at: null,
       total_price: options.totalPrice || null,

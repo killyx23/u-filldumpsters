@@ -20,6 +20,7 @@ import { AIKnowledgeBaseManager } from '@/components/admin/AIKnowledgeBaseManage
 import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSectionManager';
 import { LoyaltyPointsManager } from '@/components/admin/LoyaltyPointsManager';
 import { ReferralsManager } from '@/components/admin/ReferralsManager';
+import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
 import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -266,6 +267,7 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
                         <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
                         <TabsTrigger value="pricing" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Pricing</span></TabsTrigger>
+                        <TabsTrigger value="charges-fees" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Charges & Fees</span></TabsTrigger>
                         <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
                         <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
                         <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
@@ -315,6 +317,7 @@ export const AdminDashboard = () => {
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>
                             <TabsContent value="pricing"><PricingManager /></TabsContent>
+                            <TabsContent value="charges-fees"><ChargesAndFeesManager /></TabsContent>
                             <TabsContent value="equipment"><EquipmentManager /></TabsContent>
                             <TabsContent value="reviews"><ReviewsManager /></TabsContent>
                             <TabsContent value="faqs"><FaqsManager /></TabsContent>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
+import { logBookingChargeHistory } from '@/utils/bookingChargeHistory';
 import { ClipboardCheck, Camera, DollarSign, Loader2 } from 'lucide-react';
 
 const INSPECTION_SECTIONS = {
@@ -57,6 +58,23 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
   const [damageNotes, setDamageNotes] = useState('');
   const [photoFiles, setPhotoFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [cleaningFeeAmount, setCleaningFeeAmount] = useState(0);
+
+  useEffect(() => {
+    const loadCleaningFee = async () => {
+      const { data, error } = await supabase
+        .from('charges_and_fees')
+        .select('fee_value')
+        .eq('fee_key', 'cleaning_fee')
+        .maybeSingle();
+
+      if (!error && data?.fee_value !== undefined && data?.fee_value !== null) {
+        setCleaningFeeAmount(Number(data.fee_value));
+      }
+    };
+
+    loadCleaningFee();
+  }, []);
 
   const handleToggleItem = (sectionKey, itemId, value) => {
     setInspectionData(prev => ({
@@ -103,7 +121,7 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
       const photoUrls = await uploadPhotos(booking.id);
 
       // Calculate additional fees
-      const cleaningFee = needsCleaning ? 50 : 0; // Default $50 cleaning fee
+      const cleaningFee = needsCleaning ? Number(cleaningFeeAmount || 0) : 0;
       const dumpFeeAmount = dumpFee ? parseFloat(dumpFee) : 0;
       const totalAdditionalFees = cleaningFee + dumpFeeAmount;
 
@@ -143,6 +161,38 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
         .eq('id', booking.id);
 
       if (updateError) throw updateError;
+
+      const historyRows = [
+        cleaningFee > 0
+          ? {
+              charge_key: 'cleaning_fee',
+              charge_name: 'Equipment Cleaning Fee',
+              charge_description:
+                'Cleaning fee applied after inspection due to excessive dirt or decontamination needs.',
+              amount: cleaningFee,
+              metadata: { inspection_type: inspectionType },
+            }
+          : null,
+        dumpFeeAmount > 0
+          ? {
+              charge_key: 'dump_fee',
+              charge_name: 'Dump Fee',
+              charge_description:
+                'Additional dump/disposal fee applied after inspection processing.',
+              amount: dumpFeeAmount,
+              metadata: { inspection_type: inspectionType },
+            }
+          : null,
+      ].filter(Boolean);
+
+      const historyResult = await logBookingChargeHistory(
+        booking.id,
+        historyRows,
+        'admin_digital_inspection',
+      );
+      if (!historyResult.success) {
+        console.warn('[DigitalInspectionChecklist] Failed to write booking charge history:', historyResult.error);
+      }
 
       // Log inspection
       await supabase.from('rental_tracking_logs').insert({
@@ -246,7 +296,7 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
 
           <div className="flex items-center justify-between p-3 bg-white/5 rounded">
             <Label htmlFor="needsCleaning" className="text-white">
-              Needs Cleaning? (adds $50 fee)
+              Needs Cleaning? (adds ${Number(cleaningFeeAmount || 0).toFixed(2)} fee)
             </Label>
             <Switch
               id="needsCleaning"

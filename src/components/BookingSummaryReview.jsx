@@ -15,6 +15,7 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -405,8 +406,7 @@ export const BookingSummaryReview = ({
                                 items={protectionItems}
                                 showInfoButton={true}
                                 infoTitle="Protection Options"
-                                infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
-                                serviceName={plan?.name}
+                                infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
                             />
 
                             {/* 3. Rent Equipment */}
