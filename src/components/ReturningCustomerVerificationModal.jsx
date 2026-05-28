@@ -108,26 +108,10 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         );
       }
 
-      const { data: customerData, error: customerError } = await supabase
-        .from('customers')
-        .select('id, first_name, last_name, email, phone, street, city, state, zip')
-        .eq('email', normalizedEmail)
-        .maybeSingle();
-
-      if (customerError) {
-        console.warn('[ReturningCustomerVerificationModal] Could not load customer profile:', customerError);
-      } else if (customerData) {
-        setCustomerProfile(customerData);
+      const data = verifyData.bookings || [];
+      if (verifyData.customer) {
+        setCustomerProfile(verifyData.customer);
       }
-
-      const { data, error: fetchError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', normalizedEmail)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (fetchError) throw fetchError;
 
       if (!data || data.length === 0) {
         setBookings([]);
@@ -165,7 +149,7 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
           console.warn('[ReturningCustomerVerificationModal] Rewards lookup error:', rewardsError);
         } else if (rewardsData?.success) {
           setPointsBalance(Number(rewardsData.pointsBalance || 0));
-          if (!customerData && rewardsData.customer) {
+          if (!verifyData.customer && rewardsData.customer) {
             setCustomerProfile(rewardsData.customer);
           }
         }

@@ -11,7 +11,7 @@ export const uploadVerificationImage = async (customerId, imageFile, imageType) 
     .from('verification-documents')
     .upload(filePath, imageFile, {
       contentType: imageFile.type,
-      upsert: true
+      upsert: false,
     });
 
   if (uploadError) {

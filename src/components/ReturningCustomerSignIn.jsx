@@ -101,35 +101,8 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
         throw new Error(data?.error || 'Invalid verification code');
       }
 
-      // Fetch customer data
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Customer data:`, customer);
-
-      if (customerError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Customer fetch error:`, customerError);
-      }
-
-      // Fetch past bookings
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Past bookings:`, bookings);
-
-      if (bookingsError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Bookings fetch error:`, bookingsError);
-      }
-
-      setCustomerData(customer || { name: email.split('@')[0], email });
-      setPastBookings(bookings || []);
+      setCustomerData(data.customer || { name: email.split('@')[0], email });
+      setPastBookings(data.bookings || []);
       setStatus('authenticated');
 
       toast({

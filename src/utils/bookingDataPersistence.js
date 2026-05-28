@@ -4,18 +4,8 @@ import { supabase } from '@/lib/customSupabaseClient';
 /**
  * EMAIL DEDUPLICATION PATTERN
  * ===========================
- * This file implements a check-before-insert pattern to prevent duplicate email errors
- * in the pending_customers table. The pattern is:
- * 
- * 1. Check if email already exists in pending_customers
- * 2. If exists:
- *    - UPDATE the existing record with new booking data, setting is_verified back to false
- *    - Return the existing token for email verification
- * 3. If doesn't exist:
- *    - INSERT new record
- * 
- * IMPORTANT: Do NOT bypass this pattern. Always use storePendingBooking() to create
- * pending customer records. Direct inserts may cause duplicate email errors.
+ * Pending customer records are written via the store_pending_booking RPC
+ * (SECURITY DEFINER) so anon clients never need direct table access.
  */
 
 /**
@@ -32,7 +22,7 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 
   try {
     const email = bookingData.email?.trim().toLowerCase();
-    
+
     if (!email) {
       console.error(`[${timestamp}] [storePendingBooking] No email provided`);
       return {
@@ -41,24 +31,6 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       };
     }
 
-    // STEP 1: Check if email already exists in pending_customers
-    console.log(`[${timestamp}] [storePendingBooking] Checking for existing email: ${email}`);
-    
-    const { data: existingRecord, error: checkError } = await supabase
-      .from('pending_customers')
-      .select('id, email, is_verified, created_at')
-      .eq('email', email)
-      .maybeSingle();
-
-    if (checkError) {
-      console.error(`[${timestamp}] [storePendingBooking] Error checking existing email:`, checkError);
-      return {
-        success: false,
-        error: 'Failed to verify email availability. Please try again.'
-      };
-    }
-
-    // Prepare the booking data payload
     const agreementFeeSnapshot = Array.isArray(options.agreementFeeSnapshot)
       ? options.agreementFeeSnapshot
       : [];
@@ -66,8 +38,8 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       ? { ...addonsData, agreementFeeSnapshot }
       : addonsData;
 
-    const bookingPayload = {
-      email: email,
+    const payload = {
+      email,
       first_name: bookingData.firstName?.trim() || null,
       last_name: bookingData.lastName?.trim() || null,
       name: `${bookingData.firstName || ''} ${bookingData.lastName || ''}`.trim() || null,
@@ -90,82 +62,34 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
         ...(bookingData || {}),
         agreementAcceptedAt: new Date().toISOString(),
       },
-      is_verified: false,
-      verified_at: null,
       total_price: options.totalPrice || null,
       base_price: options.basePrice || null,
       delivery_service: options.deliveryService || false
     };
 
-    // STEP 2: Handle existing email
-    if (existingRecord) {
-      console.log(`[${timestamp}] [storePendingBooking] Found existing record:`, {
-        id: existingRecord.id,
-        is_verified: existingRecord.is_verified,
-        created_at: existingRecord.created_at
-      });
+    const { data: token, error } = await supabase.rpc('store_pending_booking', { payload });
 
-      // Update the existing record regardless of verification status
-      console.log(`[${timestamp}] [storePendingBooking] Updating existing record to unverified with new details`);
-      
-      const { data: updatedRecord, error: updateError } = await supabase
-        .from('pending_customers')
-        .update(bookingPayload)
-        .eq('id', existingRecord.id)
-        .select('id')
-        .single();
-
-      if (updateError) {
-        console.error(`[${timestamp}] [storePendingBooking] Update failed:`, updateError);
-        return {
-          success: false,
-          error: 'Failed to update booking information. Please try again.'
-        };
-      }
-
-      console.log(`[${timestamp}] [storePendingBooking] ✓ Successfully updated existing record`);
-      
-      // Return the existing record ID as token
-      return {
-        success: true,
-        token: existingRecord.id
-      };
-    }
-
-    // STEP 3: No existing record - INSERT new one
-    console.log(`[${timestamp}] [storePendingBooking] No existing record found - inserting new`);
-    
-    const { data: newRecord, error: insertError } = await supabase
-      .from('pending_customers')
-      .insert([bookingPayload])
-      .select('id')
-      .single();
-
-    if (insertError) {
-      console.error(`[${timestamp}] [storePendingBooking] Insert failed:`, insertError);
-      
-      // Check if this is a duplicate key error that slipped through
-      if (insertError.code === '23505' || insertError.message?.includes('duplicate')) {
-        console.warn(`[${timestamp}] [storePendingBooking] Race condition detected - duplicate email`);
-        return {
-          success: false,
-          error: 'This email was just registered by another request. Please refresh and try again.'
-        };
-      }
-      
+    if (error) {
+      console.error(`[${timestamp}] [storePendingBooking] RPC error:`, error);
       return {
         success: false,
         error: 'Failed to save booking information. Please try again.'
       };
     }
 
-    console.log(`[${timestamp}] [storePendingBooking] ✓ Successfully inserted new record:`, newRecord.id);
-    
+    if (!token) {
+      return {
+        success: false,
+        error: 'Failed to save booking information. Please try again.'
+      };
+    }
+
+    console.log(`[${timestamp}] [storePendingBooking] ✓ Saved pending booking:`, token);
+
     return {
       success: true,
-      token: newRecord.id
+      token
     };
-
   } catch (error) {
     const catchTs = new Date().toISOString();
     console.error(`[${catchTs}] [storePendingBooking] Unexpected error:`, error);
@@ -179,31 +103,30 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 /**
  * Maps a pending_customers row into BookingJourney state shape.
  * @param {Object} pending - Row from pending_customers
- * @returns {Object}
  */
 export function mapPendingToBookingState(pending) {
+  const plan = pending.plan_data || {};
   const addons = pending.addons_data || {};
-  const bookingData = pending.booking_data || {
-    firstName: pending.first_name,
-    lastName: pending.last_name,
-    email: pending.email,
-    phone: pending.phone,
-    contactAddress: pending.contact_address,
-    dropOffDate: pending.drop_off_date,
-    pickupDate: pending.pickup_date,
-    dropOffTimeSlot: pending.drop_off_time_slot,
-    pickupTimeSlot: pending.pickup_time_slot,
-    notes: pending.notes,
-    termsAccepted: false,
-    addressVerified: Boolean(pending.contact_address?.isVerified),
-  };
-
-  const plan = pending.plan_data;
-  const deliveryService =
-    pending.delivery_service || addons.deliveryService || (plan?.id === 2 && addons.isDelivery) || false;
+  const deliveryService = pending.delivery_service ?? false;
 
   return {
-    bookingData,
+    contactInfo: {
+      firstName: pending.first_name || '',
+      lastName: pending.last_name || '',
+      email: pending.email || '',
+      phone: pending.phone || '',
+      contactAddress: pending.contact_address || {
+        street: pending.street,
+        city: pending.city,
+        state: pending.state,
+        zip: pending.zip
+      },
+      dropOffDate: pending.drop_off_date,
+      pickupDate: pending.pickup_date,
+      dropOffTimeSlot: pending.drop_off_time_slot,
+      pickupTimeSlot: pending.pickup_time_slot,
+      notes: pending.notes || ''
+    },
     selectedPlan: plan,
     addonsData: {
       insurance: addons.insurance || 'accept',
@@ -239,11 +162,7 @@ export async function retrievePendingBooking(token) {
       };
     }
 
-    const { data, error } = await supabase
-      .from('pending_customers')
-      .select('*')
-      .eq('id', token)
-      .single();
+    const { data, error } = await supabase.rpc('get_pending_customer_by_id', { p_id: token });
 
     if (error) {
       console.error(`[${timestamp}] [retrievePendingBooking] Query error:`, error);
@@ -253,7 +172,9 @@ export async function retrievePendingBooking(token) {
       };
     }
 
-    if (!data) {
+    const record = Array.isArray(data) ? data[0] : data;
+
+    if (!record) {
       console.warn(`[${timestamp}] [retrievePendingBooking] No record found for token`);
       return {
         success: false,
@@ -262,12 +183,11 @@ export async function retrievePendingBooking(token) {
     }
 
     console.log(`[${timestamp}] [retrievePendingBooking] ✓ Successfully retrieved record`);
-    
+
     return {
       success: true,
-      bookingData: data
+      bookingData: record
     };
-
   } catch (error) {
     console.error(`[${timestamp}] [retrievePendingBooking] Unexpected error:`, error);
     return {
@@ -278,39 +198,13 @@ export async function retrievePendingBooking(token) {
 }
 
 /**
- * Marks a pending customer as verified
- * @param {string} email - Customer email address
- * @returns {Promise<{success: boolean, error?: string}>}
+ * Marks a pending customer as verified (handled by verify-email-code edge function in production).
+ * @deprecated Prefer the verify-email-code edge function.
  */
 export async function markPendingCustomerVerified(email) {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] [markPendingCustomerVerified] Marking email as verified: ${email}`);
-
-  try {
-    const { error } = await supabase
-      .from('pending_customers')
-      .update({ 
-        is_verified: true,
-        verified_at: new Date().toISOString()
-      })
-      .eq('email', email.trim().toLowerCase());
-
-    if (error) {
-      console.error(`[${timestamp}] [markPendingCustomerVerified] Update error:`, error);
-      return {
-        success: false,
-        error: 'Failed to mark email as verified'
-      };
-    }
-
-    console.log(`[${timestamp}] [markPendingCustomerVerified] ✓ Email marked as verified`);
-    return { success: true };
-
-  } catch (error) {
-    console.error(`[${timestamp}] [markPendingCustomerVerified] Unexpected error:`, error);
-    return {
-      success: false,
-      error: 'Unexpected error during verification'
-    };
-  }
+  console.warn('[markPendingCustomerVerified] Direct table updates are disabled; use verify-email-code edge function.');
+  return {
+    success: false,
+    error: 'Verification must be completed via the email verification flow.'
+  };
 }
