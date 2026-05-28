@@ -168,10 +168,7 @@ const CheckoutForm = ({
     try {
       if (isDeliveryService && delivery_location_verified) {
         console.log(`[${timestamp}] [PaymentPage] Updating delivery location verification...`);
-        await supabase.from('bookings').update({ 
-          delivery_location_verified: true, 
-          delivery_location_verified_at: new Date().toISOString() 
-        }).eq('id', bookingId);
+        await supabase.rpc('mark_booking_delivery_verified', { p_booking_id: bookingId });
       }
 
       console.log(`[${timestamp}] [PaymentPage] Confirming payment with Stripe...`);
@@ -543,7 +540,7 @@ export const PaymentPage = ({ onBack }) => {
   const [loadingBookingData, setLoadingBookingData] = useState(true);
   const [dataError, setDataError] = useState(null);
   const [dataErrorTitle, setDataErrorTitle] = useState('Booking Creation Failed');
-  
+
   const [validatedTotal, setValidatedTotal] = useState(0);
   const [rewardsOffer, setRewardsOffer] = useState(null);
   const [rewardsChoiceResolved, setRewardsChoiceResolved] = useState(false);
@@ -598,22 +595,20 @@ export const PaymentPage = ({ onBack }) => {
       console.log(`[${timestamp}] [PaymentPage] Retrieving booking data for ID: ${pendingId}`);
 
       try {
-        const { data, error } = await supabase
-          .from('pending_customers')
-          .select('*')
-          .eq('id', pendingId)
-          .single();
+        const { data, error } = await supabase.rpc('get_pending_customer_by_id', { p_id: pendingId });
 
         if (error) {
           console.error(`[${timestamp}] [PaymentPage] Error fetching pending customer:`, error);
           throw new Error('Could not find your booking. Please restart the booking process.');
         }
 
-        if (!data) {
+        const pendingRecord = Array.isArray(data) ? data[0] : data;
+
+        if (!pendingRecord) {
           throw new Error('Booking not found. Please restart the booking process.');
         }
 
-        if (!data.is_verified) {
+        if (!pendingRecord.is_verified) {
           toast({
             title: 'Verification required',
             description: 'Please complete email verification before payment.',
@@ -624,33 +619,33 @@ export const PaymentPage = ({ onBack }) => {
           return;
         }
 
-        console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, data);
+        console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, pendingRecord);
 
         // Reconstruct booking data from pending_customers
         const retrievedBookingData = {
-          firstName: data.first_name || '',
-          lastName: data.last_name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          contactAddress: data.contact_address || { 
-            street: data.street, 
-            city: data.city, 
-            state: data.state, 
-            zip: data.zip 
+          firstName: pendingRecord.first_name || '',
+          lastName: pendingRecord.last_name || '',
+          email: pendingRecord.email || '',
+          phone: pendingRecord.phone || '',
+          contactAddress: pendingRecord.contact_address || {
+            street: pendingRecord.street,
+            city: pendingRecord.city,
+            state: pendingRecord.state,
+            zip: pendingRecord.zip
           },
-          dropOffDate: data.drop_off_date,
-          pickupDate: data.pickup_date,
-          dropOffTimeSlot: data.drop_off_time_slot || '',
-          pickupTimeSlot: data.pickup_time_slot || '',
-          notes: data.notes || '',
-          ...data.booking_data
+          dropOffDate: pendingRecord.drop_off_date,
+          pickupDate: pendingRecord.pickup_date,
+          dropOffTimeSlot: pendingRecord.drop_off_time_slot || '',
+          pickupTimeSlot: pendingRecord.pickup_time_slot || '',
+          notes: pendingRecord.notes || '',
+          ...pendingRecord.booking_data
         };
 
-        setPendingCustomerData(data);
+        setPendingCustomerData(pendingRecord);
         setBookingData(retrievedBookingData);
-        setPlan(data.plan_data);
-        setAddonsData(data.addons_data || {});
-        setDeliveryService(data.delivery_service || false);
+        setPlan(pendingRecord.plan_data);
+        setAddonsData(pendingRecord.addons_data || {});
+        setDeliveryService(pendingRecord.delivery_service || false);
 
       } catch (error) {
         console.error(`[${timestamp}] [PaymentPage] Failed to retrieve booking:`, error);
@@ -754,13 +749,11 @@ export const PaymentPage = ({ onBack }) => {
         // Handle license images if present
         if (pendingData.addons_data?.licenseImageUrls?.length > 0) {
           console.log(`[${timestamp}] [PaymentPage] Updating customer with license info...`);
-          await supabase
-            .from('customers')
-            .update({
-              license_plate: pendingData.addons_data.licensePlate,
-              license_image_urls: pendingData.addons_data.licenseImageUrls,
-            })
-            .eq('id', data.customer_id);
+          await supabase.rpc('update_customer_license_from_checkout', {
+            p_booking_id: data.id,
+            p_license_plate: pendingData.addons_data.licensePlate,
+            p_license_image_urls: pendingData.addons_data.licenseImageUrls,
+          });
         }
 
         // Decrement equipment quantities if needed

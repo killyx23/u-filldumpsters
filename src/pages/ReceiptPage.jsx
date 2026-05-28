@@ -31,14 +31,18 @@ export const ReceiptPage = () => {
         const fetchDetailsAndCalculate = async () => {
             try {
                 // Fetch complete booking data with all fields
-                const { data: booking, error: bError } = await supabase
-                    .from('bookings')
-                    .select('*, customers(*)')
-                    .eq('id', bookingId)
-                    .single();
+                const { data: payload, error: bError } = await supabase.rpc('get_booking_for_post_checkout', {
+                    p_booking_id: Number.parseInt(String(bookingId), 10),
+                    p_payment_intent: searchParams.get('payment_intent'),
+                });
 
                 if (bError) throw new Error('Could not fetch booking details.');
-                if (!booking) throw new Error('Booking not found.');
+                if (!payload?.booking) throw new Error('Booking not found.');
+
+                const booking = {
+                    ...payload.booking,
+                    customers: payload.customers,
+                };
 
                 setBookingData(booking);
 

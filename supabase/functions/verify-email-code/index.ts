@@ -145,15 +145,28 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: booking } = await supabase
-      .from("bookings")
-      .select("id")
+    const { data: customer, error: customerError } = await supabase
+      .from("customers")
+      .select("*")
       .eq("email", emailLower)
-      .order("created_at", { ascending: false })
-      .limit(1)
       .maybeSingle();
 
-    console.log("[verify-email-code] ✓ Verified:", emailLower, "booking_id:", booking?.id ?? null);
+    const { data: bookings, error: bookingsError } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("email", emailLower)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (bookingsError) {
+      console.error("[verify-email-code] bookings fetch error:", bookingsError);
+    }
+
+    if (customerError) {
+      console.error("[verify-email-code] customer fetch error:", customerError);
+    }
+
+    console.log("[verify-email-code] ✓ Verified:", emailLower, "booking_id:", bookings?.[0]?.id ?? null);
 
     return jsonResponse(
       corsHeaders,
@@ -162,8 +175,10 @@ Deno.serve(async (req) => {
         message: verification.is_verified
           ? "Email already verified"
           : "Email verified successfully",
-        booking_id: booking?.id ?? null,
+        booking_id: bookings?.[0]?.id ?? null,
         email: emailLower,
+        customer: customer ?? null,
+        bookings: bookings ?? [],
         ...(pending_customer_id ? { pending_customer_id } : {}),
       },
       200,

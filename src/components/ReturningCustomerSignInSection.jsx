@@ -108,30 +108,8 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
         throw new Error(data?.error || 'Invalid verification code');
       }
 
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Customer data:`, customer);
-
-      if (customerError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Customer fetch error:`, customerError);
-      }
-
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Past bookings:`, bookings);
-
-      if (bookingsError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Bookings fetch error:`, bookingsError);
-      }
+      const customer = data.customer;
+      const bookings = data.bookings || [];
 
       setCustomerData(customer || { name: email.split('@')[0], email });
       setPastBookings(bookings || []);

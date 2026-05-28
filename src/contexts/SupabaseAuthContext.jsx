@@ -20,13 +20,8 @@ export const AuthProvider = ({ children }) => {
       return false;
     }
 
-    // Check metadata first (fastest method)
-    const adminFromMetadata = 
-      currentUser.app_metadata?.is_admin === true || 
-      currentUser.user_metadata?.is_admin === true;
-
-    if (adminFromMetadata) {
-      console.log('[AuthContext] Admin status confirmed via metadata:', currentUser.email);
+    if (currentUser.app_metadata?.is_admin === true) {
+      console.log('[AuthContext] Admin status confirmed via app_metadata:', currentUser.email);
       setIsAdmin(true);
       return true;
     }
