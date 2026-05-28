@@ -169,7 +169,7 @@ export const CustomerPortalLogin = () => {
 
       console.log('[CustomerPortalLogin] Phone validation:', {
         providedPhone: normalizedPhone,
-        bookingPhone: bookingPhone,
+        bookingPhone: booking.phone,
         match: phoneMatch
       });
 
