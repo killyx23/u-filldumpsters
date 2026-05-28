@@ -24,6 +24,7 @@ import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdVali
 import { formatCurrency } from '@/api/EcommerceApi';
 import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
+import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 
 export const BookingForm = ({
   plan,
@@ -70,8 +71,11 @@ export const BookingForm = ({
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
-    if (isDelivery) return allPlans.find(p => p.id === 4) || null;
-    return allPlans.find(p => p.id === plan?.id) || null;
+    if (isDelivery) {
+      const variantId = plan?.delivery_variant_service_id ?? 4;
+      return allPlans.find((p) => p.id === variantId) || null;
+    }
+    return allPlans.find((p) => p.id === plan?.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
   const handleReorderSelect = async (pastBooking) => {
@@ -316,10 +320,12 @@ export const BookingForm = ({
   }, [fetchAvailability, currentMonth]);
 
   useEffect(() => {
-    if (!currentPlan || currentPlan.id !== 2 || isDelivery) return;
+    if (!currentPlan || !isHourlySelfPickupPlan(currentPlan, isDelivery)) return;
+
+    const serviceId = currentPlan.id;
 
     const fetchExactTimes = async () => {
-      console.log('[BookingForm] Fetching exact times for trailer rental');
+      console.log('[BookingForm] Fetching exact times for hourly pickup service', serviceId);
       setFetchingExactTimes(true);
       let pStartTime = '';
       let rByTime = '';
@@ -334,7 +340,7 @@ export const BookingForm = ({
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('pickup_start_time')
-            .eq('service_id', 2)
+            .eq('service_id', serviceId)
             .eq('date', dateStr)
             .maybeSingle();
           
@@ -348,17 +354,17 @@ export const BookingForm = ({
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('pickup_start_time')
-              .eq('service_id', 2)
+              .eq('service_id', serviceId)
               .eq('day_of_week', dow)
               .maybeSingle();
-            
-            if (saError) {
-              console.warn('[BookingForm] Error fetching service availability pickup time:', saError);
-            }
-            
-            if (sa?.pickup_start_time) {
-              pStartTime = sa.pickup_start_time;
-            }
+          
+          if (saError) {
+            console.warn('[BookingForm] Error fetching service availability pickup time:', saError);
+          }
+          
+          if (sa?.pickup_start_time) {
+            pStartTime = sa.pickup_start_time;
+          }
           }
         }
 
@@ -369,7 +375,7 @@ export const BookingForm = ({
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('return_by_time')
-            .eq('service_id', 2)
+            .eq('service_id', serviceId)
             .eq('date', dateStr)
             .maybeSingle();
           
@@ -383,17 +389,17 @@ export const BookingForm = ({
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('return_by_time')
-              .eq('service_id', 2)
+              .eq('service_id', serviceId)
               .eq('day_of_week', dow)
               .maybeSingle();
-            
-            if (saError) {
-              console.warn('[BookingForm] Error fetching service availability return time:', saError);
-            }
-            
-            if (sa?.return_by_time) {
-              rByTime = sa.return_by_time;
-            }
+          
+          if (saError) {
+            console.warn('[BookingForm] Error fetching service availability return time:', saError);
+          }
+          
+          if (sa?.return_by_time) {
+            rByTime = sa.return_by_time;
+          }
           }
         }
 
@@ -404,6 +410,7 @@ export const BookingForm = ({
         }));
 
         console.log('[BookingForm] ✓ Exact times set:', {
+          serviceId,
           dropOff: pStartTime || defaultStart,
           pickup: rByTime || defaultReturn
         });
@@ -511,15 +518,17 @@ export const BookingForm = ({
     let dropOffSlots = [];
     let pickupSlots = [];
     
+    const hourlyPickup = isHourlySelfPickupPlan(plan, isDelivery);
+
     if (dropOffAvail && dropOffAvail.available) {
       if (plan.id === 1) dropOffSlots = dropOffAvail.deliverySlots || [];
-      else if (plan.id === 2 && !isDelivery) dropOffSlots = dropOffAvail.pickupSlots || [];
+      else if (hourlyPickup) dropOffSlots = dropOffAvail.pickupSlots || dropOffAvail.hourlySlots || [];
       else if (plan.id === 2 && isDelivery) dropOffSlots = dropOffAvail.deliverySlots || [];
       else if (plan.id === 3) dropOffSlots = dropOffAvail.deliverySlots || [];
     }
     if (pickupAvail && pickupAvail.available) {
       if (plan.id === 1) pickupSlots = pickupAvail.pickupSlots || [];
-      else if (plan.id === 2 && !isDelivery) pickupSlots = pickupAvail.returnSlots || [];
+      else if (hourlyPickup) pickupSlots = pickupAvail.returnSlots || [];
       else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
     }
     
@@ -552,7 +561,9 @@ export const BookingForm = ({
       const state = {
         ...prev,
         [field]: newDate,
-        ...(currentPlan?.id !== 2 || isDelivery ? { [`${field.replace('Date', '')}TimeSlot`]: '' } : {})
+        ...(isHourlySelfPickupPlan(currentPlan, isDelivery)
+          ? {}
+          : { [`${field.replace('Date', '')}TimeSlot`]: '' })
       };
 
       if (field === 'dropOffDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
@@ -645,7 +656,7 @@ export const BookingForm = ({
         
         if (currentPlan.id === 1) {
           basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
-        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+        } else if (currentPlan.id === 2 || currentPlan.id === 4 || currentPlan.id === 5) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         } else if (currentPlan.id === 3) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
@@ -767,6 +778,7 @@ export const BookingForm = ({
           time2: 'Delivery (Pickup Window)'
         };
       case 2:
+      case 5:
         return {
           date1: 'Pickup Date',
           date2: 'Return Date',
@@ -1128,7 +1140,7 @@ export const BookingForm = ({
             
             <div className="border-t border-white/20 pt-4">
               <p className="text-white text-lg font-semibold">
-                {currentPlan?.id === 2 && !isDelivery ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}
+                {isHourlySelfPickupPlan(currentPlan, isDelivery) ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}
               </p>
               <div className="flex items-baseline mb-2">
                 <p className="text-4xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
@@ -1228,7 +1240,7 @@ export const BookingForm = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
                   <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
-                  {currentPlan?.id === 2 && !isDelivery ? (
+                  {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                       <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} />
                   ) : (
                       <TimeSlotPicker label={labels.time1} value={bookingData.dropOffTimeSlot} onValueChange={v => setBookingData(p => ({
@@ -1239,7 +1251,7 @@ export const BookingForm = ({
                   
                   {currentPlan?.id !== 3 && <>
                           <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
-                          {currentPlan?.id === 2 && !isDelivery ? (
+                          {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                               <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} />
                           ) : (
                               <TimeSlotPicker label={labels.time2} value={bookingData.pickupTimeSlot} onValueChange={v => setBookingData(p => ({

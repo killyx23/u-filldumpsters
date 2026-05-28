@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
-import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { useResolvedBookingService } from '@/hooks/useResolvedBookingService';
 import { showDirectionsMap } from '@/utils/bookingPickupWindow';
 import { PickupLocationSection } from '@/components/customer-portal/PickupLocationSection';
 import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectionsMap';
@@ -78,9 +78,8 @@ export const CustomerPortalBookingDetail = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, user]);
 
-  const isPickupService = booking
-    ? isCustomerPickupService(booking.plan, booking.addons)
-    : false;
+  const { displayName: resolvedPlanName, isCustomerPickup: isPickupService } =
+    useResolvedBookingService(booking);
 
   const customerAddress = booking
     ? (booking.delivery_address?.formatted_address ||
@@ -128,7 +127,7 @@ export const CustomerPortalBookingDetail = () => {
     );
   }
 
-  const planName = booking.plan?.name || 'Custom Rental';
+  const planName = resolvedPlanName || 'Custom Rental';
   const isHighDistance = distanceInfo.distance > 30;
   const canReschedule = booking.status === 'pending_payment' || booking.status === 'confirmed' || booking.status === 'active';
 

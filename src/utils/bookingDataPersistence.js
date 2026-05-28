@@ -1,5 +1,10 @@
 
 import { supabase } from '@/lib/customSupabaseClient';
+import {
+  fetchServiceById,
+  getServiceIdFromBooking,
+  resolveServiceIdForBooking,
+} from '@/utils/servicePlan';
 
 /**
  * EMAIL DEDUPLICATION PATTERN
@@ -11,7 +16,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 /**
  * Stores or updates a pending booking in the database with email deduplication
  * @param {Object} bookingData - Contact and booking information
- * @param {Object} plan - Selected service plan
+ * @param {Object} plan - Selected service (live row from services)
  * @param {Object} addonsData - Selected add-ons and additional data
  * @param {Object} options - Additional options including pricing data
  * @returns {Promise<{success: boolean, token?: string, error?: string}>}
@@ -30,6 +35,9 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
         error: 'Email address is required'
       };
     }
+
+    const deliveryService = options.deliveryService || false;
+    const serviceId = resolveServiceIdForBooking(plan, deliveryService) ?? plan?.id ?? null;
 
     const agreementFeeSnapshot = Array.isArray(options.agreementFeeSnapshot)
       ? options.agreementFeeSnapshot
@@ -55,8 +63,8 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       drop_off_time_slot: bookingData.dropOffTimeSlot || null,
       pickup_time_slot: bookingData.pickupTimeSlot || null,
       notes: bookingData.notes || null,
-      service_id: plan?.id || null,
-      plan_data: plan || null,
+      service_id: serviceId,
+      plan_data: null,
       addons_data: addonsWithFeeSnapshot || null,
       booking_data: {
         ...(bookingData || {}),
@@ -64,7 +72,7 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       },
       total_price: options.totalPrice || null,
       base_price: options.basePrice || null,
-      delivery_service: options.deliveryService || false
+      delivery_service: deliveryService
     };
 
     const { data: token, error } = await supabase.rpc('store_pending_booking', { payload });
@@ -101,13 +109,33 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 }
 
 /**
+ * Load live service for a pending row (service_id preferred; legacy plan_data fallback).
+ * @param {Object} pending
+ * @returns {Promise<object|null>}
+ */
+export async function hydratePlanFromPending(pending) {
+  const serviceId = getServiceIdFromBooking(pending);
+  if (serviceId) {
+    const { data, error } = await fetchServiceById(supabase, serviceId);
+    if (!error && data) return data;
+  }
+  const legacy = pending?.plan_data;
+  if (legacy && Object.keys(legacy).length > 0) return legacy;
+  return null;
+}
+
+/**
  * Maps a pending_customers row into BookingJourney state shape.
  * @param {Object} pending - Row from pending_customers
+ * @param {Object|null} [hydratedPlan] - Live service from hydratePlanFromPending
  */
-export function mapPendingToBookingState(pending) {
-  const plan = pending.plan_data || {};
+export function mapPendingToBookingState(pending, hydratedPlan = null) {
+  const plan = hydratedPlan || pending.plan_data || {};
   const addons = pending.addons_data || {};
   const deliveryService = pending.delivery_service ?? false;
+  const requiresDriverVerification = Boolean(
+    plan?.customer_pickup && !deliveryService
+  ) || (Number(plan?.id) === 2 && !deliveryService);
 
   return {
     contactInfo: {
@@ -141,7 +169,7 @@ export function mapPendingToBookingState(pending) {
     basePrice: pending.base_price || 0,
     finalPrice: pending.total_price || 0,
     deliveryService,
-    requiresDriverVerification: plan?.id === 2 && !deliveryService,
+    requiresDriverVerification,
   };
 }
 

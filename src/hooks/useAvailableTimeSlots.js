@@ -52,10 +52,10 @@ export function useAvailableTimeSlots(serviceId, date, timeType) {
             endTimeStr = data.delivery_end_time || endTimeStr;
           } else if (timeType === 'pickup') {
             startTimeStr = data.pickup_start_time || startTimeStr;
-            endTimeStr = data.pickup_end_time || endTimeStr;
+            endTimeStr = data.pickup_end_time || data.return_by_time || endTimeStr;
           } else if (timeType === 'return') {
-            startTimeStr = data.return_start_time || startTimeStr;
-            endTimeStr = data.return_end_time || endTimeStr;
+            startTimeStr = data.return_start_time || data.return_by_time || startTimeStr;
+            endTimeStr = data.return_end_time || data.return_by_time || endTimeStr;
           } else if (timeType === 'hourly') {
             startTimeStr = data.hourly_start_time || startTimeStr;
             endTimeStr = data.hourly_end_time || endTimeStr;

@@ -21,8 +21,10 @@ import {
   storePendingBooking,
   retrievePendingBooking,
   mapPendingToBookingState,
+  hydratePlanFromPending,
 } from '@/utils/bookingDataPersistence';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 
@@ -72,7 +74,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const [deliveryService, setDeliveryService] = useState(false);
   const [agreementFeeSnapshot, setAgreementFeeSnapshot] = useState([]);
 
-  const requiresDriverVerification = selectedPlan?.id === 2 && !deliveryService;
+  const requiresDriverVerification = isCustomerPickupService(selectedPlan, {
+    deliveryService,
+    isDelivery: deliveryService,
+  });
 
   const resetBookingState = useCallback(() => {
     setCurrentStep(0);
@@ -106,9 +111,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     });
   }, [currentStep, highestStep, requiresDriverVerification, updateFlowProgress]);
 
-  const applyPendingBookingState = useCallback((pending, resumeStep) => {
-    const mapped = mapPendingToBookingState(pending);
-    setBookingData(mapped.bookingData);
+  const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
+    const hydratedPlan = await hydratePlanFromPending(pending);
+    const mapped = mapPendingToBookingState(pending, hydratedPlan);
+    setBookingData(mapped.contactInfo);
     setSelectedPlan(mapped.selectedPlan);
     setAddonsData(mapped.addonsData);
     setBasePrice(mapped.basePrice);
@@ -334,7 +340,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       setAgreementFeeSnapshot(agreementMeta.agreementFeeSnapshot);
     }
 
-    if (selectedPlan?.id === 2 && !deliveryService) {
+    if (requiresDriverVerification) {
       console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
       setCurrentStep(7);
       window.scrollTo(0, 0);
