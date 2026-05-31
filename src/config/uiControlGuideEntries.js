@@ -244,8 +244,8 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           iconClassName: 'text-blue-300',
           shortLabel: 'Upload license',
           summary: 'Driver verification',
-          description: 'Upload front and back of the driver’s license and enter the towing vehicle plate.',
-          howToUse: 'Tap Upload Front/Back and select clear photos. Fill in the license plate field.',
+          description: 'Upload front and back of the driver’s license, your auto insurance declaration page or card, and enter the towing vehicle plate.',
+          howToUse: 'Tap Upload Front/Back and Upload Insurance Document, then fill in the license plate field.',
         }),
         entry({
           id: 'skip',
@@ -262,7 +262,7 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           iconClassName: 'text-green-400',
           shortLabel: 'Submit & Continue',
           summary: 'Complete verification',
-          description: 'Use when all required license and plate information is provided.',
+          description: 'Use when all required license, insurance, and plate information is provided.',
           howToUse: 'Tap when uploads and plate are complete to continue to email verification.',
         }),
       ];

@@ -6,26 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, ShieldCheck, UploadCloud, Info } from 'lucide-react';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
-import { uploadVerificationImage, saveVerificationDocumentToDb } from '@/utils/verificationImageHelper';
+import { Loader2, ShieldCheck, UploadCloud } from 'lucide-react';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { uploadVerificationImage, saveVerificationDocumentToDb, getMergedVerificationDocumentsByCustomerId } from '@/utils/verificationImageHelper';
+import { VerificationInfoTooltip } from '@/components/VerificationInfoTooltip';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
-
-const PlateInfoTooltip = () => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button type="button" className="ml-2 text-blue-300 hover:text-yellow-400 transition-colors">
-        <Info className="h-5 w-5"/>
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="top" className="bg-gray-900 border-blue-400 text-white max-w-sm p-4">
-      <h4 className="font-bold text-yellow-300 mb-2">Why do we need this information?</h4>
-      <p className="text-sm text-blue-200">
-        To ensure the security and proper use of our rental equipment, we require the license plate number of the vehicle that will be towing the trailer. This information is crucial for liability, legal compliance, and asset protection.
-      </p>
-    </TooltipContent>
-  </Tooltip>
-);
 
 export const VerificationManager = ({ customer, onUpdate }) => {
     const [licensePlate, setLicensePlate] = useState(customer?.license_plate || '');
@@ -35,9 +20,38 @@ export const VerificationManager = ({ customer, onUpdate }) => {
     // Local form state for new uploads
     const [frontImage, setFrontImage] = useState(null);
     const [backImage, setBackImage] = useState(null);
+    const [insuranceImage, setInsuranceImage] = useState(null);
+    const [existingFrontUrl, setExistingFrontUrl] = useState(null);
+    const [existingBackUrl, setExistingBackUrl] = useState(null);
+    const [existingInsuranceUrl, setExistingInsuranceUrl] = useState(null);
+    const [existingFrontPath, setExistingFrontPath] = useState(null);
+    const [existingBackPath, setExistingBackPath] = useState(null);
+    const [existingInsurancePath, setExistingInsurancePath] = useState(null);
+    const [displayRefreshKey, setDisplayRefreshKey] = useState(0);
     
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
+    const fileInputInsuranceRef = useRef(null);
+
+    React.useEffect(() => {
+        const loadExistingDocs = async () => {
+            if (!customer?.id) return;
+            try {
+                const doc = await getMergedVerificationDocumentsByCustomerId(customer.id);
+                if (doc) {
+                    setExistingFrontUrl(doc.license_front_url || null);
+                    setExistingBackUrl(doc.license_back_url || null);
+                    setExistingInsuranceUrl(doc.insurance_url || null);
+                    setExistingFrontPath(doc.license_front_storage_path || null);
+                    setExistingBackPath(doc.license_back_storage_path || null);
+                    setExistingInsurancePath(doc.insurance_storage_path || null);
+                }
+            } catch (error) {
+                console.error('[VerificationManager] Failed to load existing documents:', error);
+            }
+        };
+        loadExistingDocs();
+    }, [customer?.id]);
 
     const handlePlateChange = (e) => {
         const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -58,7 +72,8 @@ export const VerificationManager = ({ customer, onUpdate }) => {
         try {
             const uploaded = await uploadVerificationImage(customer.id, file, type);
             if (type === 'license_front') setFrontImage(uploaded);
-            else setBackImage(uploaded);
+            else if (type === 'license_back') setBackImage(uploaded);
+            else setInsuranceImage(uploaded);
             toast({ title: "Image Uploaded", description: "Ready to save." });
         } catch (error) {
             toast({ title: `Upload Failed`, description: error.message, variant: "destructive" });
@@ -90,20 +105,53 @@ export const VerificationManager = ({ customer, onUpdate }) => {
 
             if (customerError) throw customerError;
 
-            // Only save if new images were uploaded here
-            if (frontImage && backImage) {
+            const merged = await getMergedVerificationDocumentsByCustomerId(customer.id);
+
+            const nextFront = frontImage || {
+                url: existingFrontUrl || merged?.license_front_url,
+                path: existingFrontPath || merged?.license_front_storage_path,
+            };
+            const nextBack = backImage || {
+                url: existingBackUrl || merged?.license_back_url,
+                path: existingBackPath || merged?.license_back_storage_path,
+            };
+            const nextInsurance = insuranceImage || {
+                url: existingInsuranceUrl || merged?.insurance_url,
+                path: existingInsurancePath || merged?.insurance_storage_path,
+            };
+
+            const hasDocUpdate = Boolean(frontImage || backImage || insuranceImage);
+
+            if (hasDocUpdate && nextFront?.url && nextBack?.url && nextInsurance?.url) {
                 await saveVerificationDocumentToDb(
                     customer.id,
-                    frontImage.url,
-                    frontImage.path,
-                    backImage.url,
-                    backImage.path,
-                    'pending'
+                    nextFront.url,
+                    nextFront.path,
+                    nextBack.url,
+                    nextBack.path,
+                    'pending',
+                    nextInsurance.url,
+                    nextInsurance.path,
                 );
+            } else if (hasDocUpdate && insuranceImage?.url && (!nextFront?.url || !nextBack?.url)) {
+                toast({
+                    title: 'License Images Required',
+                    description: 'Please upload both front and back license images before saving insurance.',
+                    variant: 'destructive',
+                });
+                return;
             }
             
             setFrontImage(null);
             setBackImage(null);
+            setInsuranceImage(null);
+            setExistingFrontUrl(nextFront?.url || null);
+            setExistingBackUrl(nextBack?.url || null);
+            setExistingInsuranceUrl(nextInsurance?.url || null);
+            setExistingFrontPath(nextFront?.path || null);
+            setExistingBackPath(nextBack?.path || null);
+            setExistingInsurancePath(nextInsurance?.path || null);
+            setDisplayRefreshKey((prev) => prev + 1);
             
             toast({ title: "Verification Info Updated!", description: "Your information has been submitted for review." });
             if (onUpdate) onUpdate();
@@ -124,7 +172,7 @@ export const VerificationManager = ({ customer, onUpdate }) => {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <VerificationImageDisplay customerId={customer?.id} />
+                    <VerificationImageDisplay customerId={customer?.id} refreshKey={displayRefreshKey} />
                 </CardContent>
             </Card>
 
@@ -139,7 +187,7 @@ export const VerificationManager = ({ customer, onUpdate }) => {
                     <div>
                         <div className="flex items-center">
                             <Label htmlFor="licensePlate">Towing Vehicle License Plate</Label>
-                            <PlateInfoTooltip />
+                            <VerificationInfoTooltip />
                         </div>
                         <Input
                             id="licensePlate"
@@ -176,6 +224,18 @@ export const VerificationManager = ({ customer, onUpdate }) => {
                             )}
                             <Input ref={fileInputBackRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 'license_back')} disabled={isUploading} accept="image/*" />
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Replace Auto Insurance (Declaration Page or Insurance Card)</Label>
+                        {insuranceImage ? (
+                            <div className="p-3 bg-green-900/30 border border-green-500 rounded text-green-300 text-sm text-center">New Insurance Document Selected</div>
+                        ) : (
+                            <Button type="button" variant="outline" className="w-full h-20 bg-black/20 hover:bg-white/10" onClick={() => fileInputInsuranceRef.current?.click()} disabled={isUploading}>
+                                <UploadCloud className="mr-2 h-4 w-4" /> Choose New Insurance Document
+                            </Button>
+                        )}
+                        <Input ref={fileInputInsuranceRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, 'insurance_document')} disabled={isUploading} accept="image/*,application/pdf" />
                     </div>
 
                     <div className="flex justify-end pt-4">

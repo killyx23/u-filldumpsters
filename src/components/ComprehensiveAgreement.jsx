@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
+import { format } from 'date-fns';
 import {
   AlertTriangle,
   ClipboardSignature as Signature,
@@ -15,32 +16,17 @@ import {
 } from 'lucide-react';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
-
-const DEFAULT_FEES = {
-  extension_fee: 75,
-  dry_run_percentage: 50,
-  dumpster_allowed_tons: 2.5,
-  dumpster_overweight_rate: 100,
-  dump_loader_max_tons: 5,
-  base_dump_fee: 150,
-  dump_tonnage_rate: 45,
-  special_item_fee_min: 20,
-  special_item_fee_max: 50,
-  cleaning_fee: 20,
-  advance_cancel_percentage: 10,
-  late_cancel_percentage: 50,
-  small_equipment_admin_rate: 15,
-  driveway_protection_plan_cost: 15,
-  hardware_protection_plan_cost: 15,
-  hardware_protection_plan_cap: 500,
-};
-
-const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
-const formatPercent = (value) => `${Number(value || 0).toFixed(2).replace(/\.00$/, '')}`;
-const formatTons = (value) => Number(value || 0).toFixed(2).replace(/\.00$/, '');
+import {
+  createFeeLookup,
+  DEFAULT_FEES,
+  formatMoney,
+  formatPercent,
+  formatTons,
+  mapFeeRowsToConfig,
+} from '@/utils/chargesAndFeesConfig';
 
 const AgreementText = ({ fees }) => {
-  const fee = (key) => fees[key] ?? DEFAULT_FEES[key];
+  const fee = createFeeLookup(fees);
 
   return (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
@@ -456,6 +442,7 @@ const AgreementText = ({ fees }) => {
 
 export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProcessing }) => {
   const [signature, setSignature] = useState('');
+  const [signatureDate, setSignatureDate] = useState(() => format(new Date(), 'PPP'));
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToSummary, setAgreedToSummary] = useState(false);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
@@ -480,10 +467,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
 
       if (isMounted) {
         setFeeRows(data);
-        const mapped = data.reduce(
-          (acc, row) => ({ ...acc, [row.fee_key]: Number(row.fee_value) }),
-          {},
-        );
+        const mapped = mapFeeRowsToConfig(data);
         setFees((prev) => ({ ...prev, ...mapped }));
       }
     };
@@ -522,11 +506,12 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
   const isButtonDisabled = useMemo(
     () =>
       !signature.trim() ||
+      !signatureDate.trim() ||
       !agreedToTerms ||
       !hasScrolledToBottom ||
       !agreedToSummary ||
       isProcessing,
-    [signature, agreedToTerms, hasScrolledToBottom, agreedToSummary, isProcessing],
+    [signature, signatureDate, agreedToTerms, hasScrolledToBottom, agreedToSummary, isProcessing],
   );
 
   const handleSubmit = () => {
@@ -560,7 +545,11 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     }));
 
     setError('');
-    onAccept({ agreementFeeSnapshot });
+    onAccept({
+      agreementFeeSnapshot,
+      agreementSignature: trimmedSignature,
+      agreementSignatureDate: signatureDate.trim(),
+    });
   };
 
   return (
@@ -591,43 +580,6 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
         </ScrollArea>
 
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="signature" className="text-lg font-semibold text-white flex items-center mb-2">
-              <Signature className="mr-2 h-5 w-5 text-yellow-400" />
-              E-Signature
-            </Label>
-            <p className="text-sm text-blue-200 mb-2">
-              Please type your full name as it appears on the booking:{' '}
-              <strong className="text-yellow-300">{expectedName}</strong>
-            </p>
-            <Input
-              id="signature"
-              type="text"
-              placeholder="Type your full name here"
-              value={signature}
-              onChange={(e) => {
-                setSignature(e.target.value);
-                if (error) setError('');
-              }}
-              className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400"
-            />
-          </div>
-
-          <div className="flex items-center space-x-3 pt-2">
-            <Checkbox
-              id="terms-agree"
-              checked={agreedToTerms}
-              onCheckedChange={(checked) => {
-                setAgreedToTerms(Boolean(checked));
-                if (error) setError('');
-              }}
-              className="border-white/50 data-[state=checked]:bg-yellow-400 h-6 w-6"
-            />
-            <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
-              I have read, understood, and agree to be bound by the entire Rental Agreement.
-            </Label>
-          </div>
-
           <div
             className="rental-terms-summary-container"
             style={{
@@ -680,6 +632,90 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 Scroll to the bottom of the Master Agreement to enable this checkbox.
               </p>
             )}
+          </div>
+
+          <div className="rounded-lg border border-white/20 bg-black/20 p-4">
+            <h3 className="text-lg font-bold text-yellow-300 mb-2">
+              REPRESENTATION OF OPERATOR AND ABSOLUTE LIABILITY ACKNOWLEDGEMENT
+            </h3>
+            <div className="text-sm text-blue-200 leading-relaxed space-y-3">
+              <p>
+                By executing this Agreement, the individual signing below (
+                <strong className="text-yellow-300">{expectedName}</strong>) expressly warrants, represents, and
+                covenants that they are the primary authorized operator of the leased equipment (the roll-off trailer
+                and dumpster unit).
+              </p>
+              <p>
+                Renter affirms under penalty of fraud that the identification and documentation provided during
+                checkout belong to them and accurately represent their true identity.
+              </p>
+              <p>
+                Absolute Liability for Permitted or Unpermitted Use: Renter acknowledges and agrees that they assume
+                absolute, unconditional liability for the equipment from the moment of possession until it is returned
+                and accepted by the Owner. This liability remains fully binding regardless of who is physically driving
+                the tow vehicle or operating the equipment. If the Renter permits any other individual to transport,
+                load, dump, or operate the equipment, Renter agrees that such individual operates as the Renter's
+                direct agent. Renter accepts full, primary, and personal financial and legal responsibility for any
+                property damage, bodily injury, theft, or total loss resulting from such use, whether authorized or
+                unauthorized.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 pt-2">
+            <Checkbox
+              id="terms-agree"
+              checked={agreedToTerms}
+              onCheckedChange={(checked) => {
+                setAgreedToTerms(Boolean(checked));
+                if (error) setError('');
+              }}
+              className="border-white/50 data-[state=checked]:bg-yellow-400 h-6 w-6"
+            />
+            <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
+              By checking this box and typing my name below, I agree that I have read, understood, and legally bind
+              myself to the Rental Agreement terms above.
+            </Label>
+          </div>
+
+          <div>
+            <Label htmlFor="signature" className="text-lg font-semibold text-white flex items-center mb-2">
+              <Signature className="mr-2 h-5 w-5 text-yellow-400" />
+              E-Signature
+            </Label>
+            <p className="text-sm text-blue-200 mb-2">
+              Please type your full name as it appears on the booking:{' '}
+              <strong className="text-yellow-300">{expectedName}</strong>
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <Input
+                id="signature"
+                type="text"
+                placeholder="Type your full name here"
+                value={signature}
+                onChange={(e) => {
+                  setSignature(e.target.value);
+                  if (error) setError('');
+                }}
+                className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400 flex-1"
+              />
+              <div className="w-full sm:w-48 shrink-0">
+                <Label htmlFor="signatureDate" className="text-xs text-blue-200 mb-1 block">
+                  Date
+                </Label>
+                <Input
+                  id="signatureDate"
+                  type="text"
+                  placeholder="MMM d, yyyy"
+                  value={signatureDate}
+                  onChange={(e) => {
+                    setSignatureDate(e.target.value);
+                    if (error) setError('');
+                  }}
+                  className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400"
+                />
+              </div>
+            </div>
           </div>
 
           {error && (
