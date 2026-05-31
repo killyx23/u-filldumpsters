@@ -390,6 +390,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const handleVerificationSubmit = async (verificationData) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleVerificationSubmit triggered with data:`, verificationData);
+    const runId = `run-${Date.now()}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:start',message:'handleVerificationSubmit start',data:{currentStep,isProcessing,emailPresent:Boolean(bookingData?.email),selectedPlanId:selectedPlan?.id,hasLicensePlate:Boolean(verificationData?.licensePlate),hasFrontImage:Boolean(verificationData?.licenseImageUrls?.front),hasBackImage:Boolean(verificationData?.licenseImageUrls?.back),wasSkipped:Boolean(verificationData?.wasVerificationSkipped)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     setAddonsData((prev) => ({ ...prev, ...verificationData }));
     setIsProcessing(true);
@@ -405,6 +409,9 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       const resultTs = new Date().toISOString();
       if (!result.success) {
         console.error(`[${resultTs}] [BookingJourney] Failed to store pending booking:`, result.error);
+        // #region agent log
+        fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:failure',message:'handleVerificationSubmit received failed result',data:{resultError:result.error||null,currentStep,isProcessingAtFailure:isProcessing},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         toast({
           title: 'Error',
           description: result.error || 'Failed to save booking data. Please try again.',
@@ -415,6 +422,9 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       }
 
       console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
+      // #region agent log
+      fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:success',message:'handleVerificationSubmit success',data:{tokenPresent:Boolean(result?.token)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       navigateToVerifyEmail(result.token);
     } catch (error) {
       const catchTs = new Date().toISOString();

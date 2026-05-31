@@ -54,7 +54,7 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: plan?.highlight?.delay || 0 }}
             className={cn(
-                "relative h-full pt-8 group transition-all duration-300",
+                "relative h-full w-full pt-8 group transition-all duration-300",
                 isTemporarilyUnavailable ? "opacity-80 grayscale-[30%]" : ""
             )}
         >
@@ -73,11 +73,11 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
             <div
                 data-service-id={plan?.id}
                 className={cn(
-                "relative p-0.5 overflow-hidden rounded-2xl h-full shadow-2xl transition-all duration-300",
+                "relative p-0.5 overflow-hidden rounded-2xl h-full w-full shadow-2xl transition-all duration-300",
                 "bg-gradient-to-r", currentStyle.border
             )}>
                 <div className={cn(
-                    "relative z-10 backdrop-blur-xl rounded-[15px] p-6 flex flex-col h-full",
+                    "relative z-10 backdrop-blur-xl rounded-[15px] p-5 xl:p-6 flex flex-col h-full w-full",
                     currentStyle.bg
                 )}>
                     
@@ -88,12 +88,12 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     )}
 
                     <div className="flex-grow pt-8">
-                        <h3 className={cn("text-3xl font-bold mb-3 text-center", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
-                        <p className="text-white/80 mb-6 h-24 text-[15px] leading-relaxed text-center" >
+                        <h3 className={cn("text-2xl xl:text-3xl font-bold mb-3 text-center leading-tight", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
+                        <p className="text-white/80 mb-6 min-h-[5.5rem] text-sm xl:text-[15px] leading-relaxed text-center" >
                             {typeof displayDescription === 'string' ? displayDescription : 'Description unavailable'}
                         </p>
                         <div className="mb-6 text-center">
-                            <span className="text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>
+                            <span className="text-4xl xl:text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>
                             <span className="text-gray-300 ml-2 text-sm" >{typeof displayPriceUnit === 'string' ? displayPriceUnit : ''}</span>
                         </div>
                         <ul className="space-y-3 text-white/90 mb-8">

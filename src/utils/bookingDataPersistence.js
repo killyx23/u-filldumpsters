@@ -6,6 +6,59 @@ import {
   resolveServiceIdForBooking,
 } from '@/utils/servicePlan';
 
+function serializeDateForRpc(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const isoDateMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (isoDateMatch) return isoDateMatch[1];
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
+function sanitizeNumericForRpc(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalized = String(value)
+    .trim()
+    .replace(/[$,]/g, '')
+    .replace(/\s+/g, '');
+  if (!normalized) return null;
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sanitizeIntegerForRpc(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? value : null;
+  }
+
+  const normalized = String(value).trim();
+  if (!/^-?\d+$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
 /**
  * EMAIL DEDUPLICATION PATTERN
  * ===========================
@@ -27,6 +80,11 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 
   try {
     const email = bookingData.email?.trim().toLowerCase();
+    const runId = `run-${Date.now()}`;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H1',location:'bookingDataPersistence.js:storePendingBooking:start',message:'storePendingBooking invoked',data:{emailPresent:Boolean(email),planId:plan?.id,deliveryService:Boolean(options?.deliveryService),dropOffDateType:typeof bookingData?.dropOffDate,pickupDateType:typeof bookingData?.pickupDate},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     if (!email) {
       console.error(`[${timestamp}] [storePendingBooking] No email provided`);
@@ -37,7 +95,12 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
     }
 
     const deliveryService = options.deliveryService || false;
-    const serviceId = resolveServiceIdForBooking(plan, deliveryService) ?? plan?.id ?? null;
+    const resolvedServiceId = resolveServiceIdForBooking(plan, deliveryService) ?? plan?.id ?? null;
+    const serviceId = sanitizeIntegerForRpc(resolvedServiceId);
+    const dropOffDate = serializeDateForRpc(bookingData.dropOffDate);
+    const pickupDate = serializeDateForRpc(bookingData.pickupDate);
+    const totalPrice = sanitizeNumericForRpc(options.totalPrice);
+    const basePrice = sanitizeNumericForRpc(options.basePrice);
 
     const agreementFeeSnapshot = Array.isArray(options.agreementFeeSnapshot)
       ? options.agreementFeeSnapshot
@@ -58,8 +121,8 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       zip: bookingData.contactAddress?.zip || null,
       contact_address: bookingData.contactAddress || null,
       delivery_address: addonsData?.deliveryAddress || bookingData.contactAddress || null,
-      drop_off_date: bookingData.dropOffDate || null,
-      pickup_date: bookingData.pickupDate || null,
+      drop_off_date: dropOffDate,
+      pickup_date: pickupDate,
       drop_off_time_slot: bookingData.dropOffTimeSlot || null,
       pickup_time_slot: bookingData.pickupTimeSlot || null,
       notes: bookingData.notes || null,
@@ -70,15 +133,46 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
         ...(bookingData || {}),
         agreementAcceptedAt: new Date().toISOString(),
       },
-      total_price: options.totalPrice || null,
-      base_price: options.basePrice || null,
+      total_price: totalPrice,
+      base_price: basePrice,
       delivery_service: deliveryService
     };
+
+    const { data: existingRows, error: existingRowsError } = await supabase
+      .from('pending_customers')
+      .select('id, email, is_verified')
+      .ilike('email', email);
+
+    // #region agent log
+    fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H2',location:'bookingDataPersistence.js:storePendingBooking:preflight',message:'preflight pending_customers lookup before RPC',data:{email,preflightErrorCode:existingRowsError?.code||null,preflightCount:Array.isArray(existingRows)?existingRows.length:null,preflightIds:Array.isArray(existingRows)?existingRows.map((r)=>r.id):[]},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     const { data: token, error } = await supabase.rpc('store_pending_booking', { payload });
 
     if (error) {
-      console.error(`[${timestamp}] [storePendingBooking] RPC error:`, error);
+      const rpcReason = [error.code, error.message, error.details, error.hint]
+        .filter(Boolean)
+        .join(' | ');
+      const payloadDiagnostic = {
+        service_id: payload.service_id,
+        service_id_type: typeof payload.service_id,
+        drop_off_date: payload.drop_off_date,
+        pickup_date: payload.pickup_date,
+        total_price: payload.total_price,
+        total_price_type: typeof payload.total_price,
+        base_price: payload.base_price,
+        base_price_type: typeof payload.base_price,
+        email_present: Boolean(payload.email),
+      };
+      console.error(
+        `[${timestamp}] [storePendingBooking] RPC error:`,
+        rpcReason || error,
+        payloadDiagnostic,
+        error
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H3',location:'bookingDataPersistence.js:storePendingBooking:rpcError',message:'store_pending_booking RPC failed',data:{errorCode:error.code||null,errorMessage:error.message||null,errorDetails:error.details||null,httpStatus:error?.code==='23505'?'conflict':null,payloadDiagnostic},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return {
         success: false,
         error: 'Failed to save booking information. Please try again.'
@@ -93,6 +187,9 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
     }
 
     console.log(`[${timestamp}] [storePendingBooking] ✓ Saved pending booking:`, token);
+    // #region agent log
+    fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H4',location:'bookingDataPersistence.js:storePendingBooking:success',message:'store_pending_booking RPC succeeded',data:{tokenPresent:Boolean(token),tokenType:typeof token},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     return {
       success: true,
