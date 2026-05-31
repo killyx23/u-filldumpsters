@@ -11,6 +11,7 @@ import { format, isValid, parseISO } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
+import { saveVerificationDocumentToDb } from '@/utils/verificationImageHelper';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
@@ -766,6 +767,37 @@ export const PaymentPage = ({ onBack }) => {
             p_license_plate: pendingData.addons_data.licensePlate,
             p_license_image_urls: pendingData.addons_data.licenseImageUrls,
           });
+        }
+
+        if (pendingData.addons_data?.insuranceImageUrl?.url) {
+          try {
+            const { data: bookingRow, error: bookingLookupError } = await supabase
+              .from('bookings')
+              .select('customer_id')
+              .eq('id', data.id)
+              .single();
+
+            if (bookingLookupError) {
+              console.error(`[${timestamp}] [PaymentPage] Failed to load booking customer for insurance sync:`, bookingLookupError);
+            } else if (bookingRow?.customer_id) {
+              const licenseUrls = pendingData.addons_data.licenseImageUrls || [];
+              await saveVerificationDocumentToDb(
+                bookingRow.customer_id,
+                licenseUrls[0]?.url || null,
+                licenseUrls[0]?.path || null,
+                licenseUrls[1]?.url || null,
+                licenseUrls[1]?.path || null,
+                'pending',
+                pendingData.addons_data.insuranceImageUrl.url,
+                pendingData.addons_data.insuranceImageUrl.path,
+              );
+            }
+          } catch (insuranceSyncError) {
+            console.error(
+              `[${timestamp}] [PaymentPage] Insurance verification sync failed after booking creation:`,
+              insuranceSyncError,
+            );
+          }
         }
 
         // Decrement equipment quantities if needed

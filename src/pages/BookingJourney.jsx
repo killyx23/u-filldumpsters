@@ -335,9 +335,20 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const handleAgreementAccept = async (agreementMeta = {}) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleAgreementAccept triggered`);
+    const signatureFields = {};
+
+    if (typeof agreementMeta.agreementSignature === 'string') {
+      signatureFields.agreementSignature = agreementMeta.agreementSignature;
+    }
+    if (typeof agreementMeta.agreementSignatureDate === 'string') {
+      signatureFields.agreementSignatureDate = agreementMeta.agreementSignatureDate;
+    }
 
     if (Array.isArray(agreementMeta.agreementFeeSnapshot)) {
       setAgreementFeeSnapshot(agreementMeta.agreementFeeSnapshot);
+    }
+    if (Object.keys(signatureFields).length > 0) {
+      setAddonsData((prev) => ({ ...prev, ...signatureFields }));
     }
 
     if (requiresDriverVerification) {
@@ -351,7 +362,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setIsProcessing(true);
 
     try {
-      const result = await storePendingBooking(bookingData, selectedPlan, addonsData, {
+      const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...signatureFields }, {
         totalPrice: finalPrice,
         basePrice: basePrice,
         deliveryService: deliveryService,

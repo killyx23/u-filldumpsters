@@ -554,7 +554,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                 </div>
                 
                 <div className="pt-4 border-t border-white/10">
-                    <VerificationImageDisplay customerId={customer?.id} />
+                    <VerificationImageDisplay customerId={customer?.id} title="Driver & Insurance Documents" />
                     
                     <div className="mt-4 flex justify-end gap-2">
                         <Button variant="destructive" size="sm" onClick={() => handleUpdateDocStatus('rejected')} disabled={isProcessingStatus}>

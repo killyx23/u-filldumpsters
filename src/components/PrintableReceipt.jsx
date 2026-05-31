@@ -21,6 +21,8 @@ const AgreementText = ({ booking, hasInsurance }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
         ? `${booking.first_name} ${booking.last_name}` 
         : booking?.name;
+    const signedBy = booking?.addons?.agreementSignature || displayName;
+    const signedDate = booking?.addons?.agreementSignatureDate || null;
 
     return (
         <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
@@ -44,12 +46,18 @@ const AgreementText = ({ booking, hasInsurance }) => {
                     <ShieldCheck className="h-6 w-6 text-green-600 mr-3" />
                     <div>
                         <p className="font-bold text-green-800">Electronically Signed & Agreed</p>
-                        <p className="text-xs text-green-700">by {displayName}</p>
+                        <p className="text-xs text-green-700">by {signedBy}</p>
                     </div>
                 </div>
                 <div className="text-right">
-                    <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
-                    <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
+                    {signedDate ? (
+                        <p className="font-semibold text-green-800">{signedDate}</p>
+                    ) : (
+                        <>
+                            <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
+                            <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
@@ -646,7 +654,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             
             <footer className="text-xs text-gray-500 pt-4 mt-6" style={{ pageBreakInside: 'avoid' }}>
                 <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
-                {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver's license and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
+                {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver&apos;s license, auto insurance document, and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
                 {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
                 {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
