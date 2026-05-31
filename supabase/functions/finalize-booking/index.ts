@@ -22,6 +22,7 @@ Deno.serve(async (req)=>{
     const body = await req.json();
     const bookingId = body.bookingId ?? body.booking_id;
     const paymentIntentId = body.paymentIntentId ?? body.payment_intent_id ?? null;
+    const siteUrl = body.site_url;
     if (!bookingId) {
       throw new Error("bookingId is required.");
     }
@@ -73,7 +74,7 @@ Deno.serve(async (req)=>{
       }
 
       const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
-        body: { bookingId: booking.id }
+        body: { bookingId: booking.id, site_url: siteUrl }
       });
       if (emailError) {
         console.error("[finalize-booking] send-booking-confirmation catch-up failed:", emailError);
@@ -401,7 +402,8 @@ Deno.serve(async (req)=>{
     let emailSent = false;
     const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
       body: {
-        bookingId: updatedBooking.id
+        bookingId: updatedBooking.id,
+        site_url: siteUrl
       }
     });
     if (emailError) {

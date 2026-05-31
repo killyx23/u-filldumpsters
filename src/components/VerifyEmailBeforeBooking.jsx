@@ -28,6 +28,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const token = searchParams.get('token');
+    const codeFromUrl = searchParams.get('code');
     const loadingTimeoutRef = useRef(null);
     const verificationTimeoutRef = useRef(null);
 
@@ -141,6 +142,14 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
         loadPendingBooking();
     }, [token, retryCount, navigate]);
+
+    useEffect(() => {
+        if (status !== 'idle') return;
+        const prefetchedCode = String(codeFromUrl || '').trim();
+        if (!/^\d{6}$/.test(prefetchedCode)) return;
+        setCode(prefetchedCode);
+        setStatus('sent');
+    }, [status, codeFromUrl]);
 
     // Load equipment prices with error handling
     useEffect(() => {
@@ -310,7 +319,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 body: {
                     email: bookingData.email,
                     name: `${bookingData.firstName} ${bookingData.lastName}`.trim(),
-                    pending_customer_id: token
+                    pending_customer_id: token,
+                    site_url: typeof window !== 'undefined' ? window.location.origin : undefined
                 }
             });
 

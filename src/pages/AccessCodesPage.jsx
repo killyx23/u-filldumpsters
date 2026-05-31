@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
+import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 
@@ -241,8 +242,12 @@ export const AccessCodesPage = ({ customerData }) => {
       setMagicLinkToken(data.token);
 
       // Create magic link URL
-      const siteUrl = window.location.origin;
-      const magicLinkUrl = `${siteUrl}/customer-portal?token=${data.token}&order_id=${booking?.id}&phone=${customerData.phone}`;
+      const magicLinkUrl = buildAccessCodesQrUrl({
+        token: data.token,
+        portalNumber: customerData.customer_id_text,
+        phone: customerData.phone,
+        orderId: booking?.id,
+      });
       
       console.log(`[${context}] QR code URL: ${magicLinkUrl}`);
 
@@ -389,11 +394,18 @@ export const AccessCodesPage = ({ customerData }) => {
     );
   }
 
-  const siteUrl = window.location.origin;
-  const magicLinkUrl = magicLinkToken 
-    ? `${siteUrl}/customer-portal?token=${magicLinkToken}&order_id=${booking?.id}&phone=${customerData.phone}`
+  const magicLinkUrl = magicLinkToken
+    ? buildAccessCodesQrUrl({
+      token: magicLinkToken,
+      portalNumber: customerData?.customer_id_text,
+      phone: customerData?.phone,
+      orderId: booking?.id,
+    })
     : '';
-  const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
+  const safetyVideoUrl = buildHowToGuidesQrUrl({
+    portalNumber: customerData?.customer_id_text,
+    phone: customerData?.phone,
+  });
 
   return (
     <>

@@ -2,12 +2,12 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
 import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
+import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
-const SITE_URL = Deno.env.get("SITE_URL") || "https://u-filldumpsters.com";
 const formatCurrency = (amount)=>{
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -219,18 +219,17 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
         ${thankYouRewardsHTML}
       </div>`;
 };
-const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
+const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
   const grandTotal = resolveBookingGrandTotal(booking);
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
   const customerIdText = booking.customers?.customer_id_text || 'N/A';
   const phone = booking.customers?.phone || booking.phone || 'N/A';
-  console.log(` site url: ${SITE_URL}`);
-  const portalUrl = `${SITE_URL}/login?phone=${encodeURIComponent(phone)}&portal_number=${encodeURIComponent(customerIdText)}`;
+  console.log(` site url: ${siteUrl}`);
+  const portalUrl = `${siteUrl}/login?phone=${encodeURIComponent(phone)}&portal_number=${encodeURIComponent(customerIdText)}`;
   console.log(`portal URL: ${portalUrl}`);
   const serviceName = serviceDetails?.name || plan.name || "N/A";
-  const serviceDescription = serviceDetails?.description || "";
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
   let equipmentHTML = "";
   if (addons.equipment && addons.equipment.length > 0) {
@@ -259,9 +258,9 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
     `[send-booking-confirmation] selfService=${selfService} planId=${plan.id} serviceType=${serviceType} isDelivery=${Boolean(addons.isDelivery || addons.deliveryService)}`,
   );
   const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
-  const returnScheduleLabel = selfService ? "Return by:" : "Pickup:";
+  const returnScheduleLabel = selfService ? "Return By:" : "Pickup:";
   const pickupScheduleValue = selfService
-    ? `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
+    ? `${formatDate(booking.drop_off_date)} ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
     : `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}`;
   const returnScheduleValue = selfService
     ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
@@ -276,7 +275,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
   if (selfService) {
     nextStepsHTML = `
       <li><strong>🔑 Access Codes:</strong> At least 12 hours before your scheduled pickup time, you will receive a text and email with the exact location address and unlock code.</li>
-      <li><strong>🗓️ Pickup:</strong> You can pick up the trailer at our location on the south side of Saratoga Springs on ${pickupDateFormatted} at ${pickupStartTimeFormatted}.</li>
+      <li><strong>🗓️ Pickup:</strong> You can pick up the trailer at our location on the south side of Saratoga Springs on ${pickupDateFormatted} ${pickupStartTimeFormatted}.</li>
       <li><strong>🛻 Towing Requirements:</strong> Ensure your towing vehicle meets the minimum requirements. Your truck must have a 2-5/16 inch ball hitch.</li>
       <li><strong>📖 Safety & Operation:</strong> Follow all safety and operating instructions. Detailed operating instructions and videos can be found in the Customer Portal.</li>
       <li><strong>🪵 Usage:</strong> Fill the trailer at your convenience during your rental period.</li>
@@ -351,8 +350,6 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       <div style="margin-bottom: 25px;">
         <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Service Details</h2>
         <p style="margin: 0 0 10px 0; color: #1e40af; font-weight: bold; font-size: 16px;">${serviceName}</p>
-        ${serviceDescription ? `<p style="margin: 0 0 15px 0; color: #4b5563; font-size: 14px; line-height: 1.5;">${serviceDescription}</p>` : ''}
-        
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
             <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${pickupScheduleLabel}</td>
@@ -403,7 +400,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       <!-- Customer Portal Access -->
       <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
         <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔑 Customer Portal Access</h3>
-        <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal.</p>
+        <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal. (Most all questions and changes can be access through the portal)</p>
         
         <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
           <tr>
@@ -550,8 +547,11 @@ Deno.serve(async (req)=>{
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [send-booking-confirmation] Function entry`);
   try {
-    const { bookingId, email } = await req.json();
-    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}`);
+    const body = await req.json();
+    const bookingId = body.bookingId ?? body.booking_id;
+    const email = body.email;
+    const siteUrl = normalizeSiteUrl(body.site_url);
+    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}`);
     if (!bookingId) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: Missing bookingId`);
       return new Response(JSON.stringify({
@@ -609,7 +609,7 @@ Deno.serve(async (req)=>{
       insuranceFallbackPrice = Number(insuranceService.base_price);
     }
     const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
-    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount);
+    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
     const subject = `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
     console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail}`);
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);

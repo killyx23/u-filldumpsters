@@ -79,6 +79,23 @@ export const CustomerPortal = () => {
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
     const autoLoginAttemptedRef = useRef(false);
 
+    const mergeSearchParams = useCallback((updates = {}, options = {}) => {
+        const next = new URLSearchParams(searchParams);
+        const removeKeys = options.removeKeys || [];
+
+        removeKeys.forEach((key) => next.delete(key));
+
+        Object.entries(updates).forEach(([key, value]) => {
+            if (value === null || value === undefined || value === '') {
+                next.delete(key);
+            } else {
+                next.set(key, String(value));
+            }
+        });
+
+        setSearchParams(next);
+    }, [searchParams, setSearchParams]);
+
     const getDeeplinkCredentials = useCallback(() => {
         const portalId =
             searchParams.get('portal_id') ||
@@ -153,7 +170,7 @@ export const CustomerPortal = () => {
 
                     if (loginData?.session) {
                         await supabase.auth.setSession(loginData.session);
-                        setSearchParams({ tab: 'access-codes' });
+                        mergeSearchParams({ tab: 'access-codes' }, { removeKeys: ['token'] });
                         setActiveTab('access-codes');
                         
                         toast({
@@ -169,13 +186,13 @@ export const CustomerPortal = () => {
                         description: err.message || 'This link has expired or is invalid. Please log in manually.',
                         variant: 'destructive'
                     });
-                    setSearchParams({});
+                    mergeSearchParams({}, { removeKeys: ['token'] });
                 }
             }
         };
 
         handleMagicLink();
-    }, [searchParams, user, authLoading]);
+    }, [searchParams, user, authLoading, mergeSearchParams]);
 
     useEffect(() => {
         const pid = searchParams.get('portal_id');
@@ -194,7 +211,7 @@ export const CustomerPortal = () => {
     const handleTabChange = (tabId) => {
         console.log('[CustomerPortal] Tab changed to:', tabId);
         setActiveTab(tabId);
-        setSearchParams({ tab: tabId });
+        mergeSearchParams({ tab: tabId });
     };
 
     const fetchData = useCallback(async (isInitialLoad = true) => {
@@ -381,7 +398,8 @@ export const CustomerPortal = () => {
             try {
                 console.log('[CustomerPortal] Auto-login from deeplink params');
                 await performPortalLogin(portalId, phone);
-                setSearchParams({ tab: 'dashboard' });
+                const requestedTab = searchParams.get('tab') || 'dashboard';
+                mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
                 toast({
                     title: 'Login Successful',
                     description: 'Welcome to your customer portal.',
@@ -400,7 +418,7 @@ export const CustomerPortal = () => {
         };
 
         runAutoLogin();
-    }, [authLoading, user, isLoggingIn, getDeeplinkCredentials, performPortalLogin, setSearchParams]);
+    }, [authLoading, user, isLoggingIn, getDeeplinkCredentials, performPortalLogin, searchParams, mergeSearchParams]);
 
     useEffect(() => {
         if (!user || !session?.access_token) return;

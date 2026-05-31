@@ -11,7 +11,9 @@ Deno.serve(async (req)=>{
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [resend-confirmation-email] Function entry`);
   try {
-    const { booking_id } = await req.json();
+    const body = await req.json();
+    const booking_id = body.booking_id ?? body.bookingId;
+    const site_url = body.site_url;
     console.log(`[${timestamp}] [resend-confirmation-email] Booking ID: ${booking_id}`);
     if (!booking_id) {
       console.error(`[${timestamp}] [resend-confirmation-email] ERROR: Missing booking_id`);
@@ -34,7 +36,8 @@ Deno.serve(async (req)=>{
         "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
       },
       body: JSON.stringify({
-        booking_id
+        bookingId: booking_id,
+        site_url
       })
     });
     const result = await response.json();

@@ -30,9 +30,33 @@ import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
 import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortalGuard';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 
+const mergeRouteQuery = (to, incomingSearch) => {
+  const [path, toQuery = ''] = to.split('?');
+  const merged = new URLSearchParams(toQuery);
+  const incoming = new URLSearchParams(incomingSearch);
+
+  incoming.forEach((value, key) => {
+    merged.set(key, value);
+  });
+
+  const query = merged.toString();
+  return `${path}${query ? `?${query}` : ''}`;
+};
+
 const PortalRedirect = ({ to }) => {
   const { search } = useLocation();
-  return <Navigate to={`${to}${search}`} replace />;
+  return <Navigate to={mergeRouteQuery(to, search)} replace />;
+};
+
+/** Legacy receipt QR paths: /portal/access-codes?token=... → customer portal access tab */
+const PortalAccessCodesRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={mergeRouteQuery('/customer-portal?tab=access-codes', search)} replace />;
+};
+
+const VerifyRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={`/verify-email${search}`} replace />;
 };
 
 function App() {
@@ -74,6 +98,7 @@ function App() {
               <Route path="/booking-confirmation" element={<BookingConfirmation />} />
               <Route path="/receipt/:bookingId" element={<ReceiptPage />} />
               <Route path="/products" element={<ProductShowcasePage />} />
+              <Route path="/verify" element={<VerifyRedirect />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/payment" element={<PaymentPage />} />
               <Route path="/confirmation" element={<BookingConfirmation />} />
@@ -83,6 +108,7 @@ function App() {
               
               <Route path="/customer-portal" element={<CustomerPortal />} />
               <Route path="/portal" element={<PortalRedirect to="/customer-portal" />} />
+              <Route path="/portal/access-codes" element={<PortalAccessCodesRedirect />} />
               <Route path="/customer-portal/resources" element={<PortalRedirect to="/customer-portal?tab=resources" />} />
               
               {/* Backward compatibility routes */}
