@@ -14,6 +14,7 @@ import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/
 import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
+import { buildAccessCodesQrUrl } from '@/utils/buildPortalQrUrls';
 
 export const BookingConfirmation = () => {
   const [searchParams] = useSearchParams();
@@ -46,7 +47,7 @@ export const BookingConfirmation = () => {
     removeAfterPrint: true,
   });
 
-  const generateMagicLink = async (customerId, customerPhone) => {
+  const generateMagicLink = async (customerId, customerPhone, portalNumber) => {
     const timestamp = new Date().toISOString();
 
     console.log(`[${timestamp}] [BookingConfirmation] Generating magic link token for customer:`, {
@@ -78,8 +79,12 @@ export const BookingConfirmation = () => {
       }
 
       if (data?.token) {
-        const baseUrl = window.location.origin;
-        const url = `${baseUrl}/customer-portal?token=${data.token}&order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
+        const url = buildAccessCodesQrUrl({
+          token: data.token,
+          portalNumber,
+          phone: customerPhone,
+          orderId: bookingId,
+        });
 
         console.log(`[${timestamp}] [BookingConfirmation] Magic link created:`, url);
         setMagicLinkUrl(url);
@@ -90,7 +95,11 @@ export const BookingConfirmation = () => {
         stack: err.stack
       });
 
-      const fallbackUrl = `${window.location.origin}/customer-portal?order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
+      const fallbackUrl = buildAccessCodesQrUrl({
+        portalNumber,
+        phone: customerPhone,
+        orderId: bookingId,
+      });
       console.log(`[${timestamp}] [BookingConfirmation] Using fallback URL:`, fallbackUrl);
       setMagicLinkUrl(fallbackUrl);
     } finally {
@@ -124,6 +133,7 @@ export const BookingConfirmation = () => {
         body: {
           bookingId,
           paymentIntentId,
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
         },
       });
 
@@ -317,7 +327,11 @@ export const BookingConfirmation = () => {
 
         if (isDumpLoaderRental && booking.customers?.id && booking.customers?.phone) {
           console.log(`[${timestamp}] [BookingConfirmation] This is Dump Loader Trailer - generating magic link`);
-          await generateMagicLink(booking.customers.id, booking.customers.phone);
+          await generateMagicLink(
+            booking.customers.id,
+            booking.customers.phone,
+            booking.customers.customer_id_text
+          );
         }
 
         setLoading(false);

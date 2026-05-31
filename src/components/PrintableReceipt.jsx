@@ -4,6 +4,7 @@ import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from '
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
+import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -279,11 +280,18 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
 
     // QR Code URLs
-    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ufilldumpsters.com';
-    const magicLinkUrl = magicLinkToken 
-        ? `${siteUrl}/portal/access-codes?token=${magicLinkToken}`
+    const magicLinkUrl = magicLinkToken
+        ? buildAccessCodesQrUrl({
+            token: magicLinkToken,
+            portalNumber: customer_id_text,
+            phone,
+            orderId: booking.id
+        })
         : '';
-    const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
+    const safetyVideoUrl = buildHowToGuidesQrUrl({
+        portalNumber: customer_id_text,
+        phone
+    });
 
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
