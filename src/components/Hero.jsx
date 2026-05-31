@@ -19,7 +19,7 @@ const ServiceCard = ({
   } else if (id === 3) {
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
   } else if (id === 5) {
-    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/71ba93b0b17b71051b7ab08600b18632.jpg";
+    imageUrl = "/images/diy-heavy-equipment.png";
   }
   
   return (

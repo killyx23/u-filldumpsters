@@ -198,12 +198,12 @@ export const Plans = ({ onSelectPlan }) => {
 
     const gridClass =
         plansWithDumpFees.length >= 4
-            ? 'grid md:grid-cols-2 xl:grid-cols-4 gap-x-10 gap-y-16'
-            : 'grid md:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-16';
+            ? 'grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 xl:gap-8 gap-y-16 w-full'
+            : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 xl:gap-8 gap-y-16 w-full';
 
     return (
-        <section className="py-20 px-4">
-            <div className="container mx-auto">
+        <section className="py-20 px-4 sm:px-6 lg:px-8 xl:px-10">
+            <div className="w-full max-w-[1920px] mx-auto">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}

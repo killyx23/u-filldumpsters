@@ -24,7 +24,11 @@ export function resolveServiceIdForBooking(service, isDelivery = false) {
  */
 export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
   if (!service) return null;
-  const highlightText = service.homepage_highlight?.trim();
+  const fallbackHighlights = {
+    5: 'Skip Labor, Get Power',
+  };
+  const highlightText =
+    service.homepage_highlight?.trim() || fallbackHighlights[Number(service.id)] || '';
   return {
     ...service,
     highlight: highlightText

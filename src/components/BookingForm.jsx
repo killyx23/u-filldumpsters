@@ -323,8 +323,19 @@ export const BookingForm = ({
     if (!currentPlan || !isHourlySelfPickupPlan(currentPlan, isDelivery)) return;
 
     const serviceId = currentPlan.id;
+    const hasDropOffDate = Boolean(bookingData.dropOffDate);
+    const hasPickupDate = Boolean(bookingData.pickupDate);
 
     const fetchExactTimes = async () => {
+      if (!hasDropOffDate && !hasPickupDate) {
+        setBookingData(prev => ({
+          ...prev,
+          dropOffTimeSlot: '',
+          pickupTimeSlot: ''
+        }));
+        return;
+      }
+
       console.log('[BookingForm] Fetching exact times for hourly pickup service', serviceId);
       setFetchingExactTimes(true);
       let pStartTime = '';
@@ -405,8 +416,12 @@ export const BookingForm = ({
 
         setBookingData(prev => ({
           ...prev,
-          dropOffTimeSlot: pStartTime ? formatTimeToAmPm(pStartTime) : defaultStart,
-          pickupTimeSlot: rByTime ? formatTimeToAmPm(rByTime) : defaultReturn
+          dropOffTimeSlot: hasDropOffDate
+            ? (pStartTime ? formatTimeToAmPm(pStartTime) : defaultStart)
+            : '',
+          pickupTimeSlot: hasPickupDate
+            ? (rByTime ? formatTimeToAmPm(rByTime) : defaultReturn)
+            : ''
         }));
 
         console.log('[BookingForm] ✓ Exact times set:', {
@@ -419,8 +434,8 @@ export const BookingForm = ({
         console.warn('[BookingForm] Unexpected error fetching exact times:', error);
         setBookingData(prev => ({
           ...prev,
-          dropOffTimeSlot: defaultStart,
-          pickupTimeSlot: defaultReturn
+          dropOffTimeSlot: hasDropOffDate ? defaultStart : '',
+          pickupTimeSlot: hasPickupDate ? defaultReturn : ''
         }));
       } finally {
         setFetchingExactTimes(false);
@@ -1241,7 +1256,7 @@ export const BookingForm = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
                   <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                   {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
-                      <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} />
+                      <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.dropOffDate)} />
                   ) : (
                       <TimeSlotPicker label={labels.time1} value={bookingData.dropOffTimeSlot} onValueChange={v => setBookingData(p => ({
                         ...p,
@@ -1252,7 +1267,7 @@ export const BookingForm = ({
                   {currentPlan?.id !== 3 && <>
                           <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                           {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
-                              <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} />
+                              <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.pickupDate)} />
                           ) : (
                               <TimeSlotPicker label={labels.time2} value={bookingData.pickupTimeSlot} onValueChange={v => setBookingData(p => ({
                                 ...p,
@@ -1338,7 +1353,7 @@ const TimeSlotPicker = ({
     </Select>
   </div>;
 
-const ReadOnlyTimeField = ({ label, value, loading }) => {
+const ReadOnlyTimeField = ({ label, value, loading, hasDate }) => {
   const formatTimeToAmPm = (timeStr) => {
     if (!timeStr || timeStr === 'Not available') return timeStr;
     try {
@@ -1349,16 +1364,24 @@ const ReadOnlyTimeField = ({ label, value, loading }) => {
     }
   };
 
-  const displayValue = loading ? 'Loading...' : (value ? formatTimeToAmPm(value) : 'Pending...');
+  const displayValue = !hasDate
+    ? 'Choose date to see times'
+    : (loading ? 'Loading...' : (value ? formatTimeToAmPm(value) : 'Pending...'));
+  const isUnavailable = value === 'Not available';
+  const showLoading = hasDate && loading;
+  const iconClassName = isUnavailable ? 'text-red-400' : (hasDate ? 'text-gray-500' : 'text-gray-400');
+  const textClassName = isUnavailable
+    ? 'text-red-400 font-semibold'
+    : (!hasDate ? 'text-gray-400' : 'text-gray-300');
       
   return (
       <div className="md:col-span-1">
           <label className="text-sm font-medium text-white mb-2 block">{label}</label>
-          <div className={`w-full bg-black/40 border border-white/20 rounded-md px-3 py-2 flex items-center cursor-not-allowed text-sm h-10 ${value === 'Not available' ? 'text-red-400 font-semibold' : 'text-gray-300'}`}>
-              {loading ? (
+          <div className={`w-full bg-black/40 border border-white/20 rounded-md px-3 py-2 flex items-center cursor-not-allowed text-sm h-10 ${textClassName}`}>
+              {showLoading ? (
                  <><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500" /> Loading...</>
               ) : (
-                 <><Clock className={`mr-2 h-4 w-4 ${value === 'Not available' ? 'text-red-400' : 'text-gray-500'}`} /> {displayValue}</>
+                 <><Clock className={`mr-2 h-4 w-4 ${iconClassName}`} /> {displayValue}</>
               )}
           </div>
       </div>
