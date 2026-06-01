@@ -288,10 +288,27 @@ export default defineConfig({
 		cors: true,
 		// Do not set Cross-Origin-Embedder-Policy here — it blocks Stripe Payment Element
 		// iframes from js.stripe.com (elements-inner-loader-ui, etc.) in local dev.
-		allowedHosts: [
-			'.app-preview.com',
-			'.app-preview.io',
-		],
+		// Allow LAN/tunnel hostnames during local debugging from phones.
+		allowedHosts: true,
+		proxy: {
+			'/rest/v1': {
+				target: 'http://127.0.0.1:55421',
+				changeOrigin: true,
+			},
+			'/functions/v1': {
+				target: 'http://127.0.0.1:55421',
+				changeOrigin: true,
+			},
+			'/auth/v1': {
+				target: 'http://127.0.0.1:55421',
+				changeOrigin: true,
+			},
+			'/realtime/v1': {
+				target: 'http://127.0.0.1:55421',
+				changeOrigin: true,
+				ws: true,
+			},
+		},
 	},
 	resolve: {
 		extensions: ['.jsx', '.js', '.tsx', '.ts', '.json', ],
