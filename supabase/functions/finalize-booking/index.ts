@@ -101,7 +101,14 @@ Deno.serve(async (req)=>{
         alreadyProcessed: true,
         emailSent,
         status: booking.status,
-        loyalty: { pointsAwarded, pointsRedeemed: 0, referralBonusAwarded: 0, referralApplied: false }
+        loyalty: {
+          pointsAwarded,
+          pointsRedeemed: 0,
+          referralBonusAwarded: 0,
+          referralApplied: false,
+          referralDollarsRedeemed: 0,
+          referralPendingRecorded: false
+        }
       }), {
         headers: {
           ...corsHeaders,
@@ -237,15 +244,22 @@ Deno.serve(async (req)=>{
       pointsAwarded: 0,
       pointsRedeemed: 0,
       referralBonusAwarded: 0,
-      referralApplied: false
+      referralApplied: false,
+      referralDollarsRedeemed: 0,
+      referralPendingRecorded: false
     };
     const bookingTotal = Number(updatedBooking.total_price || 0);
     const redeemedPoints = toPositiveInt(updatedBooking.addons?.loyaltyPointsToRedeem);
     const referralCode = (updatedBooking.addons?.referralCode || updatedBooking.addons?.referral_code || "").trim();
     const couponId = Number(updatedBooking.addons?.coupon?.id || 0);
-    const { data: loyaltySettings } = await supabase.from("loyalty_settings").select("points_per_dollar, referral_bonus_points").maybeSingle();
+    const { data: loyaltySettings } = await supabase.from("loyalty_settings").select("points_per_dollar, referral_bonus_dollars").maybeSingle();
     const pointsPerDollar = Number(loyaltySettings?.points_per_dollar || 10);
-    const referralBonusPoints = toPositiveInt(loyaltySettings?.referral_bonus_points || 100);
+    const referralBonusDollars = Number(loyaltySettings?.referral_bonus_dollars || 25);
+    const redeemedReferralDollars = Number(
+      updatedBooking.addons?.referralDollarsToRedeem ||
+      updatedBooking.addons?.referral_wallet_to_redeem ||
+      0
+    );
     if (updatedBooking.customer_id && redeemedPoints > 0) {
       const { data: redeemResult, error: redeemError } = await supabase.rpc("adjust_loyalty_points", {
         p_customer_id: updatedBooking.customer_id,
@@ -261,6 +275,23 @@ Deno.serve(async (req)=>{
       const redemption = Array.isArray(redeemResult) ? redeemResult[0] : redeemResult;
       if (!redemption?.already_processed) {
         loyaltyOutcome.pointsRedeemed = redeemedPoints;
+      }
+    }
+    if (updatedBooking.customer_id && redeemedReferralDollars > 0) {
+      const { data: referralRedeemResult, error: referralRedeemError } = await supabase.rpc("adjust_referral_wallet", {
+        p_customer_id: updatedBooking.customer_id,
+        p_amount: redeemedReferralDollars,
+        p_transaction_type: "redeemed",
+        p_booking_id: updatedBooking.id,
+        p_referral_id: null,
+        p_notes: "Redeemed during checkout"
+      });
+      if (referralRedeemError) {
+        throw new Error(`Referral wallet redemption failed: ${referralRedeemError.message}`);
+      }
+      const redemption = Array.isArray(referralRedeemResult) ? referralRedeemResult[0] : referralRedeemResult;
+      if (!redemption?.already_processed) {
+        loyaltyOutcome.referralDollarsRedeemed = Number(redeemedReferralDollars.toFixed(2));
       }
     }
     if (updatedBooking.customer_id && bookingTotal > 0) {
@@ -284,11 +315,11 @@ Deno.serve(async (req)=>{
       }
     }
     if (updatedBooking.customer_id && referralCode) {
-      const { data: referralResult, error: referralError } = await supabase.rpc("complete_referral_for_booking", {
+      const { data: referralResult, error: referralError } = await supabase.rpc("register_referral_for_booking", {
         p_booking_id: updatedBooking.id,
         p_referee_customer_id: updatedBooking.customer_id,
         p_referral_code: referralCode,
-        p_bonus_points: referralBonusPoints
+        p_bonus_dollars: referralBonusDollars
       });
       if (referralError) {
         console.error("[finalize-booking] Referral completion failed:", referralError);
@@ -296,8 +327,11 @@ Deno.serve(async (req)=>{
         const referral = Array.isArray(referralResult) ? referralResult[0] : referralResult;
         if (referral?.referral_id) {
           loyaltyOutcome.referralApplied = true;
-          if (referral?.rewarded) {
-            loyaltyOutcome.referralBonusAwarded = referralBonusPoints;
+          if (referral?.pending_recorded) {
+            loyaltyOutcome.referralPendingRecorded = true;
+          }
+          if (referral?.already_rewarded) {
+            loyaltyOutcome.referralBonusAwarded = Number(referralBonusDollars.toFixed(2));
           }
         }
       }
@@ -311,6 +345,25 @@ Deno.serve(async (req)=>{
       if (couponError) {
         console.error("[finalize-booking] coupon usage increment failed:", couponError);
       }
+    }
+    const rewardsAddonsPatch = {
+      ...(updatedBooking.addons || {}),
+      loyaltyPointsEarned: Number(loyaltyOutcome.pointsAwarded || 0),
+      loyaltyPointsRedeemed: Number(loyaltyOutcome.pointsRedeemed || 0),
+      referralDollarsRedeemed: Number(loyaltyOutcome.referralDollarsRedeemed || 0),
+      referralDollarsPending: loyaltyOutcome.referralPendingRecorded ? Number(referralBonusDollars.toFixed(2)) : Number(updatedBooking.addons?.referralDollarsPending || 0),
+      rewardsSummaryUpdatedAt: new Date().toISOString(),
+    };
+    const { data: bookingWithRewards, error: rewardsPatchError } = await supabase
+      .from("bookings")
+      .update({ addons: rewardsAddonsPatch })
+      .eq("id", updatedBooking.id)
+      .select("*, customers!inner(*)")
+      .single();
+    if (rewardsPatchError) {
+      console.error("[finalize-booking] rewards summary patch failed:", rewardsPatchError);
+    } else if (bookingWithRewards) {
+      Object.assign(updatedBooking, bookingWithRewards);
     }
     // ----------------------------------------------------------------
     // Step 5c: Notify admin chat when verification was skipped

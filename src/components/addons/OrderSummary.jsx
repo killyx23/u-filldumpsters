@@ -279,7 +279,8 @@ export const OrderSummary = ({
         }
 
         const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
-        const discount = couponDiscount + loyaltyDiscount;
+        const referralDiscount = Number(addons?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             baseRental,
@@ -293,6 +294,7 @@ export const OrderSummary = ({
             discount,
             couponDiscount,
             loyaltyDiscount,
+            referralDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
@@ -431,6 +433,13 @@ export const OrderSummary = ({
         discountItems.push({
             label: `Loyalty Points (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)`,
             amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addons?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true 
         });
     }

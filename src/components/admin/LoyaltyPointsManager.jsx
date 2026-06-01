@@ -12,6 +12,7 @@ export const LoyaltyPointsManager = () => {
   const [settings, setSettings] = useState({
     points_per_dollar: 10,
     points_to_dollar: 100,
+    referral_bonus_dollars: 25,
   });
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,7 @@ export const LoyaltyPointsManager = () => {
         setSettings({
           points_per_dollar: data.points_per_dollar || 10,
           points_to_dollar: data.points_to_dollar || 100,
+          referral_bonus_dollars: Number(data.referral_bonus_dollars || 25),
         });
       }
     } catch (err) {
@@ -196,7 +198,7 @@ export const LoyaltyPointsManager = () => {
             Loyalty Points Settings
           </CardTitle>
           <CardDescription className="text-gray-400">
-            Configure how customers earn and redeem loyalty points
+            Configure points rates and referral bonus wallet dollars
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -232,6 +234,23 @@ export const LoyaltyPointsManager = () => {
               />
               <p className="text-xs text-gray-400">
                 Example: If set to 100, customer needs 100 points to get $1 discount
+              </p>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="referralBonusDollars" className="text-white">
+                Referral Bonus Dollars (per completed referred booking)
+              </Label>
+              <Input
+                id="referralBonusDollars"
+                type="number"
+                min="0"
+                step="0.01"
+                value={settings.referral_bonus_dollars}
+                onChange={(e) => setSettings({ ...settings, referral_bonus_dollars: Number(e.target.value) })}
+                className="text-white"
+              />
+              <p className="text-xs text-gray-400">
+                This is a separate wallet from loyalty points. It is added as pending first and becomes available only when the referred booking reaches Completed.
               </p>
             </div>
           </div>

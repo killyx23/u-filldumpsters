@@ -119,9 +119,10 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const total = resolveBookingGrandTotal(booking);
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
   const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
+  const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
   const couponDiscountAmount = Number(addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0);
   const couponCode = addons?.coupon?.code || null;
-  const totalRewardsDiscount = Math.max(0, loyaltyDiscountAmount + couponDiscountAmount);
+  const totalRewardsDiscount = Math.max(0, loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount);
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
   let rows = "";
   if (snapshot.length > 0) {
@@ -191,6 +192,12 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
     rows += `<tr>
       <td style="padding: 6px 0; color: #047857;">Loyalty Points Discount (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)</td>
       <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(loyaltyDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (referralDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Referral Wallet Discount</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(referralDiscountAmount)}</td>
     </tr>`;
   }
   const thankYouRewardsHTML = totalRewardsDiscount > 0 ? `
@@ -270,6 +277,8 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const pickupStartTimeFormatted = formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false });
   const returnDateFormatted = formatDate(booking.pickup_date);
   const returnByTimePlain = formatPlainBookingTime(booking.pickup_time_slot);
+  const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);
+  const referralPendingDollars = Number(addons?.referralDollarsPending || 0);
 
   let nextStepsHTML = "";
   if (selfService) {
@@ -374,6 +383,17 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       ` : ""}
 
       ${buildPriceSummaryHTML(booking, insuranceAmount)}
+
+      ${(pointsEarned > 0 || referralPendingDollars > 0) ? `
+      <div style="margin-top: 20px; padding: 14px 16px; background-color: #ecfdf5; border: 1px solid #86efac; border-radius: 8px;">
+        <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.5;">
+          <strong>🎉 Rewards Update:</strong> Thank you for your booking.
+          ${pointsEarned > 0 ? ` You earned <strong>${pointsEarned} loyalty points</strong> from this order.` : ''}
+          ${referralPendingDollars > 0 ? ` You also have <strong>${formatCurrency(referralPendingDollars)}</strong> in pending referral rewards waiting for activation after completion rules are met.` : ''}
+          Visit your Customer Portal anytime to track balances and history.
+        </p>
+      </div>
+      ` : ""}
 
       <!-- Total -->
       <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">

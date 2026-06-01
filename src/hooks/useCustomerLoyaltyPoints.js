@@ -7,6 +7,7 @@ import { supabase } from '@/lib/customSupabaseClient';
  */
 export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
   const [pointsBalance, setPointsBalance] = useState(0);
+  const [referralWallet, setReferralWallet] = useState({ pendingBalance: 0, availableBalance: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -17,6 +18,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
   const [conversionRates, setConversionRates] = useState({
     pointsPerDollar: DEFAULT_POINTS_PER_DOLLAR,
     pointsToDollar: DEFAULT_POINTS_TO_DOLLAR,
+    referralBonusDollars: 25,
   });
 
   // Fetch conversion rates from settings
@@ -31,6 +33,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
         setConversionRates({
           pointsPerDollar: data.points_per_dollar || DEFAULT_POINTS_PER_DOLLAR,
           pointsToDollar: data.points_to_dollar || DEFAULT_POINTS_TO_DOLLAR,
+          referralBonusDollars: Number(data.referral_bonus_dollars || 25),
         });
       }
     } catch (err) {
@@ -56,6 +59,13 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
           setConversionRates({
             pointsPerDollar: Number(data.conversionRates.pointsPerDollar || DEFAULT_POINTS_PER_DOLLAR),
             pointsToDollar: Number(data.conversionRates.pointsToDollar || DEFAULT_POINTS_TO_DOLLAR),
+            referralBonusDollars: Number(data.conversionRates.referralBonusDollars || 25),
+          });
+        }
+        if (data?.referralWallet) {
+          setReferralWallet({
+            pendingBalance: Number(data.referralWallet.pendingBalance || 0),
+            availableBalance: Number(data.referralWallet.availableBalance || 0),
           });
         }
         return Number(data?.pointsBalance || 0);
@@ -78,6 +88,17 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
 
       const balance = data?.points_balance ?? (await loadVerifiedRewards()) ?? 0;
       setPointsBalance(balance);
+      if (customerId) {
+        const { data: walletData } = await supabase
+          .from('customer_referral_wallets')
+          .select('pending_balance, available_balance')
+          .eq('customer_id', customerId)
+          .maybeSingle();
+        setReferralWallet({
+          pendingBalance: Number(walletData?.pending_balance || 0),
+          availableBalance: Number(walletData?.available_balance || 0),
+        });
+      }
       return balance;
     } catch (err) {
       console.error('[useCustomerLoyaltyPoints] Error fetching points:', err);
@@ -180,6 +201,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
 
   return {
     pointsBalance,
+    referralWallet,
     loading,
     error,
     conversionRates,
