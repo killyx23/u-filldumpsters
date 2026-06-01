@@ -225,7 +225,8 @@ export const AccessCodesPage = ({ customerData }) => {
       const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
         body: {
           customer_id: customerData.id,
-          phone: customerData.phone
+          phone: customerData.phone,
+          order_id: booking?.id,
         }
       });
 
@@ -403,8 +404,10 @@ export const AccessCodesPage = ({ customerData }) => {
     })
     : '';
   const safetyVideoUrl = buildHowToGuidesQrUrl({
+    token: magicLinkToken,
     portalNumber: customerData?.customer_id_text,
     phone: customerData?.phone,
+    orderId: booking?.id,
   });
 
   return (

@@ -401,6 +401,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
         <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔑 Customer Portal Access</h3>
         <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal. (Most all questions and changes can be access through the portal)</p>
+        <p style="margin: 0 0 20px 0; color: #991b1b; font-size: 14px; line-height: 1.6; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 14px;"><strong>⚠️ Privacy Notice:</strong> This portal information is private and personal. Please keep this email secure and do not share your Portal ID, phone number, or access links with anyone. 🔒</p>
         
         <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
           <tr>

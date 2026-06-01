@@ -142,52 +142,62 @@ export const CustomerPortal = () => {
     useEffect(() => {
         const handleMagicLink = async () => {
             const token = searchParams.get('token');
+            if (!token || authLoading) {
+                return;
+            }
+
+            if (user) {
+                const requestedTab = searchParams.get('tab') || 'access-codes';
+                setActiveTab(requestedTab);
+                mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
+                return;
+            }
             
-            if (token && !user && !authLoading) {
-                console.log('[CustomerPortal] Magic link token detected, validating...');
-                
-                try {
-                    const { data, error } = await supabase.functions.invoke('validate-magic-link-token', {
-                        body: { token }
-                    });
+            console.log('[CustomerPortal] Magic link token detected, validating...');
+            
+            try {
+                const requestedTab = searchParams.get('tab') || 'access-codes';
+                const requestedOrderId = searchParams.get('order_id');
+                const { data, error } = await supabase.functions.invoke('validate-magic-link-token', {
+                    body: { token, order_id: requestedOrderId }
+                });
 
-                    if (error || !data?.valid) {
-                        throw new Error(data?.error || 'Invalid or expired link');
-                    }
-
-                    console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
-
-                    const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
-                        body: {
-                            portal_number: data.customer.customer_id_text,
-                            phone: data.customer.phone
-                        }
-                    });
-
-                    if (loginError || loginData?.error) {
-                        throw new Error(loginData?.error || 'Failed to create session');
-                    }
-
-                    if (loginData?.session) {
-                        await supabase.auth.setSession(loginData.session);
-                        mergeSearchParams({ tab: 'access-codes' }, { removeKeys: ['token'] });
-                        setActiveTab('access-codes');
-                        
-                        toast({
-                            title: 'Login Successful',
-                            description: 'Welcome! Redirecting to your access codes...'
-                        });
-                    }
-
-                } catch (err) {
-                    console.error('[CustomerPortal] Magic link error:', err);
-                    toast({
-                        title: 'Invalid Link',
-                        description: err.message || 'This link has expired or is invalid. Please log in manually.',
-                        variant: 'destructive'
-                    });
-                    mergeSearchParams({}, { removeKeys: ['token'] });
+                if (error || !data?.valid) {
+                    throw new Error(data?.error || 'Invalid or expired link');
                 }
+
+                console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
+
+                const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
+                    body: {
+                        portal_number: data.customer.customer_id_text,
+                        phone: data.customer.phone
+                    }
+                });
+
+                if (loginError || loginData?.error) {
+                    throw new Error(loginData?.error || 'Failed to create session');
+                }
+
+                if (loginData?.session) {
+                    await supabase.auth.setSession(loginData.session);
+                    mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
+                    setActiveTab(requestedTab);
+                    
+                    toast({
+                        title: 'Login Successful',
+                        description: 'Welcome! Redirecting to your portal...'
+                    });
+                }
+
+            } catch (err) {
+                console.error('[CustomerPortal] Magic link error:', err);
+                toast({
+                    title: 'Invalid Link',
+                    description: err.message || 'This link has expired or is invalid. Please log in manually.',
+                    variant: 'destructive'
+                });
+                mergeSearchParams({}, { removeKeys: ['token'] });
             }
         };
 
@@ -400,6 +410,7 @@ export const CustomerPortal = () => {
                 await performPortalLogin(portalId, phone);
                 const requestedTab = searchParams.get('tab') || 'dashboard';
                 mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
+                setActiveTab(requestedTab);
                 toast({
                     title: 'Login Successful',
                     description: 'Welcome to your customer portal.',

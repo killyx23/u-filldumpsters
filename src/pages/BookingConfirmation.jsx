@@ -63,7 +63,8 @@ export const BookingConfirmation = () => {
       const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
         body: {
           customer_id: customerId,
-          phone: customerPhone
+          phone: customerPhone,
+          order_id: bookingId,
         }
       });
 

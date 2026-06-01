@@ -103,7 +103,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
                     body: {
                         customer_id: booking.customers.id,
-                        phone: booking.customers.phone
+                        phone: booking.customers.phone,
+                        order_id: booking.id,
                     }
                 });
 
@@ -289,9 +290,24 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         })
         : '';
     const safetyVideoUrl = buildHowToGuidesQrUrl({
+        token: magicLinkToken,
         portalNumber: customer_id_text,
-        phone
+        phone,
+        orderId: booking.id,
     });
+    const qrUsesLocalhost = (() => {
+        const targetUrl = magicLinkUrl || safetyVideoUrl;
+        if (!targetUrl) return false;
+        try {
+            const hostname = new URL(targetUrl).hostname;
+            return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+        } catch {
+            return targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1');
+        }
+    })();
+    const devQrPreviewUrl = import.meta.env.DEV && magicLinkUrl
+        ? (magicLinkUrl.length > 96 ? `${magicLinkUrl.slice(0, 96)}...` : magicLinkUrl)
+        : '';
 
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -376,6 +392,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p className="text-xs text-gray-600 mt-2 italic">
                                     Scan to view your PIN
                                 </p>
+                                {devQrPreviewUrl && (
+                                    <p className="text-[10px] text-gray-500 mt-1 break-all">
+                                        URL: {devQrPreviewUrl}
+                                    </p>
+                                )}
                             </div>
 
                             {/* Safety Video QR */}
@@ -401,21 +422,20 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     <p className="font-bold text-red-900 mb-1">⚠️ PRIVATE INFORMATION</p>
                                     <p className="text-sm text-red-800 leading-relaxed">
                                         These QR codes contain your personal rental information. Keep this receipt secure and do not share with others. 
+                                        These QR codes are time-sensitive for your privacy and are only active during your booking timeframe.
                                         The first QR code provides quick access to your PIN at the trailer. The second links to safety instructions.
                                     </p>
+                                    {import.meta.env.DEV && qrUsesLocalhost && (
+                                        <p className="text-xs text-red-700 mt-2">
+                                            Dev note: phone scans cannot open localhost. Set <strong>VITE_SITE_URL</strong> (or <strong>VITE_QR_BASE_URL</strong>) to your computer&apos;s LAN URL, restart dev server, and regenerate this receipt.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     </section>
                 )}
                 
-                <section className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
-                    <h3 className="font-bold text-lg mb-2 text-yellow-800 flex items-center"><Key className="mr-2 h-5 w-5"/> Customer Portal Login Information</h3>
-                    <p className="text-sm">Use the following credentials to access the Customer Portal to view your booking status, add notes, or upload files.</p>
-                    <p className="mt-2"><strong>Customer ID:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{customer_id_text}</span></p>
-                    <p><strong>Phone Number:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{phone}</span></p>
-                </section>
-
                 {isSelfService && !isCancelledAndRefunded && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Trailer Rental Instructions</h3>
