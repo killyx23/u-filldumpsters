@@ -54,16 +54,6 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
     if (!customerId) return;
     setCreating(true);
     try {
-      const existingActive = referrals.find((ref) => ref.referral_code);
-      if (existingActive?.referral_code) {
-        setPrimaryCode(existingActive.referral_code);
-        toast({
-          title: 'Referral link already active',
-          description: 'You already have a referral link. Share it to start earning rewards.',
-        });
-        return;
-      }
-
       const code = generateReferralCode(customerId);
       const { data, error } = await supabase
         .from('referrals')
@@ -82,7 +72,7 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
       setReferrals((prev) => [data, ...prev]);
       toast({
         title: 'Referral link ready',
-        description: 'Share your code with friends to earn rewards when they book.',
+        description: 'Share this link with a friend. You can generate additional links anytime.',
       });
     } catch (err) {
       console.error('[PortalReferralsSection] Create error:', err);
@@ -97,6 +87,7 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
   };
 
   const referralLink = primaryCode ? `${siteUrl}/?ref=${encodeURIComponent(primaryCode)}` : '';
+  const rewardedCount = referrals.filter((ref) => ref.status === 'rewarded').length;
 
   const copyToClipboard = async (text, label) => {
     try {
@@ -115,7 +106,7 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
           Refer Friends & Earn Rewards
         </CardTitle>
         <CardDescription className="text-green-100/80">
-          Share your referral link. When someone books using your code, you earn bonus loyalty points.
+          Share referral links. Rewards stay pending until the referred booking is completed, then they activate.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -174,20 +165,53 @@ export const PortalReferralsSection = ({ customerId, customerEmail }) => {
                     </Button>
                   </div>
                 </div>
+                <Button
+                  type="button"
+                  onClick={handleCreateCode}
+                  disabled={creating}
+                  variant="outline"
+                >
+                  {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                  Generate Another Link
+                </Button>
               </div>
             )}
 
             {referrals.length > 0 && (
               <div className="pt-2 border-t border-white/10">
                 <p className="text-sm font-medium text-white mb-2">Referral history</p>
-                <ul className="space-y-1 text-sm text-gray-300">
-                  {referrals.slice(0, 5).map((ref) => (
-                    <li key={ref.id} className="flex justify-between">
-                      <span className="truncate mr-2">{ref.referral_code}</span>
-                      <span className="capitalize">{String(ref.status || 'pending').replace(/_/g, ' ')}</span>
-                    </li>
-                  ))}
+                <ul className="space-y-2 text-sm text-gray-300">
+                  {referrals.slice(0, 8).map((ref) => {
+                    const statusText = String(ref.status || 'pending').replace(/_/g, ' ');
+                    const shareUrl = `${siteUrl}/?ref=${encodeURIComponent(ref.referral_code)}`;
+                    return (
+                      <li key={ref.id} className="bg-black/20 border border-white/10 rounded p-2">
+                        <div className="flex justify-between items-center gap-2">
+                          <span className="truncate mr-2 font-mono">{ref.referral_code}</span>
+                          <span className="capitalize text-xs">
+                            {statusText}
+                          </span>
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <Input readOnly value={shareUrl} className="bg-black/30 border-white/20 text-white text-xs" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => copyToClipboard(shareUrl, 'Referral link')}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
+              </div>
+            )}
+            {rewardedCount > 0 && (
+              <div className="bg-green-900/30 border border-green-500/30 rounded-lg p-3 text-sm text-green-100">
+                Congratulations! Your first referral reward has been applied and is now active.
               </div>
             )}
           </>

@@ -65,7 +65,8 @@ export function calculateBookingTotal(
   }
 
   const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-  const discount = couponDiscount + loyaltyDiscount;
+  const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+  const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
   return {
     basePriceAmount: lineByKey.base_rental?.amount ?? Number(plan?.price || plan?.base_price || 0),
@@ -79,6 +80,7 @@ export function calculateBookingTotal(
     discount,
     couponDiscount,
     loyaltyDiscount,
+    referralDiscount,
     subtotal: breakdown.subtotalBeforeTax,
     taxableSubtotal: breakdown.taxableSubtotal,
     nonTaxableSubtotal: breakdown.nonTaxableSubtotal,

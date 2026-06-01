@@ -72,6 +72,8 @@ Deno.serve(async (req) => {
     }
 
     let pointsBalance = 0;
+    let referralPendingBalance = 0;
+    let referralAvailableBalance = 0;
     if (customer?.id) {
       const { data: pointsRow, error: pointsError } = await supabase
         .from('loyalty_points')
@@ -82,11 +84,22 @@ Deno.serve(async (req) => {
       if (!pointsError && pointsRow?.points_balance) {
         pointsBalance = Number(pointsRow.points_balance || 0);
       }
+
+      const { data: walletRow, error: walletError } = await supabase
+        .from('customer_referral_wallets')
+        .select('pending_balance, available_balance')
+        .eq('customer_id', customer.id)
+        .maybeSingle();
+
+      if (!walletError && walletRow) {
+        referralPendingBalance = Number(walletRow.pending_balance || 0);
+        referralAvailableBalance = Number(walletRow.available_balance || 0);
+      }
     }
 
     const { data: settings } = await supabase
       .from('loyalty_settings')
-      .select('points_per_dollar, points_to_dollar')
+      .select('points_per_dollar, points_to_dollar, referral_bonus_dollars')
       .maybeSingle();
 
     return new Response(JSON.stringify({
@@ -94,9 +107,14 @@ Deno.serve(async (req) => {
       customer,
       customerId: customer?.id || null,
       pointsBalance,
+      referralWallet: {
+        pendingBalance: referralPendingBalance,
+        availableBalance: referralAvailableBalance,
+      },
       conversionRates: {
         pointsPerDollar: Number(settings?.points_per_dollar || 10),
         pointsToDollar: Number(settings?.points_to_dollar || 100),
+        referralBonusDollars: Number(settings?.referral_bonus_dollars || 25),
       },
     }), {
       status: 200,

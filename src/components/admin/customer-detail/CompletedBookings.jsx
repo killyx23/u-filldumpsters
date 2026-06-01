@@ -67,6 +67,10 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                  const refundDetails = booking.refund_details || null;
                  const archiveDetails = booking.archive_details || null;
                  const initiatedByLabel = getInitiatedByLabel(archiveDetails);
+                 const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                 const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
+                 const referralDollarsActivated = Number(booking.addons?.referralDollarsActivated || 0);
+                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
 
                  const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
                  const stripeChargeId = archiveDetails?.stripe_charge_id || paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
@@ -99,6 +103,16 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
                              {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
+                        </div>
+
+                        <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-3 text-xs text-gray-200">
+                            <p className="text-yellow-300 font-semibold mb-1">Rewards summary</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
+                                <p>Referral activated: <span className="font-semibold text-green-300">${referralDollarsActivated.toFixed(2)}</span></p>
+                                <p>Referral redeemed: <span className="font-semibold text-blue-300">${referralDollarsRedeemed.toFixed(2)}</span></p>
+                            </div>
                         </div>
 
                         {relevantEquipment.length > 0 && (

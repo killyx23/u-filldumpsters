@@ -266,7 +266,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }
     const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount || 0);
-    const discountAmount = couponDiscountAmount + loyaltyDiscountAmount;
+    const referralDiscountAmount = Number(addons?.referralDiscountAmount || 0);
+    const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);
+    const referralPending = Number(addons?.referralDollarsPending || 0);
+    const referralActivated = Number(addons?.referralDollarsActivated || 0);
+    const discountAmount = couponDiscountAmount + loyaltyDiscountAmount + referralDiscountAmount;
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
     
@@ -615,7 +619,15 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                             </td>
                                         </tr>
                                     )}
-                                    {loyaltyDiscountAmount > 0 && (
+                                    {referralDiscountAmount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">Referral Wallet</td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">
+                                                -${referralDiscountAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {(loyaltyDiscountAmount > 0 || referralDiscountAmount > 0) && (
                                         <tr>
                                             <td colSpan="2" className="py-2 px-6 text-xs text-green-800 italic">
                                                 Thank you for your loyalty. We appreciate your continued business.
@@ -659,6 +671,18 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
                             <p className="font-bold text-sm">🏗️ Landfill/Disposal Fees (TBD)</p>
                             <p className="text-xs text-gray-700 mt-1">Pending dump fees will be calculated based on actual waste processed and charged separately.</p>
+                        </div>
+                    )}
+
+                    {(pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (
+                        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded">
+                            <p className="font-bold text-sm text-green-800">🎉 Rewards update</p>
+                            <p className="text-xs text-green-900 mt-1">
+                                {pointsEarned > 0 ? `You earned ${pointsEarned} loyalty points from this booking.` : ''}
+                                {referralPending > 0 ? ` Pending referral rewards: $${referralPending.toFixed(2)}.` : ''}
+                                {referralActivated > 0 ? ` Referral rewards activated: $${referralActivated.toFixed(2)}.` : ''}
+                                {' '}Track and redeem rewards anytime in your Customer Portal.
+                            </p>
                         </div>
                     )}
 

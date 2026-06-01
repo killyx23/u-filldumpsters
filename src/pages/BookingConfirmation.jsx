@@ -36,6 +36,7 @@ export const BookingConfirmation = () => {
 
   const [errorMsg, setErrorMsg] = useState(null);
   const [pointsAwarded, setPointsAwarded] = useState(0);
+  const [referralPendingAward, setReferralPendingAward] = useState(0);
   const [isPortalNavigating, setIsPortalNavigating] = useState(false);
 
   const navigate = useNavigate();
@@ -205,6 +206,10 @@ export const BookingConfirmation = () => {
           title: 'Loyalty Points Earned!',
           description: `You earned ${awardedFromFinalize} points with this booking!`,
         });
+      }
+      const pendingReferralFromFinalize = Number(data?.booking?.addons?.referralDollarsPending || 0);
+      if (pendingReferralFromFinalize > 0) {
+        setReferralPendingAward(pendingReferralFromFinalize);
       }
 
     } catch (err) {
@@ -628,6 +633,19 @@ export const BookingConfirmation = () => {
               </p>
               <p className="text-xs text-purple-200/60">
                 View your points balance and redeem rewards in your customer portal.
+              </p>
+            </div>
+          )}
+
+          {referralPendingAward > 0 && (
+            <div className="bg-gradient-to-br from-amber-900/40 to-yellow-800/20 border border-amber-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="h-6 w-6 text-amber-300" />
+                <h3 className="text-xl font-bold text-amber-300">Referral Reward Pending</h3>
+              </div>
+              <p className="text-amber-100/80 text-sm">
+                You have <span className="font-bold text-amber-200">${referralPendingAward.toFixed(2)}</span> in referral rewards pending.
+                These rewards activate after referral completion rules are met, and you can track status in your customer portal.
               </p>
             </div>
           )}

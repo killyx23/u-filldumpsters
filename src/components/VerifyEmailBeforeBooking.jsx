@@ -283,7 +283,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         }
 
         const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-        const discount = couponDiscount + loyaltyDiscount;
+        const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             basePriceAmount,
@@ -297,6 +298,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             discount,
             couponDiscount,
             loyaltyDiscount,
+            referralDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
@@ -542,6 +544,13 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         discountItems.push({
             label: `Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`,
             amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true
         });
     }

@@ -17,7 +17,7 @@ export const ReferralsManager = () => {
     try {
       const { data, error } = await supabase
         .from('referrals')
-        .select('id, referral_code, status, referrer_points_awarded, referee_email, created_at, completed_at, completed_booking_id, referrer:referrer_customer_id(name, email), referee:referee_customer_id(name, email)')
+        .select('id, referral_code, status, referrer_points_awarded, referrer_bonus_dollars_awarded, referee_email, created_at, completed_at, completed_booking_id, pending_booking_id, reward_activated_at, referrer:referrer_customer_id(name, email), referee:referee_customer_id(name, email)')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setReferrals(data || []);
@@ -140,11 +140,18 @@ export const ReferralsManager = () => {
                     </p>
                     <p className="text-xs text-gray-400">
                       Created: {new Date(ref.created_at).toLocaleString()}
-                      {ref.completed_booking_id ? ` • Booking #${ref.completed_booking_id}` : ''}
+                      {ref.pending_booking_id ? ` • Pending booking #${ref.pending_booking_id}` : ''}
+                      {ref.completed_booking_id ? ` • Completed booking #${ref.completed_booking_id}` : ''}
                     </p>
                     <p className="text-xs text-gray-300">
-                      Bonus awarded: {Number(ref.referrer_points_awarded || 0)} pts
+                      Bonus: ${Number(ref.referrer_bonus_dollars_awarded || 0).toFixed(2)} wallet dollars
+                      {ref.referrer_points_awarded ? ` • Legacy ${Number(ref.referrer_points_awarded)} pts` : ''}
                     </p>
+                    {ref.reward_activated_at && (
+                      <p className="text-xs text-green-300">
+                        Activated: {new Date(ref.reward_activated_at).toLocaleString()}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right space-y-2">
                     <span className="text-xs uppercase text-blue-300">
@@ -154,26 +161,26 @@ export const ReferralsManager = () => {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={updatingId === ref.id || ref.status === 'completed'}
-                        onClick={() => updateStatus(ref.id, 'completed')}
+                        disabled={updatingId === ref.id || ref.status === 'pending_completion'}
+                        onClick={() => updateStatus(ref.id, 'pending_completion')}
                       >
-                        Complete
+                        Mark Pending
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={updatingId === ref.id || ref.status === 'rewarded'}
-                        onClick={() => updateStatus(ref.id, 'rewarded')}
+                        disabled={updatingId === ref.id || ref.status === 'pending_activation'}
+                        onClick={() => updateStatus(ref.id, 'pending_activation')}
                       >
-                        Rewarded
+                        Await Completion
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={updatingId === ref.id || ref.status === 'expired'}
-                        onClick={() => updateStatus(ref.id, 'expired')}
+                        disabled={updatingId === ref.id || ref.status === 'cancelled'}
+                        onClick={() => updateStatus(ref.id, 'cancelled')}
                       >
-                        Expire
+                        Cancel
                       </Button>
                     </div>
                   </div>

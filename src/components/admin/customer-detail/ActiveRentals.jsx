@@ -389,6 +389,10 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
                 
                 const totalPrice = booking.total_price && typeof booking.total_price === 'number' ? booking.total_price.toFixed(2) : '0.00';
+                const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
+                const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
+                const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
 
                 return (
                     <motion.div
@@ -415,6 +419,16 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${booking.drop_off_time_slot || 'N/A'}`} />
                             <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${booking.pickup_time_slot || 'N/A'}`} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
+                        </div>
+
+                        <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-4">
+                            <p className="text-sm font-semibold text-yellow-400 mb-2">Rewards & Referrals for this booking</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-xs text-gray-200">
+                                <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
+                                <p>Referral pending: <span className="font-semibold text-orange-300">${referralDollarsPending.toFixed(2)}</span></p>
+                                <p>Referral redeemed: <span className="font-semibold text-green-300">${referralDollarsRedeemed.toFixed(2)}</span></p>
+                            </div>
                         </div>
 
                         <div className="mt-6 border-t border-white/20 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">

@@ -380,6 +380,12 @@ const CheckoutForm = ({
                   value={-pricingBreakdown.loyaltyDiscount}
                 />
               )}
+              {pricingBreakdown.referralDiscount > 0 && (
+                <BreakdownLine
+                  label={`Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`}
+                  value={-pricingBreakdown.referralDiscount}
+                />
+              )}
             </>
           )}
           
@@ -547,6 +553,10 @@ export const PaymentPage = ({ onBack }) => {
   const [validatedTotal, setValidatedTotal] = useState(0);
   const [rewardsOffer, setRewardsOffer] = useState(null);
   const [rewardsChoiceResolved, setRewardsChoiceResolved] = useState(false);
+  const [rewardsDraft, setRewardsDraft] = useState({
+    pointsToRedeem: 0,
+    referralDollarsToRedeem: 0,
+  });
 
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
   const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
@@ -662,7 +672,7 @@ export const PaymentPage = ({ onBack }) => {
     };
 
     retrieveBookingData();
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
@@ -869,7 +879,7 @@ export const PaymentPage = ({ onBack }) => {
     const initializeRewardsOffer = async () => {
       if (loadingBookingData || !bookingData || !addonsData) return;
 
-      if (Number(addonsData?.loyaltyPointsToRedeem || 0) > 0) {
+      if (Number(addonsData?.loyaltyPointsToRedeem || 0) > 0 || Number(addonsData?.referralDollarsToRedeem || 0) > 0) {
         setRewardsChoiceResolved(true);
         return;
       }
@@ -879,10 +889,19 @@ export const PaymentPage = ({ onBack }) => {
           body: { email: bookingData.email },
         });
 
-        if (!error && data?.success && Number(data.pointsBalance || 0) > 0) {
+        const pointsBalance = Number(data?.pointsBalance || 0);
+        const referralAvailable = Number(data?.referralWallet?.availableBalance || 0);
+        const referralPending = Number(data?.referralWallet?.pendingBalance || 0);
+        if (!error && data?.success && (pointsBalance > 0 || referralAvailable > 0 || referralPending > 0)) {
           setRewardsOffer({
-            pointsBalance: Number(data.pointsBalance || 0),
+            pointsBalance,
             pointsToDollar: Number(data.conversionRates?.pointsToDollar || 100),
+            referralAvailable,
+            referralPending,
+          });
+          setRewardsDraft({
+            pointsToRedeem: pointsBalance,
+            referralDollarsToRedeem: referralAvailable,
           });
           return;
         }
@@ -904,35 +923,50 @@ export const PaymentPage = ({ onBack }) => {
 
     const pointsToDollar = Number(rewardsOffer.pointsToDollar || 100);
     const currentTotal = Number(pendingCustomerData?.total_price || 0);
-    const maxPointsForOrder = Math.floor(currentTotal * pointsToDollar);
-    const pointsToRedeem = Math.min(Number(rewardsOffer.pointsBalance || 0), maxPointsForOrder);
+    const requestedPoints = Math.max(0, Number(rewardsDraft.pointsToRedeem || 0));
+    const requestedReferral = Math.max(0, Number(rewardsDraft.referralDollarsToRedeem || 0));
+    const maxPointsByBalance = Number(rewardsOffer.pointsBalance || 0);
+    const maxReferralByBalance = Number(rewardsOffer.referralAvailable || 0);
+    const pointsToRedeem = Math.min(requestedPoints, maxPointsByBalance, Math.floor(currentTotal * pointsToDollar));
     const loyaltyDiscountAmount = Number((pointsToRedeem / pointsToDollar).toFixed(2));
+    const remainingAfterPoints = Math.max(0, currentTotal - loyaltyDiscountAmount);
+    const referralDollarsToRedeem = Math.min(requestedReferral, maxReferralByBalance, remainingAfterPoints);
+    const referralDiscountAmount = Number(referralDollarsToRedeem.toFixed(2));
 
-    if (pointsToRedeem > 0 && loyaltyDiscountAmount > 0) {
-      setAddonsData((prev) => ({
-        ...prev,
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: pointsToRedeem,
+      loyaltyDiscountAmount,
+      referralDollarsToRedeem,
+      referralDiscountAmount,
+    }));
+    setPendingCustomerData((prev) => ({
+      ...prev,
+      addons_data: {
+        ...(prev?.addons_data || {}),
         loyaltyPointsToRedeem: pointsToRedeem,
         loyaltyDiscountAmount,
-      }));
-      setPendingCustomerData((prev) => ({
-        ...prev,
-        addons_data: {
-          ...(prev?.addons_data || {}),
-          loyaltyPointsToRedeem: pointsToRedeem,
-          loyaltyDiscountAmount,
-        },
-      }));
-      toast({
-        title: 'Rewards Applied',
-        description: `${pointsToRedeem} points applied for a $${loyaltyDiscountAmount.toFixed(2)} discount.`,
-      });
-    }
+        referralDollarsToRedeem,
+        referralDiscountAmount,
+      },
+    }));
+    toast({
+      title: 'Rewards Applied',
+      description: `${pointsToRedeem} points and $${referralDiscountAmount.toFixed(2)} referral wallet applied.`,
+    });
 
     setRewardsOffer(null);
     setRewardsChoiceResolved(true);
   };
 
   const handleSkipRewards = () => {
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: 0,
+      loyaltyDiscountAmount: 0,
+      referralDollarsToRedeem: 0,
+      referralDiscountAmount: 0,
+    }));
     setRewardsOffer(null);
     setRewardsChoiceResolved(true);
   };
@@ -1109,6 +1143,11 @@ export const PaymentPage = ({ onBack }) => {
   }
 
   if (rewardsOffer && !bookingCreated) {
+    const pointsToDollar = Number(rewardsOffer.pointsToDollar || 100);
+    const pointsDiscountPreview = Number((Number(rewardsDraft.pointsToRedeem || 0) / pointsToDollar).toFixed(2));
+    const referralPreview = Number(rewardsDraft.referralDollarsToRedeem || 0);
+    const totalPreview = Number((pointsDiscountPreview + referralPreview).toFixed(2));
+    const totalCap = Number(pendingCustomerData?.total_price || 0);
     return (
       <motion.div
         initial={false}
@@ -1117,22 +1156,62 @@ export const PaymentPage = ({ onBack }) => {
         transition={{ duration: 0.5 }}
         className="container mx-auto py-16 px-4"
       >
-        <div className="max-w-3xl mx-auto bg-purple-900/20 border border-purple-500/40 rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <Gift className="h-5 w-5 text-purple-300 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm text-purple-100 font-semibold">
-                You have {rewardsOffer.pointsBalance} rewards points available.
+        <div className="max-w-4xl mx-auto bg-gradient-to-br from-slate-900/80 via-purple-900/20 to-yellow-900/20 border border-yellow-500/30 rounded-2xl p-6 md:p-8 shadow-2xl">
+          <div className="flex items-start gap-4">
+            <Gift className="h-8 w-8 text-yellow-300 mt-1" />
+            <div className="flex-1 space-y-4">
+              <p className="text-xl text-yellow-100 font-bold">
+                Thank you for being a rewards member.
               </p>
-              <p className="text-xs text-purple-200 mt-1">
-                Would you like to apply your rewards to this booking before payment?
+              <p className="text-sm text-blue-100">
+                You can apply rewards now or save them for a larger discount later.
               </p>
-              <div className="flex gap-2 mt-3">
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-black/30 border border-purple-500/30 rounded-xl p-4">
+                  <p className="text-sm text-purple-200">Points from previous purchases</p>
+                  <p className="text-3xl font-bold text-purple-300 mt-1">{rewardsOffer.pointsBalance}</p>
+                  <p className="text-xs text-purple-100 mt-1">{pointsToDollar} points = $1 off</p>
+                  <label className="block text-xs text-purple-100 mt-3 mb-1">Points to apply now</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={rewardsOffer.pointsBalance}
+                    value={rewardsDraft.pointsToRedeem}
+                    onChange={(e) => setRewardsDraft((prev) => ({ ...prev, pointsToRedeem: Number(e.target.value || 0) }))}
+                    className="w-full bg-slate-900 border border-purple-400/40 rounded px-3 py-2 text-white"
+                  />
+                </div>
+
+                <div className="bg-gradient-to-br from-yellow-200/20 via-amber-300/15 to-yellow-600/20 border border-yellow-400/40 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-yellow-300/10 blur-xl" />
+                  <p className="text-sm text-yellow-100">Referral rewards wallet</p>
+                  <p className="text-3xl font-bold text-yellow-300 mt-1">${Number(rewardsOffer.referralAvailable || 0).toFixed(2)}</p>
+                  <p className="text-xs text-yellow-100 mt-1">Pending: ${Number(rewardsOffer.referralPending || 0).toFixed(2)} (activates after referred booking is completed)</p>
+                  <label className="block text-xs text-yellow-100 mt-3 mb-1">Referral dollars to apply now</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Number(rewardsOffer.referralAvailable || 0)}
+                    step="0.01"
+                    value={rewardsDraft.referralDollarsToRedeem}
+                    onChange={(e) => setRewardsDraft((prev) => ({ ...prev, referralDollarsToRedeem: Number(e.target.value || 0) }))}
+                    className="w-full bg-slate-900 border border-yellow-400/40 rounded px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-black/30 border border-white/10 rounded-lg p-3 text-sm text-blue-100">
+                <p>Preview discount: <span className="font-semibold text-white">${totalPreview.toFixed(2)}</span></p>
+                <p className="text-xs text-blue-200 mt-1">Order cap: ${totalCap.toFixed(2)} (discounts never exceed subtotal/total).</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
                 <Button onClick={handleApplyRewards} className="bg-purple-600 hover:bg-purple-700">
-                  Apply Rewards
+                  Apply Rewards To This Order
                 </Button>
                 <Button onClick={handleSkipRewards} variant="outline">
-                  Not Now
+                  Save Rewards For Later
                 </Button>
               </div>
             </div>
