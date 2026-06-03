@@ -12,9 +12,11 @@ import { RescheduleRequestReview } from './RescheduleRequestReview';
 import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { calculateAddonsDifference } from '@/utils/rescheduleCalculations';
+import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import { buildRescheduleReason, extractEdgeFunctionError } from '@/utils/rescheduleRequestFormatter';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
 
 const STEPS = {
   SERVICE: 1,
@@ -36,7 +38,15 @@ const STEP_TITLES = {
   [STEPS.REVIEW]: 'Review & Submit'
 };
 
-export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
+export const RescheduleDialog = ({
+  open,
+  onClose,
+  bookingId,
+  onSuccess,
+  adminMode = false,
+  initiatedBy = 'admin',
+  adminEmail = null,
+}) => {
   const { data, loading, error } = useRescheduleDataLoader(bookingId);
   const [currentStep, setCurrentStep] = useState(STEPS.SERVICE);
   const [submitting, setSubmitting] = useState(false);
@@ -241,34 +251,72 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
         inventoryChanges: rescheduleData.inventory_changes,
       });
 
-      console.log('Submitting reschedule request:', { bookingId, reasonLength: reason.length });
+      console.log('Submitting reschedule request:', { bookingId, reasonLength: reason.length, adminMode });
 
-      const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
-        body: {
-          bookingId: Number(bookingId),
-          reason,
-          rescheduleDetails: rescheduleData,
-        },
-      });
+      if (adminMode) {
+        const days = calculateDays(newDropOffDate, newPickupDate);
+        const newCosts = await calculateBookingCosts(
+          selectedService,
+          days,
+          selectedAddonsList,
+          distanceMiles
+        );
 
-      if (requestError) {
-        const message = await extractEdgeFunctionError(requestError, requestData);
-        throw new Error(message);
+        const { data: adminData, error: adminError } = await supabase.functions.invoke('admin-complete-reschedule', {
+          body: {
+            bookingId: Number(bookingId),
+            initiatedBy,
+            adminEmail,
+            newTotalPrice: newCosts.total,
+            rescheduleDetails: rescheduleData,
+          },
+        });
+
+        if (adminError) {
+          const message = await extractEdgeFunctionError(adminError, adminData);
+          throw new Error(message);
+        }
+        if (adminData?.error) {
+          throw new Error(adminData.error);
+        }
+
+        expireActiveRentalAccessCodesForOrder(bookingId, 'admin');
+
+        toast({
+          title: 'Reschedule Complete',
+          description: `Booking #${bookingId} rescheduled. New booking #${adminData.newBookingId} created.`,
+        });
+
+        onSuccess?.({ newBookingId: adminData.newBookingId, newBooking: adminData.newBooking });
+        onClose();
+      } else {
+        const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
+          body: {
+            bookingId: Number(bookingId),
+            reason,
+            rescheduleDetails: rescheduleData,
+          },
+        });
+
+        if (requestError) {
+          const message = await extractEdgeFunctionError(requestError, requestData);
+          throw new Error(message);
+        }
+        if (requestData?.error) {
+          throw new Error(requestData.error);
+        }
+
+        console.log('Reschedule request successful:', requestData);
+        expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
+
+        toast({
+          title: 'Reschedule Request Submitted!',
+          description: 'Your request has been submitted for admin review. Inventory changes will be processed upon approval.',
+        });
+
+        onSuccess?.();
+        onClose();
       }
-      if (requestData?.error) {
-        throw new Error(requestData.error);
-      }
-
-      console.log('Reschedule request successful:', requestData);
-      expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
-
-      toast({
-        title: "Reschedule Request Submitted!",
-        description: "Your request has been submitted for admin review. Inventory changes will be processed upon approval.",
-      });
-
-      onSuccess?.();
-      onClose();
       
     } catch (err) {
       console.error('Error submitting reschedule:', err);
@@ -325,7 +373,7 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-gray-950 text-white border-gray-800">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-gold flex items-center">
-            <span className="mr-3">Reschedule Booking #{bookingId}</span>
+            <span className="mr-3">{adminMode ? 'Admin Reschedule' : 'Reschedule'} Booking #{bookingId}</span>
             {currentStep < STEPS.REVIEW && (
               <span className="text-sm text-gray-400 font-normal">
                 Step {currentStep} of 7: {STEP_TITLES[currentStep]}
@@ -419,6 +467,13 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
           )}
         </div>
 
+        <UiControlGuide
+          variant="compact"
+          stepTitle="Reschedule"
+          entries={getRescheduleGuideEntries()}
+          className="mt-2 flex justify-end"
+        />
+
         {/* Navigation buttons */}
         <div className="flex justify-between items-center pt-6 border-t border-gray-800">
           {currentStep > STEPS.SERVICE ? (
@@ -438,7 +493,7 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
               {submitting ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</>
               ) : (
-                <><CheckCircle2 className="mr-2 h-4 w-4" /> Submit Request</>
+                <><CheckCircle2 className="mr-2 h-4 w-4" /> {adminMode ? 'Complete Reschedule' : 'Submit Request'}</>
               )}
             </Button>
           )}

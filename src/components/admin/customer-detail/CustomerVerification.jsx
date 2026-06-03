@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History, AlertTriangle, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { updateVerificationStatus } from '@/utils/verificationImageHelper';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
 
@@ -55,6 +55,25 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
 
             if (refundError) throw refundError;
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
+
+            const refundMessage =
+                `Your booking #${booking.id} has been cancelled. ` +
+                `A refund of $${refundAmount} has been processed. Reason: ${reason}`;
+            await supabase.from('chat_messages').insert({
+                conversation_id: `cust_${customer.id}`,
+                customer_id: customer.id,
+                booking_id: booking.id,
+                sender_type: 'admin',
+                message_content: refundMessage,
+                is_read: false,
+                message_severity: 'urgent',
+                message_context: {
+                    action: 'booking_refund',
+                    amount: parseFloat(refundAmount),
+                    reason,
+                    booking_id: booking.id,
+                },
+            });
             
             const updatedBookingForEmail = {
                 ...booking, 
@@ -119,50 +138,149 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     );
 };
 
-const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
-    const [stripeCustomerId, setStripeCustomerId] = useState('');
-    const [stripePaymentIntentId, setStripePaymentIntentId] = useState('');
-    const [stripeChargeId, setStripeChargeId] = useState('');
-    const [isSaving, setIsSaving] = useState(false);
+const getChargeDeltaInfo = (booking) => {
+    const details = booking.payment_delta_details || {};
+    const amountFromDetails = Number(details.amount_due || 0);
+    const history = Array.isArray(booking.reschedule_history) ? booking.reschedule_history : [];
+    const latestReschedule = history.length > 0 ? history[history.length - 1] : null;
+    const amountFromHistory =
+        latestReschedule && latestReschedule.new_total_price != null && latestReschedule.original_total_price != null
+            ? Number(latestReschedule.new_total_price) - Number(latestReschedule.original_total_price)
+            : 0;
 
-    const handleSave = async () => {
-        setIsSaving(true);
+    const amountDue = amountFromDetails > 0 ? amountFromDetails : Math.max(0, amountFromHistory);
+    const originalTotal = details.original_total_price ?? latestReschedule?.original_total_price ?? booking.total_price ?? 0;
+    const newTotal = details.new_total_price ?? latestReschedule?.new_total_price ?? booking.total_price ?? 0;
+
+    return {
+        amountDue,
+        originalTotal: Number(originalTotal || 0),
+        newTotal: Number(newTotal || 0),
+        reason: details.reason || details.notes || 'Reschedule change requires payment adjustment.',
+        state: details.state || 'pending',
+        requestedAt: details.requested_at || details.last_updated_at || booking.reschedule_timestamp || booking.created_at,
+    };
+};
+
+const formatMaybeDateTime = (value) => {
+    if (!value) return 'N/A';
+    const parsed = parseISO(String(value));
+    if (!isValid(parsed)) return 'N/A';
+    return format(parsed, 'PPP p');
+};
+
+const ChargeDifferenceDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
+    const initial = getChargeDeltaInfo(booking || {});
+    const [amount, setAmount] = useState(initial.amountDue > 0 ? initial.amountDue.toFixed(2) : '0.00');
+    const [reason, setReason] = useState(initial.reason);
+    const [manualChargeId, setManualChargeId] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [manualRequired, setManualRequired] = useState(false);
+    const [lastAutoError, setLastAutoError] = useState('');
+
+    React.useEffect(() => {
+        if (!booking) return;
+        const next = getChargeDeltaInfo(booking);
+        setAmount(next.amountDue > 0 ? next.amountDue.toFixed(2) : '0.00');
+        setReason(next.reason);
+        setManualChargeId('');
+        setManualRequired(false);
+        setLastAutoError('');
+    }, [booking?.id, open]);
+
+    if (!booking) return null;
+
+    const handleAttemptCharge = async () => {
+        const parsed = Number(amount);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            toast({ title: 'Invalid Amount', description: 'Amount to charge must be greater than $0.00.', variant: 'destructive' });
+            return;
+        }
+        setIsProcessing(true);
         try {
-            const { data: paymentInfo, error: paymentInfoError } = await supabase
-                .from('stripe_payment_info')
-                .insert({
-                    booking_id: booking.id,
-                    stripe_customer_id: stripeCustomerId,
-                    stripe_payment_intent_id: stripePaymentIntentId,
-                    stripe_charge_id: stripeChargeId,
-                })
-                .select()
-                .single();
+            const { data, error } = await supabase.functions.invoke('charge-booking-difference', {
+                body: {
+                    bookingId: booking.id,
+                    action: 'auto',
+                    amount: parsed,
+                    reason,
+                },
+            });
+            if (error) throw error;
 
-            if (paymentInfoError) throw paymentInfoError;
-
-            const prevStatus = booking.status;
-            const { error: bookingUpdateError } = await supabase
-                .from('bookings')
-                .update({
-                    status: 'Confirmed',
-                    ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
-                })
-                .eq('id', booking.id);
-
-            if (bookingUpdateError) throw bookingUpdateError;
-
-            if (prevStatus === 'pending_review') {
-                await expireActiveRentalAccessCodesForOrder(booking.id);
+            if (data?.success) {
+                toast({ title: 'Charge Successful', description: `Charged $${parsed.toFixed(2)} and marked booking confirmed.` });
+                await expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
+                onUpdate();
+                onOpenChange(false);
+                return;
             }
 
-            toast({ title: "Success", description: "Stripe IDs updated and booking confirmed." });
+            setManualRequired(true);
+            setLastAutoError(data?.message || 'Auto-charge failed and manual fallback is required.');
+            toast({
+                title: 'Manual Follow-up Required',
+                description: data?.message || 'Auto-charge was not completed. Record manual outcome below.',
+                variant: 'destructive',
+            });
+        } catch (err) {
+            setManualRequired(true);
+            setLastAutoError(err.message);
+            toast({ title: 'Auto-charge Failed', description: err.message, variant: 'destructive' });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    const handleMarkManualSuccess = async () => {
+        const parsed = Number(amount);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+            toast({ title: 'Invalid Amount', description: 'Amount to charge must be greater than $0.00.', variant: 'destructive' });
+            return;
+        }
+        setIsProcessing(true);
+        try {
+            const { error } = await supabase.functions.invoke('charge-booking-difference', {
+                body: {
+                    bookingId: booking.id,
+                    action: 'manual_success',
+                    amount: parsed,
+                    reason,
+                    manualChargeId: manualChargeId || null,
+                },
+            });
+            if (error) throw error;
+            toast({ title: 'Manual Charge Recorded', description: `Recorded manual charge of $${parsed.toFixed(2)}.` });
+            await expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
             onUpdate();
             onOpenChange(false);
-        } catch (error) {
-            toast({ title: "Save Failed", description: error.message, variant: "destructive" });
+        } catch (err) {
+            toast({ title: 'Save Failed', description: err.message, variant: 'destructive' });
         } finally {
-            setIsSaving(false);
+            setIsProcessing(false);
+        }
+    };
+
+    const handleCancelCharge = async () => {
+        const parsed = Number(amount);
+        setIsProcessing(true);
+        try {
+            const { error } = await supabase.functions.invoke('charge-booking-difference', {
+                body: {
+                    bookingId: booking.id,
+                    action: 'cancel',
+                    amount: Number.isFinite(parsed) && parsed > 0 ? parsed : 0.01,
+                    reason: reason || 'Charge approval cancelled by admin',
+                },
+            });
+            if (error) throw error;
+            toast({ title: 'Charge Cancelled', description: 'Customer was notified in chat with urgent action required.' });
+            onUpdate();
+            onOpenChange(false);
+        } catch (err) {
+            toast({ title: 'Cancellation Failed', description: err.message, variant: 'destructive' });
+        } finally {
+            setIsProcessing(false);
         }
     };
 
@@ -170,29 +288,80 @@ const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="bg-gray-900 border-yellow-400 text-white">
                 <DialogHeader>
-                    <DialogTitle>Update Stripe IDs for Booking #{booking.id}</DialogTitle>
-                    <DialogDescription>Manually link this booking to a Stripe payment.</DialogDescription>
+                    <DialogTitle className="flex items-center">
+                        <CreditCard className="mr-2 h-5 w-5 text-yellow-300" />
+                        Charge Difference for Booking #{booking.id}
+                    </DialogTitle>
+                    <DialogDescription>
+                        Review the payment adjustment and approve charge attempt. If it cannot be auto-charged, record manual outcome.
+                    </DialogDescription>
                 </DialogHeader>
+
                 <div className="space-y-4 py-4">
+                    <div className="rounded-md border border-yellow-500/30 bg-yellow-900/20 p-3 text-sm">
+                        <p><strong>Customer:</strong> {customer?.name || 'N/A'}</p>
+                        <p><strong>Original Total:</strong> ${getChargeDeltaInfo(booking).originalTotal.toFixed(2)}</p>
+                        <p><strong>New Total:</strong> ${getChargeDeltaInfo(booking).newTotal.toFixed(2)}</p>
+                        <p><strong>Requested:</strong> {formatMaybeDateTime(getChargeDeltaInfo(booking).requestedAt)}</p>
+                    </div>
+
                     <div>
-                        <Label htmlFor="stripe-customer-id">Stripe Customer ID</Label>
-                        <Input id="stripe-customer-id" value={stripeCustomerId} onChange={(e) => setStripeCustomerId(e.target.value)} placeholder="cus_..." className="bg-white/20" />
+                        <Label htmlFor="delta-amount">Amount to Charge ($)</Label>
+                        <Input
+                            id="delta-amount"
+                            type="number"
+                            step="0.01"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            className="bg-white/20"
+                        />
                     </div>
                     <div>
-                        <Label htmlFor="stripe-pi-id">Stripe Payment Intent ID</Label>
-                        <Input id="stripe-pi-id" value={stripePaymentIntentId} onChange={(e) => setStripePaymentIntentId(e.target.value)} placeholder="pi_..." className="bg-white/20" />
+                        <Label htmlFor="delta-reason">Reason / Description</Label>
+                        <Input
+                            id="delta-reason"
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            className="bg-white/20"
+                        />
                     </div>
-                    <div>
-                        <Label htmlFor="stripe-charge-id">Stripe Charge ID</Label>
-                        <Input id="stripe-charge-id" value={stripeChargeId} onChange={(e) => setStripeChargeId(e.target.value)} placeholder="ch_..." className="bg-white/20" />
-                    </div>
+
+                    {manualRequired && (
+                        <div className="rounded-md border border-orange-500/40 bg-orange-900/20 p-3 space-y-2">
+                            <p className="text-sm text-orange-200 font-semibold flex items-center">
+                                <AlertTriangle className="h-4 w-4 mr-2" />
+                                Auto-charge did not complete. Manual confirmation required.
+                            </p>
+                            {lastAutoError && <p className="text-xs text-orange-300">{lastAutoError}</p>}
+                            <div>
+                                <Label htmlFor="manual-charge-id">Manual Stripe Charge/PI ID (optional)</Label>
+                                <Input
+                                    id="manual-charge-id"
+                                    value={manualChargeId}
+                                    onChange={(e) => setManualChargeId(e.target.value)}
+                                    placeholder="ch_... or pi_..."
+                                    className="bg-white/20"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
-                <DialogFooter>
-                    <Button variant="destructive" onClick={() => onOpenChange(false)}>Cancel</Button>
-                    <Button className="bg-green-600 hover:bg-green-700" onClick={handleSave} disabled={isSaving}>
-                        {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Continue
+
+                <DialogFooter className="gap-2">
+                    <Button variant="destructive" onClick={handleCancelCharge} disabled={isProcessing}>
+                        Cancel Charge Request
                     </Button>
+                    {manualRequired ? (
+                        <Button className="bg-green-600 hover:bg-green-700" onClick={handleMarkManualSuccess} disabled={isProcessing}>
+                            {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Mark as Charged Manually
+                        </Button>
+                    ) : (
+                        <Button className="bg-green-600 hover:bg-green-700" onClick={handleAttemptCharge} disabled={isProcessing}>
+                            {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Approve & Attempt Charge
+                        </Button>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>
@@ -201,7 +370,7 @@ const StripeIdDialog = ({ booking, open, onOpenChange, onUpdate }) => {
 
 export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
-    const [selectedBookingForStripe, setSelectedBookingForStripe] = useState(null);
+    const [selectedBookingForCharge, setSelectedBookingForCharge] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
     const [plate, setPlate] = useState(customer?.license_plate || '');
     const [isSavingPlate, setIsSavingPlate] = useState(false);
@@ -281,21 +450,24 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     container: "bg-orange-900/30 border-orange-500",
                     title: "text-orange-300 font-bold",
                     icon: <MessageSquare className="mr-2 h-4 w-4"/>,
-                    titleText: "Change Request for Booking #"
+                    titleText: "Change Request for Booking #",
+                    nextStep: "Review change details, then approve booking or cancel/refund."
                 };
             case 'pending_payment':
                  return {
                     container: "bg-red-900/30 border-red-500",
                     title: "text-red-300 font-bold",
                     icon: <DollarSign className="mr-2 h-4 w-4"/>,
-                    titleText: "Payment Pending for Booking #"
+                    titleText: "Payment Difference Pending for Booking #",
+                    nextStep: "Open charge dialog, attempt auto-charge, then confirm or cancel with reason."
                 };
             default:
                 return {
                     container: "bg-orange-900/30 border-orange-500",
                     title: "text-orange-300 font-bold",
                     icon: <FileText className="mr-2 h-4 w-4"/>,
-                    titleText: "New Booking Verification #"
+                    titleText: "New Booking Verification #",
+                    nextStep: "Verify customer docs and approve/reject."
                 };
         }
     };
@@ -315,10 +487,44 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         return noteMap;
     }, [notes]);
     
+    const getPendingPaymentSummary = (booking) => {
+        const details = getChargeDeltaInfo(booking);
+        return [
+            {
+                label: 'Amount to Charge',
+                value: `$${details.amountDue.toFixed(2)}`,
+            },
+            {
+                label: 'Original Total',
+                value: `$${details.originalTotal.toFixed(2)}`,
+            },
+            {
+                label: 'New Total',
+                value: `$${details.newTotal.toFixed(2)}`,
+            },
+            {
+                label: 'Reason',
+                value: details.reason,
+            },
+            {
+                label: 'State',
+                value: details.state,
+            },
+        ];
+    };
+
     return (
         <>
         <RefundDialog booking={selectedBookingForRefund} customer={customer} open={!!selectedBookingForRefund} onOpenChange={() => setSelectedBookingForRefund(null)} onUpdate={onUpdate} />
-        {selectedBookingForStripe && <StripeIdDialog booking={selectedBookingForStripe} open={!!selectedBookingForStripe} onOpenChange={() => setSelectedBookingForStripe(null)} onUpdate={onUpdate} />}
+        {selectedBookingForCharge && (
+            <ChargeDifferenceDialog
+                booking={selectedBookingForCharge}
+                customer={customer}
+                open={!!selectedBookingForCharge}
+                onOpenChange={() => setSelectedBookingForCharge(null)}
+                onUpdate={onUpdate}
+            />
+        )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-white/5 p-6 rounded-lg shadow-lg space-y-6">
@@ -348,7 +554,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                 </div>
                 
                 <div className="pt-4 border-t border-white/10">
-                    <VerificationImageDisplay customerId={customer?.id} />
+                    <VerificationImageDisplay customerId={customer?.id} title="Driver & Insurance Documents" />
                     
                     <div className="mt-4 flex justify-end gap-2">
                         <Button variant="destructive" size="sm" onClick={() => handleUpdateDocStatus('rejected')} disabled={isProcessingStatus}>
@@ -394,6 +600,9 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         return (
                             <div key={booking.id} className={`${styles.container} p-4 rounded-lg`}>
                                 <p className={styles.title}>{styles.titleText}{booking.id}</p>
+                                <p className="text-xs text-yellow-200 mt-2">
+                                    <strong>Next step:</strong> {styles.nextStep}
+                                </p>
                                 {requestNotes.length > 0 && (
                                     <div className="mt-2 space-y-2">
                                          {requestNotes.map((note, i) => (
@@ -404,11 +613,22 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                          ))}
                                     </div>
                                 )}
+                                {booking.status === 'pending_payment' && (
+                                    <div className="mt-3 rounded-md border border-red-500/40 bg-red-950/40 p-3 space-y-1">
+                                        {getPendingPaymentSummary(booking).map((item) => (
+                                            <p key={item.label} className="text-xs text-red-100">
+                                                <span className="font-semibold text-red-300">{item.label}:</span> {item.value}
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
                                 <div className="flex justify-end space-x-2 mt-4">
                                     {booking.status === 'pending_payment' ? (
                                         <>
-                                            <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}>Cancel</Button>
-                                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => setSelectedBookingForStripe(booking)}>Update Stripe IDs</Button>
+                                            <Button size="sm" variant="destructive" onClick={() => setSelectedBookingForCharge(booking)}>Charge / Cancel</Button>
+                                            <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => setSelectedBookingForCharge(booking)}>
+                                                Open Charge Dialog
+                                            </Button>
                                         </>
                                     ) : (
                                         <>

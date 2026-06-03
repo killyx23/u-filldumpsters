@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PlanCard } from '@/components/PlanCard';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { formatISO, startOfDay, addDays } from 'date-fns';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { fetchHomepageServices, mapServiceToPlanCard } from '@/utils/servicePlan';
 
 export const Plans = ({ onSelectPlan }) => {
     const [plans, setPlans] = useState([]);
@@ -12,6 +14,7 @@ export const Plans = ({ onSelectPlan }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const { dumpFees } = useDumpFees();
+    const [retryCount, setRetryCount] = useState(0);
 
     useEffect(() => {
         const fetchPlansAndAvailability = async () => {
@@ -19,111 +22,103 @@ export const Plans = ({ onSelectPlan }) => {
             setError(null);
 
             try {
-                console.log('[Plans] 🔄 Initiating fetch from Supabase');
-                console.log('[Plans] Supabase client status:', supabase ? '✓ Initialized' : '✗ Not initialized');
-                
-                // Test basic connection first
                 const { data: testData, error: testError } = await supabase
                     .from('services')
                     .select('id')
                     .limit(1);
-                
+
                 if (testError) {
-                    console.error('[Plans] ✗ Connection test failed:', testError);
                     throw new Error(`Connection test failed: ${testError.message}`);
                 }
-                
-                console.log('[Plans] ✓ Connection test successful');
-                
-                // Fetch services (plans)
-                const { data: plansData, error: plansError } = await supabase
-                    .from('services')
-                    .select('*')
-                    .in('id', [1, 2, 3, 4])
-                    .order('id');
-                
-                if (plansError) {
-                    console.error('[Plans] ✗ Fetch error:', {
-                        message: plansError.message,
-                        details: plansError.details,
-                        hint: plansError.hint,
-                        code: plansError.code
-                    });
-                    throw plansError;
-                }
-                
-                console.log('[Plans] ✓ Fetched plans:', plansData?.length || 0);
-                
-                // Filter to only show base plans on the frontend (1, 2, 3)
-                const frontendPlans = plansData.filter(p => [1, 2, 3].includes(p.id));
+
+                const homepageResult = await fetchHomepageServices(supabase);
+                if (homepageResult.error) throw homepageResult.error;
+
+                const frontendPlans = (homepageResult.data || []).map((s, i) =>
+                    mapServiceToPlanCard(s, i)
+                );
                 setPlans(frontendPlans);
 
                 if (frontendPlans.length === 0) {
+                    setError('No bookable services are configured. Please try again later.');
                     setLoading(false);
                     return;
                 }
-                
+
                 const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
-                
-                // 1. Fetch explicit daily availability overrides for today
+
                 const { data: dateSpecificAvailData, error: dateSpecificError } = await supabase
                     .from('date_specific_availability')
                     .select('service_id, is_available')
                     .eq('date', todayStr);
 
                 if (dateSpecificError) {
-                    console.warn('[Plans] ⚠ Date-specific availability fetch failed:', dateSpecificError);
+                    console.warn('[Plans] Date-specific availability fetch failed:', dateSpecificError);
                 }
 
                 const todayAvailabilityMap = {};
                 if (dateSpecificAvailData) {
-                    dateSpecificAvailData.forEach(item => {
+                    dateSpecificAvailData.forEach((item) => {
                         todayAvailabilityMap[item.service_id] = item.is_available;
                     });
                 }
 
-                // 2. Fetch general 30-day availability as fallback
                 const startDate = todayStr;
                 const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
-                
-                const availabilityPromises = frontendPlans.map(plan => 
+
+                const availabilityPromises = frontendPlans.map((plan) =>
                     supabase.functions.invoke('get-availability', {
                         body: {
                             serviceId: plan.id,
                             startDate,
                             endDate,
-                            isDelivery: plan.id === 2 ? false : undefined 
-                        }
+                            isDelivery: plan.delivery_variant_service_id ? false : undefined,
+                        },
                     })
                 );
-                
-                const deliveryForPlan2Promise = supabase.functions.invoke('get-availability', {
-                    body: { serviceId: 2, startDate, endDate, isDelivery: true }
-                });
+
+                const trailerPlan = frontendPlans.find((p) => p.delivery_variant_service_id);
+                const deliveryForTrailerPromise = trailerPlan
+                    ? supabase.functions.invoke('get-availability', {
+                          body: {
+                              serviceId: trailerPlan.id,
+                              startDate,
+                              endDate,
+                              isDelivery: true,
+                          },
+                      })
+                    : Promise.resolve({ data: null });
 
                 try {
-                    const results = await Promise.all([...availabilityPromises, deliveryForPlan2Promise]);
+                    const results = await Promise.all([
+                        ...availabilityPromises,
+                        deliveryForTrailerPromise,
+                    ]);
                     const newAvailability = {};
+                    const deliveryResultIndex = results.length - 1;
 
                     frontendPlans.forEach((plan, index) => {
-                        // Primary check: Is it explicitly marked closed today in admin?
                         if (todayAvailabilityMap[plan.id] === false) {
                             newAvailability[plan.id] = false;
                             return;
                         }
 
-                        // Fallback check: Is it available at all in the next 30 days?
-                        let isAnyDayAvailable = false;
                         const result = results[index];
-                        
-                        if (result.data?.availability) {
-                            isAnyDayAvailable = Object.values(result.data.availability).some(day => day.available);
+                        const availByDate = result.data?.availability;
+                        let isAnyDayAvailable = todayAvailabilityMap[plan.id] !== false;
+
+                        if (availByDate && Object.keys(availByDate).length > 0) {
+                            isAnyDayAvailable = Object.values(availByDate).some(
+                                (day) => day.available
+                            );
                         }
-                        
-                        if (plan.id === 2) {
-                            const deliveryResult = results[results.length - 1];
-                            if (deliveryResult.data?.availability) {
-                                const isDeliveryAvailable = Object.values(deliveryResult.data.availability).some(day => day.available);
+
+                        if (plan.delivery_variant_service_id) {
+                            const deliveryResult = results[deliveryResultIndex];
+                            if (deliveryResult?.data?.availability) {
+                                const isDeliveryAvailable = Object.values(
+                                    deliveryResult.data.availability
+                                ).some((day) => day.available);
                                 isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
                             }
                         }
@@ -133,53 +128,44 @@ export const Plans = ({ onSelectPlan }) => {
 
                     setAvailability(newAvailability);
                 } catch (availError) {
-                    console.error('[Plans] ✗ Availability fetch failed:', availError);
-                    // Fallback to just today's map if edge functions fail
+                    console.error('[Plans] Availability fetch failed:', availError);
                     const fallbackAvail = {};
-                    frontendPlans.forEach(p => fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false);
+                    frontendPlans.forEach((p) => {
+                        fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false;
+                    });
                     setAvailability(fallbackAvail);
                 }
-            } catch (error) {
-                console.error('[Plans] ✗ Fatal error:', error);
-                setError(error.message);
+            } catch (err) {
+                console.error('[Plans] Fatal error:', err);
+                setError(err.message);
             } finally {
                 setLoading(false);
             }
         };
 
         fetchPlansAndAvailability();
-    }, []);
+    }, [retryCount]);
 
-    const planHighlights = {
-        1: { text: 'Our Most Popular Service', delay: 0.1 },
-        2: { text: 'Incredible Value', delay: 0.2 },
-        3: { text: 'Save Money and Time', delay: 0.3 },
-    };
+    const plansWithDumpFees = plans.map((plan) => {
+        const dumpFeeData = dumpFees.find((df) => df.service_id === plan.id);
+        const enhancedPlan = { ...plan };
 
-    const plansWithHighlights = plans.map((plan) => {
-        // Find if this plan has a dynamically managed dump fee
-        const dumpFeeData = dumpFees.find(df => df.service_id === plan.id);
-        const enhancedPlan = { ...plan, highlight: planHighlights[plan.id] };
-        
-        // Custom override for plan 3
-        if (plan.id === 3) {
-            enhancedPlan.name = "Rock, Decorative Rock, Mulch, & Gravel Delivery Service";
-        }
-        
         if (dumpFeeData) {
             enhancedPlan.dynamicDumpFee = parseFloat(dumpFeeData.fee_per_ton).toFixed(2);
-            enhancedPlan.dynamicMaxTons = dumpFeeData.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
+            enhancedPlan.dynamicMaxTons = dumpFeeData.max_tons
+                ? parseFloat(dumpFeeData.max_tons)
+                : null;
         }
-        
+
         return enhancedPlan;
     });
-    
+
     if (loading) {
-      return (
-        <div className="flex justify-center items-center h-96">
-            <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
-        </div>
-      );
+        return (
+            <div className="flex justify-center items-center h-96">
+                <Loader2 className="h-16 w-16 animate-spin text-yellow-400" />
+            </div>
+        );
     }
 
     if (error) {
@@ -190,31 +176,52 @@ export const Plans = ({ onSelectPlan }) => {
                 <p className="text-blue-200 max-w-md">
                     We're experiencing connection issues. Please refresh the page or contact us for assistance.
                 </p>
-                <p className="text-sm text-gray-400 mt-2">Error: {error}</p>
+                <p className="text-sm text-gray-400 mt-2">{error}</p>
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-6 border-yellow-400 text-yellow-400 hover:bg-yellow-400/10"
+                    onClick={() => setRetryCount((c) => c + 1)}
+                >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Try again
+                </Button>
             </div>
         );
     }
 
     const valueProps = [
-        "Simple and Fast Online Scheduling",
-        "Up-Front and Competitive Pricing",
-        "Professional Service"
+        'Simple and Fast Online Scheduling',
+        'Up-Front and Competitive Pricing',
+        'Professional Service',
     ];
 
+    const gridClass =
+        plansWithDumpFees.length >= 4
+            ? 'grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 xl:gap-8 gap-y-16 w-full'
+            : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 xl:gap-8 gap-y-16 w-full';
+
     return (
-        <section className="py-20 px-4">
-            <div className="container mx-auto">
+        <section className="py-20 px-4 sm:px-6 lg:px-8 xl:px-10">
+            <div className="w-full max-w-[1920px] mx-auto">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6 }}
                     className="text-center mb-12"
                 >
-                    <h2 className="text-4xl lg:text-5xl font-extrabold text-white mb-4 tracking-tight" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>Choose Your Service</h2>
-                    <p className="text-xl text-blue-200 max-w-2xl mx-auto">Select the perfect solution for your project, backed by reliable service.</p>
+                    <h2
+                        className="text-4xl lg:text-5xl font-extrabold text-white mb-4 tracking-tight"
+                        style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}
+                    >
+                        Choose Your Service
+                    </h2>
+                    <p className="text-xl text-blue-200 max-w-2xl mx-auto">
+                        Select the perfect solution for your project, backed by reliable service.
+                    </p>
                 </motion.div>
 
-                <motion.div 
+                <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.6, delay: 0.2 }}
@@ -228,17 +235,17 @@ export const Plans = ({ onSelectPlan }) => {
                     ))}
                 </motion.div>
 
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-x-10 gap-y-16">
-                    {plansWithHighlights.map((plan) => {
-                         const isTemporarilyUnavailable = availability[plan.id] === false;
-                         return (
+                <div className={gridClass}>
+                    {plansWithDumpFees.map((plan) => {
+                        const isTemporarilyUnavailable = availability[plan.id] === false;
+                        return (
                             <PlanCard
                                 key={plan.id}
                                 plan={plan}
                                 onSelect={onSelectPlan}
                                 isTemporarilyUnavailable={isTemporarilyUnavailable}
                             />
-                         );
+                        );
                     })}
                 </div>
 
@@ -250,7 +257,8 @@ export const Plans = ({ onSelectPlan }) => {
                 >
                     <h3 className="text-2xl font-bold text-yellow-400 mb-3">U-Fill Dumpsters LLC</h3>
                     <p className="text-lg text-blue-200 leading-relaxed">
-                        Your trusted partner for waste management solutions. We're committed to providing fast, reliable, and affordable services to help you get the job done right.
+                        Your trusted partner for waste management solutions. We're committed to providing
+                        fast, reliable, and affordable services to help you get the job done right.
                     </p>
                 </motion.div>
             </div>

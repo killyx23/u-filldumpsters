@@ -8,11 +8,13 @@ import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid } from 'date-fns';
-import { retrievePendingBooking } from '@/utils/bookingDataPersistence';
+import { retrievePendingBooking, hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
@@ -26,6 +28,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const token = searchParams.get('token');
+    const codeFromUrl = searchParams.get('code');
     const loadingTimeoutRef = useRef(null);
     const verificationTimeoutRef = useRef(null);
 
@@ -116,13 +119,14 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 };
 
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Reconstructed booking data:`, reconstructedBookingData);
-                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Plan data:`, pending.plan_data);
+                const hydratedPlan = await hydratePlanFromPending(pending);
+                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Service id:`, pending.service_id);
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Addons data:`, pending.addons_data);
 
                 setBookingData(reconstructedBookingData);
-                setPlan(pending.plan_data);
+                setPlan(hydratedPlan);
                 setAddonsData(pending.addons_data || {});
-                
+
                 clearTimeout(loadingTimeoutRef.current);
                 setStatus('idle');
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
@@ -137,7 +141,15 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         };
 
         loadPendingBooking();
-    }, [token, retryCount]);
+    }, [token, retryCount, navigate]);
+
+    useEffect(() => {
+        if (status !== 'idle') return;
+        const prefetchedCode = String(codeFromUrl || '').trim();
+        if (!/^\d{6}$/.test(prefetchedCode)) return;
+        setCode(prefetchedCode);
+        setStatus('sent');
+    }, [status, codeFromUrl]);
 
     // Load equipment prices with error handling
     useEffect(() => {
@@ -260,18 +272,19 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             ...taxOptions,
         });
 
-        let discount = 0;
+        let couponDiscount = 0;
         const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (addonsData?.coupon?.isValid) {
             if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
+                couponDiscount = Number(addonsData.coupon.discountValue || 0);
             } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
             }
         }
 
         const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-        discount += loyaltyDiscount;
+        const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             basePriceAmount,
@@ -283,7 +296,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             purchaseItemsCost,
             disposalCost,
             discount,
+            couponDiscount,
             loyaltyDiscount,
+            referralDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
@@ -306,7 +321,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 body: {
                     email: bookingData.email,
                     name: `${bookingData.firstName} ${bookingData.lastName}`.trim(),
-                    pending_customer_id: token
+                    pending_customer_id: token,
+                    site_url: typeof window !== 'undefined' ? window.location.origin : undefined
                 }
             });
 
@@ -384,6 +400,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Email verified successfully!`);
+            if (typeof window !== 'undefined') {
+                window.sessionStorage.setItem(`verified_email_${String(bookingData.email || '').toLowerCase()}`, String(Date.now()));
+            }
             setStatus('verified');
 
             toast({
@@ -514,10 +533,24 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({
             label: `Coupon (${addonsData.coupon?.code || 'Applied'})`,
-            amount: -calculatedTotals.discount,
+            amount: -calculatedTotals.couponDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true
         });
     }
@@ -884,6 +917,11 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                         </AnimatePresence>
                     </div>
                 </div>
+                <UiControlGuide
+                    stepTitle="Verify Email"
+                    entries={getBookingGuideEntries('email')}
+                    className="mt-6 flex justify-end"
+                />
             </div>
         </motion.div>
     );

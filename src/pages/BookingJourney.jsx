@@ -21,7 +21,10 @@ import {
   storePendingBooking,
   retrievePendingBooking,
   mapPendingToBookingState,
+  hydratePlanFromPending,
 } from '@/utils/bookingDataPersistence';
+import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 
@@ -41,7 +44,7 @@ const INITIAL_BOOKING_DATA = {
 };
 
 const INITIAL_ADDONS_DATA = {
-  insurance: 'decline',
+  insurance: 'accept',
   drivewayProtection: 'decline',
   equipment: [],
   coupon: null,
@@ -69,8 +72,12 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const [finalPrice, setFinalPrice] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [deliveryService, setDeliveryService] = useState(false);
+  const [agreementFeeSnapshot, setAgreementFeeSnapshot] = useState([]);
 
-  const requiresDriverVerification = selectedPlan?.id === 2 && !deliveryService;
+  const requiresDriverVerification = isCustomerPickupService(selectedPlan, {
+    deliveryService,
+    isDelivery: deliveryService,
+  });
 
   const resetBookingState = useCallback(() => {
     setCurrentStep(0);
@@ -82,6 +89,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setFinalPrice(0);
     setIsProcessing(false);
     setDeliveryService(false);
+    setAgreementFeeSnapshot([]);
   }, []);
 
   useEffect(() => {
@@ -103,9 +111,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     });
   }, [currentStep, highestStep, requiresDriverVerification, updateFlowProgress]);
 
-  const applyPendingBookingState = useCallback((pending, resumeStep) => {
-    const mapped = mapPendingToBookingState(pending);
-    setBookingData(mapped.bookingData);
+  const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
+    const hydratedPlan = await hydratePlanFromPending(pending);
+    const mapped = mapPendingToBookingState(pending, hydratedPlan);
+    setBookingData(mapped.contactInfo);
     setSelectedPlan(mapped.selectedPlan);
     setAddonsData(mapped.addonsData);
     setBasePrice(mapped.basePrice);
@@ -162,6 +171,23 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state?.reorderBooking]);
 
+  useEffect(() => {
+    const returningCustomerProfile = location.state?.returningCustomerProfile;
+    if (!returningCustomerProfile) return;
+
+    const mapped = mapCustomerToBookingData(returningCustomerProfile.customer, returningCustomerProfile.email);
+    setBookingData((prev) => ({
+      ...prev,
+      ...mapped,
+      contactAddress: {
+        ...prev.contactAddress,
+        ...mapped.contactAddress,
+      },
+    }));
+
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
   const handleReorderService = async (pastBooking) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] Reordering service from booking:`, pastBooking.id);
@@ -188,6 +214,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         console.error(`[${timestamp}] [BookingJourney] Error fetching customer:`, customerError);
       }
 
+      const hasCustomerProfile = Boolean(customer?.id);
+
       setBookingData({
         firstName: customer?.first_name || pastBooking.first_name || '',
         lastName: customer?.last_name || pastBooking.last_name || '',
@@ -198,9 +226,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
           city: customer?.city || pastBooking.city || '',
           state: customer?.state || pastBooking.state || '',
           zip: customer?.zip || pastBooking.zip || '',
-          isVerified: true,
+          customerId: customer?.id || null,
+          isVerified: hasCustomerProfile,
         },
-        addressVerified: true,
+        addressVerified: hasCustomerProfile,
         dropOffDate: null,
         pickupDate: null,
         dropOffTimeSlot: '',
@@ -210,7 +239,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       });
 
       setAddonsData({
-        insurance: addons.insurance || 'decline',
+        insurance: addons.insurance || 'accept',
         drivewayProtection: addons.drivewayProtection || 'decline',
         equipment: addons.equipment || [],
         coupon: null,
@@ -257,6 +286,17 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     window.scrollTo(0, 0);
   };
 
+  const handleReturningCustomerVerified = (customerData) => {
+    setBookingData((prev) => ({
+      ...prev,
+      ...customerData,
+      contactAddress: {
+        ...prev.contactAddress,
+        ...(customerData?.contactAddress || {}),
+      },
+    }));
+  };
+
   const handleAddonsSubmit = (total, _, addons) => {
     setFinalPrice(total);
     setAddonsData((prev) => ({ ...prev, ...addons }));
@@ -292,11 +332,26 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     navigate(`/verify-email?token=${token}`);
   };
 
-  const handleAgreementAccept = async () => {
+  const handleAgreementAccept = async (agreementMeta = {}) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleAgreementAccept triggered`);
+    const signatureFields = {};
 
-    if (selectedPlan?.id === 2 && !deliveryService) {
+    if (typeof agreementMeta.agreementSignature === 'string') {
+      signatureFields.agreementSignature = agreementMeta.agreementSignature;
+    }
+    if (typeof agreementMeta.agreementSignatureDate === 'string') {
+      signatureFields.agreementSignatureDate = agreementMeta.agreementSignatureDate;
+    }
+
+    if (Array.isArray(agreementMeta.agreementFeeSnapshot)) {
+      setAgreementFeeSnapshot(agreementMeta.agreementFeeSnapshot);
+    }
+    if (Object.keys(signatureFields).length > 0) {
+      setAddonsData((prev) => ({ ...prev, ...signatureFields }));
+    }
+
+    if (requiresDriverVerification) {
       console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
       setCurrentStep(7);
       window.scrollTo(0, 0);
@@ -307,10 +362,13 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setIsProcessing(true);
 
     try {
-      const result = await storePendingBooking(bookingData, selectedPlan, addonsData, {
+      const result = await storePendingBooking(bookingData, selectedPlan, { ...addonsData, ...signatureFields }, {
         totalPrice: finalPrice,
         basePrice: basePrice,
         deliveryService: deliveryService,
+        agreementFeeSnapshot: Array.isArray(agreementMeta.agreementFeeSnapshot)
+          ? agreementMeta.agreementFeeSnapshot
+          : agreementFeeSnapshot,
       });
 
       const resultTs = new Date().toISOString();
@@ -343,6 +401,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const handleVerificationSubmit = async (verificationData) => {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingJourney] handleVerificationSubmit triggered with data:`, verificationData);
+    const runId = `run-${Date.now()}`;
+    // #region agent log
+    fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:start',message:'handleVerificationSubmit start',data:{currentStep,isProcessing,emailPresent:Boolean(bookingData?.email),selectedPlanId:selectedPlan?.id,hasLicensePlate:Boolean(verificationData?.licensePlate),hasFrontImage:Boolean(verificationData?.licenseImageUrls?.front),hasBackImage:Boolean(verificationData?.licenseImageUrls?.back),wasSkipped:Boolean(verificationData?.wasVerificationSkipped)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     setAddonsData((prev) => ({ ...prev, ...verificationData }));
     setIsProcessing(true);
@@ -352,11 +414,15 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         totalPrice: finalPrice,
         basePrice: basePrice,
         deliveryService: deliveryService,
+        agreementFeeSnapshot,
       });
 
       const resultTs = new Date().toISOString();
       if (!result.success) {
         console.error(`[${resultTs}] [BookingJourney] Failed to store pending booking:`, result.error);
+        // #region agent log
+        fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:failure',message:'handleVerificationSubmit received failed result',data:{resultError:result.error||null,currentStep,isProcessingAtFailure:isProcessing},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         toast({
           title: 'Error',
           description: result.error || 'Failed to save booking data. Please try again.',
@@ -367,6 +433,9 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       }
 
       console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
+      // #region agent log
+      fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:success',message:'handleVerificationSubmit success',data:{tokenPresent:Boolean(result?.token)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       navigateToVerifyEmail(result.token);
     } catch (error) {
       const catchTs = new Date().toISOString();
@@ -414,6 +483,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             deliveryService={deliveryService}
             setDeliveryService={setDeliveryService}
             onReorderSelect={handleReorderService}
+            onCustomerVerified={handleReturningCustomerVerified}
           />
         );
       case 2:

@@ -11,10 +11,9 @@ import { ReturningCustomerVerificationModal } from '@/components/ReturningCustom
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
   const bookingFlow = useBookingFlowOptional();
-  const { user, signOut } = useAuth();
+  const { user, isAdmin, signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
-  const isAdmin = user?.user_metadata?.is_admin;
   const isCustomer = user && !isAdmin;
 
   const handleAdminClick = () => {
@@ -180,7 +179,31 @@ export const Header = ({ onReorderSelect }) => {
       <ReturningCustomerVerificationModal
         isOpen={isReturningCustomerModalOpen}
         onClose={() => setIsReturningCustomerModalOpen(false)}
-        onReorderSelect={onReorderSelect}
+        onReorderSelect={(booking) => {
+          onReorderSelect?.(booking);
+          navigate('/');
+        }}
+        onCustomerVerified={(customerData) => {
+          navigate('/', {
+            state: {
+              returningCustomerProfile: {
+                customer: {
+                  id: customerData?.contactAddress?.customerId || null,
+                  first_name: customerData?.firstName || '',
+                  last_name: customerData?.lastName || '',
+                  email: customerData?.email || '',
+                  phone: customerData?.phone || '',
+                  street: customerData?.contactAddress?.street || '',
+                  city: customerData?.contactAddress?.city || '',
+                  state: customerData?.contactAddress?.state || '',
+                  zip: customerData?.contactAddress?.zip || '',
+                },
+                email: customerData?.email || '',
+              },
+            },
+          });
+          setIsReturningCustomerModalOpen(false);
+        }}
       />
     </>
   );

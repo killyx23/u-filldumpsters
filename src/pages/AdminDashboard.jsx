@@ -19,6 +19,8 @@ import { AIAssistantMessagesManager } from '@/components/admin/AIAssistantMessag
 import { AIKnowledgeBaseManager } from '@/components/admin/AIKnowledgeBaseManager';
 import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSectionManager';
 import { LoyaltyPointsManager } from '@/components/admin/LoyaltyPointsManager';
+import { ReferralsManager } from '@/components/admin/ReferralsManager';
+import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
 import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -255,6 +257,9 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="loyalty" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                             <Gift className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Loyalty Points</span>
                         </TabsTrigger>
+                        <TabsTrigger value="referrals" className="py-2 bg-indigo-900/20 data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
+                            <Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Referrals</span>
+                        </TabsTrigger>
                         <TabsTrigger value="ai-knowledge" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                             <Brain className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">AI Knowledge</span>
                         </TabsTrigger>
@@ -262,6 +267,7 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
                         <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
                         <TabsTrigger value="pricing" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Pricing</span></TabsTrigger>
+                        <TabsTrigger value="charges-fees" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Charges & Fees</span></TabsTrigger>
                         <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
                         <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
                         <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
@@ -277,6 +283,7 @@ export const AdminDashboard = () => {
                             <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
                             <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
                             <TabsContent value="loyalty"><LoyaltyPointsManager /></TabsContent>
+                            <TabsContent value="referrals"><ReferralsManager /></TabsContent>
                             <TabsContent value="ai-knowledge">
                                 <div className="space-y-8">
                                     <Tabs defaultValue="entries" className="w-full">
@@ -306,10 +313,11 @@ export const AdminDashboard = () => {
                                     </Tabs>
                                 </div>
                             </TabsContent>
-                            <TabsContent value="bookings"><BookingsManager initialBookings={bookings} /></TabsContent>
+                            <TabsContent value="bookings"><BookingsManager initialBookings={bookings} adminEmail={user?.email} onBookingsChange={fetchDashboardData} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>
                             <TabsContent value="pricing"><PricingManager /></TabsContent>
+                            <TabsContent value="charges-fees"><ChargesAndFeesManager /></TabsContent>
                             <TabsContent value="equipment"><EquipmentManager /></TabsContent>
                             <TabsContent value="reviews"><ReviewsManager /></TabsContent>
                             <TabsContent value="faqs"><FaqsManager /></TabsContent>

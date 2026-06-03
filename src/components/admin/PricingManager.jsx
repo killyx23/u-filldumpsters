@@ -576,8 +576,29 @@ export const PricingManager = () => {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [servicesRes, couponsRes, insuranceRes] = await Promise.all([
-                supabase.from('services').select('*').in('id', [1, 2, 3, 4, 7]).order('id'),
+            let servicesRes = await supabase
+                .from('services')
+                .select('*')
+                .order('display_order', { ascending: true })
+                .order('id');
+
+            const isDisplayOrderMissing =
+                servicesRes.error &&
+                (servicesRes.error.code === '42703' ||
+                    servicesRes.error.message?.toLowerCase().includes('display_order'));
+
+            if (isDisplayOrderMissing) {
+                console.warn(
+                    '[PricingManager] services.display_order missing, falling back to id ordering.',
+                    servicesRes.error
+                );
+                servicesRes = await supabase
+                    .from('services')
+                    .select('*')
+                    .order('id');
+            }
+
+            const [couponsRes, insuranceRes] = await Promise.all([
                 supabase.from('coupons').select('*').order('created_at', { ascending: false }),
                 supabase.from('equipment').select('*').eq('type', 'insurance').order('name')
             ]);

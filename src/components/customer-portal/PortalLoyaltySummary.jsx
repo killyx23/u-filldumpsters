@@ -6,7 +6,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { format } from 'date-fns';
 
 export const PortalLoyaltySummary = ({ customerId }) => {
-  const { pointsBalance, loading, conversionRates, getPointsBalance } = useCustomerLoyaltyPoints(customerId);
+  const { pointsBalance, referralWallet, loading, conversionRates, getPointsBalance } = useCustomerLoyaltyPoints(customerId);
   const [transactions, setTransactions] = useState([]);
   const [loadingTx, setLoadingTx] = useState(true);
 
@@ -43,6 +43,8 @@ export const PortalLoyaltySummary = ({ customerId }) => {
   }, [customerId]);
 
   const dollarValue = Number((pointsBalance / conversionRates.pointsToDollar).toFixed(2));
+  const availableReferral = Number(referralWallet?.availableBalance || 0);
+  const pendingReferral = Number(referralWallet?.pendingBalance || 0);
 
   return (
     <div className="space-y-4 mb-6">
@@ -53,7 +55,7 @@ export const PortalLoyaltySummary = ({ customerId }) => {
             Your Loyalty Points
           </CardTitle>
           <CardDescription className="text-purple-100/80">
-            Earn {conversionRates.pointsPerDollar} points per $1 spent. Redeem {conversionRates.pointsToDollar} points for $1 off.
+            Earn {conversionRates.pointsPerDollar} points per $1 spent. Redeem {conversionRates.pointsToDollar} points for $1 off. Referral dollars are tracked separately.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -71,6 +73,14 @@ export const PortalLoyaltySummary = ({ customerId }) => {
               <div>
                 <p className="text-3xl font-bold text-green-400">${dollarValue}</p>
                 <p className="text-sm text-gray-300">Redeemable value</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-emerald-300">${availableReferral.toFixed(2)}</p>
+                <p className="text-sm text-gray-300">Referral dollars available</p>
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-orange-300">${pendingReferral.toFixed(2)}</p>
+                <p className="text-sm text-gray-300">Referral dollars pending</p>
               </div>
             </div>
           )}
@@ -112,6 +122,11 @@ export const PortalLoyaltySummary = ({ customerId }) => {
                 </li>
               ))}
             </ul>
+          )}
+          {transactions.some((tx) => tx.transaction_type.includes('redeem')) && (
+            <p className="text-xs text-gray-500 mt-3">
+              Redeemed points are marked as no longer available after use.
+            </p>
           )}
         </CardContent>
       </Card>

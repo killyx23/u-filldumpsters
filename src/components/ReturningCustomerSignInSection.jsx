@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect }) => {
   const [mode, setMode] = useState('input'); // input, sending, sent, verifying, authenticated
@@ -77,10 +78,11 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [ReturningCustomerSignIn] Verifying code:`, code);
 
-    if (!code || code.length < 5) {
+    const trimmedCode = code.trim();
+    if (!trimmedCode || trimmedCode.length !== 6) {
       toast({
         title: 'Invalid Code',
-        description: 'Please enter the complete verification code.',
+        description: 'Please enter the complete 6-digit verification code.',
         variant: 'destructive'
       });
       return;
@@ -89,42 +91,25 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
     setMode('verifying');
 
     try {
+      const normalizedEmail = email.toLowerCase().trim();
       const { data, error } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: email.toLowerCase().trim(), code }
+        body: { email: normalizedEmail, code: trimmedCode }
       });
 
       const responseTs = new Date().toISOString();
       console.log(`[${responseTs}] [ReturningCustomerSignIn] verify-email-code response:`, { data, error });
 
-      if (error || !data?.success) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error || data?.error);
+      if (error) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error);
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
+      if (!data?.success) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, data?.error);
         throw new Error(data?.error || 'Invalid verification code');
       }
 
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Customer data:`, customer);
-
-      if (customerError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Customer fetch error:`, customerError);
-      }
-
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Past bookings:`, bookings);
-
-      if (bookingsError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Bookings fetch error:`, bookingsError);
-      }
+      const customer = data.customer;
+      const bookings = data.bookings || [];
 
       setCustomerData(customer || { name: email.split('@')[0], email });
       setPastBookings(bookings || []);

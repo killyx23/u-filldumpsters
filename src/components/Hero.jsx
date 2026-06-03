@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, AlertCircle } from 'lucide-react';
+import { fetchHomepageServices, getHeroStaticFallback } from '@/utils/servicePlan';
 
 const ServiceCard = ({
   name,
@@ -17,6 +18,8 @@ const ServiceCard = ({
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/71ba93b0b17b71051b7ab08600b18632.jpg";
   } else if (id === 3) {
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
+  } else if (id === 5) {
+    imageUrl = "/images/diy-heavy-equipment.png";
   }
   
   return (
@@ -70,35 +73,27 @@ export const Hero = () => {
         
         console.log('[Hero] ✓ Connection test successful');
         
-        // Fetching IDs 1, 2, and 3 for the homepage grid
-        const { data, error: fetchError } = await supabase
-          .from('services')
-          .select('id, name')
-          .in('id', [1, 2, 3])
-          .order('id');
-        
-        if (fetchError) {
-          console.error('[Hero] ✗ Fetch error:', {
-            message: fetchError.message,
-            details: fetchError.details,
-            hint: fetchError.hint,
-            code: fetchError.code
-          });
-          throw fetchError;
+        const homepageResult = await fetchHomepageServices(supabase);
+
+        if (homepageResult.error) {
+          console.error('[Hero] ✗ Fetch error:', homepageResult.error);
+          throw homepageResult.error;
         }
-        
-        console.log('[Hero] ✓ Fetched services:', data?.length || 0);
-        setServices(data || []);
+
+        let data = homepageResult.data?.map((s) => ({ id: s.id, name: s.name })) || [];
+
+        if (data.length === 0) {
+          console.warn('[Hero] No services from DB; using static fallback');
+          data = getHeroStaticFallback();
+        }
+
+        console.log('[Hero] ✓ Fetched services:', data.length);
+        setServices(data);
         
       } catch (err) {
         console.error('[Hero] ✗ Fatal error:', err);
         setError(err.message);
-        // Don't block page load - use fallback data
-        setServices([
-          { id: 1, name: '16 Yard Dumpster' },
-          { id: 2, name: 'Dump Loader Trailer Rental Service' },
-          { id: 3, name: 'Rock, Decorative Rock, Mulch, & Gravel Delivery Service' }
-        ]);
+        setServices(getHeroStaticFallback());
       } finally {
         setLoading(false);
       }
@@ -111,7 +106,8 @@ export const Hero = () => {
     const idMap = {
       1: '16-yard-dumpster',
       2: 'dump-loader-trailer',
-      3: 'rock-mulch-gravel'
+      3: 'rock-mulch-gravel',
+      5: 'mini-excavator',
     };
     const targetId = idMap[serviceId];
     if (!targetId) return;
@@ -126,7 +122,8 @@ export const Hero = () => {
         1: '16 Yard Dumpster',
         2: 'Dump Loader Trailer',
         3: 'Rock Mulch',
-        4: 'Mulch'
+        4: 'Mulch',
+        5: 'Excavator',
       };
       const match = headings.find(h => h.textContent.includes(searchTexts[serviceId]) || h.textContent.includes('Decorative Rock'));
       if (match) {
@@ -192,12 +189,12 @@ export const Hero = () => {
             <p className="text-blue-200">Loading services... (Using cached data)</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+          <div className={`grid grid-cols-1 md:grid-cols-2 ${services.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-8 max-w-6xl mx-auto`}>
             {services.map((service, index) => (
               <ServiceCard 
                 key={service.id} 
                 id={service.id} 
-                name={service.id === 3 ? "Rock, Decorative Rock, Mulch, & Gravel Delivery Service" : service.name} 
+                name={service.name} 
                 delay={0.4 + index * 0.15} 
                 onClick={scrollToService} 
               />

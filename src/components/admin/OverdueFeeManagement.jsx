@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
+import { logBookingChargeHistory } from '@/utils/bookingChargeHistory';
 import { AlertTriangle, Clock, DollarSign, Save } from 'lucide-react';
 import { format, differenceInMinutes } from 'date-fns';
 
@@ -94,6 +95,27 @@ export const OverdueFeeManagement = ({ booking, onUpdate }) => {
         .eq('id', booking.id);
 
       if (updateError) throw updateError;
+
+      const historyResult = await logBookingChargeHistory(
+        booking.id,
+        [
+          {
+            charge_key: 'overdue_fee',
+            charge_name: 'Overdue Fee',
+            charge_description: 'Fee added for late equipment return beyond the scheduled pickup window.',
+            amount: feeAmount,
+            metadata: {
+              minutes_overdue: returnStatus?.minutes_overdue || null,
+              scheduled_return: returnStatus?.scheduled?.toISOString?.() || null,
+              actual_return: returnStatus?.actual?.toISOString?.() || null,
+            },
+          },
+        ],
+        'admin_overdue_fee_management',
+      );
+      if (!historyResult.success) {
+        console.warn('[OverdueFeeManagement] Failed to write booking charge history:', historyResult.error);
+      }
 
       // Log the fee addition
       await supabase.from('rental_tracking_logs').insert({

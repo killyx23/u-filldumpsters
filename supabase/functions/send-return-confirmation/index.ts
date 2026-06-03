@@ -1,9 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.30.0';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 const BREVO_API_KEY = Deno.env.get('BREVO_API_KEY');
 const BREVO_FROM_EMAIL = Deno.env.get('BREVO_FROM_EMAIL');
 const SITE_URL = Deno.env.get('SITE_URL') || 'https://your-site.com';
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders

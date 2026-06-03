@@ -6,13 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Gift, Sparkles, AlertCircle } from 'lucide-react';
 import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
 
-export const LoyaltyPointsRedemption = ({ customerId, onPointsRedemption, currentTotal }) => {
+export const LoyaltyPointsRedemption = ({ customerId, verifiedEmail, onPointsRedemption, currentTotal }) => {
   const {
     pointsBalance,
     loading,
     conversionRates,
     calculateDiscountFromPoints,
-  } = useCustomerLoyaltyPoints(customerId);
+  } = useCustomerLoyaltyPoints(customerId, verifiedEmail);
 
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);

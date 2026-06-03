@@ -26,9 +26,9 @@ export const generateTimeSlotOptions = (intervalMinutes = 30) => {
 };
 
 export const getIncrementForService = (serviceId) => {
-    // 1-hour for Dump Loader Trailer Rental (ID: 2)
-    // 2-hours for 16 Yard Dumpster (ID: 1), Rock/Mulch (ID: 3), Dump Loader with Delivery (ID: 4)
-    return serviceId === 2 ? 60 : 120;
+    // 1-hour for trailer (2) and mini excavator (5)
+    // 2-hours for dumpster (1), rock/mulch (3), delivery trailer (4)
+    return serviceId === 2 || serviceId === 5 ? 60 : 120;
 };
 
 export const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate, now) => {

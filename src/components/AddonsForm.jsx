@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
 
   useEffect(() => {
+    if (contactAddress?.customerId) {
+      setCustomerId(contactAddress.customerId);
+      return;
+    }
+
     const lookupCustomer = async () => {
       if (!customerEmail?.includes('@')) {
         setCustomerId(null);
@@ -65,7 +70,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       setCustomerId(data?.id ?? null);
     };
     lookupCustomer();
-  }, [customerEmail]);
+  }, [customerEmail, contactAddress?.customerId]);
 
   const handlePointsRedemption = (points, discountAmount) => {
     setAddonsData((prev) => ({
@@ -288,6 +293,38 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     setAddonsData(prev => ({ ...prev, coupon }));
   };
 
+  const loyaltyPreviewTotal = useMemo(() => {
+    const equipmentPrices = {};
+    equipmentMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+    disposalMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+
+    const estimate = calculateBookingTotal(
+      plan,
+      addonsData,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+
+    return Number(estimate?.total || basePrice || 0);
+  }, [
+    addonsData,
+    basePrice,
+    deliveryService,
+    disposalMetaWithPrices,
+    equipmentMetaWithPrices,
+    insurancePrice,
+    plan,
+    taxOptions,
+    taxRate,
+  ]);
+
   if (!addonsData || !plan) {
     return null;
   }
@@ -420,8 +457,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
               {customerId && (
                 <LoyaltyPointsRedemption
                   customerId={customerId}
+                  verifiedEmail={customerEmail?.toLowerCase().trim()}
                   onPointsRedemption={handlePointsRedemption}
-                  currentTotal={basePrice}
+                  currentTotal={loyaltyPreviewTotal}
                 />
               )}
               <OrderSummary

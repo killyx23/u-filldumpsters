@@ -1,21 +1,33 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, Info, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, AlertTriangle, Loader2, CheckCircle2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { uploadVerificationImage, saveVerificationDocumentToDb, updateVerificationStatus, getVerificationDocumentsByCustomerId } from '@/utils/verificationImageHelper';
+import { uploadVerificationImage, saveVerificationDocumentToDb, updateVerificationStatus, getMergedVerificationDocumentsByCustomerId } from '@/utils/verificationImageHelper';
+import { VerificationInfoTooltip } from '@/components/VerificationInfoTooltip';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
 const FilePreview = ({ file, url, onRemove }) => {
     if (!file && !url) return null;
-    const displayUrl = file ? URL.createObjectURL(file) : url;
+    const isPdf = file?.type === 'application/pdf' || (url && url.toLowerCase().includes('.pdf'));
+    const displayUrl = file && !isPdf ? URL.createObjectURL(file) : url;
+
     return (
         <div className="relative group w-full h-32 rounded-lg overflow-hidden border border-white/20 bg-black/40">
-            <img src={displayUrl} alt="Preview" className="w-full h-full object-contain" />
+            {isPdf ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-blue-200 px-4 text-center">
+                    <FileText className="h-8 w-8 mb-2 text-yellow-400" />
+                    <p className="text-sm">{file?.name || 'Insurance document uploaded'}</p>
+                </div>
+            ) : (
+                <img src={displayUrl} alt="Preview" className="w-full h-full object-contain" />
+            )}
             <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="destructive" size="icon" className="h-8 w-8" onClick={onRemove}>
                     <X className="h-5 w-5" />
@@ -24,22 +36,6 @@ const FilePreview = ({ file, url, onRemove }) => {
         </div>
     );
 };
-
-const PlateInfoTooltip = () => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button type="button" className="ml-2 text-blue-300 hover:text-yellow-400 transition-colors">
-        <Info className="h-5 w-5"/>
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="top" className="bg-gray-900 border-blue-400 text-white max-w-sm p-4">
-      <h4 className="font-bold text-yellow-300 mb-2">Why do we need this information?</h4>
-      <p className="text-sm text-blue-200">
-        To ensure the security and proper use of our rental equipment, we require the license plate number of the vehicle that will be towing the trailer. This information is crucial for liability & accountability, legal compliance, and asset protection.
-      </p>
-    </TooltipContent>
-  </Tooltip>
-);
 
 const IncompleteInfoPopover = () => (
     <Popover>
@@ -64,12 +60,15 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
     
     const [licenseFrontFile, setLicenseFrontFile] = useState(null);
     const [licenseBackFile, setLicenseBackFile] = useState(null);
+    const [insuranceFile, setInsuranceFile] = useState(null);
     
     // Track existing URLs if customer already has documents
     const [existingFrontUrl, setExistingFrontUrl] = useState(null);
     const [existingBackUrl, setExistingBackUrl] = useState(null);
+    const [existingInsuranceUrl, setExistingInsuranceUrl] = useState(null);
     const [existingFrontPath, setExistingFrontPath] = useState(null);
     const [existingBackPath, setExistingBackPath] = useState(null);
+    const [existingInsurancePath, setExistingInsurancePath] = useState(null);
 
     const [isUploading, setIsUploading] = useState(false);
     const [isLoadingInitial, setIsLoadingInitial] = useState(true);
@@ -80,6 +79,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
 
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
+    const fileInputInsuranceRef = useRef(null);
 
     useEffect(() => {
         const fetchExistingDocs = async () => {
@@ -89,12 +89,14 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
             }
             try {
                 // Returns null gracefully if no record exists due to maybeSingle()
-                const doc = await getVerificationDocumentsByCustomerId(customerId);
+                const doc = await getMergedVerificationDocumentsByCustomerId(customerId);
                 if (doc) {
                     setExistingFrontUrl(doc.license_front_url || null);
                     setExistingBackUrl(doc.license_back_url || null);
+                    setExistingInsuranceUrl(doc.insurance_url || null);
                     setExistingFrontPath(doc.license_front_storage_path || null);
                     setExistingBackPath(doc.license_back_storage_path || null);
+                    setExistingInsurancePath(doc.insurance_storage_path || null);
                     
                     // If customer already has documents, they're a returning customer
                     setIsEmailRegistered(true);
@@ -102,8 +104,10 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                     // Explicitly reset to empty state if no record is found
                     setExistingFrontUrl(null);
                     setExistingBackUrl(null);
+                    setExistingInsuranceUrl(null);
                     setExistingFrontPath(null);
                     setExistingBackPath(null);
+                    setExistingInsurancePath(null);
                     setIsEmailRegistered(false);
                 }
             } catch (err) {
@@ -123,8 +127,9 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
         const plateRegex = /^[A-Z0-9]{6,7}$/;
         const hasFront = licenseFrontFile || existingFrontUrl;
         const hasBack = licenseBackFile || existingBackUrl;
-        return plateRegex.test(licensePlate) && hasFront && hasBack;
-    }, [licensePlate, licenseFrontFile, licenseBackFile, existingFrontUrl, existingBackUrl]);
+        const hasInsurance = insuranceFile || existingInsuranceUrl;
+        return plateRegex.test(licensePlate) && hasFront && hasBack && hasInsurance;
+    }, [licensePlate, licenseFrontFile, licenseBackFile, insuranceFile, existingFrontUrl, existingBackUrl, existingInsuranceUrl]);
 
     const handlePlateChange = (e) => {
         const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -165,6 +170,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
         try {
             let frontImage = { url: existingFrontUrl, path: existingFrontPath };
             let backImage = { url: existingBackUrl, path: existingBackPath };
+            let insuranceImage = { url: existingInsuranceUrl, path: existingInsurancePath };
 
             if (licenseFrontFile) {
                 frontImage = await uploadVerificationImage(effectiveCustomerId, licenseFrontFile, 'license_front');
@@ -172,22 +178,28 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
             if (licenseBackFile) {
                 backImage = await uploadVerificationImage(effectiveCustomerId, licenseBackFile, 'license_back');
             }
+            if (insuranceFile) {
+                insuranceImage = await uploadVerificationImage(effectiveCustomerId, insuranceFile, 'insurance_document');
+            }
 
-            if ((licenseFrontFile && !frontImage) || (licenseBackFile && !backImage)) {
+            if ((licenseFrontFile && !frontImage) || (licenseBackFile && !backImage) || (insuranceFile && !insuranceImage)) {
                 throw new Error("Failed to upload one or more images.");
             }
 
             // Save to the database document table (will gracefully handle INSERT or UPDATE depending on if a record exists)
-            if (customerId && frontImage?.url && backImage?.url) {
+            if (customerId && frontImage?.url && backImage?.url && insuranceImage?.url) {
                 await saveVerificationDocumentToDb(
                     customerId, 
                     frontImage.url, 
                     frontImage.path, 
                     backImage.url, 
-                    backImage.path
+                    backImage.path,
+                    'pending',
+                    insuranceImage.url,
+                    insuranceImage.path,
                 );
                 // If updating existing images, set status to pending again for review
-                if (licenseFrontFile || licenseBackFile) {
+                if (licenseFrontFile || licenseBackFile || insuranceFile) {
                     await updateVerificationStatus(customerId, 'pending', null);
                 }
             }
@@ -197,6 +209,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
             onVerifiedSubmit({
                 licensePlate,
                 licenseImageUrls,
+                insuranceImageUrl: insuranceImage?.url ? insuranceImage : null,
                 wasVerificationSkipped: isSkipping,
                 verificationNotes: isSkipping ? verificationNotes : null
             });
@@ -279,7 +292,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                         <div>
                             <div className="flex items-center mb-2">
                                 <Label htmlFor="licensePlate" className="text-lg font-semibold text-white">Towing Vehicle License Plate</Label>
-                                <PlateInfoTooltip />
+                                <VerificationInfoTooltip />
                             </div>
                             <Input 
                                 id="licensePlate" 
@@ -315,6 +328,39 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                                 <Input ref={fileInputBackRef} id="licenseBack" type="file" className="hidden" onChange={handleFileChange(setLicenseBackFile, setExistingBackUrl)} disabled={isUploading} accept="image/*" />
                             </div>
                         </div>
+
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                            <Label className="text-lg font-semibold text-white">Auto Insurance (Declaration Page or Insurance Card)</Label>
+                            <FilePreview
+                                file={insuranceFile}
+                                url={existingInsuranceUrl}
+                                onRemove={() => {
+                                    setInsuranceFile(null);
+                                    setExistingInsuranceUrl(null);
+                                    setExistingInsurancePath(null);
+                                }}
+                            />
+                            {!insuranceFile && !existingInsuranceUrl && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full h-14 bg-white/5 border-white/30 hover:bg-white/10 text-white"
+                                    onClick={() => fileInputInsuranceRef.current?.click()}
+                                    disabled={isUploading}
+                                >
+                                    <UploadCloud className="mr-2 h-5 w-5" /> Upload Insurance Document
+                                </Button>
+                            )}
+                            <Input
+                                ref={fileInputInsuranceRef}
+                                id="insuranceDocument"
+                                type="file"
+                                className="hidden"
+                                onChange={handleFileChange(setInsuranceFile, setExistingInsuranceUrl)}
+                                disabled={isUploading}
+                                accept="image/*,application/pdf"
+                            />
+                        </div>
                     </div>
 
                     {!isFormComplete && (
@@ -330,7 +376,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                                 value={verificationNotes}
                                 onChange={(e) => setVerificationNotes(e.target.value)}
                                 className="bg-white/10 border-white/30 text-white placeholder-orange-200/50"
-                                placeholder="e.g., Don't have license on hand right now."
+                                placeholder="e.g., Don't have license or insurance documents on hand right now."
                                 disabled={isUploading}
                             />
                         </div>
@@ -354,6 +400,11 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                             {isUploading ? <Loader2 className="mr-2 h-5 w-5 animate-spin"/> : <>Submit & Continue <ArrowRight className="ml-2 h-5 w-5"/></>}
                         </Button>
                     </div>
+                    <UiControlGuide
+                        stepTitle="Driver & Vehicle Verification"
+                        entries={getBookingGuideEntries('verification')}
+                        className="mt-4 flex justify-end"
+                    />
                 </div>
             </motion.div>
         </TooltipProvider>

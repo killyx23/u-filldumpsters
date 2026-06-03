@@ -5,6 +5,9 @@
   "private": true,
   "scripts": {
     "dev": "vite --host :: --port 3000",
+    "dev:local": "vite --host :: --port 3000",
+    "lan:sync": "node tools/sync-lan-qr-env.mjs",
+    "supabase:sync-local-env": "node tools/sync-local-supabase-env.mjs",
     "build": "node tools/generate-llms.js || true && vite build",
     "preview": "vite preview --host :: --port 3000",
     "lint": "eslint . --quiet"

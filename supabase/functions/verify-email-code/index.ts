@@ -1,133 +1,197 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-Deno.serve(async (req)=>{
+
+const jsonResponse = (
+  corsHeaders: Record<string, string>,
+  body: Record<string, unknown>,
+  status: number,
+) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+
+Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
   if (req.method === "OPTIONS") {
-    return new Response(null, {
-      headers: corsHeaders
-    });
+    return new Response(null, { headers: corsHeaders });
   }
+
   try {
-    const { email, code } = await req.json();
-    if (!code) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: "Verification code is required"
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
+    const { email, code, pending_customer_id } = await req.json();
+
+    if (!email || typeof email !== "string") {
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Email is required" },
+        400,
+      );
     }
-    console.log("[verify-email-code] Verifying code:", code);
-    // Initialize Supabase client
+
+    if (!code || typeof code !== "string") {
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Verification code is required" },
+        400,
+      );
+    }
+
+    const emailLower = email.trim().toLowerCase();
+    const trimmedCode = code.trim();
+
+    if (!emailLower.includes("@")) {
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Invalid email address" },
+        400,
+      );
+    }
+
+    if (!/^\d{6}$/.test(trimmedCode)) {
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Invalid code format. Enter the 6-digit code from your email." },
+        400,
+      );
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    // Find verification record by code
-    const { data: verification, error: fetchError } = await supabase.from("email_verifications").select("*").eq("verification_code", code).single();
-    if (fetchError || !verification) {
-      console.error("[verify-email-code] Verification not found:", fetchError);
-      return new Response(JSON.stringify({
-        success: false,
-        error: "Invalid verification code"
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("[verify-email-code] Missing Supabase configuration");
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Server configuration error" },
+        500,
+      );
     }
-    // Check if code has expired
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    console.log("[verify-email-code] Verifying:", { email: emailLower, code: trimmedCode });
+
+    const { data: verification, error: fetchError } = await supabase
+      .from("email_verifications")
+      .select("email, verification_code, code_expires_at, is_verified")
+      .eq("email", emailLower)
+      .eq("verification_code", trimmedCode)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error("[verify-email-code] Database query error:", fetchError);
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Verification failed. Please try again." },
+        500,
+      );
+    }
+
+    if (!verification) {
+      console.warn("[verify-email-code] No matching record for email + code");
+      return jsonResponse(
+        corsHeaders,
+        { success: false, error: "Invalid verification code" },
+        400,
+      );
+    }
+
     const expiresAt = new Date(verification.code_expires_at);
     const now = new Date();
+
     if (now > expiresAt) {
-      console.error("[verify-email-code] Code expired:", {
-        expiresAt,
-        now
-      });
-      return new Response(JSON.stringify({
-        success: false,
-        error: "Verification code has expired. Please request a new one."
-      }), {
-        status: 400,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
+      console.warn("[verify-email-code] Code expired:", { email: emailLower, expiresAt });
+      return jsonResponse(
+        corsHeaders,
+        {
+          success: false,
+          error: "Verification code has expired. Please request a new one.",
+        },
+        400,
+      );
     }
-    // Check if already verified
-    if (verification.is_verified) {
-      console.log("[verify-email-code] Already verified, finding booking...");
-      // Find booking by email
-      const { data: booking } = await supabase.from("bookings").select("id").eq("email", verification.email.toLowerCase()).order("created_at", {
-        ascending: false
-      }).limit(1).single();
-      return new Response(JSON.stringify({
-        success: true,
-        message: "Email already verified",
-        booking_id: booking?.id || null
-      }), {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    // Mark as verified
-    const { error: updateError } = await supabase.from("email_verifications").update({
-      is_verified: true
-    }).eq("email", verification.email);
-    if (updateError) {
-      console.error("[verify-email-code] Update error:", updateError);
-      throw new Error("Failed to mark email as verified");
-    }
-    // Find most recent booking for this email
-    const { data: booking, error: bookingError } = await supabase.from("bookings").select("id, email, status").eq("email", verification.email.toLowerCase()).order("created_at", {
-      ascending: false
-    }).limit(1).single();
-    if (bookingError || !booking) {
-      console.error("[verify-email-code] Booking not found:", bookingError);
-      return new Response(JSON.stringify({
-        success: true,
-        message: "Email verified but no booking found",
-        booking_id: null
-      }), {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json"
-        }
-      });
-    }
-    console.log("[verify-email-code] ✓ Email verified successfully, booking_id:", booking.id);
-    return new Response(JSON.stringify({
-      success: true,
-      message: "Email verified successfully",
-      booking_id: booking.id,
-      email: verification.email
-    }), {
-      status: 200,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
+
+    if (!verification.is_verified) {
+      const { error: updateError } = await supabase
+        .from("email_verifications")
+        .update({ is_verified: true })
+        .eq("email", emailLower)
+        .eq("verification_code", trimmedCode);
+
+      if (updateError) {
+        console.error("[verify-email-code] Update error:", updateError);
+        return jsonResponse(
+          corsHeaders,
+          { success: false, error: "Failed to mark email as verified" },
+          500,
+        );
       }
-    });
+    } else {
+      console.log("[verify-email-code] Already verified, reusing valid code for:", emailLower);
+    }
+
+    if (pending_customer_id) {
+      const { error: pendingError } = await supabase
+        .from("pending_customers")
+        .update({
+          is_verified: true,
+          verified_at: new Date().toISOString(),
+        })
+        .eq("id", pending_customer_id);
+
+      if (pendingError) {
+        console.error("[verify-email-code] pending_customers update error:", pendingError);
+      }
+    }
+
+    const { data: customer, error: customerError } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("email", emailLower)
+      .maybeSingle();
+
+    const { data: bookings, error: bookingsError } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("email", emailLower)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (bookingsError) {
+      console.error("[verify-email-code] bookings fetch error:", bookingsError);
+    }
+
+    if (customerError) {
+      console.error("[verify-email-code] customer fetch error:", customerError);
+    }
+
+    console.log("[verify-email-code] ✓ Verified:", emailLower, "booking_id:", bookings?.[0]?.id ?? null);
+
+    return jsonResponse(
+      corsHeaders,
+      {
+        success: true,
+        message: verification.is_verified
+          ? "Email already verified"
+          : "Email verified successfully",
+        booking_id: bookings?.[0]?.id ?? null,
+        email: emailLower,
+        customer: customer ?? null,
+        bookings: bookings ?? [],
+        ...(pending_customer_id ? { pending_customer_id } : {}),
+      },
+      200,
+    );
   } catch (error) {
     console.error("[verify-email-code] Error:", error);
-    return new Response(JSON.stringify({
-      success: false,
-      error: error.message || "Verification failed"
-    }), {
-      status: 500,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json"
-      }
-    });
+    return jsonResponse(
+      corsHeaders,
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Verification failed",
+      },
+      500,
+    );
   }
 });

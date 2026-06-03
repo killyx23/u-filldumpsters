@@ -8,6 +8,9 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
+import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -222,7 +225,8 @@ export const AccessCodesPage = ({ customerData }) => {
       const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
         body: {
           customer_id: customerData.id,
-          phone: customerData.phone
+          phone: customerData.phone,
+          order_id: booking?.id,
         }
       });
 
@@ -239,8 +243,12 @@ export const AccessCodesPage = ({ customerData }) => {
       setMagicLinkToken(data.token);
 
       // Create magic link URL
-      const siteUrl = window.location.origin;
-      const magicLinkUrl = `${siteUrl}/customer-portal?token=${data.token}&order_id=${booking?.id}&phone=${customerData.phone}`;
+      const magicLinkUrl = buildAccessCodesQrUrl({
+        token: data.token,
+        portalNumber: customerData.customer_id_text,
+        phone: customerData.phone,
+        orderId: booking?.id,
+      });
       
       console.log(`[${context}] QR code URL: ${magicLinkUrl}`);
 
@@ -290,6 +298,8 @@ export const AccessCodesPage = ({ customerData }) => {
       return;
     }
 
+    setRetryCount(0);
+
     try {
       setGeneratingPin(true);
 
@@ -300,7 +310,9 @@ export const AccessCodesPage = ({ customerData }) => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
       if (data?.success === false || !data?.pin) {
         throw new Error(data?.error || 'Failed to generate access PIN');
       }
@@ -383,11 +395,20 @@ export const AccessCodesPage = ({ customerData }) => {
     );
   }
 
-  const siteUrl = window.location.origin;
-  const magicLinkUrl = magicLinkToken 
-    ? `${siteUrl}/customer-portal?token=${magicLinkToken}&order_id=${booking?.id}&phone=${customerData.phone}`
+  const magicLinkUrl = magicLinkToken
+    ? buildAccessCodesQrUrl({
+      token: magicLinkToken,
+      portalNumber: customerData?.customer_id_text,
+      phone: customerData?.phone,
+      orderId: booking?.id,
+    })
     : '';
-  const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
+  const safetyVideoUrl = buildHowToGuidesQrUrl({
+    token: magicLinkToken,
+    portalNumber: customerData?.customer_id_text,
+    phone: customerData?.phone,
+    orderId: booking?.id,
+  });
 
   return (
     <>
@@ -414,10 +435,13 @@ export const AccessCodesPage = ({ customerData }) => {
         >
           <Card className="bg-white/10 backdrop-blur-lg border-white/20">
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-yellow-400" />
-                Rental Details
-              </CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-yellow-400" />
+                  Rental Details
+                </CardTitle>
+                <PickupLocationInfoButton />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-white">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

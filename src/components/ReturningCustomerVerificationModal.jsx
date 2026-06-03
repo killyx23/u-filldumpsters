@@ -4,16 +4,20 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { Loader2, Mail, Calendar, Package, AlertCircle } from 'lucide-react';
+import { Loader2, Mail, Calendar, Package, AlertCircle, Plus, Gift } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 
-export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderSelect }) => {
+export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderSelect, onCustomerVerified }) => {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState([]);
+  const [customerProfile, setCustomerProfile] = useState(null);
+  const [pointsBalance, setPointsBalance] = useState(0);
   const [step, setStep] = useState('email'); // email | code | bookings
   const [error, setError] = useState('');
 
@@ -21,6 +25,8 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
     setEmail('');
     setCode('');
     setBookings([]);
+    setCustomerProfile(null);
+    setPointsBalance(0);
     setStep('email');
     setError('');
   };
@@ -51,7 +57,9 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
         },
       });
 
-      if (fnError) throw fnError;
+      if (fnError) {
+        throw new Error(await parseEdgeFunctionError(fnError, data));
+      }
       if (data?.error) throw new Error(data.error);
 
       setStep('code');
@@ -70,8 +78,9 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
   const handleVerifyCode = async (e) => {
     e?.preventDefault();
 
-    if (!code || code.length < 5) {
-      setError('Please enter the complete verification code');
+    const trimmedCode = code.trim();
+    if (!trimmedCode || trimmedCode.length !== 6) {
+      setError('Please enter the complete 6-digit verification code');
       return;
     }
 
@@ -82,29 +91,73 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
       const normalizedEmail = email.toLowerCase().trim();
 
       const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: normalizedEmail, code },
+        body: { email: normalizedEmail, code: trimmedCode },
       });
 
-      if (verifyError) throw verifyError;
+      if (verifyError) {
+        throw new Error(await parseEdgeFunctionError(verifyError, verifyData));
+      }
       if (!verifyData?.success) {
         throw new Error(verifyData?.error || 'Invalid verification code');
       }
 
-      const { data, error: fetchError } = await supabase
-        .from('bookings')
-        .select('*, plan:plans(*)')
-        .eq('email', normalizedEmail)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (fetchError) throw fetchError;
-
-      if (!data || data.length === 0) {
-        setError('No previous bookings found for this email address');
-        return;
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(
+          `verified_email_${normalizedEmail}`,
+          String(Date.now())
+        );
       }
 
-      setBookings(data);
+      const data = verifyData.bookings || [];
+      if (verifyData.customer) {
+        setCustomerProfile(verifyData.customer);
+      }
+
+      if (!data || data.length === 0) {
+        setBookings([]);
+      }
+
+      const planIds = [...new Set((data || []).map((row) => row.plan_id).filter(Boolean))];
+      let plansById = {};
+      if (planIds.length > 0) {
+        const { data: planRows, error: planError } = await supabase
+          .from('plans')
+          .select('id, name')
+          .in('id', planIds);
+
+        if (planError) {
+          console.warn('[ReturningCustomerVerificationModal] Could not load plan names:', planError);
+        } else {
+          plansById = (planRows || []).reduce((acc, row) => {
+            acc[row.id] = row;
+            return acc;
+          }, {});
+        }
+      }
+
+      const enrichedBookings = (data || []).map((row) => ({
+        ...row,
+        plan: plansById[row.plan_id] || row.plan || null,
+      }));
+
+      try {
+        const { data: rewardsData, error: rewardsError } = await supabase.functions.invoke('get-returning-customer-rewards', {
+          body: { email: normalizedEmail },
+        });
+
+        if (rewardsError) {
+          console.warn('[ReturningCustomerVerificationModal] Rewards lookup error:', rewardsError);
+        } else if (rewardsData?.success) {
+          setPointsBalance(Number(rewardsData.pointsBalance || 0));
+          if (!verifyData.customer && rewardsData.customer) {
+            setCustomerProfile(rewardsData.customer);
+          }
+        }
+      } catch (rewardsErr) {
+        console.warn('[ReturningCustomerVerificationModal] Rewards lookup exception:', rewardsErr);
+      }
+
+      setBookings(enrichedBookings);
       setStep('bookings');
     } catch (err) {
       console.error('[ReturningCustomerVerificationModal] Verify error:', err);
@@ -136,6 +189,26 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
       setCode('');
     }
     setError('');
+  };
+
+  const handleStartNewBooking = () => {
+    const normalizedEmail = email.toLowerCase().trim();
+    const mapped = mapCustomerToBookingData(customerProfile, normalizedEmail);
+    if (onCustomerVerified) {
+      onCustomerVerified({
+        ...mapped,
+        loyalty: {
+          pointsBalance,
+        },
+      });
+    }
+
+    toast({
+      title: 'Welcome Back',
+      description: 'Your contact details were pre-filled for faster checkout.',
+    });
+
+    handleClose();
   };
 
   const formatBookingDate = (dateString) => {
@@ -173,7 +246,7 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
             {step === 'email' &&
               'Enter your email to receive a verification code and access your booking history.'}
             {step === 'code' && `Enter the code we sent to ${email}.`}
-            {step === 'bookings' && 'Select a previous booking to reorder with pre-filled details.'}
+            {step === 'bookings' && 'Reorder a past booking or start a new booking with your profile pre-filled.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -245,7 +318,7 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
               </Button>
               <Button
                 type="submit"
-                disabled={loading || code.length < 5}
+                disabled={loading || code.trim().length !== 6}
                 className="flex-1 bg-green-600 hover:bg-green-700"
               >
                 {loading ? (
@@ -273,7 +346,24 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
 
         {step === 'bookings' && (
           <div className="space-y-4 mt-4">
+            {pointsBalance > 0 && (
+              <div className="bg-purple-900/20 border border-purple-500/30 rounded-lg p-3 flex items-start gap-2">
+                <Gift className="h-5 w-5 text-purple-300 mt-0.5" />
+                <p className="text-sm text-purple-100">
+                  You have <strong>{pointsBalance} loyalty points</strong> available for this booking.
+                </p>
+              </div>
+            )}
             <div className="grid gap-3">
+              {bookings.length === 0 && (
+                <Card className="bg-white/5 border-white/10">
+                  <CardContent className="py-4">
+                    <p className="text-sm text-muted-foreground">
+                      We could not find previous bookings for this email yet, but you can still start a new booking with your saved profile.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
               {bookings.map((booking) => (
                 <Card key={booking.id} className="bg-white/5 border-white/10 hover:bg-white/10 transition-colors">
                   <CardHeader className="pb-3">
@@ -315,11 +405,15 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
             </div>
 
             <div className="flex gap-3 pt-4 border-t">
+              <Button
+                onClick={handleStartNewBooking}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Start New Booking
+              </Button>
               <Button variant="outline" onClick={handleBack} className="flex-1">
                 Back
-              </Button>
-              <Button variant="ghost" onClick={handleClose} className="flex-1">
-                Close
               </Button>
             </div>
           </div>

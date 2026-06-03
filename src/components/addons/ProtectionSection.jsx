@@ -71,7 +71,7 @@ export const ProtectionSection = ({
                             </button>
                         </div>
                         <RadioGroup 
-                            value={addonsData?.insurance || 'decline'} 
+                            value={addonsData?.insurance || 'accept'} 
                             onValueChange={handleInsuranceChange}
                             className="grid grid-cols-1 md:grid-cols-2 gap-3"
                         >

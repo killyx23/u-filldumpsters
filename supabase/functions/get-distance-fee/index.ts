@@ -1,8 +1,9 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 const businessAddress = "227 W Casi Way, Saratoga Springs, UT 84045";
 const perMileRate = 0.85;
 const baseFee = 30;
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders
