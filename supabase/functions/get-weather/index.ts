@@ -1,8 +1,9 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { eachDayOfInterval, parseISO } from "npm:date-fns";
 const WEATHER_API_KEY = Deno.env.get("WEATHER_API_KEY");
 const LOCATION = "Saratoga Springs,UT";
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders

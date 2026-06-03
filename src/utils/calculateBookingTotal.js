@@ -54,18 +54,19 @@ export function calculateBookingTotal(
     (lineByKey.tvDisposal?.amount ?? 0) +
     (lineByKey.applianceDisposal?.amount ?? 0);
 
-  let discount = 0;
+  let couponDiscount = 0;
   const grossBeforeDiscount = breakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
   if (addonsData?.coupon?.isValid) {
     if (addonsData.coupon.discountType === 'fixed') {
-      discount = Number(addonsData.coupon.discountValue || 0);
+      couponDiscount = Number(addonsData.coupon.discountValue || 0);
     } else if (addonsData.coupon.discountType === 'percentage') {
-      discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+      couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
     }
   }
 
   const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-  discount += loyaltyDiscount;
+  const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+  const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
   return {
     basePriceAmount: lineByKey.base_rental?.amount ?? Number(plan?.price || plan?.base_price || 0),
@@ -77,7 +78,9 @@ export function calculateBookingTotal(
     purchaseItemsCost,
     disposalCost,
     discount,
+    couponDiscount,
     loyaltyDiscount,
+    referralDiscount,
     subtotal: breakdown.subtotalBeforeTax,
     taxableSubtotal: breakdown.taxableSubtotal,
     nonTaxableSubtotal: breakdown.nonTaxableSubtotal,

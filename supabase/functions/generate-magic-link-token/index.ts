@@ -1,6 +1,7 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.30.0";
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders
@@ -10,7 +11,7 @@ Deno.serve(async (req)=>{
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const { customer_id, phone } = await req.json();
+    const { customer_id, phone, order_id } = await req.json();
     if (!customer_id || !phone) {
       return new Response(JSON.stringify({
         error: "Missing customer_id or phone"
@@ -49,6 +50,55 @@ Deno.serve(async (req)=>{
         }
       });
     }
+
+    let normalizedOrderId: number | null = null;
+    if (order_id !== null && order_id !== undefined && String(order_id).trim() !== "") {
+      const parsedOrderId = Number(order_id);
+      if (!Number.isFinite(parsedOrderId)) {
+        return new Response(JSON.stringify({
+          error: "Invalid order_id"
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+
+      const { data: booking, error: bookingError } = await supabase
+        .from("bookings")
+        .select("id, customer_id")
+        .eq("id", parsedOrderId)
+        .maybeSingle();
+
+      if (bookingError || !booking) {
+        return new Response(JSON.stringify({
+          error: "Booking not found"
+        }), {
+          status: 404,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+
+      if (booking.customer_id && Number(booking.customer_id) !== Number(customer_id)) {
+        return new Response(JSON.stringify({
+          error: "Booking does not belong to this customer"
+        }), {
+          status: 403,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        });
+      }
+
+      normalizedOrderId = Number(booking.id);
+    }
+
     // Generate secure token
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -57,6 +107,7 @@ Deno.serve(async (req)=>{
       token,
       customer_id,
       phone: customer.phone,
+      order_id: normalizedOrderId,
       expires_at: expiresAt
     }).select().single();
     if (tokenError) {

@@ -13,6 +13,9 @@ import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -164,18 +167,19 @@ export const BookingSummaryReview = ({
             ...taxOptions,
         });
 
-        let discount = 0;
+        let couponDiscount = 0;
         const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (addonsData?.coupon?.isValid) {
             if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
+                couponDiscount = Number(addonsData.coupon.discountValue || 0);
             } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
             }
         }
 
         const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-        discount += loyaltyDiscount;
+        const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             basePriceAmount,
@@ -187,7 +191,9 @@ export const BookingSummaryReview = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            couponDiscount,
             loyaltyDiscount,
+            referralDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
@@ -320,10 +326,24 @@ export const BookingSummaryReview = ({
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({ 
             label: `Coupon (${addonsData.coupon?.code || 'Applied'})`, 
-            amount: -calculatedTotals.discount, 
+            amount: -calculatedTotals.couponDiscount, 
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true 
         });
     }
@@ -395,8 +415,7 @@ export const BookingSummaryReview = ({
                                 items={protectionItems}
                                 showInfoButton={true}
                                 infoTitle="Protection Options"
-                                infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
-                                serviceName={plan?.name}
+                                infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
                             />
 
                             {/* 3. Rent Equipment */}
@@ -468,6 +487,11 @@ export const BookingSummaryReview = ({
                         >
                             Continue to Contact Info <ArrowRight className="ml-2 h-5 w-5" />
                         </Button>
+                        <UiControlGuide
+                            stepTitle="Review"
+                            entries={getBookingGuideEntries('review')}
+                            className="mt-3 flex justify-end"
+                        />
                     </div>
                 </div>
             </div>

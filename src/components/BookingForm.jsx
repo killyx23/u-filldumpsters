@@ -18,8 +18,13 @@ import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
+import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
+import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
+import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 
 export const BookingForm = ({
   plan,
@@ -29,7 +34,8 @@ export const BookingForm = ({
   onBack,
   deliveryService,
   setDeliveryService,
-  onReorderSelect
+  onReorderSelect,
+  onCustomerVerified
 }) => {
   const [allPlans, setAllPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
@@ -65,71 +71,23 @@ export const BookingForm = ({
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
-    if (isDelivery) return allPlans.find(p => p.id === 4) || null;
-    return allPlans.find(p => p.id === plan?.id) || null;
+    if (isDelivery) {
+      const variantId = plan?.delivery_variant_service_id ?? 4;
+      return allPlans.find((p) => p.id === variantId) || null;
+    }
+    return allPlans.find((p) => p.id === plan?.id) || null;
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
   const handleReorderSelect = async (pastBooking) => {
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [BookingForm] Reordering service from booking:`, pastBooking.id);
+    if (onReorderSelect) onReorderSelect(pastBooking);
+    setIsReturningCustomerModalOpen(false);
+  };
 
-    try {
-      const planData = pastBooking.plan;
-      const addons = pastBooking.addons || {};
-
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', pastBooking.email)
-        .maybeSingle();
-
-      if (customerError) {
-        console.error(`[${timestamp}] [BookingForm] Error fetching customer:`, customerError);
-      }
-
-      setBookingData(prev => ({
-        ...prev,
-        firstName: customer?.first_name || pastBooking.first_name || '',
-        lastName: customer?.last_name || pastBooking.last_name || '',
-        email: pastBooking.email,
-        phone: customer?.phone || pastBooking.phone || '',
-        contactAddress: {
-          street: customer?.street || pastBooking.street || '',
-          city: customer?.city || pastBooking.city || '',
-          state: customer?.state || pastBooking.state || '',
-          zip: customer?.zip || pastBooking.zip || '',
-          isVerified: true
-        },
-        addressVerified: true,
-        dropOffDate: null,
-        pickupDate: null,
-        dropOffTimeSlot: '',
-        pickupTimeSlot: '',
-        notes: pastBooking.notes || '',
-        termsAccepted: false
-      }));
-
-      if (onReorderSelect) {
-        onReorderSelect(pastBooking);
-      }
-
-      toast({
-        title: 'Booking Pre-filled',
-        description: 'Your previous booking details have been loaded. Please select new dates.',
-        duration: 5000
-      });
-
-      setIsReturningCustomerModalOpen(false);
-
-    } catch (error) {
-      const catchTs = new Date().toISOString();
-      console.error(`[${catchTs}] [BookingForm] Error in handleReorderSelect:`, error);
-      toast({
-        title: 'Reorder Failed',
-        description: 'Could not load your previous booking.',
-        variant: 'destructive'
-      });
+  const handleCustomerVerified = (customerData) => {
+    if (onCustomerVerified) {
+      onCustomerVerified(customerData);
     }
+    setIsReturningCustomerModalOpen(false);
   };
 
   // Fetch disposal fees from equipment_pricing table
@@ -362,10 +320,23 @@ export const BookingForm = ({
   }, [fetchAvailability, currentMonth]);
 
   useEffect(() => {
-    if (!currentPlan || currentPlan.id !== 2 || isDelivery) return;
+    if (!currentPlan || !isHourlySelfPickupPlan(currentPlan, isDelivery)) return;
+
+    const serviceId = currentPlan.id;
+    const hasDropOffDate = Boolean(bookingData.dropOffDate);
+    const hasPickupDate = Boolean(bookingData.pickupDate);
 
     const fetchExactTimes = async () => {
-      console.log('[BookingForm] Fetching exact times for trailer rental');
+      if (!hasDropOffDate && !hasPickupDate) {
+        setBookingData(prev => ({
+          ...prev,
+          dropOffTimeSlot: '',
+          pickupTimeSlot: ''
+        }));
+        return;
+      }
+
+      console.log('[BookingForm] Fetching exact times for hourly pickup service', serviceId);
       setFetchingExactTimes(true);
       let pStartTime = '';
       let rByTime = '';
@@ -380,7 +351,7 @@ export const BookingForm = ({
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('pickup_start_time')
-            .eq('service_id', 2)
+            .eq('service_id', serviceId)
             .eq('date', dateStr)
             .maybeSingle();
           
@@ -394,17 +365,17 @@ export const BookingForm = ({
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('pickup_start_time')
-              .eq('service_id', 2)
+              .eq('service_id', serviceId)
               .eq('day_of_week', dow)
               .maybeSingle();
-            
-            if (saError) {
-              console.warn('[BookingForm] Error fetching service availability pickup time:', saError);
-            }
-            
-            if (sa?.pickup_start_time) {
-              pStartTime = sa.pickup_start_time;
-            }
+          
+          if (saError) {
+            console.warn('[BookingForm] Error fetching service availability pickup time:', saError);
+          }
+          
+          if (sa?.pickup_start_time) {
+            pStartTime = sa.pickup_start_time;
+          }
           }
         }
 
@@ -415,7 +386,7 @@ export const BookingForm = ({
           const { data: dsa, error: dsaError } = await supabase
             .from('date_specific_availability')
             .select('return_by_time')
-            .eq('service_id', 2)
+            .eq('service_id', serviceId)
             .eq('date', dateStr)
             .maybeSingle();
           
@@ -429,27 +400,32 @@ export const BookingForm = ({
             const { data: sa, error: saError } = await supabase
               .from('service_availability')
               .select('return_by_time')
-              .eq('service_id', 2)
+              .eq('service_id', serviceId)
               .eq('day_of_week', dow)
               .maybeSingle();
-            
-            if (saError) {
-              console.warn('[BookingForm] Error fetching service availability return time:', saError);
-            }
-            
-            if (sa?.return_by_time) {
-              rByTime = sa.return_by_time;
-            }
+          
+          if (saError) {
+            console.warn('[BookingForm] Error fetching service availability return time:', saError);
+          }
+          
+          if (sa?.return_by_time) {
+            rByTime = sa.return_by_time;
+          }
           }
         }
 
         setBookingData(prev => ({
           ...prev,
-          dropOffTimeSlot: pStartTime ? formatTimeToAmPm(pStartTime) : defaultStart,
-          pickupTimeSlot: rByTime ? formatTimeToAmPm(rByTime) : defaultReturn
+          dropOffTimeSlot: hasDropOffDate
+            ? (pStartTime ? formatTimeToAmPm(pStartTime) : defaultStart)
+            : '',
+          pickupTimeSlot: hasPickupDate
+            ? (rByTime ? formatTimeToAmPm(rByTime) : defaultReturn)
+            : ''
         }));
 
         console.log('[BookingForm] ✓ Exact times set:', {
+          serviceId,
           dropOff: pStartTime || defaultStart,
           pickup: rByTime || defaultReturn
         });
@@ -458,8 +434,8 @@ export const BookingForm = ({
         console.warn('[BookingForm] Unexpected error fetching exact times:', error);
         setBookingData(prev => ({
           ...prev,
-          dropOffTimeSlot: defaultStart,
-          pickupTimeSlot: defaultReturn
+          dropOffTimeSlot: hasDropOffDate ? defaultStart : '',
+          pickupTimeSlot: hasPickupDate ? defaultReturn : ''
         }));
       } finally {
         setFetchingExactTimes(false);
@@ -542,6 +518,11 @@ export const BookingForm = ({
     }
     return dates;
   }, [availability]);
+
+  const showNextMonthHint = useMemo(
+    () => isMonthFullyUnavailable(currentMonth, availability, { loading: loadingAvailability }),
+    [currentMonth, availability, loadingAvailability]
+  );
   
   const timeSlots = useMemo(() => {
     if (!currentPlan || !plan) return { dropOff: [], pickup: [] };
@@ -552,15 +533,17 @@ export const BookingForm = ({
     let dropOffSlots = [];
     let pickupSlots = [];
     
+    const hourlyPickup = isHourlySelfPickupPlan(plan, isDelivery);
+
     if (dropOffAvail && dropOffAvail.available) {
       if (plan.id === 1) dropOffSlots = dropOffAvail.deliverySlots || [];
-      else if (plan.id === 2 && !isDelivery) dropOffSlots = dropOffAvail.pickupSlots || [];
+      else if (hourlyPickup) dropOffSlots = dropOffAvail.pickupSlots || dropOffAvail.hourlySlots || [];
       else if (plan.id === 2 && isDelivery) dropOffSlots = dropOffAvail.deliverySlots || [];
       else if (plan.id === 3) dropOffSlots = dropOffAvail.deliverySlots || [];
     }
     if (pickupAvail && pickupAvail.available) {
       if (plan.id === 1) pickupSlots = pickupAvail.pickupSlots || [];
-      else if (plan.id === 2 && !isDelivery) pickupSlots = pickupAvail.returnSlots || [];
+      else if (hourlyPickup) pickupSlots = pickupAvail.returnSlots || [];
       else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
     }
     
@@ -593,7 +576,9 @@ export const BookingForm = ({
       const state = {
         ...prev,
         [field]: newDate,
-        ...(currentPlan?.id !== 2 || isDelivery ? { [`${field.replace('Date', '')}TimeSlot`]: '' } : {})
+        ...(isHourlySelfPickupPlan(currentPlan, isDelivery)
+          ? {}
+          : { [`${field.replace('Date', '')}TimeSlot`]: '' })
       };
 
       if (field === 'dropOffDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
@@ -686,7 +671,7 @@ export const BookingForm = ({
         
         if (currentPlan.id === 1) {
           basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
-        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+        } else if (currentPlan.id === 2 || currentPlan.id === 4 || currentPlan.id === 5) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         } else if (currentPlan.id === 3) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
@@ -808,6 +793,7 @@ export const BookingForm = ({
           time2: 'Delivery (Pickup Window)'
         };
       case 2:
+      case 5:
         return {
           date1: 'Pickup Date',
           date2: 'Return Date',
@@ -871,8 +857,16 @@ export const BookingForm = ({
             <div className="flex items-center justify-between mb-1">
               <h4 className="font-bold text-white text-base">Service Terms</h4>
               <span 
+                role="button"
+                tabIndex={0}
                 onClick={toggleServiceTerms}
-                className="text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleServiceTerms();
+                  }
+                }}
+                className="cursor-pointer text-sm font-medium underline-offset-2 hover:underline animate-see-more-pulse"
               >
                 {isServiceTermsExpanded ? 'see less' : 'see more'}
               </span>
@@ -941,9 +935,12 @@ export const BookingForm = ({
     }
 
     if (currentPlan?.id === 2) {
-      const rentalHoursText = trailerRentalHours.pickupStart && trailerRentalHours.returnBy 
-        ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
-        : 'gives you the trailer for a full rental day.';
+      const hasPickupDate = Boolean(bookingData.dropOffDate);
+      const rentalHoursText = !hasPickupDate
+        ? 'includes flexible same-day pickup and return hours. Select a pickup date to view exact times.'
+        : trailerRentalHours.pickupStart && trailerRentalHours.returnBy
+          ? `gives you the trailer from ${trailerRentalHours.pickupStart} to ${trailerRentalHours.returnBy}.`
+          : 'will show your exact pickup and return hours once availability is loaded.';
 
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
@@ -1158,7 +1155,7 @@ export const BookingForm = ({
             
             <div className="border-t border-white/20 pt-4">
               <p className="text-white text-lg font-semibold">
-                {currentPlan?.id === 2 && !isDelivery ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}
+                {isHourlySelfPickupPlan(currentPlan, isDelivery) ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}
               </p>
               <div className="flex items-baseline mb-2">
                 <p className="text-4xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
@@ -1257,9 +1254,9 @@ export const BookingForm = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
-                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
-                  {currentPlan?.id === 2 && !isDelivery ? (
-                      <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} />
+                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                  {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
+                      <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.dropOffDate)} />
                   ) : (
                       <TimeSlotPicker label={labels.time1} value={bookingData.dropOffTimeSlot} onValueChange={v => setBookingData(p => ({
                         ...p,
@@ -1268,9 +1265,9 @@ export const BookingForm = ({
                   )}
                   
                   {currentPlan?.id !== 3 && <>
-                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} />
-                          {currentPlan?.id === 2 && !isDelivery ? (
-                              <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} />
+                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                          {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
+                              <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.pickupDate)} />
                           ) : (
                               <TimeSlotPicker label={labels.time2} value={bookingData.pickupTimeSlot} onValueChange={v => setBookingData(p => ({
                                 ...p,
@@ -1283,6 +1280,11 @@ export const BookingForm = ({
               <Button type="submit" disabled={!isFormValid} className="w-full py-4 text-lg font-semibold bg-gradient-to-r from-green-500 to-emerald-600 text-white disabled:opacity-50 mt-6 shadow-lg shadow-green-900/50 hover:from-green-400 hover:to-emerald-500 transition-all">
                 Choose Add-ons <ArrowRight className="ml-2" />
               </Button>
+              <UiControlGuide
+                stepTitle="Booking Details"
+                entries={getBookingGuideEntries('details', { planId: plan?.id, isDelivery })}
+                className="mt-3 flex justify-end"
+              />
             </motion.div>
           </form>
         </div>
@@ -1295,6 +1297,7 @@ export const BookingForm = ({
       isOpen={isReturningCustomerModalOpen}
       onClose={() => setIsReturningCustomerModalOpen(false)}
       onReorderSelect={handleReorderSelect}
+      onCustomerVerified={handleCustomerVerified}
     />
   </>;
 };
@@ -1313,12 +1316,23 @@ const DatePickerField = ({
   date,
   setDate,
   disabledDates,
-  onMonthChange
+  onMonthChange,
+  showNextMonthHint = false
 }) => <div className="md:col-span-1">
     <label className="text-sm font-medium text-white mb-2 block">{label}</label>
     <Popover>
       <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4" />{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger>
-      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={setDate} disabled={disabledDates} initialFocus onMonthChange={onMonthChange} /></PopoverContent>
+      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white">
+        <Calendar
+          mode="single"
+          selected={date}
+          onSelect={setDate}
+          disabled={disabledDates}
+          initialFocus
+          onMonthChange={onMonthChange}
+          components={showNextMonthHint ? { Footer: CalendarNextMonthHint } : undefined}
+        />
+      </PopoverContent>
     </Popover>
   </div>;
 
@@ -1339,7 +1353,7 @@ const TimeSlotPicker = ({
     </Select>
   </div>;
 
-const ReadOnlyTimeField = ({ label, value, loading }) => {
+const ReadOnlyTimeField = ({ label, value, loading, hasDate }) => {
   const formatTimeToAmPm = (timeStr) => {
     if (!timeStr || timeStr === 'Not available') return timeStr;
     try {
@@ -1350,16 +1364,24 @@ const ReadOnlyTimeField = ({ label, value, loading }) => {
     }
   };
 
-  const displayValue = loading ? 'Loading...' : (value ? formatTimeToAmPm(value) : 'Pending...');
+  const displayValue = !hasDate
+    ? 'Choose date to see times'
+    : (loading ? 'Loading...' : (value ? formatTimeToAmPm(value) : 'Pending...'));
+  const isUnavailable = value === 'Not available';
+  const showLoading = hasDate && loading;
+  const iconClassName = isUnavailable ? 'text-red-400' : (hasDate ? 'text-gray-500' : 'text-gray-400');
+  const textClassName = isUnavailable
+    ? 'text-red-400 font-semibold'
+    : (!hasDate ? 'text-gray-400' : 'text-gray-300');
       
   return (
       <div className="md:col-span-1">
           <label className="text-sm font-medium text-white mb-2 block">{label}</label>
-          <div className={`w-full bg-black/40 border border-white/20 rounded-md px-3 py-2 flex items-center cursor-not-allowed text-sm h-10 ${value === 'Not available' ? 'text-red-400 font-semibold' : 'text-gray-300'}`}>
-              {loading ? (
+          <div className={`w-full bg-black/40 border border-white/20 rounded-md px-3 py-2 flex items-center cursor-not-allowed text-sm h-10 ${textClassName}`}>
+              {showLoading ? (
                  <><Loader2 className="mr-2 h-4 w-4 animate-spin text-gray-500" /> Loading...</>
               ) : (
-                 <><Clock className={`mr-2 h-4 w-4 ${value === 'Not available' ? 'text-red-400' : 'text-gray-500'}`} /> {displayValue}</>
+                 <><Clock className={`mr-2 h-4 w-4 ${iconClassName}`} /> {displayValue}</>
               )}
           </div>
       </div>

@@ -16,9 +16,15 @@ export const getBusinessAddress = async () => {
             .single();
 
         if (!error && data && data.setting_value) {
-            if (typeof data.setting_value === 'object' && data.setting_value.address) {
-                console.log("[DistanceHelper] Fetched business address from DB object:", data.setting_value.address);
-                return data.setting_value.address;
+            if (typeof data.setting_value === 'object') {
+                const addr =
+                    data.setting_value.fullAddress ??
+                    data.setting_value.address ??
+                    null;
+                if (addr) {
+                    console.log("[DistanceHelper] Fetched business address from DB:", addr);
+                    return addr;
+                }
             } else if (typeof data.setting_value === 'string') {
                 console.log("[DistanceHelper] Fetched business address from DB string:", data.setting_value);
                 return data.setting_value;

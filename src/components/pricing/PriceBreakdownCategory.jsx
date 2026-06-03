@@ -15,41 +15,11 @@ export const PriceBreakdownCategory = ({
   infoTitle = '',
   infoDescription = '',
   showSeparator = true,
-  className = '',
-  serviceName = '' // New prop for service-aware text
+  className = ''
 }) => {
   const [showInfoDialog, setShowInfoDialog] = useState(false);
 
   if (!items || items.length === 0) return null;
-
-  // Service-specific logic for Protection Options dialog text
-  const getProtectionOptionsText = () => {
-    // Only apply custom text if this is the Protection Options category
-    const isProtectionOptions = title?.toLowerCase().includes('protection') && 
-                                title?.toLowerCase().includes('options');
-    
-    if (!isProtectionOptions || !infoDescription) {
-      return infoDescription;
-    }
-
-    // Check if service is a dump loader service (but NOT 16 Yard Dumpster Rental)
-    const isDumpLoaderService = serviceName && 
-                                (serviceName.toLowerCase().includes('dump loader') ||
-                                 serviceName.toLowerCase().includes('dump trailer') ||
-                                 serviceName.toLowerCase().includes('loader trailer')) &&
-                                !serviceName.toLowerCase().includes('16 yard') &&
-                                !serviceName.toLowerCase().includes('dumpster');
-
-    // Return service-specific text for dump loader services
-    if (isDumpLoaderService) {
-      return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";
-    }
-
-    // Return original text for all other services
-    return infoDescription;
-  };
-
-  const displayDescription = getProtectionOptionsText();
 
   return (
     <>
@@ -100,8 +70,8 @@ export const PriceBreakdownCategory = ({
                 {infoTitle || title}
               </DialogTitle>
             </DialogHeader>
-            <DialogDescription className="text-blue-100 space-y-2">
-              {displayDescription}
+            <DialogDescription className="text-blue-100 space-y-2 whitespace-pre-line">
+              {infoDescription}
             </DialogDescription>
             <DialogFooter>
               <Button onClick={() => setShowInfoDialog(false)} className="bg-yellow-500 hover:bg-yellow-600 text-black">

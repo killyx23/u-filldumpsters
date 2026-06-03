@@ -28,14 +28,22 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
             border: 'from-blue-400 to-indigo-500',
             highlightBg: 'from-blue-400 to-indigo-500',
         },
+        5: {
+            bg: 'bg-gradient-to-br from-emerald-400/10 via-blue-900 to-indigo-900',
+            title: 'text-emerald-300',
+            button: 'bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 text-white',
+            border: 'from-emerald-400 to-teal-500',
+            highlightBg: 'from-emerald-400 to-teal-500',
+        },
     };
 
     const currentStyle = cardStyles[plan?.id] || cardStyles[3];
 
-    // Safely extract properties to prevent React "Objects are not valid as a React child" errors
-    const displayDescription = plan?.homepage_description || plan?.description || '';
-    const displayPrice = plan?.base_price || 0;
-    const displayPriceUnit = plan?.price_unit || '';
+    const displayDescription =
+        plan?.displayDescription || plan?.homepage_description || plan?.description || '';
+    const displayPrice = plan?.displayPrice ?? plan?.homepage_price ?? plan?.base_price ?? 0;
+    const displayPriceUnit =
+        plan?.displayPriceUnit || plan?.homepage_price_unit || plan?.price_unit || '';
     const planName = plan?.name || 'Service Plan';
 
     const features = plan?.features ? (typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features) : [];
@@ -46,7 +54,7 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: plan?.highlight?.delay || 0 }}
             className={cn(
-                "relative h-full pt-8 group transition-all duration-300",
+                "relative h-full w-full pt-8 group transition-all duration-300",
                 isTemporarilyUnavailable ? "opacity-80 grayscale-[30%]" : ""
             )}
         >
@@ -62,12 +70,14 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     </div>
                 </div>
             )}
-            <div className={cn(
-                "relative p-0.5 overflow-hidden rounded-2xl h-full shadow-2xl transition-all duration-300",
+            <div
+                data-service-id={plan?.id}
+                className={cn(
+                "relative p-0.5 overflow-hidden rounded-2xl h-full w-full shadow-2xl transition-all duration-300",
                 "bg-gradient-to-r", currentStyle.border
             )}>
                 <div className={cn(
-                    "relative z-10 backdrop-blur-xl rounded-[15px] p-6 flex flex-col h-full",
+                    "relative z-10 backdrop-blur-xl rounded-[15px] p-5 xl:p-6 flex flex-col h-full w-full",
                     currentStyle.bg
                 )}>
                     
@@ -78,12 +88,12 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     )}
 
                     <div className="flex-grow pt-8">
-                        <h3 className={cn("text-3xl font-bold mb-3 text-center", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
-                        <p className="text-white/80 mb-6 h-24 text-[15px] leading-relaxed text-center" >
+                        <h3 className={cn("text-2xl xl:text-3xl font-bold mb-3 text-center leading-tight", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
+                        <p className="text-white/80 mb-6 min-h-[5.5rem] text-sm xl:text-[15px] leading-relaxed text-center" >
                             {typeof displayDescription === 'string' ? displayDescription : 'Description unavailable'}
                         </p>
                         <div className="mb-6 text-center">
-                            <span className="text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>
+                            <span className="text-4xl xl:text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>
                             <span className="text-gray-300 ml-2 text-sm" >{typeof displayPriceUnit === 'string' ? displayPriceUnit : ''}</span>
                         </div>
                         <ul className="space-y-3 text-white/90 mb-8">

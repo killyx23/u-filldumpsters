@@ -26,12 +26,21 @@ sleep 2  # let the link settle
 # Database schema dump
 # ---------------------------------------------------------------------------
 echo "🗄 Dumping latest database schema..."
-for attempt in 1 2 3; do
+DB_DUMP_OK=false
+for attempt in 1 2 3 4 5 ; do
   npx supabase db dump --linked > "$DB_BACKUP_DIR/schema_$DATE.sql" && break
   echo "⚠ Dump attempt $attempt failed, retrying..."
   sleep 3
 done
 
+
+# Remove the file if it ended up empty (dump succeeded but returned nothing)
+if [ ! -s "$DB_BACKUP_DIR/schema_$DATE.sql" ]; then
+  echo "❌ Database dump produced an empty file. Cleaning up and aborting."
+  rm -f "$DB_BACKUP_DIR/schema_$DATE.sql"
+  exit 1
+fi
+echo "✅ Database schema saved."
 
 # ---------------------------------------------------------------------------
 # Edge Functions — download in parallel
@@ -78,7 +87,6 @@ echo "🔁 Checking for missing downloads and retrying serially if needed..."
 RETRY_LIST=()
 while read -r fn; do
   [ -z "$fn" ] && continue
-  # Check if the function subdir exists and is non-empty
   if [ ! -d "$DOWNLOAD_WORKDIR/$fn" ] || [ -z "$(ls -A "$DOWNLOAD_WORKDIR/$fn" 2>/dev/null)" ]; then
     RETRY_LIST+=("$fn")
   fi
@@ -93,7 +101,9 @@ else
   echo "   All functions downloaded on first pass."
 fi
 
+# ---------------------------------------------------------------------------
 # Fix ownership before flatten — Supabase CLI downloads via Docker as root
+# ---------------------------------------------------------------------------
 echo "🔧 Fixing file ownership..."
 sudo chown -R "$USER:$USER" "$DOWNLOAD_WORKDIR"
 
@@ -108,7 +118,6 @@ FAILED_DOWNLOADS=()
 while read -r fn; do
   [ -z "$fn" ] && continue
   COPIED=false
-  # Walk from most-nested to least-nested; stop at the first path that exists
   for nested in \
     "$DOWNLOAD_WORKDIR/$fn/supabase/functions" \
     "$DOWNLOAD_WORKDIR/$fn/functions"; do
@@ -142,15 +151,13 @@ fi
 echo "🧩 Consolidating all Edge Functions into a single file..."
 ALL_FUNCTIONS_FILE="$BACKUP_DIR/all_edge_functions_$DATE.ts"
 
-# Write header
 echo "// Consolidated Edge Functions Backup" > "$ALL_FUNCTIONS_FILE"
 echo "// Each function/shared module is separated by headers for clarity" >> "$ALL_FUNCTIONS_FILE"
 
-# Helper: append all .ts/.js/.json files under a given directory
 append_dir_files() {
-  local base_dir="$1"   # root dir to search under
-  local label="$2"      # label prefix for the file header
-  local out="$3"        # output file
+  local base_dir="$1"
+  local label="$2"
+  local out="$3"
 
   mapfile -d '' files < <(find "$base_dir" -type f \( -name "*.ts" -o -name "*.js" -o -name "*.json" \) -print0 | sort -z)
 

@@ -1,19 +1,48 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
+import { getCorsHeaders } from "./cors.ts";
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const authHeader = req.headers.get('Authorization');
+
+    if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+      return new Response(JSON.stringify({ error: 'Supabase configuration missing' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Authentication required' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '').trim();
+    const authClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: userData, error: userError } = await authClient.auth.getUser();
+    if (userError || !userData?.user) {
+      return new Response(JSON.stringify({ error: 'Invalid session' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      supabaseUrl,
+      serviceRoleKey
     );
 
     const { action, customerId, points, bookingId, notes } = await req.json();
@@ -34,81 +63,10 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'award') {
-      const pointsToAward = Number(points);
-      const parsedBookingId = bookingId ? Number(bookingId) : null;
-
-      if (!pointsToAward || pointsToAward <= 0) {
-        return new Response(JSON.stringify({ error: 'Invalid points amount' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (parsedBookingId) {
-        const { data: existing } = await supabase
-          .from('loyalty_transactions')
-          .select('id')
-          .eq('booking_id', parsedBookingId)
-          .eq('transaction_type', 'earned')
-          .maybeSingle();
-
-        if (existing) {
-          return new Response(
-            JSON.stringify({ success: true, alreadyAwarded: true }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-      }
-
-      const { data: existingRecord } = await supabase
-        .from('loyalty_points')
-        .select('id, points_balance, total_points_earned')
-        .eq('customer_id', parsedCustomerId)
-        .maybeSingle();
-
-      let result;
-      if (existingRecord) {
-        const { data, error } = await supabase
-          .from('loyalty_points')
-          .update({
-            points_balance: existingRecord.points_balance + pointsToAward,
-            total_points_earned: existingRecord.total_points_earned + pointsToAward,
-            last_updated: new Date().toISOString(),
-          })
-          .eq('customer_id', parsedCustomerId)
-          .select()
-          .single();
-        if (error) throw error;
-        result = data;
-      } else {
-        const { data, error } = await supabase
-          .from('loyalty_points')
-          .insert({
-            customer_id: parsedCustomerId,
-            points_balance: pointsToAward,
-            total_points_earned: pointsToAward,
-            total_points_redeemed: 0,
-          })
-          .select()
-          .single();
-        if (error) throw error;
-        result = data;
-      }
-
-      const { error: txError } = await supabase.from('loyalty_transactions').insert({
-        customer_id: parsedCustomerId,
-        transaction_type: 'earned',
-        points_amount: pointsToAward,
-        booking_id: parsedBookingId,
-        notes: notes ?? null,
+      return new Response(JSON.stringify({ error: 'Award action is server-only' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
-
-      if (txError) throw txError;
-
-      return new Response(
-        JSON.stringify({ success: true, newBalance: result.points_balance }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
     }
 
     if (action === 'redeem') {
@@ -122,48 +80,47 @@ Deno.serve(async (req) => {
         });
       }
 
-      const { data: loyaltyRecord, error: fetchError } = await supabase
-        .from('loyalty_points')
-        .select('points_balance, total_points_redeemed')
-        .eq('customer_id', parsedCustomerId)
-        .single();
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('user_id', userData.user.id)
+        .maybeSingle();
 
-      if (fetchError || !loyaltyRecord) {
-        return new Response(JSON.stringify({ error: 'No loyalty account found' }), {
-          status: 404,
+      if (customerError || !customerData?.id) {
+        return new Response(JSON.stringify({ error: 'Customer account not linked' }), {
+          status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      if (loyaltyRecord.points_balance < pointsToRedeem) {
-        return new Response(JSON.stringify({ error: 'Insufficient points' }), {
-          status: 400,
+      if (customerData.id !== parsedCustomerId) {
+        return new Response(JSON.stringify({ error: 'Cannot redeem points for another account' }), {
+          status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const { data, error } = await supabase
-        .from('loyalty_points')
-        .update({
-          points_balance: loyaltyRecord.points_balance - pointsToRedeem,
-          total_points_redeemed: loyaltyRecord.total_points_redeemed + pointsToRedeem,
-          last_updated: new Date().toISOString(),
-        })
-        .eq('customer_id', parsedCustomerId)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const { error: txError } = await supabase.from('loyalty_transactions').insert({
-        customer_id: parsedCustomerId,
-        transaction_type: 'redeemed',
-        points_amount: pointsToRedeem,
-        booking_id: parsedBookingId,
-        notes: notes ?? null,
+      const { data: rpcData, error: rpcError } = await supabase.rpc('adjust_loyalty_points', {
+        p_customer_id: parsedCustomerId,
+        p_points: pointsToRedeem,
+        p_transaction_type: 'redeemed',
+        p_booking_id: parsedBookingId,
+        p_referral_id: null,
+        p_notes: notes ?? null,
       });
 
-      if (txError) throw txError;
+      if (rpcError) {
+        const message = rpcError.message?.toLowerCase().includes('insufficient')
+          ? 'Insufficient points'
+          : 'Unable to redeem points';
+        return new Response(JSON.stringify({ error: message }), {
+          status: message === 'Insufficient points' ? 400 : 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const result = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      const newBalance = Number(result?.new_balance ?? 0);
 
       const { data: settings } = await supabase
         .from('loyalty_settings')
@@ -174,7 +131,7 @@ Deno.serve(async (req) => {
       const discountAmount = Number((pointsToRedeem / pointsToDollar).toFixed(2));
 
       return new Response(
-        JSON.stringify({ success: true, newBalance: data.points_balance, discountAmount }),
+        JSON.stringify({ success: true, newBalance, discountAmount }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

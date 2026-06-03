@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, FileText, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { buildTermsSections } from '@/components/terms/buildTermsSections';
 const TermSection = ({
   id,
   title,
@@ -54,6 +58,7 @@ export const TermsAndConditionsStep = ({
   onAccept,
   onBack
 }) => {
+  const { fee } = useChargesAndFees();
   const [expandedSection, setExpandedSection] = useState(null);
   const [agreements, setAgreements] = useState({
     email: false,
@@ -72,50 +77,7 @@ export const TermsAndConditionsStep = ({
   const handleToggleExpand = id => {
     setExpandedSection(expandedSection === id ? null : id);
   };
-  const termsData = [{
-    id: 'email',
-    title: 'Email Verification & Communication',
-    summary: 'Consent to email communication and verification requirements.',
-    content: <>
-          <p>I understand that I must verify my email address to complete this booking. All order confirmations, receipts, and critical updates will be sent to this email.</p>
-          <p>U-Fill Dumpsters LLC may use this email to communicate regarding scheduling, delays, or issues with the rental. Your contact information will not be sold to third parties.</p>
-        </>
-  }, {
-    id: 'liability',
-    title: 'Liability & Damage Responsibility',
-    summary: 'Responsibility for equipment and property damage during rental.',
-    content: <>
-          <p>Customer assumes all risk of loss, theft, damage, or injury associated with the Equipment during the Rental Period, except to the extent caused by Company's gross negligence or willful misconduct.</p>
-          <p>Customer is responsible for repair or replacement costs for any damage to Equipment beyond normal wear and tear. U-Fill Dumpsters is not liable for damage to driveways, lawns, or property resulting from standard delivery (if applicable) and usage of the equipment, unless Driveway Protection or Hardware Protection was explicitly purchased and utilized, where applicable.</p>
-        </>
-  }, {
-    id: 'general',
-    title: 'General Terms & Cancellation Policy',
-    summary: 'Cancellation fees, refunds, and general rental conditions.',
-    content: <>
-          <p><strong>Cancellations more than 24 hours before scheduled delivery:</strong> 10% cancellation fee of the order total retained; balance refunded.</p>
-          <p><strong>Cancellations 24 hours or less before scheduled delivery:</strong> Up to 50% of the order total charged, plus a 10% cancellation fee of the order total retained.</p>
-          <p>No-shows or refusal of equipment at delivery may result in full rental charges. Refunds are processed within one to two business days and should reflect in accounts within 5–10 business days. But, except in some rare cases, it can be up to 30 days from the date canceled.</p>
-        </>
-  }, {
-    id: 'payment',
-    title: 'Payment Terms & Pricing',
-    summary: 'Overweight fees, disposal charges, and payment authorization.',
-    content: <>
-          <p>Full payment, including taxes and applicable add-ons, is due at booking to secure the reservation. If Dumpster Delivery Rental is chosen, than the  following statement is applicable:</p>
-          <p>Base rental price includes delivery and pickup. <strong>Disposal is billed separately at $45.00 per ton</strong> based on actual post-disposal scale weight.</p>
-          <p>Customer authorizes U-Fill Dumpsters LLC to charge the payment method on file for all disposal charges, overweight fees ($100 per ton over limit), damages, fines, and dry run fees (50% of service cost).</p>
-        </>
-  }, {
-    id: 'equipment',
-    title: 'Equipment Care & Usage',
-    summary: 'Prohibited materials, loading rules, and weight limits.',
-    content: <>
-          <p><strong>Weight Limits:</strong> Dumpsters (2.5 tons), Trailers (5 tons). Do not exceed the marked Fill Line. Dirt/soil loads must not exceed halfway up trailer walls.</p>
-          <p><strong>Prohibited Materials:</strong> Hazardous materials, paints, solvents, chemicals, asbestos, oils, liquids, medical waste, explosives, tires (unless approved), batteries, refrigerators with Freon, and contaminated soils are strictly prohibited.</p>
-          <p>Discovery of prohibited items will result in immediate termination of the rental and remediation at the Customer's full expense. Costs for the proper disposal of hazardous materials and any damage to the equipment will be assessed. Additionally, daily rental fees will continue to be charged until the equipment is returned to service and, if necessary, cleared by the proper authorities.</p>
-        </>
-  }];
+  const termsData = useMemo(() => buildTermsSections(fee), [fee]);
   return <motion.div initial={{
     opacity: 0,
     y: 50
@@ -155,6 +117,11 @@ export const TermsAndConditionsStep = ({
                     Accept All & Continue
                 </Button>
             </div>
+            <UiControlGuide
+                stepTitle="Terms & Conditions"
+                entries={getBookingGuideEntries('terms')}
+                className="mt-3 flex justify-end"
+            />
         </div>
     </motion.div>;
 };

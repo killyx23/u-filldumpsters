@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
+import { Link } from 'react-router-dom';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink } from 'lucide-react';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -52,7 +54,7 @@ const DistanceWarning = ({ booking }) => {
     );
 };
 
-export const CompletedBookings = ({ bookings, equipment }) => {
+export const CompletedBookings = ({ bookings, equipment, customerId }) => {
     if (!bookings || bookings.length === 0) return null;
 
     return (
@@ -63,18 +65,32 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                  const returnIssues = booking.return_issues || {};
                  const fees = booking.fees || {};
                  const refundDetails = booking.refund_details || null;
+                 const archiveDetails = booking.archive_details || null;
+                 const initiatedByLabel = getInitiatedByLabel(archiveDetails);
+                 const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                 const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
+                 const referralDollarsActivated = Number(booking.addons?.referralDollarsActivated || 0);
+                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
 
                  const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
-                 const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
+                 const stripeChargeId = archiveDetails?.stripe_charge_id || paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
+                 const rescheduledToId = booking.rescheduled_to_booking_id || archiveDetails?.rescheduled_to_booking_id;
 
                  return (
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <h4 className="text-xl font-bold text-white">{booking.plan.name}</h4>
+                                <h4 className="text-xl font-bold text-white">{booking.plan?.name || 'N/A'}</h4>
                                 <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
+                                <p className="text-sm text-gray-400 mt-1">Booking #{booking.id}</p>
                             </div>
-                            <StatusBadge status={booking.status} />
+                            <div className="text-right space-y-1">
+                                {booking.status === 'Rescheduled' ? (
+                                    <span className="text-xs font-bold px-2 py-1 rounded-full inline-block bg-blue-500/20 text-blue-300">Rescheduled</span>
+                                ) : (
+                                    <StatusBadge status={booking.status} />
+                                )}
+                            </div>
                         </div>
                         
                         <DistanceWarning booking={booking} />
@@ -89,12 +105,67 @@ export const CompletedBookings = ({ bookings, equipment }) => {
                              {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
                         </div>
 
+                        <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-3 text-xs text-gray-200">
+                            <p className="text-yellow-300 font-semibold mb-1">Rewards summary</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
+                                <p>Referral activated: <span className="font-semibold text-green-300">${referralDollarsActivated.toFixed(2)}</span></p>
+                                <p>Referral redeemed: <span className="font-semibold text-blue-300">${referralDollarsRedeemed.toFixed(2)}</span></p>
+                            </div>
+                        </div>
+
                         {relevantEquipment.length > 0 && (
                             <div className="mt-4">
                                 <p className="font-semibold text-blue-100">Equipment Included:</p>
                                 <ul className="list-disc list-inside text-white pl-4">
                                     {relevantEquipment.map(e => <li key={e.id}>{e.equipment.name} (x{e.quantity})</li>)}
                                 </ul>
+                            </div>
+                        )}
+
+                        {archiveDetails && (
+                            <div className="mt-4 border-t border-blue-400/50 pt-4 space-y-2">
+                                <h5 className="font-bold text-blue-300 flex items-center">
+                                    {archiveDetails.action === 'rescheduled' ? (
+                                        <Calendar className="mr-2 h-5 w-5" />
+                                    ) : (
+                                        <XCircle className="mr-2 h-5 w-5" />
+                                    )}
+                                    {archiveDetails.action === 'rescheduled' ? 'Reschedule Details' : 'Cancellation Details'}
+                                </h5>
+                                {initiatedByLabel && (
+                                    <p className="text-blue-200 font-semibold">{initiatedByLabel}</p>
+                                )}
+                                {archiveDetails.action_at && (
+                                    <p className="text-blue-200">
+                                        <strong>{archiveDetails.action === 'rescheduled' ? 'Rescheduled' : 'Cancelled'} on:</strong>{' '}
+                                        {format(parseISO(archiveDetails.action_at), 'Pp')}
+                                    </p>
+                                )}
+                                {archiveDetails.original_created_at && (
+                                    <p className="text-blue-200">
+                                        <strong>Originally booked:</strong>{' '}
+                                        {format(parseISO(archiveDetails.original_created_at), 'Pp')}
+                                    </p>
+                                )}
+                                {archiveDetails.original_total_price != null && (
+                                    <p className="text-blue-200">
+                                        <strong>Original total:</strong> ${Number(archiveDetails.original_total_price).toFixed(2)}
+                                    </p>
+                                )}
+                                {archiveDetails.notes && (
+                                    <p className="text-blue-200"><strong>Notes:</strong> {archiveDetails.notes}</p>
+                                )}
+                                {rescheduledToId && customerId && (
+                                    <Link
+                                        to={`/admin/customers/${customerId}?tab=history`}
+                                        className="inline-flex items-center text-yellow-400 hover:text-yellow-300 font-semibold mt-2"
+                                    >
+                                        <ExternalLink className="mr-1 h-4 w-4" />
+                                        View new booking #{rescheduledToId}
+                                    </Link>
+                                )}
                             </div>
                         )}
 

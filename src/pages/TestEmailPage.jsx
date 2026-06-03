@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Mail, CheckCircle, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 const TestEmailPage = () => {
   const [email, setEmail] = useState('');
@@ -61,7 +62,7 @@ const TestEmailPage = () => {
       });
 
       if (error) {
-        addLog(`Supabase invoke error: ${error.message}`, 'error');
+        addLog(`Supabase invoke error: ${await parseEdgeFunctionError(error, data)}`, 'error');
       } else if (data && data.success) {
         addLog(`Code verified successfully! Response: ${JSON.stringify(data)}`, 'success');
       } else {

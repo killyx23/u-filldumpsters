@@ -1,13 +1,13 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
-import { formatBookingTime } from "../_shared/formatBookingTime.ts";
+import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
+import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
-const SITE_URL = Deno.env.get("SITE_URL") || "https://u-filldumpsters.com";
 const formatCurrency = (amount)=>{
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -45,11 +45,62 @@ const resolveEquipmentLabel = (item: { id?: string | number; dbId?: number; labe
   if (byDb) return byDb;
   return "Equipment";
 };
-const isTrailerSelfService = (booking: { plan?: { id?: number; service_type?: string }; addons?: { isDelivery?: boolean; deliveryService?: boolean } }) => {
+/** Dump Loader customer pickup (plan 2, no delivery) — matches src/utils/customerPickupService.js */
+const CUSTOMER_PICKUP_PLAN_IDS = [2];
+
+const parseJsonField = (value: unknown) => {
+  if (value == null) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value as Record<string, unknown>;
+  return {};
+};
+
+const normalizeBookingJsonFields = (booking: { plan?: unknown; addons?: unknown }) => {
+  booking.plan = parseJsonField(booking.plan);
+  booking.addons = parseJsonField(booking.addons);
+  return booking;
+};
+
+const isTrailerSelfService = (booking: {
+  plan?: { id?: number; service_type?: string };
+  addons?: { isDelivery?: boolean; deliveryService?: boolean };
+  delivery_type?: string | null;
+}) => {
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const isDelivery = addons.isDelivery || addons.deliveryService;
-  return Number(plan.id) === 2 && plan.service_type === "hourly" && !isDelivery;
+  if (isDelivery) return false;
+  if (booking.delivery_type === "self_service_trailer" || booking.delivery_type === "self_pickup") {
+    return true;
+  }
+  return CUSTOMER_PICKUP_PLAN_IDS.includes(Number(plan.id));
+};
+
+/** Merge service row into booking.plan when JSON snapshot is missing fields. */
+const hydrateBookingPlanFromService = async (supabase, booking) => {
+  const planId = booking.plan?.id ?? booking.plan?.service_id;
+  if (!planId) return booking;
+  const { data: service } = await supabase
+    .from("services")
+    .select("id, name, description, service_type, base_price")
+    .eq("id", planId)
+    .maybeSingle();
+  if (!service) return booking;
+  booking.plan = {
+    ...booking.plan,
+    id: booking.plan?.id ?? service.id,
+    name: booking.plan?.name ?? service.name,
+    description: booking.plan?.description ?? service.description,
+    service_type: booking.plan?.service_type ?? service.service_type,
+    base_price: booking.plan?.base_price ?? service.base_price,
+  };
+  return booking;
 };
 const INSURANCE_SERVICE_ID = 7;
 const DEFAULT_INSURANCE_PRICE = 25;
@@ -67,6 +118,11 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const tax = Number(booking.tax_amount ?? 0);
   const total = resolveBookingGrandTotal(booking);
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
+  const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
+  const couponDiscountAmount = Number(addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0);
+  const couponCode = addons?.coupon?.code || null;
+  const totalRewardsDiscount = Math.max(0, loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount);
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
   let rows = "";
   if (snapshot.length > 0) {
@@ -126,6 +182,29 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
       }
     }
   }
+  if (couponDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Coupon Discount${couponCode ? ` (${couponCode})` : ""}</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(couponDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (loyaltyDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Loyalty Points Discount (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(loyaltyDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (referralDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Referral Wallet Discount</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(referralDiscountAmount)}</td>
+    </tr>`;
+  }
+  const thankYouRewardsHTML = totalRewardsDiscount > 0 ? `
+    <div style="margin-top: 12px; padding: 10px 12px; background: #ecfdf5; border: 1px solid #86efac; border-radius: 8px; color: #065f46; font-size: 13px;">
+      Thank you for your loyalty and continued business. Your rewards discount has been applied to this booking.
+    </div>
+  ` : "";
   return `
       <div style="margin-top: 25px;">
         <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Price Summary</h2>
@@ -144,20 +223,20 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
             <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(total)}</td>
           </tr>
         </table>
+        ${thankYouRewardsHTML}
       </div>`;
 };
-const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
+const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
   const grandTotal = resolveBookingGrandTotal(booking);
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
   const customerIdText = booking.customers?.customer_id_text || 'N/A';
   const phone = booking.customers?.phone || booking.phone || 'N/A';
-  console.log(` site url: ${SITE_URL}`);
-  const portalUrl = `${SITE_URL}/login?phone=${encodeURIComponent(phone)}&portal_number=${encodeURIComponent(customerIdText)}`;
+  console.log(` site url: ${siteUrl}`);
+  const portalUrl = `${siteUrl}/login?phone=${encodeURIComponent(phone)}&portal_number=${encodeURIComponent(customerIdText)}`;
   console.log(`portal URL: ${portalUrl}`);
   const serviceName = serviceDetails?.name || plan.name || "N/A";
-  const serviceDescription = serviceDetails?.description || "";
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
   let equipmentHTML = "";
   if (addons.equipment && addons.equipment.length > 0) {
@@ -181,14 +260,37 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
   if (addons.drivewayProtection === "accept") {
     addonsHTML += `<li style="padding: 5px 0;">✓ Driveway Protection</li>`;
   }
+  const selfService = isTrailerSelfService(booking);
+  console.log(
+    `[send-booking-confirmation] selfService=${selfService} planId=${plan.id} serviceType=${serviceType} isDelivery=${Boolean(addons.isDelivery || addons.deliveryService)}`,
+  );
+  const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
+  const returnScheduleLabel = selfService ? "Return By:" : "Pickup:";
+  const pickupScheduleValue = selfService
+    ? `${formatDate(booking.drop_off_date)} ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
+    : `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}`;
+  const returnScheduleValue = selfService
+    ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
+    : `${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot)}`;
+
+  const pickupDateFormatted = formatDate(booking.drop_off_date);
+  const pickupStartTimeFormatted = formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false });
+  const returnDateFormatted = formatDate(booking.pickup_date);
+  const returnByTimePlain = formatPlainBookingTime(booking.pickup_time_slot);
+  const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);
+  const referralPendingDollars = Number(addons?.referralDollarsPending || 0);
+
   let nextStepsHTML = "";
-  if (serviceType === 'trailer_rental' || serviceName.toLowerCase().includes('dump loader') || serviceName.toLowerCase().includes('trailer')) {
+  if (selfService) {
     nextStepsHTML = `
-      <li>Pick up the trailer at our location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}.</li>
-      <li>Ensure your towing vehicle meets the minimum requirements (usually a 1/2-ton truck or larger with a 2" ball hitch).</li>
-      <li>Fill the trailer at your convenience during the rental period.</li>
-      <li>Return the trailer by ${formatDate(booking.pickup_date)} at ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}.</li>
-      <li>Make sure the trailer is empty and clean before returning.</li>
+      <li><strong>🔑 Access Codes:</strong> At least 12 hours before your scheduled pickup time, you will receive a text and email with the exact location address and unlock code.</li>
+      <li><strong>🗓️ Pickup:</strong> You can pick up the trailer at our location on the south side of Saratoga Springs on ${pickupDateFormatted} ${pickupStartTimeFormatted}.</li>
+      <li><strong>🛻 Towing Requirements:</strong> Ensure your towing vehicle meets the minimum requirements. Your truck must have a 2-5/16 inch ball hitch.</li>
+      <li><strong>📖 Safety & Operation:</strong> Follow all safety and operating instructions. Detailed operating instructions and videos can be found in the Customer Portal.</li>
+      <li><strong>🪵 Usage:</strong> Fill the trailer at your convenience during your rental period.</li>
+      <li><strong>⏳ Return:</strong> Return the trailer by ${returnDateFormatted} at ${returnByTimePlain}.</li>
+      <li><strong>🔒 Drop-off & Security:</strong> Ensure the trailer is returned to the exact same location and is securely locked.</li>
+      <li><strong>🧹 Cleaning:</strong> Ensure the trailer is empty and clean before returning it to avoid cleaning fees.</li>
      `;
   } else {
     nextStepsHTML = `
@@ -199,6 +301,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
      `;
   }
   return `
+<!-- email-template: self-service-v2 -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -256,16 +359,14 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       <div style="margin-bottom: 25px;">
         <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Service Details</h2>
         <p style="margin: 0 0 10px 0; color: #1e40af; font-weight: bold; font-size: 16px;">${serviceName}</p>
-        ${serviceDescription ? `<p style="margin: 0 0 15px 0; color: #4b5563; font-size: 14px; line-height: 1.5;">${serviceDescription}</p>` : ''}
-        
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
-            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Drop-off:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: false })}</td>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${pickupScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${pickupScheduleValue}</td>
           </tr>
           <tr>
-            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Pickup:</td>
-            <td style="padding: 8px 0; color: #1f2937;">${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot, { isSelfService: isTrailerSelfService(booking), isReturnBy: true })}</td>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${returnScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${returnScheduleValue}</td>
           </tr>
         </table>
       </div>
@@ -282,6 +383,17 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       ` : ""}
 
       ${buildPriceSummaryHTML(booking, insuranceAmount)}
+
+      ${(pointsEarned > 0 || referralPendingDollars > 0) ? `
+      <div style="margin-top: 20px; padding: 14px 16px; background-color: #ecfdf5; border: 1px solid #86efac; border-radius: 8px;">
+        <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.5;">
+          <strong>🎉 Rewards Update:</strong> Thank you for your booking.
+          ${pointsEarned > 0 ? ` You earned <strong>${pointsEarned} loyalty points</strong> from this order.` : ''}
+          ${referralPendingDollars > 0 ? ` You also have <strong>${formatCurrency(referralPendingDollars)}</strong> in pending referral rewards waiting for activation after completion rules are met.` : ''}
+          Visit your Customer Portal anytime to track balances and history.
+        </p>
+      </div>
+      ` : ""}
 
       <!-- Total -->
       <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">
@@ -308,7 +420,8 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0) => {
       <!-- Customer Portal Access -->
       <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
         <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔑 Customer Portal Access</h3>
-        <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal.</p>
+        <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal. (Most all questions and changes can be access through the portal)</p>
+        <p style="margin: 0 0 20px 0; color: #991b1b; font-size: 14px; line-height: 1.6; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 14px;"><strong>⚠️ Privacy Notice:</strong> This portal information is private and personal. Please keep this email secure and do not share your Portal ID, phone number, or access links with anyone. 🔒</p>
         
         <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
           <tr>
@@ -446,6 +559,7 @@ const sendEmailWithRetry = async (toEmail, subject, htmlContent, maxRetries = 2)
   };
 };
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: corsHeaders
@@ -454,8 +568,11 @@ Deno.serve(async (req)=>{
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [send-booking-confirmation] Function entry`);
   try {
-    const { bookingId, email } = await req.json();
-    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}`);
+    const body = await req.json();
+    const bookingId = body.bookingId ?? body.booking_id;
+    const email = body.email;
+    const siteUrl = normalizeSiteUrl(body.site_url);
+    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}`);
     if (!bookingId) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: Missing bookingId`);
       return new Response(JSON.stringify({
@@ -484,12 +601,15 @@ Deno.serve(async (req)=>{
         }
       });
     }
+    normalizeBookingJsonFields(booking);
+    await hydrateBookingPlanFromService(supabase, booking);
+    const serviceId = booking.plan?.id ?? booking.plan?.service_id;
     let serviceDetails = null;
-    if (booking.plan && booking.plan.service_id) {
-      const { data: service } = await supabase.from('services').select('*').eq('id', booking.plan.service_id).single();
+    if (serviceId) {
+      const { data: service } = await supabase.from("services").select("*").eq("id", serviceId).maybeSingle();
       serviceDetails = service;
     }
-    console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully`);
+    console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully planId=${booking.plan?.id} serviceType=${booking.plan?.service_type}`);
     const recipientEmail = email || booking.email;
     if (!recipientEmail) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: No email address available`);
@@ -510,7 +630,7 @@ Deno.serve(async (req)=>{
       insuranceFallbackPrice = Number(insuranceService.base_price);
     }
     const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
-    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount);
+    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
     const subject = `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
     console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail}`);
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { generateTimeSlotOptions } from '@/components/admin/availability/time-helpers';
+import { AVAILABILITY_UI, getServiceAvailabilityUiKind } from '@/utils/availabilityServiceUi';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -43,10 +44,11 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
     const [copiedAll, setCopiedAll] = useState(false);
     
     const timeOptions = {
-        1: generateTimeSlotOptions(120), // Service 1: 2 hours
-        2: generateTimeSlotOptions(60),  // Service 2: 1 hour
-        3: generateTimeSlotOptions(120), // Service 3: 2 hours
-        4: generateTimeSlotOptions(120), // Service 4: 2 hours
+        1: generateTimeSlotOptions(120),
+        2: generateTimeSlotOptions(60),
+        3: generateTimeSlotOptions(120),
+        4: generateTimeSlotOptions(120),
+        5: generateTimeSlotOptions(60),
     };
 
     useEffect(() => {
@@ -201,25 +203,46 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                                     />
                                 </div>
                             </div>
-                            {rule.is_available && (
-                                <div className="space-y-4 pt-3 border-t border-white/10">
-                                    {service.id === 1 || service.id === 4 ? ( 
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
-                                            <TimeRangeSelector label="Delivery (Pickup Window)" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
+                            {rule.is_available && (() => {
+                                const uiKind = getServiceAvailabilityUiKind(service.id);
+                                if (uiKind === AVAILABILITY_UI.NONE) {
+                                    return (
+                                        <p className="text-sm text-gray-400 pt-3 border-t border-white/10">
+                                            No time windows for this add-on service.
+                                        </p>
+                                    );
+                                }
+                                if (uiKind === AVAILABILITY_UI.DELIVERY_WINDOW) {
+                                    return (
+                                        <div className="space-y-4 pt-3 border-t border-white/10">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                                <TimeRangeSelector label="Delivery (Pickup Window)" startValue={rule.delivery_pickup_start_time} endValue={rule.delivery_pickup_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_pickup_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_pickup_end_time', v)} options={options} />
+                                            </div>
                                         </div>
-                                    ) : service.id === 2 ? ( 
-                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <SingleTimeSelector label="Pickup Start Time" value={rule.pickup_start_time} onChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} options={options} />
-                                            <SingleTimeSelector label="Return by Time" value={rule.return_by_time} onChange={v => handleRuleChange(service.id, 'return_by_time', v)} options={options} />
+                                    );
+                                }
+                                if (uiKind === AVAILABILITY_UI.HOURLY_PICKUP) {
+                                    return (
+                                        <div className="space-y-4 pt-3 border-t border-white/10">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <SingleTimeSelector label="Pickup Start Time" value={rule.pickup_start_time} onChange={v => handleRuleChange(service.id, 'pickup_start_time', v)} options={options} />
+                                                <SingleTimeSelector label="Return by Time" value={rule.return_by_time} onChange={v => handleRuleChange(service.id, 'return_by_time', v)} options={options} />
+                                            </div>
                                         </div>
-                                    ) : service.id === 3 ? ( 
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                    );
+                                }
+                                if (uiKind === AVAILABILITY_UI.DELIVERY_ONLY) {
+                                    return (
+                                        <div className="space-y-4 pt-3 border-t border-white/10">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <TimeRangeSelector label="Delivery (Time Window)" startValue={rule.delivery_start_time} endValue={rule.delivery_end_time} onStartChange={v => handleRuleChange(service.id, 'delivery_start_time', v)} onEndChange={v => handleRuleChange(service.id, 'delivery_end_time', v)} options={options} />
+                                            </div>
                                         </div>
-                                    ) : null}
-                                </div>
-                            )}
+                                    );
+                                }
+                                return null;
+                            })()}
                         </div>
                     );
                 }) : !loading && <p>Could not load services. Please try again.</p>}

@@ -1,7 +1,8 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 const SENDGRID_API_KEY = Deno.env.get("SENDGRID_API_KEY") || Deno.env.get("BREVO_API_KEY");
 const FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "support@example.com";
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') return new Response('ok', {
     headers: corsHeaders
   });

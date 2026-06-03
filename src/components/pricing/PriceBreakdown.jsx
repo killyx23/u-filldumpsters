@@ -3,6 +3,7 @@ import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 /**
  * Reusable Price Breakdown Component
@@ -252,7 +253,7 @@ export const PriceBreakdown = ({
           items={protectionItems}
           showInfoButton={true}
           infoTitle="Protection Options"
-          infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
+          infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
         />
 
         {/* 3. Rent Equipment */}

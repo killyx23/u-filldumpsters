@@ -1,4 +1,4 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from 'npm:@supabase/supabase-js@2';
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY"), {
@@ -6,6 +6,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY"), {
 });
 const supabase = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       headers: corsHeaders

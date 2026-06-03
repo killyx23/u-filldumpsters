@@ -6,9 +6,8 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogIn, UserPlus, AlertCircle, Shield } from 'lucide-react';
+import { Loader2, LogIn, AlertCircle, Shield } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/customSupabaseClient';
 
 export const AdminLogin = () => {
   const [email, setEmail] = useState('');
@@ -102,45 +101,6 @@ export const AdminLogin = () => {
     }
   };
 
-  const handleCreateFirstAdmin = async () => {
-    const adminEmail = prompt("Enter email for the first admin user:");
-    if (!adminEmail?.trim()) {
-      toast({
-        variant: "destructive",
-        title: "Cancelled",
-        description: "Admin creation cancelled.",
-      });
-      return;
-    }
-
-    console.log('[AdminLogin] Creating first admin:', adminEmail);
-    setIsSubmitting(true);
-
-    try {
-      const { data, error } = await supabase.functions.invoke('create-first-admin', {
-        body: { email: adminEmail.trim() },
-      });
-
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
-      console.log('[AdminLogin] ✅ Admin user created:', data);
-      toast({
-        title: "Admin Created",
-        description: `Admin user created for ${adminEmail}. Check your email for login credentials.`,
-      });
-    } catch (error) {
-      console.error('[AdminLogin] Admin creation failed:', error);
-      toast({
-        variant: "destructive",
-        title: "Creation Failed",
-        description: error.message || "Could not create admin user.",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const isLoading = isSubmitting || authLoading;
 
   return (
@@ -224,25 +184,6 @@ export const AdminLogin = () => {
             )}
           </Button>
         </form>
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-white/20" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-transparent text-blue-200">First Time Setup</span>
-          </div>
-        </div>
-
-        <Button
-          onClick={handleCreateFirstAdmin}
-          variant="outline"
-          className="w-full bg-transparent border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
-          disabled={isLoading}
-        >
-          <UserPlus className="mr-2 h-4 w-4" />
-          Create First Admin User
-        </Button>
 
         <div className="pt-4 border-t border-white/10">
           <p className="text-xs text-blue-300 text-center">

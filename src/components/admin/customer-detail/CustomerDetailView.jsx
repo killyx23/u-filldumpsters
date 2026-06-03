@@ -16,10 +16,14 @@ import { ComprehensiveHistoryDialog } from './ComprehensiveHistoryDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CustomerVerification } from './CustomerVerification';
 import { CustomerProfileHeader } from './CustomerProfileHeader';
+import { CustomerRewardsOverview } from './CustomerRewardsOverview';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { format, parseISO } from 'date-fns';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
 
 export const CustomerDetailView = () => {
+    const { user } = useAuth();
     const { customerId } = useParams();
     const id = customerId;
     const [searchParams, setSearchParams] = useSearchParams();
@@ -33,6 +37,11 @@ export const CustomerDetailView = () => {
     const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'profile');
     const [hasUnreadNotes, setHasUnreadNotes] = useState(false);
+    const [loyaltySummary, setLoyaltySummary] = useState(null);
+    const [referralWallet, setReferralWallet] = useState(null);
+    const [loyaltyTransactions, setLoyaltyTransactions] = useState([]);
+    const [referralWalletTransactions, setReferralWalletTransactions] = useState([]);
+    const [referrals, setReferrals] = useState([]);
 
     const fetchCustomerDetails = useCallback(async (isInitialLoad = true) => {
         if (!id || id === 'undefined') {
@@ -55,12 +64,45 @@ export const CustomerDetailView = () => {
             const customerPromise = supabase.from('customers').select('*').eq('id', numericId).single();
             const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', numericId).order('created_at', { ascending: false });
             const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', numericId).order('created_at', { ascending: true });
+            const loyaltySummaryPromise = supabase.from('loyalty_points').select('points_balance, total_points_earned, total_points_redeemed').eq('customer_id', numericId).maybeSingle();
+            const referralWalletPromise = supabase.from('customer_referral_wallets').select('pending_balance, available_balance, total_earned, total_redeemed').eq('customer_id', numericId).maybeSingle();
+            const loyaltyTransactionsPromise = supabase.from('loyalty_transactions').select('id, transaction_type, points_amount, booking_id, notes, created_at').eq('customer_id', numericId).order('created_at', { ascending: false }).limit(100);
+            const referralWalletTransactionsPromise = supabase.from('referral_wallet_transactions').select('id, transaction_type, amount, booking_id, referral_id, notes, created_at, pending_balance_after, available_balance_after').eq('customer_id', numericId).order('created_at', { ascending: false }).limit(100);
+            const referralsPromise = supabase
+                .from('referrals')
+                .select('id, referral_code, status, referee_email, referee_customer_id, pending_booking_id, completed_booking_id, created_at, completed_at, referrer_bonus_dollars_awarded')
+                .eq('referrer_customer_id', numericId)
+                .order('created_at', { ascending: false })
+                .limit(100);
 
-            const [{ data: customerData, error: customerError }, { data: bookingsData, error: bookingsError }, { data: notesData, error: notesError }] = await Promise.all([customerPromise, bookingsPromise, notesPromise]);
+            const [
+                { data: customerData, error: customerError },
+                { data: bookingsData, error: bookingsError },
+                { data: notesData, error: notesError },
+                { data: loyaltySummaryData, error: loyaltySummaryError },
+                { data: referralWalletData, error: referralWalletError },
+                { data: loyaltyTransactionsData, error: loyaltyTransactionsError },
+                { data: referralWalletTransactionsData, error: referralWalletTransactionsError },
+                { data: referralsData, error: referralsError },
+            ] = await Promise.all([
+                customerPromise,
+                bookingsPromise,
+                notesPromise,
+                loyaltySummaryPromise,
+                referralWalletPromise,
+                loyaltyTransactionsPromise,
+                referralWalletTransactionsPromise,
+                referralsPromise,
+            ]);
             
             if (customerError) throw new Error(`Customer fetch error: ${customerError.message}`);
             if (bookingsError) throw new Error(`Bookings fetch error: ${bookingsError.message}`);
             if (notesError) throw new Error(`Notes fetch error: ${notesError.message}`);
+            if (loyaltySummaryError) throw new Error(`Loyalty summary fetch error: ${loyaltySummaryError.message}`);
+            if (referralWalletError) throw new Error(`Referral wallet fetch error: ${referralWalletError.message}`);
+            if (loyaltyTransactionsError) throw new Error(`Loyalty transactions fetch error: ${loyaltyTransactionsError.message}`);
+            if (referralWalletTransactionsError) throw new Error(`Referral wallet transactions fetch error: ${referralWalletTransactionsError.message}`);
+            if (referralsError) throw new Error(`Referrals fetch error: ${referralsError.message}`);
 
             let equipmentData = [];
             if (bookingsData && bookingsData.length > 0) {
@@ -78,6 +120,11 @@ export const CustomerDetailView = () => {
             setEquipment(equipmentData || []);
             setNotes(notesData || []);
             setHasUnreadNotes((notesData ?? []).some(n => !n.is_read && n.author_type === 'customer'));
+            setLoyaltySummary(loyaltySummaryData || null);
+            setReferralWallet(referralWalletData || null);
+            setLoyaltyTransactions(loyaltyTransactionsData || []);
+            setReferralWalletTransactions(referralWalletTransactionsData || []);
+            setReferrals(referralsData || []);
 
         } catch(err) {
              toast({ title: "Failed to load customer details", description: err.message, variant: "destructive" });
@@ -86,6 +133,11 @@ export const CustomerDetailView = () => {
              setBookings([]);
              setEquipment([]);
              setNotes([]);
+             setLoyaltySummary(null);
+             setReferralWallet(null);
+             setLoyaltyTransactions([]);
+             setReferralWalletTransactions([]);
+             setReferrals([]);
         } finally {
             if (isInitialLoad) setLoading(false);
         }
@@ -151,14 +203,24 @@ export const CustomerDetailView = () => {
     };
 
 
-    const { activeBookings, completedBookings, verificationBookings, cancelledBookings, pendingAddressBookings } = useMemo(() => {
-        if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], pendingAddressBookings: [] };
+    const { activeBookings, completedBookings, verificationBookings, cancelledBookings, rescheduledBookings, pendingAddressBookings, historyActiveBookings } = useMemo(() => {
+        if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], rescheduledBookings: [], pendingAddressBookings: [], historyActiveBookings: [] };
         const pendingAddr = bookings.filter(b => b.pending_address_verification);
-        const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
+        const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'Rescheduled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
-        const verification = bookings.filter(b => !b.pending_address_verification && (b.status === 'pending_verification' || b.status === 'pending_review' || b.status === 'pending_payment'));
+        const hasPaymentDelta = (b) => {
+            const details = b.payment_delta_details;
+            return details && (Number(details.amount_due) > 0 || details.state === 'pending');
+        };
+        const verification = bookings.filter(b => !b.pending_address_verification && (
+            b.status === 'pending_verification' ||
+            b.status === 'pending_review' ||
+            (b.status === 'pending_payment' && hasPaymentDelta(b))
+        ));
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
-        return { activeBookings: active, completedBookings: completed, verificationBookings: verification, cancelledBookings: cancelled, pendingAddressBookings: pendingAddr };
+        const rescheduled = bookings.filter(b => b.status === 'Rescheduled');
+        const historyActive = bookings.filter(isActiveBookingForHistory);
+        return { activeBookings: active, completedBookings: completed, verificationBookings: verification, cancelledBookings: cancelled, rescheduledBookings: rescheduled, pendingAddressBookings: pendingAddr, historyActiveBookings: historyActive };
     }, [bookings]);
     
     if (loading) {
@@ -213,7 +275,7 @@ export const CustomerDetailView = () => {
                     </TabsTrigger>
                     <TabsTrigger value="verification" className="relative">
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification
-                        {pendingAddressBookings.length > 0 && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
+                        {(pendingAddressBookings.length > 0 || verificationBookings.length > 0) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
                     </TabsTrigger>
                     <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                     <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
@@ -225,6 +287,13 @@ export const CustomerDetailView = () => {
                             setCustomer={setCustomer} 
                             onUpdate={() => fetchCustomerDetails(false)} 
                             onHistoryClick={() => setIsHistoryDialogOpen(true)}
+                        />
+                        <CustomerRewardsOverview
+                            loyaltySummary={loyaltySummary}
+                            referralWallet={referralWallet}
+                            loyaltyTransactions={loyaltyTransactions}
+                            referralWalletTransactions={referralWalletTransactions}
+                            referrals={referrals}
                         />
                     </div>
                 </TabsContent>
@@ -268,8 +337,8 @@ export const CustomerDetailView = () => {
                     </div>
                 </TabsContent>
                 <TabsContent value="history">
-                    <BookingHistory bookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} />
-                    <CompletedBookings bookings={[...completedBookings, ...cancelledBookings]} equipment={equipment} />
+                    <BookingHistory bookings={historyActiveBookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} adminEmail={user?.email} />
+                    <CompletedBookings bookings={[...completedBookings, ...cancelledBookings, ...rescheduledBookings]} equipment={equipment} customerId={customer.id} />
                 </TabsContent>
             </Tabs>
             

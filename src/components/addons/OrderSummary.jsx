@@ -12,6 +12,9 @@ import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCateg
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 export const OrderSummary = ({
     plan,
@@ -35,22 +38,6 @@ export const OrderSummary = ({
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
     const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
-
-    // Detect if this is a dump loader service
-    const isDumpLoaderService = plan?.name && 
-                                (plan.name.toLowerCase().includes('dump loader') ||
-                                 plan.name.toLowerCase().includes('dump trailer') ||
-                                 plan.name.toLowerCase().includes('loader trailer')) &&
-                                !plan.name.toLowerCase().includes('16 yard') &&
-                                !plan.name.toLowerCase().includes('dumpster');
-
-    // Service-specific Protection Options info text
-    const getProtectionOptionsInfoText = () => {
-        if (isDumpLoaderService) {
-            return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";
-        }
-        return "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
-    };
 
     // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {
@@ -142,6 +129,7 @@ export const OrderSummary = ({
             if (data.isValid) {
                 const couponData = {
                     isValid: true,
+                    id: data.id,
                     code: data.code,
                     discountType: data.discountType,
                     discountValue: parseFloat(data.discountValue)
@@ -280,18 +268,19 @@ export const OrderSummary = ({
             ...taxOptions,
         });
 
-        let discount = 0;
+        let couponDiscount = 0;
         const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (appliedCoupon?.isValid) {
             if (appliedCoupon.discountType === 'fixed') {
-                discount = Number(appliedCoupon.discountValue);
+                couponDiscount = Number(appliedCoupon.discountValue);
             } else if (appliedCoupon.discountType === 'percentage') {
-                discount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
             }
         }
 
         const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
-        discount += loyaltyDiscount;
+        const referralDiscount = Number(addons?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             baseRental,
@@ -303,7 +292,9 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
+            couponDiscount,
             loyaltyDiscount,
+            referralDiscount,
             subtotal: taxBreakdown.subtotalBeforeTax,
             taxableSubtotal: taxBreakdown.taxableSubtotal,
             nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
@@ -431,10 +422,24 @@ export const OrderSummary = ({
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({ 
             label: `Coupon (${appliedCoupon.code})`, 
-            amount: -calculatedTotals.discount, 
+            amount: -calculatedTotals.couponDiscount, 
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addons?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true 
         });
     }
@@ -462,8 +467,7 @@ export const OrderSummary = ({
                     items={protectionItems}
                     showInfoButton={true}
                     infoTitle="Protection Options"
-                    infoDescription={getProtectionOptionsInfoText()}
-                    serviceName={plan?.name}
+                    infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
                 />
 
                 {/* 3. Rent Equipment */}
@@ -590,6 +594,11 @@ export const OrderSummary = ({
                     </>
                 )}
             </Button>
+            <UiControlGuide
+                stepTitle="Add-ons"
+                entries={getBookingGuideEntries('addons')}
+                className="mt-3 flex justify-end"
+            />
         </motion.div>
     );
 };

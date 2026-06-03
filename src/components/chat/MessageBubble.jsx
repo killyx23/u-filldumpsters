@@ -5,12 +5,27 @@ import { Check, CheckCircle2, Clock, FileText, AlertCircle } from 'lucide-react'
 export const MessageBubble = ({ message, isCurrentUser, senderName }) => {
     const isTemp = message.id.toString().startsWith('temp_');
     const isError = message.status === 'error';
+    const severity = message.message_severity || message.message_context?.severity || null;
+
+    const severityStyles = {
+        success: 'bg-green-700 text-green-50 border border-green-400/40',
+        warning: 'bg-yellow-700 text-yellow-50 border border-yellow-300/50',
+        urgent: 'bg-red-700 text-red-50 border border-red-300/60',
+        info: 'bg-indigo-700 text-indigo-50 border border-indigo-300/40',
+    };
     
     const bubbleClasses = isCurrentUser
         ? 'bg-blue-600 text-white rounded-br-none'
-        : 'bg-gray-700 text-white rounded-bl-none';
+        : severity && severityStyles[severity]
+            ? `${severityStyles[severity]} rounded-bl-none`
+            : 'bg-gray-700 text-white rounded-bl-none';
         
     const alignClasses = isCurrentUser ? 'items-end' : 'items-start';
+    const absoluteLegacyUrl = typeof message.attachment_url === 'string' && /^https?:\/\//i.test(message.attachment_url)
+        ? message.attachment_url
+        : null;
+    const attachmentHref = message.resolved_attachment_url || absoluteLegacyUrl;
+    const isImageAttachment = message.attachment_name?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
 
     return (
         <div className={`flex flex-col gap-1 w-full my-2 ${alignClasses}`}>
@@ -21,17 +36,29 @@ export const MessageBubble = ({ message, isCurrentUser, senderName }) => {
                 {message.message_content && (
                     <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.message_content}</p>
                 )}
-                {message.attachment_url && (
-                    <a href={message.attachment_url} target="_blank" rel="noopener noreferrer" className="mt-2 block bg-black/20 p-2 rounded-lg flex items-center gap-2 hover:bg-black/40 transition-colors">
-                        {message.attachment_name?.match(/\.(jpg|jpeg|png|gif)$/i) ? (
-                             <img src={message.attachment_url} alt="attachment" className="max-w-[200px] rounded object-cover" />
-                        ) : (
-                            <>
-                                <FileText className="h-4 w-4 text-yellow-400" /> 
-                                <span className="text-xs font-medium truncate max-w-[150px]">{message.attachment_name || 'Attachment'}</span>
-                            </>
-                        )}
-                    </a>
+                {!isCurrentUser && severity && (
+                    <p className="text-[10px] uppercase tracking-wider mt-2 opacity-80 font-semibold">
+                        {severity}
+                    </p>
+                )}
+                {(message.attachment_url || message.attachment_name) && (
+                    attachmentHref ? (
+                        <a href={attachmentHref} target="_blank" rel="noopener noreferrer" className="mt-2 block bg-black/20 p-2 rounded-lg flex items-center gap-2 hover:bg-black/40 transition-colors">
+                            {isImageAttachment ? (
+                                 <img src={attachmentHref} alt="attachment" className="max-w-[200px] rounded object-cover" />
+                            ) : (
+                                <>
+                                    <FileText className="h-4 w-4 text-yellow-400" />
+                                    <span className="text-xs font-medium truncate max-w-[150px]">{message.attachment_name || 'Attachment'}</span>
+                                </>
+                            )}
+                        </a>
+                    ) : (
+                        <div className="mt-2 bg-black/20 p-2 rounded-lg flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-yellow-400" />
+                            <span className="text-xs font-medium truncate max-w-[150px]">{message.attachment_name || 'Attachment unavailable'}</span>
+                        </div>
+                    )
                 )}
                 
                 <div className="flex items-center justify-end gap-1 mt-1 opacity-70">
