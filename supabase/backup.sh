@@ -1,5 +1,10 @@
 #!/bin/bash
 set -e
+
+# Always run from repo root (script may be invoked as ./supabase/backup.sh)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
 # Load environment variables
 source ./supabase/.env
 
@@ -57,14 +62,37 @@ echo "Detected functions:"
 echo "$FUNCTIONS"
 
 # ---------------------------------------------------------------------------
+# Helper: seed isolated --workdir with link metadata (CLI looks for project ref
+# in workdir/supabase/.temp, not only --project-ref when workdir is under backups/)
+# ---------------------------------------------------------------------------
+prepare_fn_workdir() {
+  local workdir="$1"
+  if [[ ! -f "$REPO_ROOT/supabase/.temp/project-ref" ]]; then
+    echo "   ⚠ No linked project in supabase/.temp — link step may have failed"
+    return 1
+  fi
+  mkdir -p "$workdir/supabase"
+  rm -rf "$workdir/supabase/.temp"
+  cp -a "$REPO_ROOT/supabase/.temp" "$workdir/supabase/.temp"
+  cp "$REPO_ROOT/supabase/config.toml" "$workdir/supabase/config.toml"
+}
+
+# ---------------------------------------------------------------------------
 # Helper: download a single function into its own isolated subdir
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 download_fn() {
   local fn="$1"
-  local workdir="$DOWNLOAD_WORKDIR/$fn"
+  local workdir="$REPO_ROOT/$DOWNLOAD_WORKDIR/$fn"
   mkdir -p "$workdir"
-  if npx supabase functions download "$fn" --project-ref "$PROJECT_REF" --workdir "$workdir" 2>&1; then
+  if ! prepare_fn_workdir "$workdir"; then
+    echo "   ⚠ Failed to prepare workdir for $fn"
+    return 1
+  fi
+  if (
+    cd "$REPO_ROOT"
+    npx supabase functions download "$fn" --project-ref "$PROJECT_REF" --workdir "$workdir"
+  ) 2>&1; then
     echo "   ✅ $fn downloaded"
     return 0
   else
@@ -72,8 +100,8 @@ download_fn() {
     return 1
   fi
 }
-export -f download_fn
-export PROJECT_REF DOWNLOAD_WORKDIR
+export -f download_fn prepare_fn_workdir
+export PROJECT_REF DOWNLOAD_WORKDIR REPO_ROOT
 
 # First pass — parallel (up to 8 at once)
 echo "⬇️  Downloading functions in parallel..."
