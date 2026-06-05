@@ -1,3 +1,6 @@
+# WSL/Linux: keep LF everywhere; do not let Git convert to CRLF
+* text=auto eol=lf
+
 # Shell scripts must use LF (Linux/WSL/Git Bash)
 supabase/backup.sh text eol=lf
 supabase/*.sh text eol=lf

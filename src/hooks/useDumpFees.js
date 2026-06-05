@@ -6,13 +6,41 @@ import { toast } from '@/components/ui/use-toast';
 /**
  * Dump Fees Hook
  * Loads dump fees and delivery pricing from dump_fees and services tables
- * 
+ *
  * IMPORTANT: This hook performs SELECT and UPDATE queries only.
  * INSERT operations (upsert) are allowed for dump_fees table.
  * No INSERT attempts are made to business_settings table.
  */
 
-export const useDumpFees = () => {
+function isNetworkFetchError(message) {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed')
+  );
+}
+
+function formatDumpFeesError(error) {
+  const raw = error?.message || String(error);
+  if (isNetworkFetchError(raw)) {
+    return (
+      'Local Supabase is not reachable. Run `npx supabase start`, then `npm run supabase:sync-local-env`, and restart `npm run dev`.'
+    );
+  }
+  if (raw.startsWith('Connection test failed:')) {
+    const inner = raw.replace(/^Connection test failed:\s*/i, '');
+    if (isNetworkFetchError(inner)) {
+      return (
+        'Local Supabase is not reachable. Run `npx supabase start`, then `npm run supabase:sync-local-env`, and restart `npm run dev`.'
+      );
+    }
+  }
+  return raw;
+}
+
+export const useDumpFees = ({ showErrorToast = false } = {}) => {
   const [dumpFees, setDumpFees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -73,19 +101,22 @@ export const useDumpFees = () => {
       setServicesPricing(pricingMap);
       console.log('[Dump Fees] ✓ Successfully loaded dump fees for', Object.keys(pricingMap).length, 'services');
       
-    } catch (error) {
-      console.error('[Dump Fees] ✗ Fatal error:', error);
-      setError(error.message);
-      
-      toast({
-        title: 'Error loading dump fees',
-        description: `${error.message}. Please check your connection and try again.`,
-        variant: 'destructive',
-      });
+    } catch (err) {
+      const message = formatDumpFeesError(err);
+      console.error('[Dump Fees] ✗ Fatal error:', message, err);
+      setError(message);
+
+      if (showErrorToast) {
+        toast({
+          title: 'Error loading dump fees',
+          description: message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showErrorToast]);
 
   useEffect(() => {
     fetchDumpFees();

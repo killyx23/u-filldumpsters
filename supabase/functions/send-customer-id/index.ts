@@ -1,8 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getCorsHeaders } from "./cors.ts";
+import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+
 const brevoApiKey = Deno.env.get('BREVO_API_KEY');
 const fromEmail = Deno.env.get('BREVO_FROM_EMAIL');
-const siteUrl = 'https://www.u-filldumpsters.com';
+
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
@@ -11,12 +13,19 @@ Deno.serve(async (req)=>{
     });
   }
   try {
-    const { email } = await req.json();
+    const { email, site_url } = await req.json();
     if (!email) {
       throw new Error('Email address is required.');
     }
+    const emailLower = String(email).trim().toLowerCase();
+    const siteUrl = normalizeSiteUrl(site_url);
     const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
-    const { data: customer, error: customerError } = await supabaseAdmin.from('customers').select('name, email, phone, customer_id_text').eq('email', email).single();
+    const { data: customers, error: customerError } = await supabaseAdmin
+      .from('customers')
+      .select('name, email, phone, customer_id_text')
+      .ilike('email', emailLower)
+      .limit(1);
+    const customer = customers?.[0] ?? null;
     if (customerError || !customer) {
       return new Response(JSON.stringify({
         message: "Request processed."
@@ -35,7 +44,7 @@ Deno.serve(async (req)=>{
       }
     });
     const rawPhone = customer.phone.replace(/\D/g, '');
-    const loginUrl = `${siteUrl}/login?cid=${encodeURIComponent(customer.customer_id_text)}&phone=${encodeURIComponent(rawPhone)}`;
+    const loginUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customer.customer_id_text)}&phone=${encodeURIComponent(rawPhone)}`;
     const emailHtml = `
       <!DOCTYPE html>
       <html>

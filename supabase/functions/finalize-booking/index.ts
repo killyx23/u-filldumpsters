@@ -4,8 +4,41 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20"
 });
-const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const log = (msg, data)=>console.log(`[finalize-booking] ${msg}`, data !== undefined ? data : "");
+
+async function sendBookingConfirmationEmail(bookingId: number | string, siteUrl?: string | null) {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/send-booking-confirmation`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify({
+      bookingId,
+      site_url: siteUrl,
+    }),
+  });
+
+  let result: Record<string, unknown> = {};
+  try {
+    result = await response.json();
+  } catch {
+    result = { error: "Invalid response from send-booking-confirmation" };
+  }
+
+  if (response.ok && result.success === true) {
+    return { sent: true as const, recipient: result.recipient ?? null };
+  }
+
+  const errorMessage = String(
+    result.error ?? result.details ?? `HTTP ${response.status}`,
+  );
+  console.error("[finalize-booking] send-booking-confirmation failed:", errorMessage);
+  return { sent: false as const, error: errorMessage };
+}
 const toPositiveInt = (value: unknown): number => {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return 0;
@@ -73,14 +106,13 @@ Deno.serve(async (req)=>{
         }
       }
 
-      const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
-        body: { bookingId: booking.id, site_url: siteUrl }
-      });
-      if (emailError) {
-        console.error("[finalize-booking] send-booking-confirmation catch-up failed:", emailError);
-      } else {
+      let emailError: string | null = null;
+      const emailResult = await sendBookingConfirmationEmail(booking.id, siteUrl);
+      if (emailResult.sent) {
         emailSent = true;
-        log("Confirmation email catch-up invoked successfully.");
+        log("Confirmation email catch-up sent successfully.");
+      } else {
+        emailError = emailResult.error;
       }
 
       if (booking.customer_id && !booking.customers?.user_id) {
@@ -100,6 +132,7 @@ Deno.serve(async (req)=>{
         message: "Booking already finalized.",
         alreadyProcessed: true,
         emailSent,
+        emailError,
         status: booking.status,
         loyalty: {
           pointsAwarded,
@@ -451,19 +484,15 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Step 9: Send confirmation email
     // ----------------------------------------------------------------
-    log("Invoking send-booking-confirmation…");
+    log("Sending booking confirmation email…");
     let emailSent = false;
-    const { error: emailError } = await supabase.functions.invoke("send-booking-confirmation", {
-      body: {
-        bookingId: updatedBooking.id,
-        site_url: siteUrl
-      }
-    });
-    if (emailError) {
-      console.error("[finalize-booking] send-booking-confirmation failed:", emailError);
-    } else {
+    let emailError: string | null = null;
+    const emailResult = await sendBookingConfirmationEmail(updatedBooking.id, siteUrl);
+    if (emailResult.sent) {
       emailSent = true;
-      log("Confirmation email invoked successfully.");
+      log("Confirmation email sent successfully.");
+    } else {
+      emailError = emailResult.error;
     }
     // ----------------------------------------------------------------
     // Done
@@ -477,6 +506,7 @@ Deno.serve(async (req)=>{
       success: true,
       status: finalStatus,
       emailSent,
+      emailError,
       booking: updatedBooking,
       loyalty: loyaltyOutcome
     }), {

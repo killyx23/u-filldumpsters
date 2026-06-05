@@ -145,16 +145,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    const { data: customer, error: customerError } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("email", emailLower)
-      .maybeSingle();
-
     const { data: bookings, error: bookingsError } = await supabase
       .from("bookings")
       .select("*")
-      .eq("email", emailLower)
+      .ilike("email", emailLower)
       .order("created_at", { ascending: false })
       .limit(5);
 
@@ -162,11 +156,45 @@ Deno.serve(async (req) => {
       console.error("[verify-email-code] bookings fetch error:", bookingsError);
     }
 
+    let customer: Record<string, unknown> | null = null;
+
+    const { data: customersByEmail, error: customerError } = await supabase
+      .from("customers")
+      .select("*")
+      .ilike("email", emailLower)
+      .limit(1);
+
     if (customerError) {
       console.error("[verify-email-code] customer fetch error:", customerError);
+    } else if (customersByEmail?.[0]) {
+      customer = customersByEmail[0];
     }
 
-    console.log("[verify-email-code] ✓ Verified:", emailLower, "booking_id:", bookings?.[0]?.id ?? null);
+    if (!customer) {
+      const bookingCustomerId = bookings?.find((b) => b.customer_id)?.customer_id;
+      if (bookingCustomerId) {
+        const { data: customerByBooking, error: bookingCustomerError } = await supabase
+          .from("customers")
+          .select("*")
+          .eq("id", bookingCustomerId)
+          .maybeSingle();
+
+        if (bookingCustomerError) {
+          console.error("[verify-email-code] customer by booking id error:", bookingCustomerError);
+        } else if (customerByBooking) {
+          customer = customerByBooking;
+        }
+      }
+    }
+
+    console.log(
+      "[verify-email-code] ✓ Verified:",
+      emailLower,
+      "customer_id_text:",
+      customer?.customer_id_text ?? null,
+      "booking_id:",
+      bookings?.[0]?.id ?? null,
+    );
 
     return jsonResponse(
       corsHeaders,
