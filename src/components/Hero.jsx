@@ -186,7 +186,7 @@ export const Hero = () => {
         ) : error ? (
           <div className="flex flex-col justify-center items-center h-64">
             <AlertCircle className="h-12 w-12 text-yellow-400 mb-4" />
-            <p className="text-blue-200">Loading services... (Using cached data)</p>
+            <p className="text-blue-200">Showing default services</p>
           </div>
         ) : (
           <div className={`grid grid-cols-1 md:grid-cols-2 ${services.length >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-8 max-w-6xl mx-auto`}>

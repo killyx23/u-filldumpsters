@@ -13,7 +13,7 @@ export const Footer = () => {
           <p className="font-bold text-lg text-yellow-400 mb-4">Quick Links</p>
           <ul className="space-y-2">
             <li><Link to="/" className="hover:text-yellow-300 transition-colors">Home</Link></li>
-            <li><Link to="/faq" className="hover:text-yellow-300 transition-colors">FAQ</Link></li>
+            <li><Link to="/faqs" className="hover:text-yellow-300 transition-colors">FAQ</Link></li>
             <li><Link to="/contact" className="hover:text-yellow-300 transition-colors">Contact</Link></li>
             <li><Link to="/reviews" className="hover:text-yellow-300 transition-colors">Reviews</Link></li>
              <li><Link to="/login" className="hover:text-yellow-300 transition-colors">Customer Portal</Link></li>

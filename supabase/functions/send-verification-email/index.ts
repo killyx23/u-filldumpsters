@@ -84,9 +84,10 @@ Deno.serve(async (req)=>{
     }
     const siteUrl = normalizeSiteUrl(site_url);
     const pendingToken = String(pending_customer_id ?? token ?? "").trim();
+    const emailLower = email.toLowerCase();
     const verifyPath = pendingToken
       ? `/verify-email?token=${encodeURIComponent(pendingToken)}&code=${encodeURIComponent(verificationCode)}`
-      : `/customer-login?code=${encodeURIComponent(verificationCode)}`;
+      : `/customer-login?code=${encodeURIComponent(verificationCode)}&email=${encodeURIComponent(emailLower)}&recover=1`;
     const verifyLink = `${siteUrl}${verifyPath}`;
     console.log("[send-verification-email] Verification link:", verifyLink);
     // Send email via Brevo

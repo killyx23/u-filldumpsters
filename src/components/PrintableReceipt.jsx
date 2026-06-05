@@ -299,20 +299,6 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         phone,
         orderId: booking.id,
     });
-    const qrUsesLocalhost = (() => {
-        const targetUrl = magicLinkUrl || safetyVideoUrl;
-        if (!targetUrl) return false;
-        try {
-            const hostname = new URL(targetUrl).hostname;
-            return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
-        } catch {
-            return targetUrl.includes('localhost') || targetUrl.includes('127.0.0.1');
-        }
-    })();
-    const devQrPreviewUrl = import.meta.env.DEV && magicLinkUrl
-        ? (magicLinkUrl.length > 96 ? `${magicLinkUrl.slice(0, 96)}...` : magicLinkUrl)
-        : '';
-
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ flexGrow: 1 }}>
@@ -396,11 +382,6 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p className="text-xs text-gray-600 mt-2 italic">
                                     Scan to view your PIN
                                 </p>
-                                {devQrPreviewUrl && (
-                                    <p className="text-[10px] text-gray-500 mt-1 break-all">
-                                        URL: {devQrPreviewUrl}
-                                    </p>
-                                )}
                             </div>
 
                             {/* Safety Video QR */}
@@ -429,11 +410,6 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                         These QR codes are time-sensitive for your privacy and are only active during your booking timeframe.
                                         The first QR code provides quick access to your PIN at the trailer. The second links to safety instructions.
                                     </p>
-                                    {import.meta.env.DEV && qrUsesLocalhost && (
-                                        <p className="text-xs text-red-700 mt-2">
-                                            Dev note: phone scans cannot open localhost. Set <strong>VITE_SITE_URL</strong> (or <strong>VITE_QR_BASE_URL</strong>) to your computer&apos;s LAN URL, restart dev server, and regenerate this receipt.
-                                        </p>
-                                    )}
                                 </div>
                             </div>
                         </div>

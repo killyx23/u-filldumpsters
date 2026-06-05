@@ -571,7 +571,7 @@ export const PricingManager = () => {
         description: ''
     });
 
-    const { dumpFees, updateDumpFee } = useDumpFees();
+    const { dumpFees, updateDumpFee } = useDumpFees({ showErrorToast: true });
 
     const fetchData = useCallback(async () => {
         setLoading(true);

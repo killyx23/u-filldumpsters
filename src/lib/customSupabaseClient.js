@@ -34,14 +34,12 @@ function resolveSupabaseUrl(baseUrl) {
   }
 
   const browserOrigin = normalizeSupabaseUrl(window.location.origin);
-  const browserHost = getHostname(browserOrigin);
   const baseHost = getHostname(baseUrl);
-  const browserIsLanHost = browserHost && !isLocalHostname(browserHost);
   const baseIsLocalHost = baseHost && isLocalHostname(baseHost);
 
-  if (browserIsLanHost && baseIsLocalHost) {
+  if (baseIsLocalHost) {
     console.info(
-      `[Supabase] Using browser origin "${browserOrigin}" for LAN access via Vite proxy.`,
+      `[Supabase] Using browser origin "${browserOrigin}" for local dev via Vite proxy.`,
     );
     return browserOrigin;
   }
