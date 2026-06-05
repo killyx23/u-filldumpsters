@@ -109,6 +109,49 @@ export const BookingConfirmation = () => {
     }
   };
 
+  const resendConfirmationEmail = async () => {
+    if (!bookingId) return false;
+
+    setIsRefinalizing(true);
+    setFinalizeError('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('resend-confirmation-email', {
+        body: {
+          booking_id: bookingId,
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      });
+
+      if (error) {
+        const errContext = await error.context?.json().catch(() => null);
+        throw new Error(errContext?.error || error.message);
+      }
+      if (!data?.success) {
+        throw new Error(data?.error || data?.details || 'Failed to resend confirmation email.');
+      }
+
+      setFinalizeStatus('done');
+      toast({
+        title: 'Email Sent',
+        description: 'A confirmation email has been sent to your inbox.',
+      });
+      return true;
+    } catch (err) {
+      console.error('[BookingConfirmation] Resend confirmation email error:', err);
+      setFinalizeStatus('email_failed');
+      setFinalizeError(err.message || 'Could not send confirmation email.');
+      toast({
+        title: 'Email Failed',
+        description: err.message || 'Could not send confirmation email.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setIsRefinalizing(false);
+    }
+  };
+
   const finalizeBooking = async ({ isRetry = false } = {}) => {
     if (!bookingId) {
       console.warn('[BookingConfirmation] Cannot finalize: missing bookingId');
@@ -187,15 +230,16 @@ export const BookingConfirmation = () => {
         }
       }
 
-      setFinalizeStatus('done');
-
       if (data?.emailSent) {
+        setFinalizeStatus('done');
         console.log(`[${timestamp}] [BookingConfirmation] ✓ Confirmation email sent successfully`);
         toast({
           title: 'Email Sent',
           description: 'A confirmation email has been sent to your inbox.',
         });
       } else {
+        setFinalizeStatus('email_failed');
+        setFinalizeError(data?.emailError || 'Confirmation email could not be sent.');
         console.warn(`[${timestamp}] [BookingConfirmation] ⚠ Email was not sent`, data);
       }
 
@@ -545,10 +589,14 @@ export const BookingConfirmation = () => {
   const subtotalBeforeTax = bookingDetails.subtotal_before_tax || 0;
   const totalPaid = resolveBookingGrandTotal(bookingDetails);
 
+  const bookingFinalized = finalizeStatus === 'done' || finalizeStatus === 'email_failed';
+
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
       finalizeStatus === 'done'
         ? 'bg-green-950/40 border border-green-500/40'
+        : finalizeStatus === 'email_failed'
+        ? 'bg-amber-950/40 border border-amber-500/40'
         : finalizeStatus === 'failed'
         ? 'bg-red-950/40 border border-red-500/40'
         : 'bg-blue-950/40 border border-blue-500/40'
@@ -557,18 +605,23 @@ export const BookingConfirmation = () => {
         <Loader2 className="h-6 w-6 mr-4 flex-shrink-0 mt-0.5 text-blue-400 animate-spin" />
       ) : (
         <Mail className={`h-6 w-6 mr-4 flex-shrink-0 mt-0.5 ${
-          finalizeStatus === 'done' ? 'text-green-400' : 'text-red-400'
+          finalizeStatus === 'done' ? 'text-green-400'
+          : finalizeStatus === 'email_failed' ? 'text-amber-400'
+          : 'text-red-400'
         }`} />
       )}
 
       <div className="flex-1">
         <p className={`font-bold mb-1 ${
           finalizeStatus === 'done' ? 'text-green-300'
+          : finalizeStatus === 'email_failed' ? 'text-amber-300'
           : finalizeStatus === 'failed' ? 'text-red-300'
           : 'text-blue-300'
         }`}>
           {finalizeStatus === 'done'
             ? '✓ Booking Confirmed & Email Sent'
+            : finalizeStatus === 'email_failed'
+            ? '✓ Booking Confirmed — Email Not Sent'
             : finalizeStatus === 'failed'
             ? '⚠ Confirmation Issue'
             : 'Sending confirmation email...'}
@@ -576,23 +629,30 @@ export const BookingConfirmation = () => {
 
         <p className={`text-sm mb-3 ${
           finalizeStatus === 'done' ? 'text-green-100/80'
+          : finalizeStatus === 'email_failed' ? 'text-amber-100/80'
           : finalizeStatus === 'failed' ? 'text-red-100/80'
           : 'text-blue-100/80'
         }`}>
           {finalizeStatus === 'done'
             ? `A confirmation email has been sent to ${bookingDetails.email}. Your booking is secured.`
+            : finalizeStatus === 'email_failed'
+            ? `Your booking is secured, but we could not send the confirmation email${finalizeError ? `: ${finalizeError}` : ''}. You can retry below or use your receipt on this page.`
             : finalizeStatus === 'failed'
-            ? `We encountered an issue sending your confirmation email: ${finalizeError}. Your payment was successful and booking is confirmed. You can access your receipt in the portal.`
+            ? `We encountered an issue finalizing your booking: ${finalizeError}. If payment succeeded, check your portal or contact support.`
             : 'Recording your payment and sending your confirmation email. This only takes a moment.'}
         </p>
 
-        {finalizeStatus === 'failed' && (
+        {(finalizeStatus === 'email_failed' || finalizeStatus === 'failed') && (
           <Button
-            onClick={() => finalizeBooking({ isRetry: true })}
+            onClick={() => finalizeStatus === 'failed' ? finalizeBooking({ isRetry: true }) : resendConfirmationEmail()}
             disabled={isRefinalizing}
             size="sm"
             variant="outline"
-            className="bg-red-950/50 text-red-200 border-red-500/30 hover:bg-red-900 hover:text-white"
+            className={
+              finalizeStatus === 'email_failed'
+                ? 'bg-amber-950/50 text-amber-200 border-amber-500/30 hover:bg-amber-900 hover:text-white'
+                : 'bg-red-950/50 text-red-200 border-red-500/30 hover:bg-red-900 hover:text-white'
+            }
           >
             {isRefinalizing
               ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Retrying...</>
@@ -770,7 +830,7 @@ export const BookingConfirmation = () => {
             </Button>
             <Button
               onClick={handlePrint}
-              disabled={finalizeStatus !== 'done'}
+              disabled={!bookingFinalized}
               variant="outline"
               className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white hover:border-blue-500 font-semibold py-6 flex-1 text-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >

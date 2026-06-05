@@ -111,21 +111,12 @@ export const Header = ({ onReorderSelect }) => {
               </button>
             </div>
 
-            <div className="flex flex-1 items-center justify-end pl-4 xl:pl-8 h-full relative gap-4">
-              <div className="hidden lg:flex items-center h-full mr-4">
-                <div className="flex flex-col items-end gap-2">
-                  <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase max-w-[400px] block ${textEffectClass}`}>
-                    You fill it, we dump it.<br/>
-                    Where we bring the convenience to you.
-                  </span>
-                  <button
-                    onClick={() => setIsReturningCustomerModalOpen(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 underline flex items-center gap-1 transition-colors"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Returning Customer?
-                  </button>
-                </div>
+            <div className="flex flex-1 items-center justify-end pl-4 xl:pl-8 h-full relative">
+              <div className="hidden lg:flex items-center h-full mr-8">
+                <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase max-w-[400px] block ${textEffectClass}`}>
+                  You fill it, we dump it.<br/>
+                  Where we bring the convenience to you.
+                </span>
               </div>
               
               <div className="flex items-center h-full">

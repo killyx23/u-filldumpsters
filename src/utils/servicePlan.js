@@ -17,6 +17,36 @@ export function resolveServiceIdForBooking(service, isDelivery = false) {
   return Number(service.id);
 }
 
+const DELIVERY_FEE_FEATURE_RE = /delivery\s*fee/i;
+
+/**
+ * Homepage feature bullets: strip stale dollar amounts from JSON and inject live admin fields.
+ * @param {object} service - Row from services
+ */
+export function resolvePlanCardFeatures(service) {
+  if (!service) return { features: [], deliveryFee: null };
+  let list = [];
+  try {
+    const raw = service.features;
+    if (Array.isArray(raw)) list = [...raw];
+    else if (typeof raw === 'string' && raw.trim()) list = JSON.parse(raw);
+  } catch {
+    list = [];
+  }
+
+  const features = list.filter((f) => {
+    if (typeof f === 'object' && f !== null) {
+      return !DELIVERY_FEE_FEATURE_RE.test(String(f.name || ''));
+    }
+    return true;
+  });
+
+  const fee = Number(service.delivery_fee ?? 0);
+  const deliveryFee = fee > 0 ? fee : null;
+
+  return { features, deliveryFee };
+}
+
 /**
  * Map DB service row to plan card / journey shape.
  * @param {object} service
@@ -25,18 +55,28 @@ export function resolveServiceIdForBooking(service, isDelivery = false) {
 export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
   if (!service) return null;
   const fallbackHighlights = {
-    5: 'Skip Labor, Get Power',
+    5: 'Save Your Back & Time',
   };
   const highlightText =
     service.homepage_highlight?.trim() || fallbackHighlights[Number(service.id)] || '';
+  const isDumpsterHomepage = Number(service.id) === 1;
   return {
     ...service,
     highlight: highlightText
       ? { text: highlightText, delay: 0.1 + displayOrderIndex * 0.1 }
       : undefined,
     displayPrice: service.homepage_price ?? service.base_price ?? 0,
-    displayPriceUnit: service.homepage_price_unit ?? service.price_unit ?? '',
+    displayPriceUnit: isDumpsterHomepage
+      ? 'Daily Rate'
+      : service.homepage_price_unit ?? service.price_unit ?? '',
     displayDescription: service.homepage_description || service.description || '',
+    ...(() => {
+      const { features: displayFeatures, deliveryFee } = resolvePlanCardFeatures(service);
+      return { displayFeatures, displayDeliveryFee: deliveryFee };
+    })(),
+    displayName: service.name?.trim() || highlightText || 'Service Plan',
+    displayDeliveryFeeLabel: isDumpsterHomepage ? 'Delivery & Pickup Fee' : undefined,
+    showWeeklyRatesAvailable: isDumpsterHomepage,
   };
 }
 
@@ -159,13 +199,13 @@ export async function fetchServiceById(supabase, serviceId) {
 }
 
 /** Default homepage catalog when flags are missing or unset. */
-export const HOMEPAGE_SERVICE_IDS = [1, 2, 3, 5];
+export const HOMEPAGE_SERVICE_IDS = [2, 1, 5, 3];
 
 const HERO_STATIC_FALLBACK = [
-  { id: 1, name: '16 Yard Dumpster' },
   { id: 2, name: 'Dump Loader Trailer Rental Service' },
+  { id: 1, name: '16 Yard Dumpster' },
+  { id: 5, name: 'DIY Heavy Equipment' },
   { id: 3, name: 'Rock, Decorative Rock, Mulch, & Gravel Delivery Service' },
-  { id: 5, name: 'Mini Excavator Rental Service' },
 ];
 
 export function getHeroStaticFallback() {

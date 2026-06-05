@@ -11,3 +11,10 @@ env
 .env.*.local
 !.env.example
 .idea/workspace.xml
+
+# AI/MCP deploy session artifacts (never commit)
+.deploy-*.json
+.invoke-*.json
+.mcp-*.json
+.payload-*.json
+.send-*.json

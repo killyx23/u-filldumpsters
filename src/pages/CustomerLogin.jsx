@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, ShieldCheck, KeyRound, Phone, HelpCircle, Mail, ArrowRight, CheckCircle2, LockKeyhole } from 'lucide-react';
+import { Loader2, ShieldCheck, KeyRound, Phone, HelpCircle, Mail, ArrowRight, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,15 +10,42 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
-const ForgotLoginDialog = ({ open, onOpenChange }) => {
+const formatPhoneDigits = (rawDigits) => {
+    const input = String(rawDigits || '').replace(/\D/g, '');
+    let formattedPhone = '';
+    if (input.length > 0) {
+        formattedPhone = `(${input.substring(0, 3)}`;
+    }
+    if (input.length > 3) {
+        formattedPhone += `) ${input.substring(3, 6)}`;
+    }
+    if (input.length > 6) {
+        formattedPhone += `-${input.substring(6, 10)}`;
+    }
+    return formattedPhone;
+};
+
+const ForgotLoginDialog = ({ open, onOpenChange, onRecoveryComplete, initialCode = '', initialEmail = '' }) => {
     const [email, setEmail] = useState('');
-    const [step, setStep] = useState('email'); // 'email', 'verify', 'success'
+    const [step, setStep] = useState('email');
     const [code, setCode] = useState('');
     const [loading, setLoading] = useState(false);
     const [cooldown, setCooldown] = useState(0);
 
-    // Cooldown timer for resend
+    useEffect(() => {
+        if (open) {
+            if (initialEmail) setEmail(initialEmail);
+            if (initialCode) setCode(initialCode);
+            if (initialCode && initialEmail) {
+                setStep('verify');
+            } else {
+                setStep('email');
+            }
+        }
+    }, [open, initialCode, initialEmail]);
+
     useEffect(() => {
         let timer;
         if (cooldown > 0) {
@@ -31,8 +58,14 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
         if (e) e.preventDefault();
         setLoading(true);
         try {
+            if (code.length === 6 && email) {
+                setStep('verify');
+                setLoading(false);
+                return;
+            }
+
             const { data, error } = await supabase.functions.invoke('send-verification-email', {
-                body: { email }
+                body: { email, site_url: getAppOrigin() }
             });
             
             if (error) {
@@ -46,7 +79,7 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
                 description: 'Check your email for a verification code.',
             });
             setStep('verify');
-            setCooldown(30); // 30 second rate limit
+            setCooldown(30);
         } catch (error) {
             console.error("[CustomerLogin] Send code error:", error);
             toast({
@@ -65,7 +98,6 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
         
         setLoading(true);
         try {
-            // 1. Verify the code
             const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
                 body: { email, code }
             });
@@ -76,31 +108,9 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
             }
             if (!verifyData.success) throw new Error(verifyData.error || "Invalid code");
 
-            // 2. If valid, trigger the edge function to email their customer ID
-            toast({ title: 'Code Verified', description: 'Requesting your Customer ID...' });
-            
-            const { error: sendIdError } = await supabase.functions.invoke('send-customer-id', {
-                body: { email }
-            });
-
-            if (sendIdError) {
-                const errorData = await sendIdError.context?.json().catch(()=>({}));
-                throw new Error(errorData?.error || sendIdError.message);
-            }
-
-            setStep('success');
-            toast({
-                title: 'Success!',
-                description: 'Your Customer ID has been securely sent to your email.',
-            });
-            
-            // Auto close after 4 seconds
-            setTimeout(() => {
-                onOpenChange(false);
-                setStep('email');
-                setCode('');
-                setEmail('');
-            }, 4000);
+            onOpenChange(false);
+            resetDialog();
+            await onRecoveryComplete(verifyData.customer);
 
         } catch (error) {
             console.error("[CustomerLogin] Verify code error:", error);
@@ -129,9 +139,10 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
                 <DialogHeader>
                     <DialogTitle>Forgot Your Login?</DialogTitle>
                     <DialogDescription>
-                        {step === 'email' && "Enter your email address. We'll send a 6-digit verification code to securely retrieve your Customer ID."}
+                        {step === 'email' && (initialCode
+                            ? "Enter the email address this verification code was sent to."
+                            : "Enter your email address. We'll send a 6-digit verification code to securely retrieve your Customer ID.")}
                         {step === 'verify' && `We sent a 6-digit code to ${email}. Check your inbox and enter it below.`}
-                        {step === 'success' && "Verification complete!"}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -164,7 +175,7 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
                                 <DialogFooter>
                                     <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white" disabled={loading || !email}>
                                         {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                        Send Verification Code
+                                        {initialCode ? 'Continue' : 'Send Verification Code'}
                                     </Button>
                                 </DialogFooter>
                             </motion.form>
@@ -215,22 +226,6 @@ const ForgotLoginDialog = ({ open, onOpenChange }) => {
                                 </div>
                             </motion.form>
                         )}
-
-                        {step === 'success' && (
-                            <motion.div 
-                                key="success-step"
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="flex flex-col items-center justify-center py-6 text-center"
-                            >
-                                <CheckCircle2 className="h-16 w-16 text-green-400 mb-4" />
-                                <h3 className="text-xl font-bold text-white mb-2">Check Your Email Again</h3>
-                                <p className="text-gray-300 text-sm">
-                                    If an account exists for {email}, we've securely sent your Customer ID. 
-                                    You can use it to log in now.
-                                </p>
-                            </motion.div>
-                        )}
                     </AnimatePresence>
                 </div>
             </DialogContent>
@@ -242,39 +237,150 @@ export const CustomerLogin = () => {
     const [customerId, setCustomerId] = useState('');
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
+    const [recoveringFromUrl, setRecoveringFromUrl] = useState(false);
     const [isForgotDialogOpen, setIsForgotDialogOpen] = useState(false);
+    const [forgotInitialCode, setForgotInitialCode] = useState('');
+    const [forgotInitialEmail, setForgotInitialEmail] = useState('');
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const urlRecoveryStarted = useRef(false);
+
+    const applyCredentials = useCallback((cid, rawPhone) => {
+        if (cid) setCustomerId(cid);
+        if (rawPhone) setPhone(formatPhoneDigits(rawPhone));
+    }, []);
+
+    const attemptPortalLogin = useCallback(async (cid, rawPhone) => {
+        const requestPayload = {
+            portal_number: cid.trim(),
+            customerId: cid.trim(),
+            phone: rawPhone,
+        };
+
+        const { data: functionData, error: functionError } = await supabase.functions.invoke('customer-portal-login', {
+            body: requestPayload
+        });
+
+        if (functionError) {
+            let errorMessage = functionError.message;
+            try {
+                const errorContext = await functionError.context?.json();
+                if (errorContext?.error) {
+                    errorMessage = errorContext.error;
+                }
+            } catch {
+                // ignore parse errors
+            }
+            throw new Error(errorMessage || 'Could not verify your account details.');
+        }
+
+        if (functionData?.error) {
+            throw new Error(functionData.error);
+        }
+
+        if (!functionData?.session) {
+            throw new Error('Could not create a session. Please try again.');
+        }
+
+        const { error: sessionError } = await supabase.auth.setSession(functionData.session);
+        if (sessionError) throw sessionError;
+
+        toast({
+            title: 'Login Successful!',
+            description: 'Redirecting you to your portal...',
+        });
+        navigate('/customer-portal');
+        return true;
+    }, [navigate]);
+
+    const completePortalRecovery = useCallback(async (customer) => {
+        if (!customer?.customer_id_text || !customer?.phone) {
+            toast({
+                title: 'Account Not Found',
+                description: 'No customer portal account was found for this email. Please contact support.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const cid = customer.customer_id_text;
+        const rawPhone = String(customer.phone).replace(/\D/g, '');
+
+        setLoading(true);
+        try {
+            await attemptPortalLogin(cid, rawPhone);
+        } catch (error) {
+            console.error('[CustomerLogin] Recovery auto-login failed, pre-filling credentials:', error);
+            applyCredentials(cid, rawPhone);
+            toast({
+                title: 'Credentials Ready',
+                description: 'Your Customer ID and phone have been filled in. Tap Login to Portal to continue.',
+            });
+        } finally {
+            setLoading(false);
+        }
+    }, [attemptPortalLogin, applyCredentials]);
 
     useEffect(() => {
         const cid = searchParams.get('cid');
         const portalId = searchParams.get('portal_id');
         const portalNumber = searchParams.get('portal_number');
         const ph = searchParams.get('phone');
+        const code = searchParams.get('code');
+        const email = searchParams.get('email')?.trim().toLowerCase() ?? null;
         
         const foundId = cid || portalNumber || portalId;
-        
         if (foundId) {
             setCustomerId(foundId);
         }
         if (ph) {
-            handlePhoneChange({ target: { value: ph } });
+            setPhone(formatPhoneDigits(ph));
         }
-    }, [searchParams]);
+
+        if (code && email && !urlRecoveryStarted.current) {
+            urlRecoveryStarted.current = true;
+            setRecoveringFromUrl(true);
+            navigate('/customer-login', { replace: true });
+
+            (async () => {
+                try {
+                    const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
+                        body: { email, code }
+                    });
+
+                    if (verifyError) {
+                        const errContext = await verifyError.context?.json().catch(() => null);
+                        throw new Error(errContext?.error || verifyError.message);
+                    }
+                    if (!verifyData.success) {
+                        throw new Error(verifyData.error || 'Invalid verification code');
+                    }
+
+                    await completePortalRecovery(verifyData.customer);
+                } catch (error) {
+                    console.error('[CustomerLogin] URL recovery error:', error);
+                    toast({
+                        title: 'Verification Failed',
+                        description: error.message || 'Could not verify your email link. Please try again.',
+                        variant: 'destructive',
+                    });
+                    setForgotInitialCode(code);
+                    setForgotInitialEmail(email);
+                    setIsForgotDialogOpen(true);
+                } finally {
+                    setRecoveringFromUrl(false);
+                }
+            })();
+        } else if (code && !email && !urlRecoveryStarted.current) {
+            urlRecoveryStarted.current = true;
+            setForgotInitialCode(code);
+            setIsForgotDialogOpen(true);
+            navigate('/customer-login', { replace: true });
+        }
+    }, [searchParams, navigate, completePortalRecovery]);
 
     const handlePhoneChange = (e) => {
-        const input = e.target.value.replace(/\D/g, '');
-        let formattedPhone = '';
-        if (input.length > 0) {
-            formattedPhone = `(${input.substring(0, 3)}`;
-        }
-        if (input.length > 3) {
-            formattedPhone += `) ${input.substring(3, 6)}`;
-        }
-        if (input.length > 6) {
-            formattedPhone += `-${input.substring(6, 10)}`;
-        }
-        setPhone(formattedPhone);
+        setPhone(formatPhoneDigits(e.target.value));
     };
 
     const handleSubmit = async (e) => {
@@ -302,57 +408,7 @@ export const CustomerLogin = () => {
         setLoading(true);
 
         try {
-            const requestPayload = { 
-                portal_number: customerId.trim(), 
-                customerId: customerId.trim(), // Send both for compatibility
-                phone: rawPhone 
-            };
-
-            console.log('[CustomerLogin] Sending login payload to edge function:', requestPayload);
-
-            // Edge function returns the fully initialized session, bypassing custom password auth
-            // supabase.functions.invoke automatically handles JSON serialization and Content-Type headers
-            const { data: functionData, error: functionError } = await supabase.functions.invoke('customer-portal-login', {
-                body: requestPayload
-            });
-
-            console.log('[CustomerLogin] Edge function response:', { functionData, functionError });
-
-            if (functionError) {
-                // Try to parse error context from edge function if available
-                let errorMessage = functionError.message;
-                try {
-                    const errorContext = await functionError.context?.json();
-                    if (errorContext && errorContext.error) {
-                        errorMessage = errorContext.error;
-                    }
-                } catch (e) {
-                    // Ignore JSON parse error on context
-                }
-                throw new Error(errorMessage || 'Could not verify your account details.');
-            }
-            
-            if (functionData?.error) {
-                throw new Error(functionData.error);
-            }
-
-            // Immediately set the session received from the server
-            if (functionData?.session) {
-                const { error: sessionError } = await supabase.auth.setSession(functionData.session);
-                
-                if (sessionError) {
-                    throw sessionError;
-                }
-
-                toast({
-                    title: 'Login Successful!',
-                    description: 'Redirecting you to your portal...',
-                });
-                navigate('/customer-portal');
-            } else {
-                throw new Error('Could not create a session. Please try again.');
-            }
-
+            await attemptPortalLogin(customerId.trim(), rawPhone);
         } catch (error) {
             console.error('[CustomerLogin] Login error:', error);
             toast({
@@ -364,6 +420,8 @@ export const CustomerLogin = () => {
             setLoading(false);
         }
     };
+
+    const isBusy = loading || recoveringFromUrl;
 
     return (
         <>
@@ -382,7 +440,11 @@ export const CustomerLogin = () => {
                         <div className="text-center mb-8">
                             <ShieldCheck className="mx-auto h-16 w-16 text-yellow-400 mb-4" />
                             <h1 className="text-3xl font-bold text-white">Customer Portal</h1>
-                            <p className="text-gray-300 mt-2">Enter your credentials to access your portal.</p>
+                            <p className="text-gray-300 mt-2">
+                                {recoveringFromUrl
+                                    ? 'Verifying your email link...'
+                                    : 'Enter your credentials to access your portal.'}
+                            </p>
                         </div>
                         <form onSubmit={handleSubmit} className="space-y-6">
                             <div className="space-y-2">
@@ -394,6 +456,7 @@ export const CustomerLogin = () => {
                                     value={customerId}
                                     onChange={(e) => setCustomerId(e.target.value)}
                                     required
+                                    disabled={isBusy}
                                     className="bg-white/10 border-white/20 placeholder:text-gray-400 text-white"
                                 />
                             </div>
@@ -406,14 +469,15 @@ export const CustomerLogin = () => {
                                     value={phone}
                                     onChange={handlePhoneChange}
                                     required
+                                    disabled={isBusy}
                                     className="bg-white/10 border-white/20 placeholder:text-gray-400 text-white"
                                 />
                             </div>
-                            <Button type="submit" className="w-full bg-yellow-400 text-black hover:bg-yellow-500 font-bold text-lg py-6" disabled={loading}>
-                                {loading ? (
+                            <Button type="submit" className="w-full bg-yellow-400 text-black hover:bg-yellow-500 font-bold text-lg py-6" disabled={isBusy}>
+                                {isBusy ? (
                                     <>
                                         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                        Logging in...
+                                        {recoveringFromUrl ? 'Verifying...' : 'Logging in...'}
                                     </>
                                 ) : (
                                     <>
@@ -424,7 +488,7 @@ export const CustomerLogin = () => {
                             </Button>
                         </form>
                         <div className="text-center mt-6">
-                            <Button variant="link" className="text-yellow-300 hover:text-yellow-200" onClick={() => setIsForgotDialogOpen(true)}>
+                            <Button variant="link" className="text-yellow-300 hover:text-yellow-200" onClick={() => setIsForgotDialogOpen(true)} disabled={isBusy}>
                                 <HelpCircle className="w-4 h-4 mr-2" />
                                 Forgot your login info?
                             </Button>
@@ -432,7 +496,13 @@ export const CustomerLogin = () => {
                     </div>
                 </motion.div>
             </div>
-            <ForgotLoginDialog open={isForgotDialogOpen} onOpenChange={setIsForgotDialogOpen} />
+            <ForgotLoginDialog
+                open={isForgotDialogOpen}
+                onOpenChange={setIsForgotDialogOpen}
+                onRecoveryComplete={completePortalRecovery}
+                initialCode={forgotInitialCode}
+                initialEmail={forgotInitialEmail}
+            />
         </>
     );
 };

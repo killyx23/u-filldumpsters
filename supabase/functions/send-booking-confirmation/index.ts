@@ -233,8 +233,9 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
   const customerIdText = booking.customers?.customer_id_text || 'N/A';
   const phone = booking.customers?.phone || booking.phone || 'N/A';
+  const rawPhone = String(phone).replace(/\D/g, '');
   console.log(` site url: ${siteUrl}`);
-  const portalUrl = `${siteUrl}/login?phone=${encodeURIComponent(phone)}&portal_number=${encodeURIComponent(customerIdText)}`;
+  const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
   console.log(`portal URL: ${portalUrl}`);
   const serviceName = serviceDetails?.name || plan.name || "N/A";
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
@@ -467,37 +468,6 @@ const sendEmailWithRetry = async (toEmail, subject, htmlContent, maxRetries = 2)
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [send-booking-confirmation] Attempt ${attempt}/${maxRetries} to send email to ${toEmail}`);
     try {
-      if (RESEND_API_KEY) {
-        console.log(`[${timestamp}] [send-booking-confirmation] Using Resend API`);
-        const resendResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${RESEND_API_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            from: "U-Fill Dumpsters <noreply@u-filldumpsters.com>",
-            to: [
-              toEmail
-            ],
-            subject: subject,
-            html: htmlContent
-          })
-        });
-        if (resendResponse.ok) {
-          const result = await resendResponse.json();
-          console.log(`[${timestamp}] [send-booking-confirmation] Email sent successfully via Resend:`, result);
-          return {
-            success: true,
-            provider: "resend",
-            result
-          };
-        } else {
-          const errorText = await resendResponse.text();
-          lastError = `Resend API error: ${errorText}`;
-          console.error(`[${timestamp}] [send-booking-confirmation] Resend failed:`, lastError);
-        }
-      }
       if (BREVO_API_KEY) {
         console.log(`[${timestamp}] [send-booking-confirmation] Using Brevo API`);
         const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -532,6 +502,37 @@ const sendEmailWithRetry = async (toEmail, subject, htmlContent, maxRetries = 2)
           const errorText = await brevoResponse.text();
           lastError = `Brevo API error: ${errorText}`;
           console.error(`[${timestamp}] [send-booking-confirmation] Brevo failed:`, lastError);
+        }
+      }
+      if (RESEND_API_KEY) {
+        console.log(`[${timestamp}] [send-booking-confirmation] Using Resend API`);
+        const resendResponse = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${RESEND_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: "U-Fill Dumpsters <noreply@u-filldumpsters.com>",
+            to: [
+              toEmail
+            ],
+            subject: subject,
+            html: htmlContent
+          })
+        });
+        if (resendResponse.ok) {
+          const result = await resendResponse.json();
+          console.log(`[${timestamp}] [send-booking-confirmation] Email sent successfully via Resend:`, result);
+          return {
+            success: true,
+            provider: "resend",
+            result
+          };
+        } else {
+          const errorText = await resendResponse.text();
+          lastError = `Resend API error: ${errorText}`;
+          console.error(`[${timestamp}] [send-booking-confirmation] Resend failed:`, lastError);
         }
       }
       if (!RESEND_API_KEY && !BREVO_API_KEY) {
