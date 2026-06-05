@@ -1,10 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Star } from 'lucide-react';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { AlertTriangle, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
+    const [showUnavailableDialog, setShowUnavailableDialog] = useState(false);
+    const navigate = useNavigate();
+
+    const handleSelect = () => {
+        if (isTemporarilyUnavailable) {
+            setShowUnavailableDialog(true);
+        } else {
+            onSelect(plan);
+        }
+    };
+
+    const handleContact = () => {
+        setShowUnavailableDialog(false);
+        navigate('/contact');
+    };
 
     const cardStyles = {
         1: {
@@ -44,11 +68,30 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
     const displayPrice = plan?.displayPrice ?? plan?.homepage_price ?? plan?.base_price ?? 0;
     const displayPriceUnit =
         plan?.displayPriceUnit || plan?.homepage_price_unit || plan?.price_unit || '';
-    const planName = plan?.name || 'Service Plan';
+    const planName = plan?.displayName || plan?.name || plan?.highlight?.text || 'Service Plan';
 
-    const features = plan?.features ? (typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features) : [];
+    const displayDeliveryFee =
+      plan?.displayDeliveryFee != null && Number(plan.displayDeliveryFee) > 0
+        ? Number(plan.displayDeliveryFee)
+        : null;
+    const deliveryFeeLabel = plan?.displayDeliveryFeeLabel || 'Delivery Fee';
+
+    const features = (() => {
+      if (Array.isArray(plan?.displayFeatures)) return plan.displayFeatures;
+      if (!plan?.features) return [];
+      const raw = typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features;
+      return Array.isArray(raw)
+        ? raw.filter((f) => {
+            if (typeof f === 'object' && f !== null) {
+              return !/delivery\s*fee/i.test(String(f.name || ''));
+            }
+            return true;
+          })
+        : [];
+    })();
 
     return (
+        <>
         <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
@@ -95,14 +138,28 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                         <div className="mb-6 text-center">
                             <span className="text-4xl xl:text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>
                             <span className="text-gray-300 ml-2 text-sm" >{typeof displayPriceUnit === 'string' ? displayPriceUnit : ''}</span>
+                            {displayDeliveryFee != null && (
+                                <p className="mt-2 text-sm font-medium text-gray-300">
+                                    {deliveryFeeLabel} (${displayDeliveryFee.toFixed(2)})
+                                </p>
+                            )}
+                            {plan?.showWeeklyRatesAvailable && (
+                                <p className="mt-2 text-sm font-medium text-gray-300">
+                                    Weekly Rates Available
+                                </p>
+                            )}
                         </div>
                         <ul className="space-y-3 text-white/90 mb-8">
                             {Array.isArray(features) && features.map((feature, index) => {
-                                // CRITICAL FIX: Ensure object features are extracted to strings to prevent React crashes
                                 let featureText = '';
                                 if (typeof feature === 'object' && feature !== null) {
                                     featureText = feature.name || '';
-                                    if (feature.value) featureText += ` ($${feature.value})`;
+                                    if (feature.value !== undefined && feature.value !== null && feature.value !== '') {
+                                      const amount = Number(feature.value);
+                                      featureText += Number.isFinite(amount)
+                                        ? ` ($${amount.toFixed(2)})`
+                                        : ` (${feature.value})`;
+                                    }
                                 } else {
                                     featureText = String(feature);
                                 }
@@ -117,12 +174,11 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                         </ul>
                     </div>
                     <Button
-                        onClick={() => onSelect(plan)}
-                        disabled={isTemporarilyUnavailable}
+                        onClick={handleSelect}
                         className={cn(
                             'w-full py-3 mt-auto text-lg font-bold transition-all duration-300 shadow-lg',
                             isTemporarilyUnavailable 
-                                ? 'bg-slate-700 hover:bg-slate-700 text-slate-300 cursor-not-allowed border-none' 
+                                ? 'bg-slate-700 hover:bg-slate-600 text-white transform hover:scale-105' 
                                 : `${currentStyle.button} transform hover:scale-105`
                         )}
                     >
@@ -131,5 +187,43 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                 </div>
             </div>
         </motion.div>
+
+        <Dialog open={showUnavailableDialog} onOpenChange={setShowUnavailableDialog}>
+            <DialogContent className="bg-gray-900 border-yellow-500 text-white max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center text-2xl text-yellow-400">
+                        <AlertTriangle className="mr-3 h-8 w-8 flex-shrink-0" />
+                        Service Temporarily Unavailable
+                    </DialogTitle>
+                </DialogHeader>
+                <DialogDescription asChild>
+                    <div className="my-4 text-base text-blue-200 space-y-4">
+                        <p>
+                            We apologize for the inconvenience. The{' '}
+                            <strong className="text-white">{planName}</strong> is temporarily unavailable,
+                            and we are working to have it available again soon. Please check back here often.
+                        </p>
+                        <p>
+                            If you need this service and are willing to work with us, or your timeline is flexible
+                            and you do not need it right away, we may still be able to fit you in. Please contact
+                            our customer service team to discuss options.
+                        </p>
+                    </div>
+                </DialogDescription>
+                <DialogFooter className="sm:justify-between gap-2 mt-4">
+                    <Button
+                        onClick={() => setShowUnavailableDialog(false)}
+                        variant="outline"
+                        className="text-white border-white/50 hover:bg-white/20"
+                    >
+                        See You Soon
+                    </Button>
+                    <Button onClick={handleContact} className="bg-yellow-500 hover:bg-yellow-600 text-black">
+                        Contact Us
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 };
