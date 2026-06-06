@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
+import {
+  buildBookingDateUTC,
+  getPinWindowSkipReason,
+  isWithinPinGenerationWindow,
+} from "../_shared/pinTiming.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 function makeJsonResponse(corsHeaders) {
@@ -40,28 +45,34 @@ function sleep(ms) {
  *
  * Falls back to the provided fallbackHourUTC if the slot cannot be parsed.
  */ function buildIgloohomeDate(date, timeSlot, fallbackHourUTC) {
-  const pad = (n)=>String(n).padStart(2, "0");
-  if (timeSlot) {
-    const match = timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (match) {
-      let hour = parseInt(match[1], 10);
-      const minute = parseInt(match[2], 10);
-      const meridiem = match[3].toUpperCase();
-      if (meridiem === "PM" && hour !== 12) hour += 12;
-      if (meridiem === "AM" && hour === 12) hour = 0;
-      // MST -> UTC: add 6 hours
-      const utcHour = hour + 6;
-      if (utcHour >= 24) {
-        const nextDay = new Date(date + "T00:00:00Z");
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-        const nextDayStr = nextDay.toISOString().split("T")[0];
-        return `${nextDayStr}T${pad(utcHour - 24)}:${pad(minute)}:00+00:00`;
-      }
-      return `${date}T${pad(utcHour)}:${pad(minute)}:00+00:00`;
-    }
+  if (timeSlot && !timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)) {
     console.warn(`[generate-daily-pins] Could not parse time slot: "${timeSlot}" — using fallback`);
   }
-  return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
+  return buildBookingDateUTC(date, timeSlot, fallbackHourUTC);
+}
+
+async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+  if (booking.pin_notification_sent_at) {
+    console.log(`[generate-daily-pins] Skipping notification for booking #${booking.id} — already sent`);
+    return;
+  }
+  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: booking.id,
+      email_type: "pin_update",
+      pin,
+      start_time: startTime,
+      end_time: endTime,
+    },
+  });
+  if (error) {
+    console.error(`[generate-daily-pins] PIN notification failed for booking #${booking.id}:`, error.message);
+    return;
+  }
+  const now = new Date().toISOString();
+  await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
+  await supabase.from("rental_access_codes").update({ notified_at: now }).eq("order_id", booking.id).eq("status", "active");
+  console.log(`[generate-daily-pins] ✓ PIN notification sent for booking #${booking.id}`);
 }
 async function getOAuthToken(clientId, clientSecret) {
   const credentials = btoa(`${clientId}:${clientSecret}`);
@@ -438,9 +449,21 @@ Deno.serve(async (req)=>{
       }, 500);
     }
     const trailerBookings = (bookings ?? []).filter(isTrailerRental);
-    console.log(`[generate-daily-pins] Found ${trailerBookings.length} bookings needing PINs`);
+    const eligibleBookings = [];
+    const skippedBookings = [];
+    for (const booking of trailerBookings) {
+      const skipReason = getPinWindowSkipReason(booking);
+      if (skipReason) {
+        skippedBookings.push({ bookingId: booking.id, reason: skipReason });
+        console.log(`[generate-daily-pins] Skipping booking #${booking.id} — ${skipReason}`);
+        continue;
+      }
+      if (!isWithinPinGenerationWindow(booking)) continue;
+      eligibleBookings.push(booking);
+    }
+    console.log(`[generate-daily-pins] Found ${trailerBookings.length} trailer bookings, ${eligibleBookings.length} within 12h window, ${skippedBookings.length} skipped`);
     const generateResults = [];
-    for (const booking of trailerBookings){
+    for (const booking of eligibleBookings){
       // Guard: skip if an active PIN already exists
       const { data: existingPin } = await supabase.from("rental_access_codes").select("id").eq("order_id", booking.id).eq("status", "active").single();
       if (existingPin) {
@@ -493,16 +516,9 @@ Deno.serve(async (req)=>{
         });
         if (insertError) {
           console.error(`[generate-daily-pins] DB insert failed for booking #${booking.id}:`, insertError.message);
+        } else {
+          await maybeSendPinNotification(supabase, booking, pinResult.pin, startTimeUTC, endTimeUTC);
         }
-        // TODO: uncomment when send-pin-notification is deployed
-        // const { error: emailError } = await supabase.functions.invoke("send-pin-notification", {
-        //   body: { bookingId: booking.id, pin: pinResult.pin, dropOffDate: booking.drop_off_date, pickupDate: booking.pickup_date },
-        // });
-        // if (emailError) {
-        //   console.error(`[generate-daily-pins] PIN notification failed for booking #${booking.id}:`, emailError);
-        // } else {
-        //   await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
-        // }
         console.log(`[generate-daily-pins] ✓ Booking #${booking.id} complete (${pinResult.pinType})`);
         generateResults.push({
           bookingId: booking.id,
@@ -520,7 +536,7 @@ Deno.serve(async (req)=>{
     }
     const deletedCount = deleteResults.filter((r)=>r.success).length;
     const generatedCount = generateResults.filter((r)=>r.success).length;
-    console.log(`[generate-daily-pins] Done. Deleted: ${deletedCount}/${allPinsToProcess.length} | Generated: ${generatedCount}/${trailerBookings.length}`);
+    console.log(`[generate-daily-pins] Done. Deleted: ${deletedCount}/${allPinsToProcess.length} | Generated: ${generatedCount}/${eligibleBookings.length}`);
     return jsonResponse({
       success: true,
       lockOnline,
@@ -530,8 +546,9 @@ Deno.serve(async (req)=>{
         results: deleteResults
       },
       generated: {
-        processed: trailerBookings.length,
+        processed: eligibleBookings.length,
         succeeded: generatedCount,
+        skipped: skippedBookings,
         results: generateResults
       }
     });
