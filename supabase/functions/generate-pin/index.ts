@@ -1,5 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
+import {
+  buildBookingDateUTC,
+  isBookingEnded,
+  isWithinPinGenerationWindow,
+} from "../_shared/pinTiming.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
@@ -50,31 +55,30 @@ function generateRandomPin() {
  *
  * Falls back to the provided fallbackHourUTC if the slot cannot be parsed.
  */ function buildIgloohomeDate(date, timeSlot, fallbackHourUTC) {
-  const pad = (n)=>String(n).padStart(2, "0");
-  if (timeSlot) {
-    // Expected format: "6:00 AM", "11:00 PM", "12:00 PM" etc.
-    const match = timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (match) {
-      let hour = parseInt(match[1], 10);
-      const minute = parseInt(match[2], 10);
-      const meridiem = match[3].toUpperCase();
-      // Convert 12-hour to 24-hour
-      if (meridiem === "PM" && hour !== 12) hour += 12;
-      if (meridiem === "AM" && hour === 12) hour = 0;
-      // MST -> UTC: add 6 hours
-      const utcHour = hour + 6;
-      if (utcHour >= 24) {
-        // Rolls over to next day
-        const nextDay = new Date(date + "T00:00:00Z");
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-        const nextDayStr = nextDay.toISOString().split("T")[0];
-        return `${nextDayStr}T${pad(utcHour - 24)}:${pad(minute)}:00+00:00`;
-      }
-      return `${date}T${pad(utcHour)}:${pad(minute)}:00+00:00`;
-    }
+  if (timeSlot && !timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)) {
     console.warn(`[generate-pin] Could not parse time slot: "${timeSlot}" — using fallback`);
   }
-  return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
+  return buildBookingDateUTC(date, timeSlot, fallbackHourUTC);
+}
+
+async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+  if (booking.pin_notification_sent_at) return;
+  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: booking.id,
+      email_type: "pin_update",
+      pin,
+      start_time: startTime,
+      end_time: endTime,
+    },
+  });
+  if (error) {
+    console.error(`[generate-pin] PIN notification failed for booking #${booking.id}:`, error.message);
+    return;
+  }
+  const now = new Date().toISOString();
+  await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
+  await supabase.from("rental_access_codes").update({ notified_at: now }).eq("order_id", booking.id).eq("status", "active");
 }
 async function getOAuthToken(clientId, clientSecret) {
   const credentials = btoa(`${clientId}:${clientSecret}`);
@@ -388,6 +392,21 @@ Deno.serve(async (req)=>{
       }, 404);
     }
 
+    if (callerType === "customer") {
+      if (isBookingEnded(booking)) {
+        return jsonResponse({
+          success: false,
+          error: "This rental period has ended."
+        }, 403);
+      }
+      if (!isWithinPinGenerationWindow(booking)) {
+        return jsonResponse({
+          success: false,
+          error: "Access PIN is not available yet. Codes are issued 12 hours before your scheduled pickup."
+        }, 403);
+      }
+    }
+
     const { data: existingPin } = await supabase
       .from("rental_access_codes")
       .select("id, access_pin")
@@ -441,13 +460,7 @@ Deno.serve(async (req)=>{
       end_time: endTimeUTC,
       status: "active"
     });
-    // TODO: uncomment when send-pin-notification is deployed
-    // const { error: emailError } = await supabase.functions.invoke("send-pin-notification", {
-    //   body: { bookingId: booking.id, pin: pinResult.pin, dropOffDate: booking.drop_off_date, pickupDate: booking.pickup_date },
-    // });
-    // if (!emailError) {
-    //   await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", bookingId);
-    // }
+    await maybeSendPinNotification(supabase, booking, pinResult.pin, startTimeUTC, endTimeUTC);
     console.log(`[generate-pin] ✓ PIN generated for booking #${bookingId} via ${pinResult.pinType}`);
     return jsonResponse({
       success: true,

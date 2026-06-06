@@ -11,6 +11,7 @@ import QRCode from 'qrcode.react';
 import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
+import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -298,6 +299,24 @@ export const AccessCodesPage = ({ customerData }) => {
       return;
     }
 
+    if (isBookingEnded(booking)) {
+      toast({
+        title: 'Rental Ended',
+        description: 'This rental period has ended. Access codes are no longer available.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (!isWithinPinGenerationWindow(booking)) {
+      toast({
+        title: 'Not Available Yet',
+        description: 'Access codes are issued 12 hours before your scheduled pickup.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setRetryCount(0);
 
     try {
@@ -356,6 +375,7 @@ export const AccessCodesPage = ({ customerData }) => {
   };
 
   const isRentalExpired = () => {
+    if (booking && isBookingEnded(booking)) return true;
     if (!accessCode?.end_time) return false;
     try {
       return isPast(parseISO(accessCode.end_time));
@@ -363,6 +383,10 @@ export const AccessCodesPage = ({ customerData }) => {
       return false;
     }
   };
+
+  const pinWindowOpen = booking ? isWithinPinGenerationWindow(booking) : false;
+  const bookingEnded = booking ? isBookingEnded(booking) : false;
+  const pinEligibleFrom = booking ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
 
   if (loading) {
     return (
@@ -570,6 +594,32 @@ export const AccessCodesPage = ({ customerData }) => {
                 </Card>
               </motion.div>
             </>
+          ) : bookingEnded ? (
+            <Card className="bg-red-900/30 backdrop-blur-lg border-red-500/50">
+              <CardContent className="p-8 text-center">
+                <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Rental Period Ended</h2>
+                <p className="text-red-200 text-lg">
+                  This rental period has ended. Access codes are no longer available.
+                </p>
+              </CardContent>
+            </Card>
+          ) : !pinWindowOpen ? (
+            <Card className="bg-blue-50/90 backdrop-blur-sm border-blue-200">
+              <CardContent className="p-8 text-center">
+                <Clock className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-blue-900 mb-2">Access Code Not Yet Available</h2>
+                <p className="text-blue-800 text-lg mb-4">
+                  Your access code will be available 12 hours before your scheduled pickup
+                  {pinEligibleFrom ? (
+                    <> on <strong>{format(pinEligibleFrom, 'MMM dd, yyyy')} at {format(pinEligibleFrom, 'h:mm a')}</strong></>
+                  ) : null}.
+                </p>
+                <p className="text-sm text-blue-700">
+                  Scheduled pickup: {formatDateTime(booking?.drop_off_date, booking?.drop_off_time_slot)}
+                </p>
+              </CardContent>
+            </Card>
           ) : (
             <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">
               <CardContent className="p-8 text-center">
@@ -601,7 +651,7 @@ export const AccessCodesPage = ({ customerData }) => {
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <Button 
                     onClick={handleGeneratePin}
-                    disabled={generatingPin}
+                    disabled={generatingPin || !pinWindowOpen}
                     className="bg-yellow-600 hover:bg-yellow-700 text-white"
                   >
                     {generatingPin ? (
