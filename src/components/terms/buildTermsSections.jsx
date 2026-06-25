@@ -4,8 +4,8 @@ import { formatMoney, formatPercent, formatTons } from '@/utils/chargesAndFeesCo
 export const buildTermsSections = (fee) => [
   {
     id: 'email',
-    title: 'Email Verification & Communication',
-    summary: 'Consent to email communication and verification requirements.',
+    title: 'Email & Text Message Communication',
+    summary: 'Consent to email verification and order-related text (SMS) communication.',
     content: (
       <>
         <p>
@@ -15,6 +15,13 @@ export const buildTermsSections = (fee) => [
         <p>
           U-Fill Dumpsters LLC may use this email to communicate regarding scheduling, delays, or issues with the
           rental. Your contact information will not be sold to third parties.
+        </p>
+        <p>
+          By providing my mobile phone number, I consent to receive text messages (SMS/MMS) from U-Fill Dumpsters LLC
+          about my order and rental, including booking confirmations, pickup and delivery updates, access codes,
+          scheduling changes, and other account-related notices. Message and data rates may apply. Message frequency
+          varies. Consent to receive text messages is not required as a condition of purchase. I may opt out at any time
+          by replying STOP to a text message or by contacting U-Fill Dumpsters LLC customer support.
         </p>
       </>
     ),
