@@ -36,7 +36,7 @@ export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefre
                 <p className="text-sm text-blue-200">Chat with support, get AI assistance, submit tickets, or leave reviews.</p>
             </div>
 
-            <Tabs defaultValue="ai-assistant" className="w-full">
+            <Tabs defaultValue="chat" className="w-full">
                 <TabsList className="grid w-full grid-cols-4 bg-black/20 text-white">
                     <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
                     <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>

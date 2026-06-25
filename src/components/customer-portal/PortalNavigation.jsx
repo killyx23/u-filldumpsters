@@ -24,8 +24,8 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
     { id: 'bookings', label: 'Bookings', icon: List },
     { id: 'tracking', label: 'Tracking', icon: Map },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
-    { id: 'documents', label: 'Documents', icon: FileText },
-    { id: 'resources', label: 'How-To & Guides', icon: BookOpen },
+    { id: 'documents', label: 'Your Receipts', icon: FileText },
+    { id: 'resources', label: 'How-To Guides & Documents', icon: BookOpen },
     { id: 'profile', label: 'Profile', icon: User },
     { 
       id: 'verification', 

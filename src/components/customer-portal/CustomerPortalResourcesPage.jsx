@@ -43,8 +43,8 @@ export const CustomerPortalResourcesPage = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white mb-1">How-To & Guides</h2>
-        <p className="text-sm text-blue-200">Access helpful guides, videos, and documents.</p>
+        <h2 className="text-2xl font-bold text-white mb-1">How-To Guides & Documents</h2>
+        <p className="text-sm text-blue-200">Videos, guides, and rental documents for your booking.</p>
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-black/20 p-4 rounded-xl border border-white/10">
