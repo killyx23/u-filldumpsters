@@ -5,8 +5,8 @@ import {
     calculateDays,
     buildOriginalAddonsList,
 } from '@/utils/rescheduleCalculations';
-
-const DEFAULT_INSURANCE_PRICE = 25;
+import { filterRentableServices } from '@/utils/servicePlan';
+import { fetchPlansForService, DEFAULT_INSURANCE_PRICE } from '@/utils/protectionPlans';
 
 export const useRescheduleDataLoader = (bookingId) => {
     const [data, setData] = useState(null);
@@ -25,10 +25,11 @@ export const useRescheduleDataLoader = (bookingId) => {
                     .single();
                 if (bookingErr) throw bookingErr;
 
-                const { data: services, error: servicesErr } = await supabase
+                const { data: servicesRaw, error: servicesErr } = await supabase
                     .from('services')
                     .select('*');
                 if (servicesErr) throw servicesErr;
+                const services = filterRentableServices(servicesRaw || []);
 
                 const { data: allEquipment, error: allEquipErr } = await supabase
                     .from('equipment')
@@ -41,15 +42,10 @@ export const useRescheduleDataLoader = (bookingId) => {
                     .eq('booking_id', bookingId);
                 if (equipErr) throw equipErr;
 
-                let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
-                const { data: insuranceService } = await supabase
-                    .from('services')
-                    .select('base_price')
-                    .eq('id', 7)
-                    .maybeSingle();
-                if (insuranceService?.base_price != null) {
-                    insuranceFallbackPrice = Number(insuranceService.base_price);
-                }
+                const bookingServiceId = Number(booking?.plan?.id);
+                const protectionPlans = await fetchPlansForService(bookingServiceId);
+                const insuranceFallbackPrice =
+                    protectionPlans?.rentalInsurance?.price ?? DEFAULT_INSURANCE_PRICE;
 
                 const originalAddonsList = buildOriginalAddonsList(
                     booking,

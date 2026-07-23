@@ -8,6 +8,8 @@ export const StepIndicator = ({
   highestStep = currentStep,
   onStepClick,
   requiresDriverVerification = true,
+  showInlineEmailStep = false,
+  skipEmailVerification = false,
 }) => {
   const steps = [
     { number: 1, title: 'Booking Details' },
@@ -16,13 +18,14 @@ export const StepIndicator = ({
     { number: 4, title: 'Contact Info' },
     { number: 5, title: 'Terms & Conditions' },
     { number: 6, title: 'Required Agreement' },
-    { number: 7, title: 'Driver & Vehicle Verification' },
-    { number: 8, title: 'Verify Email' },
+    { number: 7, title: 'Verify Email' },
+    { number: 8, title: 'Driver & Vehicle Verification' },
     { number: 9, title: 'Payment' },
   ];
 
   const isStepSkipped = (stepNumber) =>
-    stepNumber === 7 && !requiresDriverVerification;
+    (stepNumber === 7 && (!requiresDriverVerification || !showInlineEmailStep || skipEmailVerification)) ||
+    (stepNumber === 8 && !requiresDriverVerification);
 
   return (
     <div className="w-full max-w-7xl mx-auto mb-8 px-4 mt-8">

@@ -15,9 +15,9 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
         console.warn('RescheduleAddressVerification: onAddressUpdated callback not provided');
     });
 
-    const originalAddressObj = booking?.delivery_address;
+    const originalAddressObj = booking?.delivery_address || booking?.contact_address;
     const originalAddressStr = originalAddressObj?.formatted_address || 
-        `${booking?.street || ''}, ${booking?.city || ''}, ${booking?.state || ''} ${booking?.zip || ''}`.trim();
+        `${booking?.street || booking?.customers?.street || ''}, ${booking?.city || booking?.customers?.city || ''}, ${booking?.state || booking?.customers?.state || ''} ${booking?.zip || booking?.customers?.zip || ''}`.trim();
     
     const [useSameAddress, setUseSameAddress] = useState(true);
     const [newAddress, setNewAddress] = useState({

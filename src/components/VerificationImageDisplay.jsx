@@ -2,6 +2,7 @@ import React from 'react';
 import { useVerificationImageLoader } from '@/hooks/useVerificationImageLoader';
 import { Loader2, Download, AlertTriangle, Image as ImageIcon, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { isVerificationPdf } from '@/utils/verificationImageHelper';
 
 export const VerificationImageDisplay = ({ customerId, title = "Driver & Insurance Documents", refreshKey = 0 }) => {
     const { images, loading, error, downloadImage, refetch } = useVerificationImageLoader(customerId);
@@ -41,7 +42,7 @@ export const VerificationImageDisplay = ({ customerId, title = "Driver & Insuran
     }
 
     const renderImageCard = (label, url, storagePath, alt, downloadName) => {
-        const isPdf = url && url.toLowerCase().includes('.pdf');
+        const isPdf = isVerificationPdf(storagePath || url);
 
         return (
         <div className="relative group flex flex-col">

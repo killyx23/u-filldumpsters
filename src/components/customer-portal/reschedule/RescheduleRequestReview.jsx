@@ -6,6 +6,7 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
 import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import { isDeliveryServiceId } from '@/utils/rescheduleTaxCalculator';
 
 export const RescheduleRequestReview = ({
     originalBooking,
@@ -31,9 +32,10 @@ export const RescheduleRequestReview = ({
             setCostsLoading(true);
             try {
                 const origDays = calculateDays(originalBooking?.drop_off_date, originalBooking?.pickup_date);
-                const originalDistance = Number(originalBooking?.customers?.distance_miles || 0);
+                const storedDistance = Number(originalBooking?.customers?.distance_miles || 0);
+                const originalDistance = isDeliveryServiceId(originalService?.id) ? storedDistance : 0;
                 const newDays = calculateDays(newDropOffDate, newPickupDate);
-                const newDistance = originalDistance;
+                const newDistance = isDeliveryServiceId(newService?.id) ? storedDistance : 0;
 
                 const [orig, updated] = await Promise.all([
                     calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance),

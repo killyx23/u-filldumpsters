@@ -52,13 +52,24 @@ export function useBookingStepperNavigation(routeStep) {
     (step) => {
       if (step >= routeStep) return;
       if (step === 7 && !requiresDriverVerification) return;
+      if (step === 8 && !requiresDriverVerification) return;
 
-      if (step === 8 && routeStep === 9 && token) {
+      if (step === 7 && routeStep === 9 && token && !requiresDriverVerification) {
         navigate(`/verify-email?token=${token}`);
         return;
       }
 
-      if (step < 8 && token) {
+      if (step === 7 && routeStep === 9 && token && requiresDriverVerification) {
+        navigate('/', { state: { resumeStep: 7, token } });
+        return;
+      }
+
+      if (step === 8 && routeStep === 9 && token && requiresDriverVerification) {
+        navigate('/', { state: { resumeStep: 8, token } });
+        return;
+      }
+
+      if (step < 7 && token) {
         navigate('/', { state: { resumeStep: step, token } });
       }
     },
@@ -66,8 +77,8 @@ export function useBookingStepperNavigation(routeStep) {
   );
 
   const goBackOneStep = useCallback(() => {
-    if (routeStep === 8) {
-      const backStep = requiresDriverVerification ? 7 : 6;
+    if (routeStep === 7) {
+      const backStep = 6;
       if (token) {
         navigate('/', { state: { resumeStep: backStep, token } });
       } else {
@@ -77,7 +88,11 @@ export function useBookingStepperNavigation(routeStep) {
     }
 
     if (routeStep === 9 && token) {
-      navigate(`/verify-email?token=${token}`);
+      if (requiresDriverVerification) {
+        navigate('/', { state: { resumeStep: 8, token } });
+      } else {
+        navigate(`/verify-email?token=${token}`);
+      }
       return;
     }
 

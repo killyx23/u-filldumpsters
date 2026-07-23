@@ -4,7 +4,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, User, Clock, DollarSign, ShieldAlert, MessageSquare, Bell, AlertTriangle, MapPin } from 'lucide-react';
+import { Loader2, ArrowLeft, User, Clock, DollarSign, ShieldAlert, MessageSquare, Bell, AlertTriangle, MapPin, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CustomerProfile } from './CustomerProfile';
 import { CommunicationLog } from './CommunicationLog';
@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CustomerVerification } from './CustomerVerification';
 import { CustomerProfileHeader } from './CustomerProfileHeader';
 import { CustomerRewardsOverview } from './CustomerRewardsOverview';
+import { ProtectionPlanHistory } from './ProtectionPlanHistory';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -267,7 +268,7 @@ export const CustomerDetailView = () => {
             <CustomerProfileHeader customer={customer} bookingsCount={bookings.length} />
 
             <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full mt-8">
-                <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 bg-white/10 text-white mb-6">
+                <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 bg-white/10 text-white mb-6">
                     <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile</TabsTrigger>
                     <TabsTrigger value="notes" className="relative">
                         <MessageSquare className="mr-2 h-4 w-4" />Chat
@@ -277,6 +278,7 @@ export const CustomerDetailView = () => {
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification
                         {(pendingAddressBookings.length > 0 || verificationBookings.length > 0) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
                     </TabsTrigger>
+                    <TabsTrigger value="protection"><Shield className="mr-2 h-4 w-4" />Protection</TabsTrigger>
                     <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
                     <TabsTrigger value="history"><DollarSign className="mr-2 h-4 w-4" />History & Receipts</TabsTrigger>
                 </TabsList>
@@ -329,6 +331,11 @@ export const CustomerDetailView = () => {
                             </div>
                          )}
                          <CustomerVerification customer={customer} verificationBookings={verificationBookings} notes={notes} onUpdate={() => fetchCustomerDetails(false)} />
+                    </div>
+                </TabsContent>
+                <TabsContent value="protection">
+                    <div className="bg-white/5 p-6 rounded-lg shadow-lg">
+                        <ProtectionPlanHistory customerId={customer.id} />
                     </div>
                 </TabsContent>
                 <TabsContent value="rentals">

@@ -263,7 +263,7 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           shortLabel: 'Submit & Continue',
           summary: 'Complete verification',
           description: 'Use when all required license, insurance, and plate information is provided.',
-          howToUse: 'Tap when uploads and plate are complete to continue to email verification.',
+          howToUse: 'Tap when uploads and plate are complete. You must certify the information is accurate before continuing to payment.',
         }),
       ];
 

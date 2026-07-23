@@ -12,6 +12,7 @@ import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { buildProtectionPlanIdsPayload } from '@/utils/protectionPlans';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
@@ -44,8 +45,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
 
   // Load insurance and driveway protection prices from hooks
-  const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
-  const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
+  const { insurancePrice, loading: insuranceLoading, rentalInsurance } = useInsurancePricing(plan?.id);
+  const { drivewayPrice, loading: drivewayLoading, drivewayProtection } = useDrivewayProtectionPrice(plan?.id);
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
   const { taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
@@ -255,7 +256,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0,
         distanceFeeDisplay: feeResult.displayText,
         insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0,
-        drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0
+        drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0,
+        protectionPlanIds: buildProtectionPlanIdsPayload(rentalInsurance, drivewayProtection),
     };
 
     if (disposalItemsList.length > 0) {
@@ -376,6 +378,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   plan={plan}
                   addonPrices={{ insurance: insurancePrice, drivewayProtection: drivewayPrice }}
                   isDelivery={deliveryService && plan.id === 2}
+                  hasDrivewayPlan={Boolean(drivewayProtection)}
+                  rentalInsurancePlan={rentalInsurance}
+                  drivewayProtectionPlan={drivewayProtection}
                 />
                 <EquipmentSection 
                   addonsData={addonsData}

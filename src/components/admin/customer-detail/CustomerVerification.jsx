@@ -581,7 +581,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                         <span>{format(parseISO(item.created_at), 'MMM d, yyyy h:mm a')}</span>
                                     </div>
                                     <p className="text-gray-400 mt-1 capitalize">Action: {item.action}</p>
-                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline mt-1 inline-block">View Version</a>
+                                    <a href={item.display_url || item.url} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline mt-1 inline-block">View Version</a>
                                 </div>
                             ))}
                         </div>
