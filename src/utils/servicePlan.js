@@ -201,6 +201,22 @@ export async function fetchServiceById(supabase, serviceId) {
 /** Default homepage catalog when flags are missing or unset. */
 export const HOMEPAGE_SERVICE_IDS = [2, 1, 5, 3];
 
+/** Non-rentable legacy rows (e.g. Premium Insurance service id 7). */
+export const NON_RENTABLE_SERVICE_IDS = [7];
+
+/**
+ * Exclude protection-plan legacy service rows from rentable service pickers.
+ * @param {object[]} services
+ */
+export function filterRentableServices(services = []) {
+  return (services || []).filter((service) => {
+    const id = Number(service?.id);
+    if (NON_RENTABLE_SERVICE_IDS.includes(id)) return false;
+    if (service?.is_rentable === false) return false;
+    return true;
+  });
+}
+
 const HERO_STATIC_FALLBACK = [
   { id: 2, name: 'Dump Loader Trailer Rental Service' },
   { id: 1, name: '16 Yard Dumpster' },
@@ -217,11 +233,15 @@ export function getHeroStaticFallback() {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  */
 export async function fetchHomepageServicesLegacy(supabase) {
-  return supabase
+  const result = await supabase
     .from('services')
     .select('*')
     .in('id', HOMEPAGE_SERVICE_IDS)
     .order('id');
+  if (result.data) {
+    return { ...result, data: filterRentableServices(result.data) };
+  }
+  return result;
 }
 
 /**
@@ -236,7 +256,7 @@ export async function fetchHomepageServices(supabase) {
     .order('display_order', { ascending: true });
 
   if (!filtered.error && filtered.data?.length > 0) {
-    return filtered;
+    return { ...filtered, data: filterRentableServices(filtered.data) };
   }
 
   if (filtered.error) {

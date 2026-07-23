@@ -102,7 +102,6 @@ const hydrateBookingPlanFromService = async (supabase, booking) => {
   };
   return booking;
 };
-const INSURANCE_SERVICE_ID = 7;
 const DEFAULT_INSURANCE_PRICE = 25;
 const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE) => {
   if (addons?.insurance !== "accept") return 0;
@@ -149,11 +148,13 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
     </tr>`;
     }
     if (addons.drivewayProtection === "accept") {
-      const drivewayAmt = Number(addons.drivewayPriceApplied ?? 15);
-      rows += `<tr>
+      const drivewayAmt = Number(addons.drivewayPriceApplied ?? 0);
+      if (drivewayAmt > 0) {
+        rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">Driveway Protection</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(drivewayAmt)}</td>
     </tr>`;
+      }
     }
     if (addons.deliveryFee > 0) {
       rows += `<tr>
@@ -626,9 +627,13 @@ Deno.serve(async (req)=>{
     }
     console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
     let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
-    const { data: insuranceService } = await supabase.from("services").select("base_price").eq("id", INSURANCE_SERVICE_ID).maybeSingle();
-    if (insuranceService?.base_price != null) {
-      insuranceFallbackPrice = Number(insuranceService.base_price);
+    const { data: premiumPlan } = await supabase
+      .from("protection_plans")
+      .select("price")
+      .eq("plan_key", "premium_insurance")
+      .maybeSingle();
+    if (premiumPlan?.price != null) {
+      insuranceFallbackPrice = Number(premiumPlan.price);
     }
     const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
     const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);

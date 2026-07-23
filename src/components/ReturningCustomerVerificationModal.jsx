@@ -10,8 +10,16 @@ import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
+import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 
-export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderSelect, onCustomerVerified }) => {
+export const ReturningCustomerVerificationModal = ({
+  isOpen,
+  onClose,
+  onReorderSelect,
+  onCustomerVerified,
+  mode = 'full',
+  initialEmail = '',
+}) => {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,6 +28,13 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
   const [pointsBalance, setPointsBalance] = useState(0);
   const [step, setStep] = useState('email'); // email | code | bookings
   const [error, setError] = useState('');
+  const isVerifyOnly = mode === 'verifyOnly';
+
+  React.useEffect(() => {
+    if (isOpen && initialEmail) {
+      setEmail(initialEmail);
+    }
+  }, [isOpen, initialEmail]);
 
   const resetState = () => {
     setEmail('');
@@ -102,15 +117,29 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
       }
 
       if (typeof window !== 'undefined') {
-        window.sessionStorage.setItem(
-          `verified_email_${normalizedEmail}`,
-          String(Date.now())
-        );
+        markVerifiedEmailSession(normalizedEmail);
       }
 
       const data = verifyData.bookings || [];
       if (verifyData.customer) {
         setCustomerProfile(verifyData.customer);
+      }
+
+      if (isVerifyOnly) {
+        const mapped = mapCustomerToBookingData(verifyData.customer, normalizedEmail);
+        if (onCustomerVerified) {
+          onCustomerVerified({
+            ...mapped,
+            returningCustomerVerified: true,
+            usedReturningCustomerLink: true,
+          });
+        }
+        toast({
+          title: 'Verified',
+          description: 'Your email is verified. You can continue with your booking.',
+        });
+        handleClose();
+        return;
       }
 
       if (!data || data.length === 0) {
@@ -197,6 +226,8 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
     if (onCustomerVerified) {
       onCustomerVerified({
         ...mapped,
+        returningCustomerVerified: true,
+        usedReturningCustomerLink: true,
         loyalty: {
           pointsBalance,
         },
@@ -244,7 +275,9 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
           </DialogTitle>
           <DialogDescription>
             {step === 'email' &&
-              'Enter your email to receive a verification code and access your booking history.'}
+              (isVerifyOnly
+                ? 'Verify your email to confirm your returning customer account for this booking.'
+                : 'Enter your email to receive a verification code and access your booking history.')}
             {step === 'code' && `Enter the code we sent to ${email}.`}
             {step === 'bookings' && 'Reorder a past booking or start a new booking with your profile pre-filled.'}
           </DialogDescription>
@@ -326,6 +359,8 @@ export const ReturningCustomerVerificationModal = ({ isOpen, onClose, onReorderS
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Verifying...
                   </>
+                ) : isVerifyOnly ? (
+                  'Verify Email'
                 ) : (
                   'Verify & View Bookings'
                 )}

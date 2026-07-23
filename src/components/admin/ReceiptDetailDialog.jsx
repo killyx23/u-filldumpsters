@@ -20,15 +20,14 @@ import React from 'react';
       { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
     ];
 
-    const addonPrices = {
-      insurance: 25,
-      drivewayProtection: 20,
-    };
-
     export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
         if (!booking) return null;
 
         const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
+        const addonPrices = {
+            insurance: Number(addons?.insurancePriceApplied || 0),
+            drivewayProtection: Number(addons?.drivewayPriceApplied || 0),
+        };
         const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
         const coupon = addons?.coupon;
         const isDelivery = addons?.isDelivery;
@@ -97,8 +96,8 @@ import React from 'react';
 
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
-                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? 'Accepted' : 'Declined'} />
-                            {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'} />}
+                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? `Accepted ($${addonPrices.insurance.toFixed(2)})` : 'Declined'} />
+                            {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
                             {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                             
                             {addons.equipment && addons.equipment.length > 0 && (

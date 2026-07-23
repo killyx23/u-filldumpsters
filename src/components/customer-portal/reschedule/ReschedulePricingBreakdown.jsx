@@ -6,18 +6,25 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { calculateDays, bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
 import { Button } from '@/components/ui/button';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import {
+  calculateRescheduleCosts,
+  isDeliveryServiceId,
+} from '@/utils/rescheduleTaxCalculator';
 
-export const ReschedulePricingBreakdown = ({ 
+export const ReschedulePricingBreakdown = ({
     bookingId,
-    originalService, 
-    originalAddonsList, 
+    originalService,
+    originalAddonsList,
     originalCosts,
-    newService, 
-    newAddonsList, 
-    newDropOffDate, 
+    newService,
+    newAddonsList,
+    newDropOffDate,
     newPickupDate,
     distanceMiles,
-    isManualAddress
+    isManualAddress,
+    verifiedAddress = null,
 }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -26,10 +33,16 @@ export const ReschedulePricingBreakdown = ({
     const [mileageLogic, setMileageLogic] = useState(null);
     const [originalBooking, setOriginalBooking] = useState(null);
     const [retryCount, setRetryCount] = useState(0);
+    const [taxRateUsed, setTaxRateUsed] = useState(0);
+
+    const { taxRate, loading: loadingTaxRate } = useTaxRate();
+    const { taxOptions, insurancePrice, loading: loadingTaxOptions } = useBookingTaxOptions(newService?.id);
 
     const currencyInfo = { code: 'USD', symbol: '$' };
 
     useEffect(() => {
+        if (loadingTaxRate || loadingTaxOptions || !taxRate) return;
+
         let isMounted = true;
         let timeoutId = null;
 
@@ -82,32 +95,27 @@ export const ReschedulePricingBreakdown = ({
 
                 const originalDays = calculateDays(booking.drop_off_date, booking.pickup_date);
                 const originalMileageRate = Number(originalService.mileage_rate || 0.85);
+                const originalIsDelivery = isDeliveryServiceId(originalService.id);
 
-                // Use STORED mileage first (faster, no API call needed)
                 let originalTotalMiles = 0;
                 let originalMileageCharge = 0;
-                
-                const storedMiles = booking.customers?.distance_miles;
-                if (storedMiles && !isNaN(storedMiles)) {
-                    // Use cached mileage from database
-                    originalTotalMiles = parseFloat(storedMiles);
-                    originalMileageCharge = originalTotalMiles * originalMileageRate;
-                    console.log(`[ReschedulePricing] Using STORED mileage: ${originalTotalMiles} mi @ $${originalMileageRate}/mi = $${originalMileageCharge.toFixed(2)}`);
-                } else {
-                    // Fallback: calculate if no stored value
-                    try {
-                        const deliveryAddr = booking.delivery_address;
-                        const customerAddress = deliveryAddr?.formatted_address || 
-                            `${deliveryAddr?.street || booking.street}, ${deliveryAddr?.city || booking.city}, ${deliveryAddr?.state || booking.state} ${deliveryAddr?.zip || booking.zip}`;
-                        
-                        console.log('[ReschedulePricing] Calculating 3-point route for:', customerAddress);
-                        originalTotalMiles = await calculateRoundTripDistance(customerAddress);
+
+                if (originalIsDelivery) {
+                    const storedMiles = booking.customers?.distance_miles;
+                    if (storedMiles && !isNaN(storedMiles)) {
+                        originalTotalMiles = parseFloat(storedMiles);
                         originalMileageCharge = originalTotalMiles * originalMileageRate;
-                        console.log(`[ReschedulePricing] CALCULATED: ${originalTotalMiles} mi @ $${originalMileageRate}/mi = $${originalMileageCharge.toFixed(2)}`);
-                    } catch (err) {
-                        console.warn('[ReschedulePricing] Mileage calculation failed, using 0:', err);
-                        originalTotalMiles = 0;
-                        originalMileageCharge = 0;
+                    } else {
+                        try {
+                            const deliveryAddr = booking.delivery_address || booking.contact_address;
+                            const customerAddress = deliveryAddr?.formatted_address ||
+                                `${deliveryAddr?.street || booking.street}, ${deliveryAddr?.city || booking.city}, ${deliveryAddr?.state || booking.state} ${deliveryAddr?.zip || booking.zip}`;
+
+                            originalTotalMiles = await calculateRoundTripDistance(customerAddress);
+                            originalMileageCharge = originalTotalMiles * originalMileageRate;
+                        } catch (err) {
+                            console.warn('[ReschedulePricing] Mileage calculation failed, using 0:', err);
+                        }
                     }
                 }
 
@@ -147,172 +155,162 @@ export const ReschedulePricingBreakdown = ({
                 }
                 console.log(`[ReschedulePricing] Total original addons: ${allOriginalAddons.length}`);
 
-                // Calculate service cost components
-                const basePrice = Number(originalService.base_price || 0);
-                const deliveryFee = Number(originalService.delivery_fee || 0);
-                
-                let baseRentalCost = 0;
-                if (originalService.id === 1) {
-                    baseRentalCost = originalDays === 7 ? 500 : basePrice + Math.max(0, originalDays - 1) * 50;
-                } else if (originalService.id === 2 || originalService.id === 4) {
-                    baseRentalCost = basePrice * originalDays;
-                } else if (originalService.id === 3) {
-                    baseRentalCost = basePrice;
-                }
+                const originalAddonsForCalc = (originalAddonsList && originalAddonsList.length > 0)
+                    ? originalAddonsList
+                    : allOriginalAddons.map((a) => ({
+                        id: a.name === 'Premium Insurance' ? 'insurance' : undefined,
+                        name: a.name,
+                        price: a.unitPrice,
+                        quantity: a.quantity,
+                        type: a.type,
+                    }));
 
-                const isDeliveryService = [1, 3, 4].includes(originalService.id);
-                const deliveryFeeApplied = isDeliveryService ? deliveryFee : 0;
+                const { data: originalServiceTax } = await supabase
+                    .from('services')
+                    .select('is_taxable, delivery_fee_is_taxable, mileage_is_taxable')
+                    .eq('id', originalService.id)
+                    .maybeSingle();
 
-                const addonsTotal = allOriginalAddons.reduce((sum, a) => sum + a.total, 0);
-                const originalSubtotal = baseRentalCost + deliveryFeeApplied + originalMileageCharge + addonsTotal;
-                const originalTax = originalSubtotal * 0.07;
-                const originalTotal = originalSubtotal + originalTax;
+                const originalDistanceForCalc = originalIsDelivery
+                    ? (Number(booking.customers?.distance_miles) || originalTotalMiles)
+                    : 0;
+
+                const originalCostResult = await calculateRescheduleCosts({
+                    service: originalService,
+                    days: originalDays,
+                    addonsList: originalAddonsForCalc,
+                    distanceMiles: originalDistanceForCalc,
+                    taxRate,
+                    taxOptions: {
+                        ...taxOptions,
+                        serviceTaxFlags: originalServiceTax || taxOptions.serviceTaxFlags,
+                    },
+                    insurancePrice,
+                });
 
                 const originalCostsData = {
-                    baseRentalCost,
-                    deliveryFee: deliveryFeeApplied,
-                    mileageCharge: originalMileageCharge,
-                    mileageDistance: originalTotalMiles,
+                    baseRentalCost: originalCostResult.baseRentalCost,
+                    deliveryFee: originalCostResult.deliveryFee,
+                    mileageCharge: originalIsDelivery ? originalCostResult.mileageCharge : 0,
+                    mileageDistance: originalIsDelivery ? originalTotalMiles : 0,
                     mileageRate: originalMileageRate,
                     addons: allOriginalAddons,
-                    addonsTotal,
-                    subtotal: originalSubtotal,
-                    tax: originalTax,
-                    total: originalTotal,
-                    days: originalDays
+                    addonsTotal: originalCostResult.addonsCost,
+                    subtotal: originalCostResult.subtotal,
+                    tax: originalCostResult.tax,
+                    total: originalCostResult.total,
+                    days: originalDays,
                 };
 
-                console.log('[ReschedulePricing] Original costs calculated:', originalCostsData);
                 if (!isMounted) return;
                 setOriginalDetailedCosts(originalCostsData);
+                setTaxRateUsed(taxRate);
 
-                // STEP 3: Calculate NEW costs
-                console.log('[ReschedulePricing] Step 3: Calculating new costs...');
                 if (!newService || !newDropOffDate) {
                     throw new Error('Missing new service or dates');
                 }
 
                 const newDays = calculateDays(newDropOffDate, newPickupDate);
-                const newBasePrice = Number(newService.base_price || 0);
-                const newDeliveryFee = Number(newService.delivery_fee || 0);
                 const newMileageRate = Number(newService.mileage_rate || 0.85);
+                const isNewDeliveryService = isDeliveryServiceId(newService.id);
+                const newDeliveryFeeApplied = isNewDeliveryService ? Number(newService.delivery_fee || 0) : 0;
 
-                // Calculate base rental
-                let newBaseRentalCost = 0;
-                if (newService.id === 1) {
-                    newBaseRentalCost = newDays === 7 ? 500 : newBasePrice + Math.max(0, newDays - 1) * 50;
-                } else if (newService.id === 2 || newService.id === 4) {
-                    newBaseRentalCost = newBasePrice * newDays;
-                } else if (newService.id === 3) {
-                    newBaseRentalCost = newBasePrice;
-                }
+                const originalAddress = booking?.delivery_address || booking?.contact_address;
+                const originalAddressStr = originalAddress?.formatted_address ||
+                    `${originalAddress?.street || booking.street}, ${originalAddress?.city || booking.city}, ${originalAddress?.state || booking.state} ${originalAddress?.zip || booking.zip}`;
 
-                const isNewDeliveryService = [1, 3, 4].includes(newService.id);
-                const newDeliveryFeeApplied = isNewDeliveryService ? newDeliveryFee : 0;
-
-                // MILEAGE LOGIC: Use stored values when possible
-                const originalAddress = booking?.delivery_address;
-                const originalAddressStr = originalAddress?.formatted_address || 
-                    `${originalAddress?.street}, ${originalAddress?.city}, ${originalAddress?.state} ${originalAddress?.zip}`;
-                
-                const newAddressStr = typeof distanceMiles === 'object' ? 
-                    distanceMiles.formatted_address : 
-                    (booking?.delivery_address?.formatted_address || originalAddressStr);
-
+                const newAddressStr = verifiedAddress || originalAddressStr;
                 const isSameAddress = originalAddressStr === newAddressStr;
-                
+
                 let newMileageCharge = 0;
                 let newMileageExplanation = '';
                 let newMileageDistance = 0;
+                let newDistanceForCalc = 0;
 
                 if (isNewDeliveryService) {
                     if (isSameAddress) {
-                        // Use LOCKED original mileage (no calculation needed)
-                        newMileageCharge = originalMileageCharge;
-                        newMileageDistance = originalTotalMiles;
-                        newMileageExplanation = `Locked from original (${newMileageDistance.toFixed(2)} mi @ $${originalMileageRate.toFixed(2)}/mi)`;
-                        console.log('[ReschedulePricing] Same address - using original mileage');
+                        newMileageCharge = originalCostsData.mileageCharge;
+                        newMileageDistance = originalCostsData.mileageDistance;
+                        newDistanceForCalc = Number(booking.customers?.distance_miles) || originalTotalMiles;
+                        newMileageExplanation = `Locked from original (${newMileageDistance.toFixed(2)} mi @ $${newMileageRate.toFixed(2)}/mi)`;
                     } else if (isManualAddress) {
-                        newMileageCharge = 0;
                         newMileageExplanation = 'Pending manual address verification';
-                        console.log('[ReschedulePricing] Manual address - pending review');
                     } else {
-                        // Calculate new mileage (with error handling)
                         try {
-                            console.log('[ReschedulePricing] Calculating NEW route for:', newAddressStr);
                             const calculatedMiles = await calculateRoundTripDistance(newAddressStr);
                             const calculatedCharge = calculatedMiles * newMileageRate;
-                            
-                            console.log(`[ReschedulePricing] NEW: ${calculatedMiles} mi @ $${newMileageRate}/mi = $${calculatedCharge.toFixed(2)}`);
-                            
-                            // Use LOWER price
-                            if (calculatedCharge < originalMileageCharge) {
+                            if (calculatedCharge < originalCostsData.mileageCharge) {
                                 newMileageCharge = calculatedCharge;
                                 newMileageDistance = calculatedMiles;
+                                newDistanceForCalc = calculatedMiles;
                                 newMileageExplanation = `New address - lower rate (${calculatedMiles.toFixed(2)} mi @ $${newMileageRate.toFixed(2)}/mi)`;
                             } else {
-                                newMileageCharge = originalMileageCharge;
-                                newMileageDistance = originalTotalMiles;
-                                newMileageExplanation = `Original rate preserved (${originalTotalMiles.toFixed(2)} mi @ $${originalMileageRate.toFixed(2)}/mi)`;
+                                newMileageCharge = originalCostsData.mileageCharge;
+                                newMileageDistance = originalCostsData.mileageDistance;
+                                newDistanceForCalc = Number(booking.customers?.distance_miles) || originalTotalMiles;
+                                newMileageExplanation = `Original rate preserved (${newMileageDistance.toFixed(2)} mi @ $${newMileageRate.toFixed(2)}/mi)`;
                             }
                         } catch (err) {
                             console.error('[ReschedulePricing] New mileage calc failed:', err);
-                            // Fallback to original
-                            newMileageCharge = originalMileageCharge;
-                            newMileageDistance = originalTotalMiles;
-                            newMileageExplanation = `Using original rate (calc error)`;
+                            newMileageCharge = originalCostsData.mileageCharge;
+                            newMileageDistance = originalCostsData.mileageDistance;
+                            newDistanceForCalc = Number(booking.customers?.distance_miles) || originalTotalMiles;
+                            newMileageExplanation = 'Using original rate (calc error)';
                         }
                     }
                 }
 
-                // Process new add-ons
-                const addonsMap = new Map();
-                if (Array.isArray(newAddonsList)) {
-                    newAddonsList.forEach(addon => {
-                        const name = addon?.name || 'Unknown';
-                        const key = name.toLowerCase();
-                        if (!addonsMap.has(key)) {
-                            addonsMap.set(key, {
-                                name: name,
-                                quantity: Number(addon?.quantity) || 1,
-                                unitPrice: Number(addon?.price) || 0,
-                                total: (Number(addon?.price) || 0) * (Number(addon?.quantity) || 1)
-                            });
-                        }
-                    });
-                }
-                const newAddons = Array.from(addonsMap.values());
-                const newAddonsTotal = newAddons.reduce((sum, a) => sum + a.total, 0);
+                const newCostResult = await calculateRescheduleCosts({
+                    service: newService,
+                    days: newDays,
+                    addonsList: newAddonsList || [],
+                    distanceMiles: isNewDeliveryService ? (newDistanceForCalc || distanceMiles) : 0,
+                    taxRate,
+                    taxOptions,
+                    insurancePrice,
+                });
 
-                const newSubtotal = newBaseRentalCost + newDeliveryFeeApplied + newMileageCharge + newAddonsTotal;
-                const newTax = newSubtotal * 0.07;
-                const newTotal = newSubtotal + newTax;
+                const addonsMap = new Map();
+                (newAddonsList || []).forEach((addon) => {
+                    const name = addon?.name || 'Unknown';
+                    const key = name.toLowerCase();
+                    if (!addonsMap.has(key)) {
+                        addonsMap.set(key, {
+                            name,
+                            quantity: Number(addon?.quantity) || 1,
+                            unitPrice: Number(addon?.price) || 0,
+                            total: (Number(addon?.price) || 0) * (Number(addon?.quantity) || 1),
+                        });
+                    }
+                });
+                const newAddons = Array.from(addonsMap.values());
 
                 const newCostsData = {
-                    baseRentalCost: newBaseRentalCost,
+                    baseRentalCost: newCostResult.baseRentalCost,
                     deliveryFee: newDeliveryFeeApplied,
-                    mileageCharge: newMileageCharge,
-                    mileageDistance: newMileageDistance,
+                    mileageCharge: isNewDeliveryService ? (isManualAddress ? 0 : newMileageCharge || newCostResult.mileageCharge) : 0,
+                    mileageDistance: isNewDeliveryService ? newMileageDistance : 0,
                     mileageRate: newMileageRate,
                     addons: newAddons,
-                    addonsTotal: newAddonsTotal,
-                    subtotal: newSubtotal,
-                    tax: newTax,
-                    total: newTotal,
-                    days: newDays
+                    addonsTotal: newCostResult.addonsCost,
+                    subtotal: newCostResult.subtotal,
+                    tax: newCostResult.tax,
+                    total: newCostResult.total,
+                    days: newDays,
                 };
 
-                console.log('[ReschedulePricing] New costs calculated:', newCostsData);
                 if (!isMounted) return;
                 setNewCosts(newCostsData);
 
-                setMileageLogic({
-                    isSameAddress,
-                    explanation: newMileageExplanation,
-                    isManualAddress
-                });
-
-                console.log('[ReschedulePricing] All calculations complete successfully!');
+                setMileageLogic(
+                    isNewDeliveryService
+                        ? {
+                            isSameAddress,
+                            explanation: newMileageExplanation,
+                            isManualAddress,
+                        }
+                        : null
+                );
                 
             } catch (err) {
                 console.error('[ReschedulePricing] Calculation error:', err);
@@ -334,7 +332,7 @@ export const ReschedulePricingBreakdown = ({
             isMounted = false;
             if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [bookingId, originalService, newService, newAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, retryCount]);
+    }, [bookingId, originalService, newService, newAddonsList, originalAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, verifiedAddress, retryCount, taxRate, taxOptions, insurancePrice, loadingTaxRate, loadingTaxOptions]);
 
     const handleRetry = () => {
         setRetryCount(prev => prev + 1);
@@ -438,7 +436,7 @@ export const ReschedulePricingBreakdown = ({
                             </div>
                             
                             <div className="flex justify-between items-center text-gray-400">
-                                <span>Estimated Tax (7%)</span>
+                                <span>Estimated Tax ({taxRateUsed || taxRate}%)</span>
                                 <span>{formatCurrency(originalDetailedCosts.tax * 100, currencyInfo)}</span>
                             </div>
                         </div>
@@ -531,7 +529,7 @@ export const ReschedulePricingBreakdown = ({
                             </div>
 
                             <div className="flex justify-between items-center text-gray-300">
-                                <span>Estimated Tax (7%)</span>
+                                <span>Estimated Tax ({taxRateUsed || taxRate}%)</span>
                                 <span>{formatCurrency(newCosts.tax * 100, currencyInfo)}</span>
                             </div>
                         </div>

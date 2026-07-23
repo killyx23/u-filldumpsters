@@ -1,6 +1,8 @@
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
 import { getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
 import { isValidEquipmentId } from './equipmentIdValidator';
+import { getTaxRate } from './getTaxRate';
+import { supabase } from '@/lib/customSupabaseClient';
 
 const INSURANCE_SERVICE_EQUIPMENT_ID = 7;
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
@@ -37,7 +39,7 @@ function addonMapKey(addon) {
     return addon?.id ?? addon?.equipment_id ?? addon?.name ?? 'unknown';
 }
 
-async function resolveAddonUnitPrice(addon, priceSnapshot = null) {
+export async function resolveAddonUnitPrice(addon, priceSnapshot = null) {
     if (isInsuranceAddon(addon)) {
         return Number(addon?.price || 0);
     }
@@ -100,6 +102,17 @@ export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment
         });
     }
 
+    if (booking?.addons?.drivewayProtection === 'accept') {
+        const applied = Number(booking.addons.drivewayPriceApplied);
+        list.push({
+            id: 'driveway',
+            name: 'Driveway Protection',
+            quantity: 1,
+            price: applied > 0 ? applied : 0,
+            type: 'driveway',
+        });
+    }
+
     return list;
 }
 
@@ -114,64 +127,73 @@ export const calculateDays = (dropOff, pickup) => {
     return Math.max(1, days);
 };
 
-export const calculateBookingCosts = async (service, days, addonsList, distanceMiles = 0, priceSnapshot = null) => {
+export const calculateBookingCosts = async (
+    service,
+    days,
+    addonsList,
+    distanceMiles = 0,
+    priceSnapshot = null,
+    taxOptions = null
+) => {
     if (!service) {
         return { serviceCost: 0, addonsCost: 0, subtotal: 0, tax: 0, total: 0 };
     }
 
-    const basePrice = Number(service.base_price) || 0;
-    const deliveryFee = Number(service.delivery_fee) || 0;
-    const mileageRate = Number(service.mileage_rate) || 0.85;
-    
-    // Calculate service cost
-    let serviceCost = 0;
-    if (service.id === 1) {
-        serviceCost = days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
-    } else if (service.id === 2 || service.id === 4) {
-        serviceCost = basePrice * days;
-    } else if (service.id === 3) {
-        serviceCost = basePrice;
-    }
+    const miles = Number(service.id) === 1 || Number(service.id) === 3 || Number(service.id) === 4
+        ? distanceMiles
+        : 0;
+    let taxRate = 7.45;
+    let resolvedTaxOptions = taxOptions;
 
-    // Add delivery fee
-    const isDeliveryService = service.id === 1 || service.id === 4 || service.id === 3;
-    if (isDeliveryService) {
-        serviceCost += deliveryFee;
-    }
-
-    // Add mileage charge
-    let mileageCharge = 0;
-    if (isDeliveryService && distanceMiles > 0) {
-        mileageCharge = distanceMiles * 2 * mileageRate;
-        serviceCost += mileageCharge;
-    }
-
-    let addonsCost = 0;
-    if (Array.isArray(addonsList)) {
-        for (const addon of addonsList) {
-            const price = await resolveAddonUnitPrice(addon, priceSnapshot);
-            const qty = Number(addon?.quantity || 1);
-            addonsCost += price * qty;
-        }
-    } else if (addonsList && typeof addonsList === 'object') {
-        for (const [key, val] of Object.entries(addonsList)) {
-            const p = Number(val?.price || val) || 0;
-            const q = Number(val?.quantity || 1);
-            addonsCost += p * q;
+    if (!resolvedTaxOptions) {
+        try {
+            const rateData = await getTaxRate();
+            taxRate = rateData?.rate ?? taxRate;
+            const { data: serviceRow } = await supabase
+                .from('services')
+                .select('is_taxable, delivery_fee_is_taxable, mileage_is_taxable')
+                .eq('id', service.id)
+                .maybeSingle();
+            resolvedTaxOptions = {
+                serviceTaxFlags: serviceRow || {},
+                equipmentTaxFlags: {},
+                insuranceIsTaxable: false,
+                drivewayIsTaxable: true,
+                drivewayPrice: 0,
+            };
+        } catch {
+            resolvedTaxOptions = {
+                serviceTaxFlags: {},
+                equipmentTaxFlags: {},
+                insuranceIsTaxable: false,
+                drivewayIsTaxable: true,
+                drivewayPrice: 0,
+            };
         }
     }
 
-    const subtotal = serviceCost + addonsCost;
-    const tax = subtotal * 0.07;
-    const total = subtotal + tax;
+    const { calculateRescheduleCosts } = await import('./rescheduleTaxCalculator');
+    const costs = await calculateRescheduleCosts({
+        service,
+        days,
+        addonsList,
+        distanceMiles: miles,
+        taxRate,
+        taxOptions: resolvedTaxOptions,
+        insurancePrice: 0,
+        priceSnapshot,
+    });
+
+    const serviceCost = costs.baseRentalCost + costs.deliveryFee + costs.mileageCharge;
 
     return {
         serviceCost: round2(serviceCost),
-        addonsCost: round2(addonsCost),
-        mileageCharge: round2(mileageCharge),
-        subtotal: round2(subtotal),
-        tax: round2(tax),
-        total: round2(total)
+        addonsCost: costs.addonsCost,
+        mileageCharge: costs.mileageCharge,
+        subtotal: costs.subtotal,
+        tax: costs.tax,
+        total: costs.total,
+        taxRate: costs.taxRate,
     };
 };
 
@@ -338,7 +360,14 @@ export async function calculateComprehensivePricing(
 
   const addonsTotal = addonsBreakdown.reduce((sum, addon) => sum + addon.total, 0);
   const subtotal = baseRentalCost + deliveryFee + mileageCharge + addonsTotal + insurancePrice;
-  const tax = subtotal * 0.07;
+  let taxRatePercent = 7.45;
+  try {
+    const rateData = await getTaxRate();
+    taxRatePercent = rateData?.rate ?? taxRatePercent;
+  } catch {
+    // use default
+  }
+  const tax = subtotal * (taxRatePercent / 100);
   const estimatedTotal = subtotal + tax;
 
   return {

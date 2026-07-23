@@ -8,8 +8,8 @@ import { useEquipmentTaxFlags } from '@/hooks/useEquipmentTaxFlags';
  * Bundles insurance/driveway pricing and per-line tax flags for booking totals.
  */
 export function useBookingTaxOptions(planId) {
-  const { insurancePrice, insuranceIsTaxable, loading: insuranceLoading } = useInsurancePricing();
-  const { drivewayPrice, drivewayIsTaxable, loading: drivewayLoading } = useDrivewayProtectionPrice();
+  const { insurancePrice, insuranceIsTaxable, loading: insuranceLoading } = useInsurancePricing(planId);
+  const { drivewayPrice, drivewayIsTaxable, loading: drivewayLoading } = useDrivewayProtectionPrice(planId);
   const { serviceTaxFlags, loading: serviceLoading } = useServiceTaxFlags(planId);
   const { equipmentTaxFlags, loading: equipmentLoading } = useEquipmentTaxFlags();
 

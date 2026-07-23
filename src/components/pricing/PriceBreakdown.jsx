@@ -69,7 +69,10 @@ export const PriceBreakdown = ({
     const insuranceCost = addons?.insurance === 'accept'
       ? Number(addons?.insurancePriceApplied || addons?.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
       : 0;
-    const drivewayProtectionCost = addons?.drivewayProtection === 'accept' ? 15 : 0;
+    const drivewayProtectionCost =
+      addons?.drivewayProtection === 'accept'
+        ? Number(addons?.drivewayPriceApplied || addons?.driveway_price || 0)
+        : 0;
 
     // Equipment costs
     let rentEquipmentCost = 0;

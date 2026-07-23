@@ -5,6 +5,7 @@ import {
   getServiceIdFromBooking,
   resolveServiceIdForBooking,
 } from '@/utils/servicePlan';
+import { isCheckoutEmailVerified } from '@/utils/checkoutEmailVerification';
 
 function serializeDateForRpc(value) {
   if (!value) return null;
@@ -109,6 +110,8 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       ? { ...addonsData, agreementFeeSnapshot }
       : addonsData;
 
+    const emailPreverified = await isCheckoutEmailVerified(email, bookingData);
+
     const payload = {
       email,
       first_name: bookingData.firstName?.trim() || null,
@@ -132,10 +135,14 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       booking_data: {
         ...(bookingData || {}),
         agreementAcceptedAt: new Date().toISOString(),
+        pendingToken: options.existingToken || bookingData?.pendingToken || null,
+        returningCustomerVerified: Boolean(bookingData?.returningCustomerVerified),
+        usedReturningCustomerLink: Boolean(bookingData?.usedReturningCustomerLink),
       },
       total_price: totalPrice,
       base_price: basePrice,
-      delivery_service: deliveryService
+      delivery_service: deliveryService,
+      email_preverified: emailPreverified,
     };
 
     const { data: existingRows, error: existingRowsError } = await supabase
@@ -226,6 +233,17 @@ export async function hydratePlanFromPending(pending) {
  * @param {Object} pending - Row from pending_customers
  * @param {Object|null} [hydratedPlan] - Live service from hydratePlanFromPending
  */
+/**
+ * True when driver/vehicle docs were submitted or explicitly skipped.
+ */
+export function isDriverVerificationComplete(addons = {}) {
+  if (addons.wasVerificationSkipped) return true;
+  const hasPlate = Boolean(String(addons.licensePlate || '').trim());
+  const urls = addons.licenseImageUrls;
+  const hasImages = Boolean(urls?.front || urls?.back);
+  return hasPlate || hasImages;
+}
+
 export function mapPendingToBookingState(pending, hydratedPlan = null) {
   const plan = hydratedPlan || pending.plan_data || {};
   const addons = pending.addons_data || {};
@@ -233,6 +251,8 @@ export function mapPendingToBookingState(pending, hydratedPlan = null) {
   const requiresDriverVerification = Boolean(
     plan?.customer_pickup && !deliveryService
   ) || (Number(plan?.id) === 2 && !deliveryService);
+
+  const storedBookingData = pending.booking_data || {};
 
   return {
     contactInfo: {
@@ -250,7 +270,12 @@ export function mapPendingToBookingState(pending, hydratedPlan = null) {
       pickupDate: pending.pickup_date,
       dropOffTimeSlot: pending.drop_off_time_slot,
       pickupTimeSlot: pending.pickup_time_slot,
-      notes: pending.notes || ''
+      notes: pending.notes || '',
+      returningCustomerVerified: Boolean(
+        storedBookingData.returningCustomerVerified || pending.is_verified
+      ),
+      usedReturningCustomerLink: Boolean(storedBookingData.usedReturningCustomerLink),
+      pendingToken: pending.id || storedBookingData.pendingToken || null,
     },
     selectedPlan: plan,
     addonsData: {

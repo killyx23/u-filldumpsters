@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { resolveVerificationMediaUrl } from '@/utils/verificationImageHelper';
 
 export function useVerificationImageHistory(customerId) {
     const [history, setHistory] = useState([]);
@@ -24,7 +25,15 @@ export function useVerificationImageHistory(customerId) {
                 .order('created_at', { ascending: false });
 
             if (fetchError) throw fetchError;
-            setHistory(data || []);
+
+            const rows = data || [];
+            const resolved = await Promise.all(
+                rows.map(async (item) => ({
+                    ...item,
+                    display_url: await resolveVerificationMediaUrl(item.storage_path || item.url),
+                })),
+            );
+            setHistory(resolved);
         } catch (err) {
             console.error('Error fetching verification history:', err);
             setError(err.message);

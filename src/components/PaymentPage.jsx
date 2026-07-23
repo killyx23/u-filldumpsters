@@ -879,6 +879,11 @@ export const PaymentPage = ({ onBack }) => {
     const initializeRewardsOffer = async () => {
       if (loadingBookingData || !bookingData || !addonsData) return;
 
+      if (bookingData?.usedReturningCustomerLink) {
+        setRewardsChoiceResolved(true);
+        return;
+      }
+
       if (Number(addonsData?.loyaltyPointsToRedeem || 0) > 0 || Number(addonsData?.referralDollarsToRedeem || 0) > 0) {
         setRewardsChoiceResolved(true);
         return;

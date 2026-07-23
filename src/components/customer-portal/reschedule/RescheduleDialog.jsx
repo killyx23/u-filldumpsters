@@ -6,6 +6,7 @@ import { RescheduleServiceSelectionSection } from './RescheduleServiceSelectionS
 import { RescheduleDateTimeSelector } from './RescheduleDateTimeSelector';
 import { RescheduleAddonsSection } from './RescheduleAddonsSection';
 import { RescheduleAddressVerification } from './RescheduleAddressVerification';
+import { RescheduleContactAddressSection } from './RescheduleContactAddressSection';
 import { RescheduleAgreementsSection } from './RescheduleAgreementsSection';
 import { ReschedulePricingBreakdown } from './ReschedulePricingBreakdown';
 import { RescheduleRequestReview } from './RescheduleRequestReview';
@@ -13,6 +14,7 @@ import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import { filterAddonsForService } from '@/utils/rescheduleAddons';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import { buildRescheduleReason, extractEdgeFunctionError } from '@/utils/rescheduleRequestFormatter';
 import { UiControlGuide } from '@/components/UiControlGuide';
@@ -60,6 +62,8 @@ export const RescheduleDialog = ({
   const [selectedAddonsList, setSelectedAddonsList] = useState([]);
   const [originalAddonsList, setOriginalAddonsList] = useState([]);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
+  const [contactAddress, setContactAddress] = useState(null);
+  const [pendingAddressVerification, setPendingAddressVerification] = useState(false);
   const [distanceMiles, setDistanceMiles] = useState(0);
   const [isManualAddress, setIsManualAddress] = useState(false);
   const [addressVerificationError, setAddressVerificationError] = useState(false);
@@ -78,11 +82,20 @@ export const RescheduleDialog = ({
       setSelectedService(data.originalService);
       setOriginalAddonsList(data.originalAddonsList || []);
       setSelectedAddonsList(data.originalAddonsList || []);
-      
-      // Initialize address with original booking address
+
       const originalAddress = data.originalBooking?.delivery_address || data.originalBooking?.contact_address;
       if (originalAddress) {
         setVerifiedAddress(originalAddress.formatted_address || `${originalAddress.street}, ${originalAddress.city}, ${originalAddress.state} ${originalAddress.zip}`);
+        setContactAddress({
+          street: originalAddress.street || data.originalBooking?.street || '',
+          city: originalAddress.city || data.originalBooking?.city || '',
+          state: originalAddress.state || data.originalBooking?.state || '',
+          zip: originalAddress.zip || data.originalBooking?.zip || '',
+          formatted_address: originalAddress.formatted_address || `${originalAddress.street}, ${originalAddress.city}, ${originalAddress.state} ${originalAddress.zip}`,
+          isVerified: originalAddress.isVerified !== false,
+          unverifiedAccepted: Boolean(originalAddress.unverifiedAccepted),
+          pending_address_verification: false,
+        });
         setDistanceMiles(data.originalBooking?.customers?.distance_miles || 0);
       }
     }
@@ -94,9 +107,10 @@ export const RescheduleDialog = ({
       console.warn('RescheduleDialog: handleServiceSelect called with no service data');
       return;
     }
-    
+
     setSelectedService(service);
-    
+    setSelectedAddonsList((prev) => filterAddonsForService(prev, service.id));
+
     toast({
       title: "Service Selected",
       description: `You've selected ${service.name}. Continue to the next step.`,
@@ -113,11 +127,27 @@ export const RescheduleDialog = ({
       return;
     }
 
-    // Update state with verified address data
     setVerifiedAddress(addressString);
     setDistanceMiles(verificationData.distance || 0);
     setIsManualAddress(verificationData.isManualEntry || false);
     setAddressVerificationError(verificationData.error || false);
+    setPendingAddressVerification(false);
+  }, []);
+
+  const handleContactAddressUpdated = useCallback((addressData) => {
+    if (!addressData || addressData.error) {
+      setContactAddress(null);
+      setVerifiedAddress(null);
+      setAddressVerificationError(true);
+      setPendingAddressVerification(false);
+      return;
+    }
+
+    setContactAddress(addressData);
+    setVerifiedAddress(addressData.formatted_address || null);
+    setAddressVerificationError(false);
+    setIsManualAddress(addressData.isManualEntry || false);
+    setPendingAddressVerification(Boolean(addressData.pending_address_verification));
   }, []);
 
   const handleNext = () => {
@@ -139,21 +169,27 @@ export const RescheduleDialog = ({
     }
 
     if (currentStep === STEPS.ADDRESS) {
+      const isDumpLoaderPickup = selectedService?.id === 2;
       const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-      
-      if (requiresDelivery) {
-        if (!verifiedAddress || addressVerificationError) {
-          toast({ 
-            title: "Address Verification Required", 
-            description: "Please verify your delivery address before continuing.", 
-            variant: "destructive" 
+
+      if (isDumpLoaderPickup) {
+        if (!contactAddress || addressVerificationError) {
+          toast({
+            title: "Address Required",
+            description: "Please confirm or verify your contact address before continuing.",
+            variant: "destructive",
           });
           return;
         }
-      } else {
-        // Skip to agreements if delivery not required
-        setCurrentStep(STEPS.AGREEMENTS);
-        return;
+      } else if (requiresDelivery) {
+        if (!verifiedAddress || addressVerificationError) {
+          toast({
+            title: "Address Verification Required",
+            description: "Please verify your delivery address before continuing.",
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
 
@@ -175,14 +211,15 @@ export const RescheduleDialog = ({
   };
 
   const handleBack = () => {
+    const isDumpLoaderPickup = selectedService?.id === 2;
     const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-    
-    // Skip address step when going back if not delivery service
-    if (currentStep === STEPS.AGREEMENTS && !requiresDelivery) {
+    const showAddressStep = isDumpLoaderPickup || requiresDelivery;
+
+    if (currentStep === STEPS.AGREEMENTS && !showAddressStep) {
       setCurrentStep(STEPS.ADDONS);
       return;
     }
-    
+
     setCurrentStep(prev => prev - 1);
   };
 
@@ -211,6 +248,7 @@ export const RescheduleDialog = ({
 
       console.log('Inventory changes:', inventoryChanges);
 
+      const isDumpLoaderPickup = selectedService?.id === 2;
       const rescheduleData = {
         booking_id: bookingId,
         new_service_id: selectedService?.id,
@@ -225,8 +263,12 @@ export const RescheduleDialog = ({
           to_allocate: inventoryChanges.toAllocate,
           unchanged: inventoryChanges.unchanged,
         },
-        new_delivery_address: verifiedAddress,
-        distance_miles: distanceMiles,
+        new_delivery_address: isDumpLoaderPickup ? null : verifiedAddress,
+        new_contact_address: isDumpLoaderPickup ? contactAddress : null,
+        pending_address_verification: pendingAddressVerification,
+        unverified_address: contactAddress?.unverified_address || null,
+        pending_verification_reason: contactAddress?.pending_verification_reason || null,
+        distance_miles: isDumpLoaderPickup ? 0 : distanceMiles,
         is_manual_address: isManualAddress,
         customer_comments: comments,
         agreements_accepted: agreementsAccepted,
@@ -259,7 +301,7 @@ export const RescheduleDialog = ({
           selectedService,
           days,
           selectedAddonsList,
-          distanceMiles
+          selectedService?.id === 2 ? 0 : distanceMiles
         );
 
         const { data: adminData, error: adminError } = await supabase.functions.invoke('admin-complete-reschedule', {
@@ -365,8 +407,14 @@ export const RescheduleDialog = ({
     );
   }
 
+  const isDumpLoaderPickup = selectedService?.id === 2;
   const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-  const showAddressStep = requiresDelivery;
+  const showAddressStep = isDumpLoaderPickup || requiresDelivery;
+
+  const currentStepTitle =
+    currentStep === STEPS.ADDRESS && isDumpLoaderPickup
+      ? 'Contact Address'
+      : STEP_TITLES[currentStep];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -376,7 +424,7 @@ export const RescheduleDialog = ({
             <span className="mr-3">{adminMode ? 'Admin Reschedule' : 'Reschedule'} Booking #{bookingId}</span>
             {currentStep < STEPS.REVIEW && (
               <span className="text-sm text-gray-400 font-normal">
-                Step {currentStep} of 7: {STEP_TITLES[currentStep]}
+                Step {currentStep} of 7: {currentStepTitle}
               </span>
             )}
           </DialogTitle>
@@ -389,6 +437,7 @@ export const RescheduleDialog = ({
               selectedService={selectedService}
               onSelectService={handleServiceSelect}
               currentServiceId={data.originalService?.id}
+              referenceDate={newDropOffDate || data?.originalBooking?.drop_off_date}
             />
           )}
 
@@ -414,10 +463,18 @@ export const RescheduleDialog = ({
               selectedAddonsList={selectedAddonsList}
               setSelectedAddonsList={setSelectedAddonsList}
               bookingId={bookingId}
+              selectedService={selectedService}
             />
           )}
 
-          {currentStep === STEPS.ADDRESS && showAddressStep && (
+          {currentStep === STEPS.ADDRESS && showAddressStep && isDumpLoaderPickup && (
+            <RescheduleContactAddressSection
+              booking={data.originalBooking}
+              onAddressUpdated={handleContactAddressUpdated}
+            />
+          )}
+
+          {currentStep === STEPS.ADDRESS && showAddressStep && requiresDelivery && (
             <RescheduleAddressVerification
               booking={data.originalBooking}
               newService={selectedService}
@@ -445,8 +502,10 @@ export const RescheduleDialog = ({
               newAddonsList={selectedAddonsList}
               newDropOffDate={newDropOffDate}
               newPickupDate={newPickupDate}
-              distanceMiles={distanceMiles}
+              distanceMiles={isDumpLoaderPickup ? 0 : distanceMiles}
               isManualAddress={isManualAddress}
+              verifiedAddress={verifiedAddress}
+              contactAddress={contactAddress}
             />
           )}
 

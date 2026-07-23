@@ -6,12 +6,12 @@ import { useBookingStepperNavigation } from '@/hooks/useBookingStepperNavigation
 
 export const VerifyEmailPage = () => {
   const { highestStep, requiresDriverVerification, handleStepClick, goBackOneStep } =
-    useBookingStepperNavigation(8);
+    useBookingStepperNavigation(7);
 
   return (
     <div className="min-h-screen">
       <StepIndicator
-        currentStep={8}
+        currentStep={7}
         highestStep={highestStep}
         onStepClick={handleStepClick}
         requiresDriverVerification={requiresDriverVerification}

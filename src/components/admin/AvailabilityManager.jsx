@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Calendar } from "@/components/ui/calendar";
 import { generateTimeSlotOptions } from '@/components/admin/availability/time-helpers';
 import { AVAILABILITY_UI, getServiceAvailabilityUiKind } from '@/utils/availabilityServiceUi';
+import { filterRentableServices } from '@/utils/servicePlan';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -283,7 +284,8 @@ export const AvailabilityManager = () => {
             ]);
 
             if (servicesRes.error) throw servicesRes.error;
-            setServices(servicesRes.data);
+            const rentableServices = filterRentableServices(servicesRes.data || []);
+            setServices(rentableServices);
 
             if (weeklyRes.error) throw weeklyRes.error;
             setWeeklyRules(weeklyRes.data);
@@ -300,7 +302,7 @@ export const AvailabilityManager = () => {
             const completelyUnavailableDates = Object.keys(dateMap)
                 .filter(date => {
                     const rulesForDate = dateMap[date];
-                    return rulesForDate.length === servicesRes.data.length && rulesForDate.every(r => r.is_available === false);
+                    return rulesForDate.length === rentableServices.length && rulesForDate.every(r => r.is_available === false);
                 })
                 .map(d => parseISO(d));
                 

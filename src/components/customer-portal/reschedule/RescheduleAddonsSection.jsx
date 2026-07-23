@@ -7,9 +7,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useProtectionPlans } from '@/hooks/useProtectionPlans';
 import { toast } from '@/components/ui/use-toast';
 import { checkInventoryAvailability } from '@/utils/equipmentInventoryManager';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
+import {
+  filterAvailableAddonsForService,
+  mergeOriginalAddonsForService,
+  serviceSupportsDriveway,
+} from '@/utils/rescheduleAddons';
 
 const getIconForEquipment = (name) => {
   const nameLower = name?.toLowerCase() || '';
@@ -34,14 +40,17 @@ export const RescheduleAddonsSection = ({
   originalBooking,
   selectedAddonsList = [], 
   setSelectedAddonsList,
-  bookingId 
+  bookingId,
+  selectedService = null,
 }) => {
   const [availableEquipment, setAvailableEquipment] = useState([]);
   const [loading, setLoading] = useState(true);
   const [inventoryWarnings, setInventoryWarnings] = useState({});
   const [originalAddonsMap, setOriginalAddonsMap] = useState(new Map());
-  const [initialized, setInitialized] = useState(false);
-  const { insurancePrice } = useInsurancePricing();
+  const serviceId = selectedService?.id ?? originalBooking?.plan?.id ?? null;
+  const { insurancePrice, rentalInsurance } = useInsurancePricing(serviceId);
+  const { drivewayProtection } = useProtectionPlans(serviceId);
+  const drivewayPrice = drivewayProtection?.price ?? 0;
 
   const currencyInfo = { code: 'USD', symbol: '$' };
 
@@ -92,26 +101,27 @@ export const RescheduleAddonsSection = ({
         if (bookingHadInsurance(originalBooking.addons)) {
           const applied = Number(originalBooking.addons.insurancePriceApplied);
           const price = applied > 0 ? applied : insurancePrice;
-          console.log('[RescheduleAddons] Original insurance accepted, price:', price);
           originalMap.set('insurance', {
             id: 'insurance',
-            name: 'Premium Insurance',
+            name: rentalInsurance?.name || 'Premium Insurance',
             price,
             quantity: 1,
             type: 'insurance',
           });
         }
-        
-        console.log('[RescheduleAddons] Total original items (excluding equipment ID 7):', originalMap.size);
-        setOriginalAddonsMap(originalMap);
-        
-        // ONLY pre-check items that were on original booking
-        if (!initialized && (!selectedAddonsList || selectedAddonsList.length === 0)) {
-          const originalList = Array.from(originalMap.values());
-          console.log('[RescheduleAddons] Initializing with original items:', originalList);
-          setSelectedAddonsList(originalList);
-          setInitialized(true);
+
+        if (originalBooking.addons?.drivewayProtection === 'accept') {
+          const applied = Number(originalBooking.addons.drivewayPriceApplied);
+          originalMap.set('driveway', {
+            id: 'driveway',
+            name: drivewayProtection?.name || 'Driveway Protection',
+            price: applied > 0 ? applied : drivewayPrice,
+            quantity: 1,
+            type: 'driveway',
+          });
         }
+
+        setOriginalAddonsMap(originalMap);
         
       } catch (err) {
         console.error('[RescheduleAddons] Error fetching original add-ons:', err);
@@ -124,7 +134,13 @@ export const RescheduleAddonsSection = ({
     };
     
     fetchOriginalAddons();
-  }, [bookingId, originalBooking, initialized, insurancePrice]);
+  }, [bookingId, originalBooking, insurancePrice, rentalInsurance, drivewayProtection, drivewayPrice]);
+
+  useEffect(() => {
+    if (!serviceId || originalAddonsMap.size === 0) return;
+    const originalList = Array.from(originalAddonsMap.values());
+    setSelectedAddonsList((prev) => mergeOriginalAddonsForService(originalList, prev, serviceId));
+  }, [serviceId, originalAddonsMap, setSelectedAddonsList]);
 
   // Fetch available equipment (excluding ID 7)
   useEffect(() => {
@@ -163,14 +179,25 @@ export const RescheduleAddonsSection = ({
         const allAddons = [
           {
             id: 'insurance',
-            name: 'Premium Insurance',
+            name: rentalInsurance?.name || 'Premium Insurance',
             price: insurancePrice,
-            description: 'Complete protection coverage for your rental',
+            description: rentalInsurance?.description || 'Complete protection coverage for your rental',
             icon: <Shield className="h-6 w-6" />,
-            type: 'service',
-            isQuantityControlled: false
+            type: 'insurance',
+            isQuantityControlled: false,
           },
-          ...equipmentWithIcons
+          ...(drivewayProtection && serviceSupportsDriveway(serviceId)
+            ? [{
+                id: 'driveway',
+                name: drivewayProtection.name || 'Driveway Protection',
+                price: drivewayPrice,
+                description: drivewayProtection.description || 'Protect your driveway during delivery',
+                icon: <Shield className="h-6 w-6" />,
+                type: 'driveway',
+                isQuantityControlled: false,
+              }]
+            : []),
+          ...equipmentWithIcons,
         ];
 
         console.log('[RescheduleAddons] Total available add-ons (including Premium Insurance from services):', allAddons.length);
@@ -188,7 +215,11 @@ export const RescheduleAddonsSection = ({
     };
 
     fetchEquipment();
-  }, [insurancePrice]);
+  }, [insurancePrice, rentalInsurance, serviceId, drivewayProtection, drivewayPrice]);
+
+  const visibleAddons = filterAvailableAddonsForService(availableEquipment, serviceId, {
+    hasDrivewayPlan: Boolean(drivewayProtection),
+  });
 
   const handleToggle = async (addon) => {
     const isCurrentlySelected = selectedAddonsList.some(a => 
@@ -392,7 +423,7 @@ export const RescheduleAddonsSection = ({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {availableEquipment?.map((addon, idx) => {
+        {visibleAddons?.map((addon, idx) => {
           const selected = isSelected(addon);
           const quantity = getQuantity(addon);
           const hasWarning = inventoryWarnings[addon.id];

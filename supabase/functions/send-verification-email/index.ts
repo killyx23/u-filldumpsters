@@ -66,13 +66,19 @@ Deno.serve(async (req)=>{
     // Generate 6-digit verification code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const emailLowerForStore = email.toLowerCase();
     console.log("[send-verification-email] Generating code for:", email);
-    // Store verification code in database
+    // Preserve prior verification so checkout save still works if a new code is resent
+    const { data: existingVerification } = await supabase
+      .from("email_verifications")
+      .select("is_verified")
+      .eq("email", emailLowerForStore)
+      .maybeSingle();
     const { error: dbError } = await supabase.from("email_verifications").upsert({
-      email: email.toLowerCase(),
+      email: emailLowerForStore,
       verification_code: verificationCode,
       code_expires_at: expiresAt.toISOString(),
-      is_verified: false,
+      is_verified: Boolean(existingVerification?.is_verified),
       attempts: 0,
       created_at: new Date().toISOString()
     }, {

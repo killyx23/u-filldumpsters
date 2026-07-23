@@ -12,7 +12,6 @@ import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
-import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
@@ -36,8 +35,7 @@ export const BookingSummaryReview = ({
     });
 
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
-    const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
-    const { drivewayPrice } = useDrivewayProtectionPrice();
+    const { insurancePrice, taxOptions, drivewayPrice, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
     // Load equipment prices from database (excluding insurance which comes from hook)
     useEffect(() => {

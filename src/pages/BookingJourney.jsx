@@ -12,6 +12,7 @@ import { ContactInfoForm } from '@/components/ContactInfoForm';
 import { TermsAndConditionsStep } from '@/components/TermsAndConditionsStep';
 import { ComprehensiveAgreement } from '@/components/ComprehensiveAgreement';
 import { DriverVehicleVerification } from '@/components/DriverVehicleVerification';
+import { CheckoutEmailVerificationStep } from '@/components/CheckoutEmailVerificationStep';
 import { toast } from '@/components/ui/use-toast';
 import { ReviewsCarousel } from '@/components/ReviewsCarousel';
 import { KeyFeatures } from '@/components/KeyFeatures';
@@ -25,6 +26,8 @@ import {
 } from '@/utils/bookingDataPersistence';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { isCheckoutEmailVerified, isCheckoutEmailVerifiedSync } from '@/utils/checkoutEmailVerification';
+import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 
@@ -41,6 +44,9 @@ const INITIAL_BOOKING_DATA = {
   pickupTimeSlot: '',
   notes: '',
   termsAccepted: false,
+  returningCustomerVerified: false,
+  usedReturningCustomerLink: false,
+  pendingToken: null,
 };
 
 const INITIAL_ADDONS_DATA = {
@@ -79,6 +85,19 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     isDelivery: deliveryService,
   });
 
+  const { isReturning: isTrueReturningCustomer } = useReturningCustomerDetection(bookingData.email);
+  // Skip Step 7 only when email was already verified via Returning Customer links (or this session).
+  const skipEmailVerification = isCheckoutEmailVerifiedSync(bookingData.email, bookingData);
+  // Inline Step 7 in the journey is for returning customers only; new customers use /verify-email page (original flow).
+  const showInlineEmailStep =
+    requiresDriverVerification && isTrueReturningCustomer && !skipEmailVerification;
+
+  useEffect(() => {
+    if (currentStep === 7 && (!showInlineEmailStep || skipEmailVerification) && requiresDriverVerification) {
+      setCurrentStep(8);
+    }
+  }, [currentStep, showInlineEmailStep, skipEmailVerification, requiresDriverVerification]);
+
   const resetBookingState = useCallback(() => {
     setCurrentStep(0);
     setHighestStep(0);
@@ -114,7 +133,17 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
     const hydratedPlan = await hydratePlanFromPending(pending);
     const mapped = mapPendingToBookingState(pending, hydratedPlan);
-    setBookingData(mapped.contactInfo);
+    const emailVerified = await isCheckoutEmailVerified(
+      mapped.contactInfo.email,
+      mapped.contactInfo
+    );
+    const contactInfo = {
+      ...mapped.contactInfo,
+      returningCustomerVerified:
+        mapped.contactInfo.returningCustomerVerified || emailVerified,
+      pendingToken: pending.id || mapped.contactInfo.pendingToken,
+    };
+    setBookingData(contactInfo);
     setSelectedPlan(mapped.selectedPlan);
     setAddonsData(mapped.addonsData);
     setBasePrice(mapped.basePrice);
@@ -123,8 +152,14 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     const resolvedStep = resumeStep ?? 6;
     setCurrentStep(resolvedStep);
     setHighestStep(Math.max(8, resolvedStep));
+    updateFlowProgress({
+      currentStep: resolvedStep,
+      highestStep: Math.max(8, resolvedStep),
+      requiresDriverVerification: mapped.requiresDriverVerification,
+      pendingToken: contactInfo.pendingToken,
+    });
     window.scrollTo(0, 0);
-  }, []);
+  }, [updateFlowProgress]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -179,6 +214,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setBookingData((prev) => ({
       ...prev,
       ...mapped,
+      returningCustomerVerified: true,
+      usedReturningCustomerLink: true,
       contactAddress: {
         ...prev.contactAddress,
         ...mapped.contactAddress,
@@ -290,6 +327,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setBookingData((prev) => ({
       ...prev,
       ...customerData,
+      returningCustomerVerified: true,
+      usedReturningCustomerLink: true,
       contactAddress: {
         ...prev.contactAddress,
         ...(customerData?.contactAddress || {}),
@@ -321,15 +360,36 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   };
 
   const navigateToVerifyEmail = (token) => {
-    const nextHighest = Math.max(highestStep, 8);
+    const nextHighest = Math.max(highestStep, 7);
     setHighestStep(nextHighest);
     updateFlowProgress({
-      currentStep: 8,
+      currentStep: 7,
       highestStep: nextHighest,
       requiresDriverVerification,
       pendingToken: token,
     });
     navigate(`/verify-email?token=${token}`);
+  };
+
+  const navigateToPayment = (token) => {
+    const nextHighest = Math.max(highestStep, 9);
+    setHighestStep(nextHighest);
+    updateFlowProgress({
+      currentStep: 9,
+      highestStep: nextHighest,
+      requiresDriverVerification,
+      pendingToken: token,
+    });
+    navigate(`/payment?bookingId=${token}`);
+  };
+
+  const proceedAfterPendingStore = async (token) => {
+    const verified = await isCheckoutEmailVerified(bookingData.email, bookingData);
+    if (verified) {
+      navigateToPayment(token);
+    } else {
+      navigateToVerifyEmail(token);
+    }
   };
 
   const handleAgreementAccept = async (agreementMeta = {}) => {
@@ -352,8 +412,70 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     }
 
     if (requiresDriverVerification) {
-      console.log(`[${timestamp}] [BookingJourney] Self-service trailer selected, proceeding to driver verification`);
-      setCurrentStep(7);
+      if (showInlineEmailStep) {
+        console.log(`[${timestamp}] [BookingJourney] Returning pickup — store pending before inline email step`);
+        setIsProcessing(true);
+
+        try {
+          const result = await storePendingBooking(
+            bookingData,
+            selectedPlan,
+            { ...addonsData, ...signatureFields },
+            {
+              totalPrice: finalPrice,
+              basePrice: basePrice,
+              deliveryService: deliveryService,
+              agreementFeeSnapshot: Array.isArray(agreementMeta.agreementFeeSnapshot)
+                ? agreementMeta.agreementFeeSnapshot
+                : agreementFeeSnapshot,
+              existingToken: bookingData.pendingToken,
+            }
+          );
+
+          if (!result.success) {
+            toast({
+              title: 'Error',
+              description: result.error || 'Failed to save booking data. Please try again.',
+              variant: 'destructive',
+            });
+            return;
+          }
+
+          const token = result.token;
+          const nextHighest = Math.max(highestStep, 7);
+
+          setBookingData((prev) => ({ ...prev, pendingToken: token }));
+          setHighestStep(nextHighest);
+          updateFlowProgress({
+            currentStep: 7,
+            highestStep: nextHighest,
+            requiresDriverVerification,
+            pendingToken: token,
+          });
+          setCurrentStep(7);
+          window.scrollTo(0, 0);
+        } catch (error) {
+          console.error(`[${timestamp}] [BookingJourney] Exception storing returning pickup pending booking:`, error);
+          toast({
+            title: 'Error',
+            description: 'An unexpected error occurred. Please try again.',
+            variant: 'destructive',
+          });
+        } finally {
+          setIsProcessing(false);
+        }
+        return;
+      }
+
+      console.log(`[${timestamp}] [BookingJourney] New-customer pickup — driver verification first (original flow)`);
+      const nextHighest = Math.max(highestStep, 8);
+      setHighestStep(nextHighest);
+      updateFlowProgress({
+        currentStep: 8,
+        highestStep: nextHighest,
+        requiresDriverVerification,
+      });
+      setCurrentStep(8);
       window.scrollTo(0, 0);
       return;
     }
@@ -384,7 +506,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       }
 
       console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
-      navigateToVerifyEmail(result.token);
+      await proceedAfterPendingStore(result.token);
     } catch (error) {
       const catchTs = new Date().toISOString();
       console.error(`[${catchTs}] [BookingJourney] Exception in handleAgreementAccept:`, error);
@@ -415,6 +537,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         basePrice: basePrice,
         deliveryService: deliveryService,
         agreementFeeSnapshot,
+        existingToken: bookingData.pendingToken,
       });
 
       const resultTs = new Date().toISOString();
@@ -433,10 +556,11 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       }
 
       console.log(`[${resultTs}] [BookingJourney] Pending booking stored successfully with token:`, result.token);
+      setBookingData((prev) => ({ ...prev, pendingToken: result.token }));
       // #region agent log
       fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H5',location:'BookingJourney.jsx:handleVerificationSubmit:success',message:'handleVerificationSubmit success',data:{tokenPresent:Boolean(result?.token)},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
-      navigateToVerifyEmail(result.token);
+      await proceedAfterPendingStore(result.token);
     } catch (error) {
       const catchTs = new Date().toISOString();
       console.error(`[${catchTs}] [BookingJourney] Exception in handleVerificationSubmit:`, error);
@@ -450,12 +574,27 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     }
   };
 
+  const handleEmailVerificationComplete = (customerData) => {
+    if (customerData) {
+      handleReturningCustomerVerified(customerData);
+    }
+    setCurrentStep(8);
+    window.scrollTo(0, 0);
+  };
+
   const goBackOneStep = () => {
     if (currentStep === 1) {
       requestLeaveBooking();
       return;
     }
-    if (currentStep === 7) {
+    if (currentStep === 8) {
+      const emailVerified = isCheckoutEmailVerifiedSync(bookingData.email, bookingData);
+      if (showInlineEmailStep && !emailVerified) {
+        setCurrentStep(7);
+      } else {
+        setCurrentStep(6);
+      }
+    } else if (currentStep === 7) {
       setCurrentStep(6);
     } else {
       setCurrentStep(currentStep - 1);
@@ -465,7 +604,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
 
   const handleStepClick = (step) => {
     if (step >= currentStep) return;
-    if (step === 7 && !requiresDriverVerification) return;
+    if (step === 7 && (!showInlineEmailStep || skipEmailVerification)) return;
+    if (step === 8 && !requiresDriverVerification) return;
     setCurrentStep(step);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -518,6 +658,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
           <ContactInfoForm
             bookingData={bookingData}
             setBookingData={setBookingData}
+            usedReturningCustomerLink={Boolean(bookingData.usedReturningCustomerLink)}
             onSubmit={handleContactSubmit}
             onBack={goBackOneStep}
           />
@@ -540,11 +681,22 @@ function BookingJourney({ reorderData, onReorderApplied }) {
         );
       case 7:
         return (
+          <CheckoutEmailVerificationStep
+            email={bookingData.email}
+            pendingToken={bookingData.pendingToken}
+            onBack={goBackOneStep}
+            onVerified={handleEmailVerificationComplete}
+            isReturningCustomer={isTrueReturningCustomer}
+          />
+        );
+      case 8:
+        return (
           <DriverVehicleVerification
             onVerifiedSubmit={handleVerificationSubmit}
             onBack={goBackOneStep}
             customerId={bookingData.contactAddress?.customerId}
             customerEmail={bookingData.email}
+            bookingData={bookingData}
           />
         );
       default:
@@ -574,6 +726,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
           highestStep={highestStep}
           onStepClick={handleStepClick}
           requiresDriverVerification={requiresDriverVerification}
+          showInlineEmailStep={showInlineEmailStep}
+          skipEmailVerification={skipEmailVerification}
         />
       )}
       {renderContent()}

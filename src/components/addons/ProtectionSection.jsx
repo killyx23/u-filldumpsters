@@ -17,7 +17,10 @@ export const ProtectionSection = ({
     handleDrivewayProtectionChange, 
     plan, 
     addonPrices,
-    isDelivery 
+    isDelivery,
+    hasDrivewayPlan = false,
+    rentalInsurancePlan = null,
+    drivewayProtectionPlan = null,
 }) => {
     const [showInsuranceInfo, setShowInsuranceInfo] = useState(false);
     const [showDrivewayInfo, setShowDrivewayInfo] = useState(false);
@@ -36,15 +39,20 @@ export const ProtectionSection = ({
                                       !plan.name.toLowerCase().includes('dumpster');
 
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && isDelivery) || plan?.id === 4;
-    // Hide driveway protection for dump loader services
-    const showDrivewayProtection = isDeliveryRequired && !isDumpLoaderTrailerRental && !isDumpLoaderWithDelivery;
+    const showDrivewayProtection =
+        hasDrivewayPlan &&
+        isDeliveryRequired &&
+        !isDumpLoaderTrailerRental &&
+        !isDumpLoaderWithDelivery;
     
-    // Use insurance price from addonPrices (loaded from database via hook)
-    const insurancePrice = addonPrices?.insurance || 20;
-    const drivewayPrice = addonPrices?.drivewayProtection || 15;
+    const insurancePrice = addonPrices?.insurance ?? rentalInsurancePlan?.price ?? 20;
+    const drivewayPrice = addonPrices?.drivewayProtection ?? drivewayProtectionPlan?.price ?? 15;
 
     // Service-specific insurance info text
     const getInsuranceInfoText = () => {
+        if (rentalInsurancePlan?.infoText) {
+            return rentalInsurancePlan.infoText;
+        }
         // Dump Loader with Delivery gets the detailed $500 coverage text
         if (isDumpLoaderWithDelivery) {
             return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";

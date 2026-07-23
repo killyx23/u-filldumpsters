@@ -25,6 +25,7 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
+import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 
 export const BookingForm = ({
   plan,
@@ -166,8 +167,9 @@ export const BookingForm = ({
       setLoadingPlans(true);
       const { data, error } = await supabase.from('services').select('*');
       if (!error && data) {
-        console.log('[BookingForm] ✓ Loaded', data.length, 'service plans');
-        setAllPlans(data);
+        const rentablePlans = data.filter((service) => service.is_rentable !== false && Number(service.id) !== 7);
+        console.log('[BookingForm] ✓ Loaded', rentablePlans.length, 'service plans');
+        setAllPlans(rentablePlans);
       } else {
         console.error('[BookingForm] ❌ Failed to fetch plans:', error);
       }
@@ -204,65 +206,29 @@ export const BookingForm = ({
   }, [isDelivery, setBookingData]);
 
   useEffect(() => {
-    if (currentPlan?.id !== 2 || isDelivery) return;
+    if (!isHourlySelfPickupPlan(currentPlan, isDelivery) || !bookingData.dropOffDate) {
+      setTrailerRentalHours({ pickupStart: '', returnBy: '' });
+      return;
+    }
 
-    const fetchTrailerRentalHours = async () => {
-      console.log('[BookingForm] Fetching trailer rental hours for service 2');
-      let pickupStart = '';
-      let returnBy = '';
-      const defaultHours = { pickupStart: '8:00 AM', returnBy: '6:00 PM' };
-
+    const fetchRentalHours = async () => {
       try {
-        if (bookingData.dropOffDate) {
-          const dateStr = format(bookingData.dropOffDate, 'yyyy-MM-dd');
-          const { data: dsa, error: dsaError } = await supabase
-            .from('date_specific_availability')
-            .select('pickup_start_time, return_by_time')
-            .eq('service_id', 2)
-            .eq('date', dateStr)
-            .maybeSingle();
-
-          if (dsaError) {
-            console.warn('[BookingForm] Error fetching date-specific availability:', dsaError);
-          }
-
-          if (dsa?.pickup_start_time) pickupStart = dsa.pickup_start_time;
-          if (dsa?.return_by_time) returnBy = dsa.return_by_time;
-        }
-
-        if (!pickupStart || !returnBy) {
-          const dow = bookingData.dropOffDate ? bookingData.dropOffDate.getDay() : new Date().getDay();
-          const { data: sa, error: saError } = await supabase
-            .from('service_availability')
-            .select('pickup_start_time, return_by_time')
-            .eq('service_id', 2)
-            .eq('day_of_week', dow)
-            .maybeSingle();
-
-          if (saError) {
-            console.warn('[BookingForm] Error fetching service availability:', saError);
-          }
-
-          if (sa) {
-            if (!pickupStart && sa.pickup_start_time) pickupStart = sa.pickup_start_time;
-            if (!returnBy && sa.return_by_time) returnBy = sa.return_by_time;
-          }
-        }
-
+        const times = await getFormattedServiceTimes(
+          currentPlan.id,
+          bookingData.dropOffDate
+        );
         setTrailerRentalHours({
-          pickupStart: pickupStart ? formatTimeToAmPm(pickupStart) : defaultHours.pickupStart,
-          returnBy: returnBy ? formatTimeToAmPm(returnBy) : defaultHours.returnBy
+          pickupStart:
+            times.pickupStartTime !== 'Time not specified' ? times.pickupStartTime : '',
+          returnBy: times.returnByTime !== 'Time not specified' ? times.returnByTime : ''
         });
-
-        console.log('[BookingForm] ✓ Trailer rental hours:', { pickupStart, returnBy });
-
       } catch (error) {
-        console.warn('[BookingForm] Unexpected error fetching trailer rental hours:', error);
-        setTrailerRentalHours(defaultHours);
+        console.warn('[BookingForm] Error fetching rental hours:', error);
+        setTrailerRentalHours({ pickupStart: '', returnBy: '' });
       }
     };
 
-    fetchTrailerRentalHours();
+    fetchRentalHours();
   }, [bookingData.dropOffDate, currentPlan, isDelivery]);
   
   const fetchAvailability = useCallback(async month => {

@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getMergedVerificationDocumentsByCustomerId, downloadVerificationImage } from '@/utils/verificationImageHelper';
+import {
+  getMergedVerificationDocumentsByCustomerId,
+  downloadVerificationImage,
+  resolveVerificationDocumentSet,
+} from '@/utils/verificationImageHelper';
 import { toast } from '@/components/ui/use-toast';
 
 export function useVerificationImageLoader(customerId) {
@@ -19,7 +23,8 @@ export function useVerificationImageLoader(customerId) {
 
         try {
             const doc = await getMergedVerificationDocumentsByCustomerId(customerId);
-            setImages(doc);
+            const resolved = await resolveVerificationDocumentSet(doc);
+            setImages(resolved);
         } catch (err) {
             console.error('Error fetching verification images:', err);
             setError(err.message);
