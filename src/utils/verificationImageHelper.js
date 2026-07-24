@@ -468,7 +468,7 @@ export const saveVerificationDocumentToDb = async (
   frontPath,
   backUrl,
   backPath,
-  status = 'pending',
+  status = 'pending', // Pass 'approved' when front+back+insurance are all present
   insuranceUrl = null,
   insurancePath = null,
 ) => {

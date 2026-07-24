@@ -7,6 +7,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, TrendingUp, Users, Settings, Plus, Minus } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
 
 export const LoyaltyPointsManager = () => {
   const [settings, setSettings] = useState({
@@ -20,13 +21,16 @@ export const LoyaltyPointsManager = () => {
   const [adjustmentPoints, setAdjustmentPoints] = useState(0);
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [transactions, setTransactions] = useState([]);
+  const [referralWalletTransactions, setReferralWalletTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(true);
+  const [loadingReferralTransactions, setLoadingReferralTransactions] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchSettings();
     fetchCustomersWithPoints();
     fetchTransactions();
+    fetchReferralWalletTransactions();
   }, []);
 
   const fetchSettings = async () => {
@@ -96,6 +100,29 @@ export const LoyaltyPointsManager = () => {
       });
     } finally {
       setLoadingTransactions(false);
+    }
+  };
+
+  const fetchReferralWalletTransactions = async () => {
+    setLoadingReferralTransactions(true);
+    try {
+      const { data, error } = await supabase
+        .from('referral_wallet_transactions')
+        .select('id, customer_id, transaction_type, amount, booking_id, referral_id, notes, created_at, pending_balance_after, available_balance_after, customers(name, email)')
+        .order('created_at', { ascending: false })
+        .limit(250);
+
+      if (error) throw error;
+      setReferralWalletTransactions(data || []);
+    } catch (err) {
+      console.error('[LoyaltyPointsManager] Error fetching referral wallet transactions:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to load referral wallet transaction history',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingReferralTransactions(false);
     }
   };
 
@@ -181,6 +208,22 @@ export const LoyaltyPointsManager = () => {
       tx.transaction_type,
       tx.notes,
       tx.booking_id ? String(tx.booking_id) : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return haystack.includes(searchTerm.toLowerCase().trim());
+  });
+
+  const filteredReferralTransactions = referralWalletTransactions.filter((tx) => {
+    const haystack = [
+      tx.customers?.name,
+      tx.customers?.email,
+      tx.transaction_type,
+      tx.notes,
+      tx.booking_id ? String(tx.booking_id) : '',
+      tx.referral_id ? String(tx.referral_id) : '',
     ]
       .filter(Boolean)
       .join(' ')
@@ -391,7 +434,7 @@ export const LoyaltyPointsManager = () => {
             Loyalty Transaction History
           </CardTitle>
           <CardDescription className="text-gray-400">
-            Searchable ledger of earned, redeemed, referral, and admin-adjustment events
+            Searchable ledger of earned, redeemed, and admin-adjustment point events
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -426,6 +469,55 @@ export const LoyaltyPointsManager = () => {
                     <div className="text-right">
                       <p className="text-xs uppercase text-blue-300">{String(tx.transaction_type || '').replace(/_/g, ' ')}</p>
                       <p className="text-sm font-bold text-green-400">{tx.points_amount} pts</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-gray-800/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <TrendingUp className="h-5 w-5 text-emerald-400" />
+            Referral Wallet Transaction History
+          </CardTitle>
+          <CardDescription className="text-gray-400">
+            Searchable ledger of pending accrual, activation, redemption, and admin referral-dollar events (uses the same search box above)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingReferralTransactions ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+            </div>
+          ) : filteredReferralTransactions.length === 0 ? (
+            <p className="text-gray-400 text-center py-8">No referral wallet transactions found</p>
+          ) : (
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              {filteredReferralTransactions.map((tx) => (
+                <div key={tx.id} className="bg-gray-900/50 border border-gray-700 rounded-lg p-3">
+                  <div className="flex justify-between items-start gap-3">
+                    <div>
+                      <p className="text-white text-sm font-semibold">
+                        {tx.customers?.name || tx.customers?.email || `Customer #${tx.customer_id}`}
+                      </p>
+                      <p className="text-xs text-gray-400">{tx.customers?.email || 'No email'}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(tx.created_at).toLocaleString()}
+                        {tx.booking_id ? ` • Booking #${tx.booking_id}` : ''}
+                        {tx.referral_id ? ` • Referral #${tx.referral_id}` : ''}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        After: pending ${Number(tx.pending_balance_after || 0).toFixed(2)} • available ${Number(tx.available_balance_after || 0).toFixed(2)}
+                      </p>
+                      {tx.notes && <p className="text-xs text-gray-300 mt-1">{tx.notes}</p>}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-emerald-300">{formatReferralWalletTxType(tx.transaction_type)}</p>
+                      <p className="text-sm font-bold text-emerald-400">${Number(tx.amount || 0).toFixed(2)}</p>
                     </div>
                   </div>
                 </div>

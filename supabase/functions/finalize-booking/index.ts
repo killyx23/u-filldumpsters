@@ -347,6 +347,7 @@ Deno.serve(async (req)=>{
         }
       }
     }
+    let referralRegistrationError: string | null = null;
     if (updatedBooking.customer_id && referralCode) {
       const { data: referralResult, error: referralError } = await supabase.rpc("register_referral_for_booking", {
         p_booking_id: updatedBooking.id,
@@ -355,6 +356,7 @@ Deno.serve(async (req)=>{
         p_bonus_dollars: referralBonusDollars
       });
       if (referralError) {
+        referralRegistrationError = referralError.message || "Referral registration failed";
         console.error("[finalize-booking] Referral completion failed:", referralError);
       } else {
         const referral = Array.isArray(referralResult) ? referralResult[0] : referralResult;
@@ -386,6 +388,9 @@ Deno.serve(async (req)=>{
       referralDollarsRedeemed: Number(loyaltyOutcome.referralDollarsRedeemed || 0),
       referralDollarsPending: loyaltyOutcome.referralPendingRecorded ? Number(referralBonusDollars.toFixed(2)) : Number(updatedBooking.addons?.referralDollarsPending || 0),
       rewardsSummaryUpdatedAt: new Date().toISOString(),
+      ...(referralRegistrationError
+        ? { referralRegistrationError, referralRegistrationFailedAt: new Date().toISOString() }
+        : { referralRegistrationError: null }),
     };
     const { data: bookingWithRewards, error: rewardsPatchError } = await supabase
       .from("bookings")
