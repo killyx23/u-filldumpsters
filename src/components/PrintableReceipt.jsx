@@ -655,12 +655,16 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
                     {(pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (
                         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded">
-                            <p className="font-bold text-sm text-green-800">🎉 Rewards update</p>
+                            <p className="font-bold text-sm text-green-800">Rewards update</p>
                             <p className="text-xs text-green-900 mt-1">
-                                {pointsEarned > 0 ? `You earned ${pointsEarned} loyalty points from this booking.` : ''}
-                                {referralPending > 0 ? ` Pending referral rewards: $${referralPending.toFixed(2)}.` : ''}
-                                {referralActivated > 0 ? ` Referral rewards activated: $${referralActivated.toFixed(2)}.` : ''}
-                                {' '}Track and redeem rewards anytime in your Customer Portal.
+                                {pointsEarned > 0 ? `You earned ${pointsEarned} loyalty points from this booking. ` : ''}
+                                {referralPending > 0
+                                  ? 'Because you were referred, you just helped a friend or family member earn a referral reward! '
+                                  : ''}
+                                {referralActivated > 0 && referralPending <= 0
+                                  ? 'Your completed booking unlocked a referral reward for the friend or family member who referred you. '
+                                  : ''}
+                                Visit your Customer Portal anytime to track your balances, where you can also invite friends and family to try our services and start earning rewards yourself.
                             </p>
                         </div>
                     )}

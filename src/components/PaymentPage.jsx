@@ -791,15 +791,26 @@ export const PaymentPage = ({ onBack }) => {
               console.error(`[${timestamp}] [PaymentPage] Failed to load booking customer for insurance sync:`, bookingLookupError);
             } else if (bookingRow?.customer_id) {
               const licenseUrls = pendingData.addons_data.licenseImageUrls || [];
+              const frontUrl = licenseUrls[0]?.url || null;
+              const frontPath = licenseUrls[0]?.path || null;
+              const backUrl = licenseUrls[1]?.url || null;
+              const backPath = licenseUrls[1]?.path || null;
+              const insuranceUrl = pendingData.addons_data.insuranceImageUrl.url;
+              const insurancePath = pendingData.addons_data.insuranceImageUrl.path;
+              const docsComplete = Boolean(
+                (frontUrl || frontPath) &&
+                (backUrl || backPath) &&
+                (insuranceUrl || insurancePath)
+              );
               await saveVerificationDocumentToDb(
                 bookingRow.customer_id,
-                licenseUrls[0]?.url || null,
-                licenseUrls[0]?.path || null,
-                licenseUrls[1]?.url || null,
-                licenseUrls[1]?.path || null,
-                'pending',
-                pendingData.addons_data.insuranceImageUrl.url,
-                pendingData.addons_data.insuranceImageUrl.path,
+                frontUrl,
+                frontPath,
+                backUrl,
+                backPath,
+                docsComplete ? 'approved' : 'pending',
+                insuranceUrl,
+                insurancePath,
               );
             }
           } catch (insuranceSyncError) {

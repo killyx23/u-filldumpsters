@@ -130,6 +130,16 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     });
   }, [currentStep, highestStep, requiresDriverVerification, updateFlowProgress]);
 
+  // Scroll after the new step paints — handler scrollTo runs too early and often leaves the viewport mid/bottom.
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [currentStep]);
+
   const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
     const hydratedPlan = await hydratePlanFromPending(pending);
     const mapped = mapPendingToBookingState(pending, hydratedPlan);
@@ -607,7 +617,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     if (step === 7 && (!showInlineEmailStep || skipEmailVerification)) return;
     if (step === 8 && !requiresDriverVerification) return;
     setCurrentStep(step);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Top scroll is handled by the currentStep effect after paint.
   };
 
   const renderContent = () => {

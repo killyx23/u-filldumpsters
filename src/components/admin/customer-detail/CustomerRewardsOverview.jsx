@@ -1,5 +1,6 @@
 import React from 'react';
 import { Gift, Wallet, History, Users } from 'lucide-react';
+import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
 
 const fmtMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
 const fmtDate = (value) => {
@@ -34,9 +35,9 @@ export const CustomerRewardsOverview = ({
   const referralEarned = Number(referralWallet?.total_earned || 0);
   const referralRedeemed = Number(referralWallet?.total_redeemed || 0);
 
-  const recentLoyalty = loyaltyTransactions.slice(0, 8);
-  const recentWallet = referralWalletTransactions.slice(0, 8);
-  const recentReferrals = referrals.slice(0, 8);
+  const recentLoyalty = loyaltyTransactions.slice(0, 20);
+  const recentWallet = referralWalletTransactions.slice(0, 20);
+  const recentReferrals = referrals.slice(0, 20);
 
   return (
     <div className="space-y-6 mt-6">
@@ -111,14 +112,20 @@ export const CustomerRewardsOverview = ({
               {recentWallet.map((tx) => (
                 <div key={tx.id} className="bg-black/20 border border-white/5 rounded p-2 text-xs">
                   <div className="flex justify-between items-center gap-2">
-                    <span className="capitalize text-blue-200">{String(tx.transaction_type || '').replace(/_/g, ' ')}</span>
+                    <span className="text-blue-200">{formatReferralWalletTxType(tx.transaction_type)}</span>
                     <ToneChip tone={String(tx.transaction_type || '').includes('redeem') || String(tx.transaction_type || '').includes('remove') ? 'red' : 'green'}>
                       {fmtMoney(tx.amount)}
                     </ToneChip>
                   </div>
                   <p className="text-gray-400 mt-1">
-                    {tx.booking_id ? `Booking #${tx.booking_id} • ` : ''}{fmtDate(tx.created_at)}
+                    {tx.booking_id ? `Booking #${tx.booking_id} • ` : ''}
+                    {tx.referral_id ? `Referral #${tx.referral_id} • ` : ''}
+                    {fmtDate(tx.created_at)}
                   </p>
+                  <p className="text-gray-500 mt-0.5">
+                    After: pending {fmtMoney(tx.pending_balance_after)} • available {fmtMoney(tx.available_balance_after)}
+                  </p>
+                  {tx.notes && <p className="text-gray-300 mt-1">{tx.notes}</p>}
                 </div>
               ))}
             </div>

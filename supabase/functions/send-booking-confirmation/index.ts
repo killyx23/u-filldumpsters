@@ -389,10 +389,10 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       ${(pointsEarned > 0 || referralPendingDollars > 0) ? `
       <div style="margin-top: 20px; padding: 14px 16px; background-color: #ecfdf5; border: 1px solid #86efac; border-radius: 8px;">
         <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.5;">
-          <strong>🎉 Rewards Update:</strong> Thank you for your booking.
+          <strong>Rewards Update:</strong> Thank you for your booking.
           ${pointsEarned > 0 ? ` You earned <strong>${pointsEarned} loyalty points</strong> from this order.` : ''}
-          ${referralPendingDollars > 0 ? ` You also have <strong>${formatCurrency(referralPendingDollars)}</strong> in pending referral rewards waiting for activation after completion rules are met.` : ''}
-          Visit your Customer Portal anytime to track balances and history.
+          ${referralPendingDollars > 0 ? ` Because you were referred, you just helped a friend or family member earn a referral reward!` : ''}
+          Visit your Customer Portal anytime to track your balances, where you can also invite friends and family to try our services and start earning rewards yourself.
         </p>
       </div>
       ` : ""}
@@ -560,6 +560,138 @@ const sendEmailWithRetry = async (toEmail, subject, htmlContent, maxRetries = 2)
     error: lastError
   };
 };
+
+const buildReferrerThankYouEmailHTML = ({
+  referrerName,
+  bonusDollars,
+  bookingId,
+  customerIdText,
+  phoneDisplay,
+  loginUrl,
+}) => {
+  const safeName = referrerName || "Valued Customer";
+  const amount = formatCurrency(Number(bonusDollars || 0));
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thank You for Your Referral</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+    <div style="background: linear-gradient(135deg, #065f46 0%, #10b981 100%); padding: 32px 20px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold;">Thank You for Your Referral</h1>
+      <p style="color: #d1fae5; margin: 10px 0 0 0; font-size: 15px;">A friend or family member just booked with your link</p>
+    </div>
+    <div style="padding: 28px 22px; color: #1f2937; font-size: 15px; line-height: 1.6;">
+      <p style="margin: 0 0 16px 0;">Hello ${safeName},</p>
+      <p style="margin: 0 0 16px 0;">
+        Thank you for referring someone to U-Fill Dumpsters. We appreciate your trust and support.
+      </p>
+      <p style="margin: 0 0 16px 0;">
+        A <strong>${amount}</strong> referral reward has been added to your account as
+        <strong>pending</strong> for referred booking <strong>#${bookingId}</strong>.
+        Once that rental is marked <strong>Completed</strong>, the reward will become available
+        in your Customer Portal for use on a future booking.
+      </p>
+      <div style="background-color: #f0f8ff; border: 1px solid #cce5ff; padding: 14px 16px; border-radius: 6px; margin: 20px 0; font-family: monospace; font-size: 14px;">
+        <strong>Customer ID:</strong> ${customerIdText || "N/A"}<br>
+        <strong>Phone Number (Password):</strong> ${phoneDisplay || "N/A"}
+      </div>
+      <p style="margin: 0 0 20px 0;">
+        Use the button below to open the Customer Portal with your details pre-filled.
+        You can track pending and available referral rewards under Welcome.
+      </p>
+      <p style="text-align: center; margin: 0 0 24px 0;">
+        <a href="${loginUrl}" style="display: inline-block; padding: 12px 24px; background-color: #f59e0b; color: #000000 !important; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Open Customer Portal
+        </a>
+      </p>
+      <p style="margin: 0; font-size: 13px; color: #6b7280;">
+        If the button does not work, copy and paste this link into your browser:<br>
+        <a href="${loginUrl}" style="color: #1d4ed8; word-break: break-all;">${loginUrl}</a>
+      </p>
+    </div>
+    <div style="background-color: #1f2937; padding: 18px; text-align: center;">
+      <p style="margin: 0; color: #9ca3af; font-size: 13px;">U-Fill Dumpsters LLC | Saratoga Springs, UT | (801) 810-8832</p>
+      <p style="margin: 8px 0 0 0; color: #9ca3af; font-size: 12px;">support@u-filldumpsters.com</p>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+};
+
+const sendReferrerThankYouEmail = async (supabase, booking, siteUrl, timestamp) => {
+  try {
+    const addons = booking?.addons && typeof booking.addons === "object" ? booking.addons : {};
+    const pendingDollars = Number(addons.referralDollarsPending || 0);
+    if (!(pendingDollars > 0)) {
+      return { sent: false, skipped: true, reason: "no_pending_referral_dollars" };
+    }
+
+    const referralCode = String(addons.referralCode || addons.referral_code || "").trim();
+    if (!referralCode) {
+      return { sent: false, skipped: true, reason: "missing_referral_code" };
+    }
+
+    const { data: referralRow, error: referralError } = await supabase
+      .from("referrals")
+      .select("id, referrer_customer_id, referral_code, status")
+      .ilike("referral_code", referralCode)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (referralError || !referralRow?.referrer_customer_id) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer lookup failed:`, referralError);
+      return { sent: false, skipped: false, reason: "referrer_not_found" };
+    }
+
+    const { data: referrer, error: referrerError } = await supabase
+      .from("customers")
+      .select("id, name, email, phone, customer_id_text")
+      .eq("id", referralRow.referrer_customer_id)
+      .maybeSingle();
+
+    if (referrerError || !referrer?.email) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer customer fetch failed:`, referrerError);
+      return { sent: false, skipped: false, reason: "referrer_email_missing" };
+    }
+
+    const rawPhone = String(referrer.phone || "").replace(/\D/g, "");
+    const customerIdText = referrer.customer_id_text || "";
+    if (!customerIdText || rawPhone.length < 10) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer missing portal login credentials`);
+      return { sent: false, skipped: false, reason: "referrer_login_incomplete" };
+    }
+
+    const loginUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+    const html = buildReferrerThankYouEmailHTML({
+      referrerName: referrer.name,
+      bonusDollars: pendingDollars,
+      bookingId: booking.id,
+      customerIdText,
+      phoneDisplay: referrer.phone,
+      loginUrl,
+    });
+    const subject = "Thank you for your referral – reward pending";
+    const emailResult = await sendEmailWithRetry(referrer.email, subject, html);
+    if (emailResult.success) {
+      console.log(`[${timestamp}] [send-booking-confirmation] Referrer thank-you sent to ${referrer.email} via ${emailResult.provider}`);
+      return { sent: true, recipient: referrer.email, provider: emailResult.provider };
+    }
+
+    console.error(`[${timestamp}] [send-booking-confirmation] Referrer thank-you failed:`, emailResult.error);
+    return { sent: false, skipped: false, reason: emailResult.error || "send_failed" };
+  } catch (err) {
+    console.error(`[${timestamp}] [send-booking-confirmation] Referrer thank-you exception:`, err);
+    return { sent: false, skipped: false, reason: err?.message || "exception" };
+  }
+};
+
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -642,11 +774,13 @@ Deno.serve(async (req)=>{
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
     if (emailResult.success) {
       console.log(`[${timestamp}] [send-booking-confirmation] SUCCESS: Email sent via ${emailResult.provider}`);
+      const referrerEmailResult = await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
       return new Response(JSON.stringify({
         success: true,
         message: "Confirmation email sent successfully",
         provider: emailResult.provider,
-        recipient: recipientEmail
+        recipient: recipientEmail,
+        referrerThankYou: referrerEmailResult,
       }), {
         status: 200,
         headers: {

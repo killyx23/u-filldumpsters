@@ -174,16 +174,35 @@ async function upsertVerificationDocuments(
     .eq('customer_id', customerId)
     .maybeSingle();
 
-  const payload = {
-    customer_id: customerId,
+  const merged = {
     license_front_url: fields.license_front_url ?? existing?.license_front_url ?? null,
     license_front_storage_path: fields.license_front_storage_path ?? existing?.license_front_storage_path ?? null,
     license_back_url: fields.license_back_url ?? existing?.license_back_url ?? null,
     license_back_storage_path: fields.license_back_storage_path ?? existing?.license_back_storage_path ?? null,
     insurance_url: fields.insurance_url ?? existing?.insurance_url ?? null,
     insurance_storage_path: fields.insurance_storage_path ?? existing?.insurance_storage_path ?? null,
+  };
+
+  let effectivePlate = licensePlate;
+  if (!effectivePlate) {
+    const { data: customerRow } = await supabase
+      .from('customers')
+      .select('license_plate')
+      .eq('id', customerId)
+      .maybeSingle();
+    effectivePlate = customerRow?.license_plate ? String(customerRow.license_plate).toUpperCase() : null;
+  }
+
+  const hasFront = Boolean(merged.license_front_url || merged.license_front_storage_path);
+  const hasBack = Boolean(merged.license_back_url || merged.license_back_storage_path);
+  const hasInsurance = Boolean(merged.insurance_url || merged.insurance_storage_path);
+  const docsComplete = hasFront && hasBack && hasInsurance && Boolean(effectivePlate);
+
+  const payload = {
+    customer_id: customerId,
+    ...merged,
     uploaded_at: new Date().toISOString(),
-    verification_status: 'pending',
+    verification_status: docsComplete ? 'approved' : 'pending',
   };
 
   const { data, error } = await supabase
@@ -196,13 +215,17 @@ async function upsertVerificationDocuments(
     throw error;
   }
 
-  if (licensePlate) {
+  if (licensePlate || docsComplete) {
+    const customerUpdate: Record<string, unknown> = {
+      has_incomplete_verification: false,
+    };
+    if (licensePlate) {
+      customerUpdate.license_plate = licensePlate;
+    }
+
     const { error: customerError } = await supabase
       .from('customers')
-      .update({
-        license_plate: licensePlate,
-        has_incomplete_verification: false,
-      })
+      .update(customerUpdate)
       .eq('id', customerId);
 
     if (customerError) {

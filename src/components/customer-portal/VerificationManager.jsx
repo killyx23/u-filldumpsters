@@ -129,7 +129,7 @@ export const VerificationManager = ({ customer, onUpdate }) => {
                     nextFront.path,
                     nextBack.url,
                     nextBack.path,
-                    'pending',
+                    'approved',
                     nextInsurance.url,
                     nextInsurance.path,
                 );
