@@ -18,6 +18,7 @@ const CHAT_NOTE_SOURCES = new Set([
     'Change Request',
     'Booking Special Instructions',
     'Booking Cancellation & Refund',
+    'Cancellation Request',
 ]);
 
 const NoteFeedItem = ({ note, customerName }) => (
@@ -46,13 +47,30 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
     const [notes, setNotes] = useState(initialNotes);
     const chatContainerRef = useRef(null);
     const fileInputRef = useRef(null);
+    const onUpdateRef = useRef(onUpdate);
+    const clearedUnreadRef = useRef(false);
 
     const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
     const { isOtherUserTyping, setIsTyping, clearTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'admin');
 
     useEffect(() => {
+        onUpdateRef.current = onUpdate;
+    }, [onUpdate]);
+
+    useEffect(() => {
         setNotes(initialNotes);
     }, [initialNotes]);
+
+    useEffect(() => {
+        clearedUnreadRef.current = false;
+    }, [customer?.id]);
+
+    // If new unread arrives while Chat is open, allow another clear pass
+    useEffect(() => {
+        if (customer?.has_unread_notes) {
+            clearedUnreadRef.current = false;
+        }
+    }, [customer?.has_unread_notes]);
 
     const relevantNotes = useMemo(
         () => notes.filter((note) => CHAT_NOTE_SOURCES.has(note.source)),
@@ -77,27 +95,46 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
         );
     }, [messages, relevantNotes]);
 
-    const markNotesAsRead = useCallback(async () => {
-        const unreadNoteIds = relevantNotes.filter((note) => !note.is_read).map((note) => note.id);
-        if (unreadNoteIds.length === 0) return;
+    const clearAdminUnreadBadges = useCallback(async () => {
+        if (!customer?.id || clearedUnreadRef.current) return;
 
-        const { error } = await supabase
+        // Mark ALL unread customer-authored notes (not just chat-feed sources)
+        const { data: updatedNotes, error: notesError } = await supabase
             .from('customer_notes')
             .update({ is_read: true })
-            .in('id', unreadNoteIds);
+            .eq('customer_id', customer.id)
+            .eq('author_type', 'customer')
+            .eq('is_read', false)
+            .select('id');
 
-        if (error) {
-            console.error('Failed to mark notes as read:', error);
+        if (notesError) {
+            console.error('Failed to mark notes as read:', notesError);
             return;
         }
 
-        setNotes((prev) =>
-            prev.map((note) =>
-                unreadNoteIds.includes(note.id) ? { ...note, is_read: true } : note
-            )
-        );
-        onUpdate?.();
-    }, [relevantNotes, onUpdate]);
+        const unreadNoteIds = (updatedNotes || []).map((note) => note.id);
+        if (unreadNoteIds.length > 0) {
+            setNotes((prev) =>
+                prev.map((note) =>
+                    unreadNoteIds.includes(note.id) ? { ...note, is_read: true } : note
+                )
+            );
+        }
+
+        // Safety net for stuck flags (e.g. admin notes that flipped has_unread_notes)
+        const { error: clearError } = await supabase
+            .from('customers')
+            .update({ has_unread_notes: false })
+            .eq('id', customer.id);
+
+        if (clearError) {
+            console.error('Failed to clear has_unread_notes:', clearError);
+            return;
+        }
+
+        clearedUnreadRef.current = true;
+        onUpdateRef.current?.();
+    }, [customer?.id]);
 
     useEffect(() => {
         if (chatContainerRef.current) {
@@ -113,8 +150,8 @@ export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
     }, [messages, markAsRead]);
 
     useEffect(() => {
-        markNotesAsRead();
-    }, [markNotesAsRead]);
+        clearAdminUnreadBadges();
+    }, [clearAdminUnreadBadges]);
 
     const handleSend = async (attachment = null) => {
         if (!input.trim() && !attachment) return;

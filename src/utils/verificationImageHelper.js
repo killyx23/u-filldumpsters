@@ -419,11 +419,15 @@ export async function attachCheckoutVerificationDocuments({
 export const uploadVerificationImage = async (customerId, imageFile, imageType) => {
   if (!imageFile) throw new Error("No image file provided");
 
-  // Anon checkout can only INSERT under unassigned-* (storage RLS). Never upload
-  // to customers/{numericId}/... from the browser — use save-checkout-verification-docs.
-  const folderId = String(customerId || '').startsWith('unassigned-')
-    ? String(customerId)
-    : `unassigned-${Date.now()}`;
+  // Anon checkout can only INSERT under unassigned-* (storage RLS). Authenticated
+  // portal users may upload to their own customers/{id}/ folder. Never upload to
+  // another customer's numeric folder from the browser — use save-checkout-verification-docs.
+  const customerIdStr = String(customerId || '');
+  const folderId = customerIdStr.startsWith('unassigned-')
+    ? customerIdStr
+    : /^\d+$/.test(customerIdStr)
+      ? customerIdStr
+      : `unassigned-${Date.now()}`;
 
   const fileExt = imageFile.name.split('.').pop();
   const fileName = `${Date.now()}.${fileExt}`;
@@ -487,12 +491,12 @@ export const saveVerificationDocumentToDb = async (
     verification_status: status,
   };
 
-  if (insuranceUrl) {
+  if (insuranceUrl || insurancePath) {
     payload.insurance_url = insuranceUrl;
     payload.insurance_storage_path = insurancePath;
   } else {
     const existing = await getVerificationDocumentsByCustomerId(customerId);
-    if (existing?.insurance_url) {
+    if (existing?.insurance_url || existing?.insurance_storage_path) {
       payload.insurance_url = existing.insurance_url;
       payload.insurance_storage_path = existing.insurance_storage_path;
     }

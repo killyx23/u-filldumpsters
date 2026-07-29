@@ -122,18 +122,19 @@ export const VerificationManager = ({ customer, onUpdate }) => {
 
             const hasDocUpdate = Boolean(frontImage || backImage || insuranceImage);
 
-            if (hasDocUpdate && nextFront?.url && nextBack?.url && nextInsurance?.url) {
+            const hasSlot = (slot) => Boolean(slot?.url || slot?.path);
+            if (hasDocUpdate && hasSlot(nextFront) && hasSlot(nextBack) && hasSlot(nextInsurance)) {
                 await saveVerificationDocumentToDb(
                     customer.id,
-                    nextFront.url,
-                    nextFront.path,
-                    nextBack.url,
-                    nextBack.path,
+                    nextFront.url || null,
+                    nextFront.path || null,
+                    nextBack.url || null,
+                    nextBack.path || null,
                     'approved',
-                    nextInsurance.url,
-                    nextInsurance.path,
+                    nextInsurance.url || null,
+                    nextInsurance.path || null,
                 );
-            } else if (hasDocUpdate && insuranceImage?.url && (!nextFront?.url || !nextBack?.url)) {
+            } else if (hasDocUpdate && hasSlot(insuranceImage) && (!hasSlot(nextFront) || !hasSlot(nextBack))) {
                 toast({
                     title: 'License Images Required',
                     description: 'Please upload both front and back license images before saving insurance.',

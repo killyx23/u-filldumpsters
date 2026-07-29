@@ -3,14 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { useFinancialData } from '@/hooks/useFinancialData';
 import { useRevenueCalculations } from '@/hooks/useRevenueCalculations';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { TrendingUp, TrendingDown, DollarSign, Truck, Users, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Truck, Percent, Loader2 } from 'lucide-react';
+import { useTaxCalculations } from '@/hooks/useTaxCalculations';
 import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export const FinancialDashboard = () => {
   const { data, loading } = useFinancialData({ autoRefresh: true });
-  const { totalRevenue, grandTotal, avgRevenuePerBooking, revenueByService, revenueByMonth } = useRevenueCalculations();
+  const { totalRevenue, grandTotal, avgRevenuePerBooking, revenueByMonth } = useRevenueCalculations();
+  const { totalTaxCollected, netRevenueExTax, taxedBookingCount } = useTaxCalculations();
 
   const metrics = useMemo(() => {
     const totalExpenses = data.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
@@ -19,14 +20,17 @@ export const FinancialDashboard = () => {
 
     return {
       totalRevenue: grandTotal,
+      totalTaxCollected,
+      netRevenueExTax,
       totalExpenses,
       netProfit,
       cashFlow: netProfit,
       activeEquipment,
       totalBookings: data.bookings.length,
       avgRevenuePerBooking,
+      taxedBookingCount,
     };
-  }, [data, grandTotal, avgRevenuePerBooking]);
+  }, [data, grandTotal, avgRevenuePerBooking, totalTaxCollected, netRevenueExTax, taxedBookingCount]);
 
   const expenseBreakdown = useMemo(() => {
     const breakdown = data.expenses.reduce((acc, exp) => {
@@ -73,16 +77,42 @@ export const FinancialDashboard = () => {
   return (
     <div className="space-y-6">
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <Card className="bg-gradient-to-br from-green-900/40 to-green-800/20 border-green-700/50">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-green-100">Total Revenue (YTD)</CardTitle>
+            <CardTitle className="text-sm font-medium text-green-100">Gross Revenue (YTD)</CardTitle>
             <DollarSign className="h-4 w-4 text-green-400" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-300">{formatCurrency(metrics.totalRevenue)}</div>
             <p className="text-xs text-green-200 mt-1">
-              {data.bookings.length} bookings completed
+              {data.bookings.length} bookings (tax-inclusive)
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-amber-900/40 to-amber-800/20 border-amber-700/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-amber-100">Taxes Collected (YTD)</CardTitle>
+            <Percent className="h-4 w-4 text-amber-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-300">{formatCurrency(metrics.totalTaxCollected)}</div>
+            <p className="text-xs text-amber-200 mt-1">
+              {metrics.taxedBookingCount} taxed bookings
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-emerald-900/40 to-emerald-800/20 border-emerald-700/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-emerald-100">Net Revenue (ex-tax)</CardTitle>
+            <DollarSign className="h-4 w-4 text-emerald-400" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-300">{formatCurrency(metrics.netRevenueExTax)}</div>
+            <p className="text-xs text-emerald-200 mt-1">
+              Subtotal before sales tax
             </p>
           </CardContent>
         </Card>
@@ -110,7 +140,9 @@ export const FinancialDashboard = () => {
               {formatCurrency(metrics.netProfit)}
             </div>
             <p className="text-xs text-blue-200 mt-1">
-              {((metrics.netProfit / metrics.totalRevenue) * 100).toFixed(1)}% profit margin
+              {metrics.totalRevenue > 0
+                ? `${((metrics.netProfit / metrics.totalRevenue) * 100).toFixed(1)}% profit margin`
+                : 'No revenue yet'}
             </p>
           </CardContent>
         </Card>

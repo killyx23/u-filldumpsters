@@ -120,7 +120,8 @@ export const CustomerDetailView = () => {
             setBookings(bookingsData || []);
             setEquipment(equipmentData || []);
             setNotes(notesData || []);
-            setHasUnreadNotes((notesData ?? []).some(n => !n.is_read && n.author_type === 'customer'));
+            const unreadFromNotes = (notesData ?? []).some((n) => !n.is_read && n.author_type === 'customer');
+            setHasUnreadNotes(Boolean(customerData?.has_unread_notes) || unreadFromNotes);
             setLoyaltySummary(loyaltySummaryData || null);
             setReferralWallet(referralWalletData || null);
             setLoyaltyTransactions(loyaltyTransactionsData || []);
@@ -159,6 +160,7 @@ export const CustomerDetailView = () => {
                 setNotes(currentNotes => [...currentNotes, payload.new]);
                 if (payload.new.author_type === 'customer') {
                     setHasUnreadNotes(true);
+                    setCustomer((c) => (c ? { ...c, has_unread_notes: true } : c));
                     toast({
                         title: "New Customer Message",
                         description: `You have a new message from ${customer?.name || 'a customer'}.`,
@@ -176,7 +178,7 @@ export const CustomerDetailView = () => {
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'customers', filter: `id=eq.${numericId}` }, (payload) => {
                 if (payload.new.id === numericId) {
                     setCustomer(c => ({ ...c, ...payload.new }));
-                    setHasUnreadNotes(payload.new.has_unread_notes);
+                    setHasUnreadNotes(Boolean(payload.new.has_unread_notes));
                 }
             })
             .subscribe();
@@ -199,7 +201,9 @@ export const CustomerDetailView = () => {
         setActiveTab(value);
         setSearchParams({ tab: value });
         if (value === 'notes') {
+            // Optimistic UI; CommunicationLog clears DB + onUpdate refreshes customer
             setHasUnreadNotes(false);
+            setCustomer((c) => (c ? { ...c, has_unread_notes: false } : c));
         }
     };
 
@@ -216,6 +220,7 @@ export const CustomerDetailView = () => {
         const verification = bookings.filter(b => !b.pending_address_verification && (
             b.status === 'pending_verification' ||
             b.status === 'pending_review' ||
+            b.status === 'cancellation_pending' ||
             (b.status === 'pending_payment' && hasPaymentDelta(b))
         ));
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
@@ -272,7 +277,7 @@ export const CustomerDetailView = () => {
                     <TabsTrigger value="profile"><User className="mr-2 h-4 w-4" />Profile</TabsTrigger>
                     <TabsTrigger value="notes" className="relative">
                         <MessageSquare className="mr-2 h-4 w-4" />Chat
-                        {hasUnreadNotes && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-red-500 border-2 border-gray-800" />}
+                        {(hasUnreadNotes || customer?.has_unread_notes) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-red-500 border-2 border-gray-800" />}
                     </TabsTrigger>
                     <TabsTrigger value="verification" className="relative">
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification

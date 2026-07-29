@@ -630,18 +630,67 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <td className="text-right py-2 pr-3 font-bold text-lg text-green-600">${calculatedTotal.toFixed(2)}</td>
                             </tr>
 
-                            {isCancelledAndRefunded && (
-                                <>
-                                    <tr className="border-t">
-                                        <td className="py-1 px-3">Cancellation Fee</td>
-                                        <td className="text-right py-1 pr-3 text-red-600">-${(calculatedTotal - (refund_details.amount || 0)).toFixed(2)}</td>
-                                    </tr>
-                                    <tr className="bg-green-50">
-                                        <td className="py-2 px-3 font-bold">Amount Refunded</td>
-                                        <td className="text-right py-2 pr-3 font-bold text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
-                                    </tr>
-                                </>
-                            )}
+                            {isCancelledAndRefunded && (() => {
+                                const cd = booking.cancellation_details;
+                                const hours = cd?.hours_before_appointment != null
+                                    ? Math.max(0, Math.round(Number(cd.hours_before_appointment)))
+                                    : null;
+                                const isLate = cd?.fee_type === 'late' || (hours != null && hours <= 24);
+                                const feeLabel = isLate
+                                    ? 'Last-minute exception cancellation fee'
+                                    : 'Standard cancellation fee';
+                                const feeAmount = cd?.fee_amount != null
+                                    ? Number(cd.fee_amount)
+                                    : (calculatedTotal - (refund_details.amount || 0));
+                                return (
+                                    <>
+                                        <tr className="border-t bg-red-50">
+                                            <td colSpan={2} className="py-2 px-3 font-bold text-red-800 text-sm">Cancellation Details</td>
+                                        </tr>
+                                        {hours != null && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Hours before appointment</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{hours} hours</td>
+                                            </tr>
+                                        )}
+                                        <tr>
+                                            <td className="py-1 px-3 text-xs text-gray-600">Fee type</td>
+                                            <td className="text-right py-1 pr-3 text-xs">
+                                                {feeLabel}
+                                                {cd?.fee_percentage != null ? ` — up to ${cd.fee_percentage}%` : ''}
+                                            </td>
+                                        </tr>
+                                        {cd?.reason && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Reason</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{cd.reason}</td>
+                                            </tr>
+                                        )}
+                                        {cd?.requested_at && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Requested</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{new Date(cd.requested_at).toLocaleString()}</td>
+                                            </tr>
+                                        )}
+                                        {cd?.approved_at && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Approved</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{new Date(cd.approved_at).toLocaleString()}</td>
+                                            </tr>
+                                        )}
+                                        <tr className="border-t">
+                                            <td className="py-1 px-3">{feeLabel}</td>
+                                            <td className="text-right py-1 pr-3 text-red-600">
+                                                -${feeAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                        <tr className="bg-green-50">
+                                            <td className="py-2 px-3 font-bold">Amount Refunded</td>
+                                            <td className="text-right py-2 pr-3 font-bold text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
+                                        </tr>
+                                    </>
+                                );
+                            })()}
                         </tbody>
                     </table>
 
@@ -653,7 +702,21 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         </div>
                     )}
 
-                    {(pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (
+                    {isCancelledAndRefunded ? (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                            <p className="font-bold text-sm text-blue-800">Cancellation update</p>
+                            <p className="text-xs text-blue-900 mt-1">
+                                {`We're sorry to see you go! Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${
+                                    (() => {
+                                        const feeAmt = booking.cancellation_details?.fee_amount != null
+                                            ? Number(booking.cancellation_details.fee_amount)
+                                            : Math.max(0, calculatedTotal - Number(refund_details?.amount || 0));
+                                        return feeAmt > 0 ? ` (cancellation fee: $${feeAmt.toFixed(2)})` : '';
+                                    })()
+                                }. If you ever need our services again, we'd be more than happy to help!`}
+                            </p>
+                        </div>
+                    ) : (pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (
                         <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded">
                             <p className="font-bold text-sm text-green-800">Rewards update</p>
                             <p className="text-xs text-green-900 mt-1">

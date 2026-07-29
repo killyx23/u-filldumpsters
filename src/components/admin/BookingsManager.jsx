@@ -207,6 +207,7 @@ export const BookingsManager = ({ initialBookings, adminEmail, onBookingsChange 
                             <SelectItem value="Delivered">Active (Delivered)</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
                             <SelectItem value="Cancelled">Cancelled</SelectItem>
+                            <SelectItem value="cancellation_pending">Cancellation Pending</SelectItem>
                             <SelectItem value="Rescheduled">Rescheduled</SelectItem>
                         </SelectContent>
                     </Select>

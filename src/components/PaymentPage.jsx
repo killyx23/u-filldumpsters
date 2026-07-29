@@ -11,7 +11,6 @@ import { format, isValid, parseISO } from 'date-fns';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
-import { saveVerificationDocumentToDb } from '@/utils/verificationImageHelper';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
@@ -769,54 +768,24 @@ export const PaymentPage = ({ onBack }) => {
           window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
         }
 
-        // Handle license images if present
-        if (pendingData.addons_data?.licenseImageUrls?.length > 0) {
-          console.log(`[${timestamp}] [PaymentPage] Updating customer with license info...`);
-          await supabase.rpc('update_customer_license_from_checkout', {
+        // Persist license + insurance into customers + driver_verification_documents
+        // via SECURITY DEFINER RPC (anon upserts are blocked by RLS).
+        const licenseImageUrls = pendingData.addons_data?.licenseImageUrls || [];
+        const insuranceImageUrl = pendingData.addons_data?.insuranceImageUrl || null;
+        const hasLicenseImages = Array.isArray(licenseImageUrls) && licenseImageUrls.length > 0;
+        const hasInsuranceImage = Boolean(insuranceImageUrl?.url || insuranceImageUrl?.path);
+        if (hasLicenseImages || hasInsuranceImage || pendingData.addons_data?.licensePlate) {
+          console.log(`[${timestamp}] [PaymentPage] Updating customer with verification docs...`);
+          const { error: licenseSyncError } = await supabase.rpc('update_customer_license_from_checkout', {
             p_booking_id: data.id,
-            p_license_plate: pendingData.addons_data.licensePlate,
-            p_license_image_urls: pendingData.addons_data.licenseImageUrls,
+            p_license_plate: pendingData.addons_data.licensePlate || null,
+            p_license_image_urls: hasLicenseImages ? licenseImageUrls : null,
+            p_insurance_image: hasInsuranceImage ? insuranceImageUrl : null,
           });
-        }
-
-        if (pendingData.addons_data?.insuranceImageUrl?.url) {
-          try {
-            const { data: bookingRow, error: bookingLookupError } = await supabase
-              .from('bookings')
-              .select('customer_id')
-              .eq('id', data.id)
-              .single();
-
-            if (bookingLookupError) {
-              console.error(`[${timestamp}] [PaymentPage] Failed to load booking customer for insurance sync:`, bookingLookupError);
-            } else if (bookingRow?.customer_id) {
-              const licenseUrls = pendingData.addons_data.licenseImageUrls || [];
-              const frontUrl = licenseUrls[0]?.url || null;
-              const frontPath = licenseUrls[0]?.path || null;
-              const backUrl = licenseUrls[1]?.url || null;
-              const backPath = licenseUrls[1]?.path || null;
-              const insuranceUrl = pendingData.addons_data.insuranceImageUrl.url;
-              const insurancePath = pendingData.addons_data.insuranceImageUrl.path;
-              const docsComplete = Boolean(
-                (frontUrl || frontPath) &&
-                (backUrl || backPath) &&
-                (insuranceUrl || insurancePath)
-              );
-              await saveVerificationDocumentToDb(
-                bookingRow.customer_id,
-                frontUrl,
-                frontPath,
-                backUrl,
-                backPath,
-                docsComplete ? 'approved' : 'pending',
-                insuranceUrl,
-                insurancePath,
-              );
-            }
-          } catch (insuranceSyncError) {
+          if (licenseSyncError) {
             console.error(
-              `[${timestamp}] [PaymentPage] Insurance verification sync failed after booking creation:`,
-              insuranceSyncError,
+              `[${timestamp}] [PaymentPage] Verification docs sync failed after booking creation:`,
+              licenseSyncError,
             );
           }
         }

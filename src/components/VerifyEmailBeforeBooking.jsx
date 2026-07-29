@@ -32,7 +32,9 @@ function buildVerificationAttachPayload(addons, email, pendingToken, customerId 
     const back = Array.isArray(urls) ? urls[1] : urls?.back;
     const insurance = addons.insuranceImageUrl;
 
-    const hasDocs = Boolean(front?.url || back?.url || insurance?.url);
+    const hasDocs = Boolean(
+      front?.url || front?.path || back?.url || back?.path || insurance?.url || insurance?.path
+    );
     if (!hasDocs) return null;
 
     return {

@@ -19,6 +19,7 @@ import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinsta
 import { buildRescheduleReason, extractEdgeFunctionError } from '@/utils/rescheduleRequestFormatter';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
+import { normalizeAddress, addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
 
 const STEPS = {
   SERVICE: 1,
@@ -62,6 +63,7 @@ export const RescheduleDialog = ({
   const [selectedAddonsList, setSelectedAddonsList] = useState([]);
   const [originalAddonsList, setOriginalAddonsList] = useState([]);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
+  const [deliveryAddressObj, setDeliveryAddressObj] = useState(null);
   const [contactAddress, setContactAddress] = useState(null);
   const [pendingAddressVerification, setPendingAddressVerification] = useState(false);
   const [distanceMiles, setDistanceMiles] = useState(0);
@@ -85,13 +87,22 @@ export const RescheduleDialog = ({
 
       const originalAddress = data.originalBooking?.delivery_address || data.originalBooking?.contact_address;
       if (originalAddress) {
-        setVerifiedAddress(originalAddress.formatted_address || `${originalAddress.street}, ${originalAddress.city}, ${originalAddress.state} ${originalAddress.zip}`);
-        setContactAddress({
+        const normalized = normalizeAddress({
           street: originalAddress.street || data.originalBooking?.street || '',
           city: originalAddress.city || data.originalBooking?.city || '',
           state: originalAddress.state || data.originalBooking?.state || '',
           zip: originalAddress.zip || data.originalBooking?.zip || '',
-          formatted_address: originalAddress.formatted_address || `${originalAddress.street}, ${originalAddress.city}, ${originalAddress.state} ${originalAddress.zip}`,
+          formatted_address: originalAddress.formatted_address,
+          isVerified: originalAddress.isVerified !== false,
+        });
+        setVerifiedAddress(formatAddressDisplay(normalized));
+        setDeliveryAddressObj(normalized);
+        setContactAddress({
+          street: normalized.street,
+          city: normalized.city,
+          state: normalized.state,
+          zip: normalized.zip,
+          formatted_address: normalized.formatted_address,
           isVerified: originalAddress.isVerified !== false,
           unverifiedAccepted: Boolean(originalAddress.unverifiedAccepted),
           pending_address_verification: false,
@@ -121,6 +132,7 @@ export const RescheduleDialog = ({
   const handleAddressUpdated = useCallback((addressString, verificationData) => {
     if (!addressString || !verificationData) {
       setVerifiedAddress(null);
+      setDeliveryAddressObj(null);
       setDistanceMiles(0);
       setAddressVerificationError(true);
       setIsManualAddress(false);
@@ -128,6 +140,9 @@ export const RescheduleDialog = ({
     }
 
     setVerifiedAddress(addressString);
+    setDeliveryAddressObj(
+      normalizeAddress(verificationData.addressObj) || normalizeAddress(addressString)
+    );
     setDistanceMiles(verificationData.distance || 0);
     setIsManualAddress(verificationData.isManualEntry || false);
     setAddressVerificationError(verificationData.error || false);
@@ -138,6 +153,7 @@ export const RescheduleDialog = ({
     if (!addressData || addressData.error) {
       setContactAddress(null);
       setVerifiedAddress(null);
+      setDeliveryAddressObj(null);
       setAddressVerificationError(true);
       setPendingAddressVerification(false);
       return;
@@ -145,6 +161,7 @@ export const RescheduleDialog = ({
 
     setContactAddress(addressData);
     setVerifiedAddress(addressData.formatted_address || null);
+    setDeliveryAddressObj(null);
     setAddressVerificationError(false);
     setIsManualAddress(addressData.isManualEntry || false);
     setPendingAddressVerification(Boolean(addressData.pending_address_verification));
@@ -249,6 +266,24 @@ export const RescheduleDialog = ({
       console.log('Inventory changes:', inventoryChanges);
 
       const isDumpLoaderPickup = selectedService?.id === 2;
+      const originalBooking = data?.originalBooking;
+      const originalAddressSource =
+        originalBooking?.delivery_address ||
+        originalBooking?.contact_address ||
+        {
+          street: originalBooking?.street,
+          city: originalBooking?.city,
+          state: originalBooking?.state,
+          zip: originalBooking?.zip,
+        };
+      const structuredDelivery = isDumpLoaderPickup
+        ? null
+        : normalizeAddress(deliveryAddressObj) || normalizeAddress(verifiedAddress);
+      const structuredContact = isDumpLoaderPickup ? normalizeAddress(contactAddress) : null;
+      const addressChanged = isDumpLoaderPickup
+        ? Boolean(structuredContact && !addressesAreEqual(structuredContact, originalAddressSource))
+        : Boolean(structuredDelivery && !addressesAreEqual(structuredDelivery, originalAddressSource));
+
       const rescheduleData = {
         booking_id: bookingId,
         new_service_id: selectedService?.id,
@@ -264,7 +299,9 @@ export const RescheduleDialog = ({
           unchanged: inventoryChanges.unchanged,
         },
         new_delivery_address: isDumpLoaderPickup ? null : verifiedAddress,
+        new_delivery_address_obj: isDumpLoaderPickup ? null : structuredDelivery,
         new_contact_address: isDumpLoaderPickup ? contactAddress : null,
+        address_changed: addressChanged,
         pending_address_verification: pendingAddressVerification,
         unverified_address: contactAddress?.unverified_address || null,
         pending_verification_reason: contactAddress?.pending_verification_reason || null,

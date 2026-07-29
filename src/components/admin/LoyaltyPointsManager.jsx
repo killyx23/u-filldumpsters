@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, TrendingUp, Users, Settings, Plus, Minus } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
+import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 
 export const LoyaltyPointsManager = () => {
   const [settings, setSettings] = useState({
@@ -467,8 +468,15 @@ export const LoyaltyPointsManager = () => {
                       {tx.notes && <p className="text-xs text-gray-300 mt-1">{tx.notes}</p>}
                     </div>
                     <div className="text-right">
-                      <p className="text-xs uppercase text-blue-300">{String(tx.transaction_type || '').replace(/_/g, ' ')}</p>
-                      <p className="text-sm font-bold text-green-400">{tx.points_amount} pts</p>
+                      <p className="text-xs uppercase text-blue-300">{formatLoyaltyTxLabel(tx)}</p>
+                      {(() => {
+                        const { debit, signedLabel } = formatLoyaltyTxAmount(tx);
+                        return (
+                          <p className={`text-sm font-bold ${debit ? 'text-red-400' : 'text-green-400'}`}>
+                            {signedLabel} pts
+                          </p>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

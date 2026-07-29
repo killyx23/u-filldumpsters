@@ -54,6 +54,8 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
             return { text: 'Completed', class: 'badge-delivered', icon: <CheckCircle className="h-3 w-3" /> };
         case 'Cancelled':
             return { text: 'Cancelled', class: 'badge-cancelled', icon: <XCircle className="h-3 w-3" /> };
+        case 'cancellation_pending':
+            return { text: 'Cancellation Pending', class: 'bg-amber-900/40 text-amber-300 border border-amber-500/30', icon: <AlertTriangle className="h-3 w-3" /> };
         default:
             return { text: booking.status, class: 'bg-gray-800 text-gray-300', icon: <Info className="h-3 w-3" /> };
     }

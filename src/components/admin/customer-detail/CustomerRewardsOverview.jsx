@@ -1,6 +1,7 @@
 import React from 'react';
 import { Gift, Wallet, History, Users } from 'lucide-react';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
+import { formatLoyaltyTxLabel, formatLoyaltyTxAmount, isLoyaltyDebit } from '@/utils/loyaltyTransactionLabels';
 
 const fmtMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
 const fmtDate = (value) => {
@@ -83,19 +84,24 @@ export const CustomerRewardsOverview = ({
             <p className="text-sm text-gray-400">No loyalty transactions yet.</p>
           ) : (
             <div className="space-y-2">
-              {recentLoyalty.map((tx) => (
+              {recentLoyalty.map((tx) => {
+                const { signedLabel } = formatLoyaltyTxAmount(tx);
+                const debit = isLoyaltyDebit(tx);
+                return (
                 <div key={tx.id} className="bg-black/20 border border-white/5 rounded p-2 text-xs">
                   <div className="flex justify-between items-center gap-2">
-                    <span className="capitalize text-blue-200">{String(tx.transaction_type || '').replace(/_/g, ' ')}</span>
-                    <ToneChip tone={String(tx.transaction_type || '').includes('redeem') ? 'red' : 'green'}>
-                      {String(tx.transaction_type || '').includes('redeem') ? '-' : '+'}{Number(tx.points_amount || 0)} pts
+                    <span className="text-blue-200">{formatLoyaltyTxLabel(tx)}</span>
+                    <ToneChip tone={debit ? 'red' : 'green'}>
+                      {signedLabel} pts
                     </ToneChip>
                   </div>
                   <p className="text-gray-400 mt-1">
-                    {tx.booking_id ? `Booking #${tx.booking_id} • ` : ''}{fmtDate(tx.created_at)}
+                    {fmtDate(tx.created_at)}
+                    {tx.notes ? ` • ${tx.notes}` : ''}
                   </p>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>

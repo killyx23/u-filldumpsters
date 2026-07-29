@@ -5,6 +5,7 @@ import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format } from 'date-fns';
 import { formatReferralWalletTxType, isReferralWalletDebit } from '@/utils/referralWalletLabels';
+import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 
 export const PortalLoyaltySummary = ({ customerId }) => {
   const { pointsBalance, referralWallet, loading, conversionRates, getPointsBalance } = useCustomerLoyaltyPoints(customerId);
@@ -131,29 +132,30 @@ export const PortalLoyaltySummary = ({ customerId }) => {
             </p>
           ) : (
             <ul className="space-y-2">
-              {transactions.map((tx) => (
+              {transactions.map((tx) => {
+                const { debit, signedLabel } = formatLoyaltyTxAmount(tx);
+                return (
                 <li
                   key={tx.id}
                   className="flex justify-between items-center text-sm border-b border-white/10 pb-2 gap-2"
                 >
-                  <span className="text-gray-200 capitalize">
-                    {tx.transaction_type.replace(/_/g, ' ')}
-                    {tx.booking_id ? ` (#${tx.booking_id})` : ''}
+                  <span className="text-gray-200">
+                    {formatLoyaltyTxLabel(tx)}
                   </span>
-                  <span className={tx.transaction_type.includes('redeem') || tx.transaction_type.includes('remove') ? 'text-red-300' : 'text-green-300'}>
-                    {tx.transaction_type.includes('redeem') || tx.transaction_type.includes('remove') ? '-' : '+'}
-                    {tx.points_amount}
+                  <span className={debit ? 'text-red-300' : 'text-green-300'}>
+                    {signedLabel}
                   </span>
                   <span className="text-xs text-gray-500">
                     {format(new Date(tx.created_at), 'MMM d, yyyy')}
                   </span>
                 </li>
-              ))}
+              );
+              })}
             </ul>
           )}
-          {transactions.some((tx) => tx.transaction_type.includes('redeem')) && (
+          {transactions.some((tx) => tx.transaction_type === 'cancelled' || tx.transaction_type === 'reschedule_adjustment' || String(tx.transaction_type || '').includes('redeem')) && (
             <p className="text-xs text-gray-500 mt-3">
-              Redeemed points are marked as no longer available after use.
+              Cancelled, price-adjusted, or redeemed points are removed from your available balance and cannot be used at checkout.
             </p>
           )}
         </CardContent>

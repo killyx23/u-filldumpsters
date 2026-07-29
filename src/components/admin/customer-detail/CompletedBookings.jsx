@@ -68,6 +68,7 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                  const archiveDetails = booking.archive_details || null;
                  const initiatedByLabel = getInitiatedByLabel(archiveDetails);
                  const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                 const loyaltyPointsReversed = Number(booking.addons?.loyaltyPointsReversedOnCancel || 0);
                  const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
                  const referralDollarsActivated = Number(booking.addons?.referralDollarsActivated || 0);
                  const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
@@ -108,7 +109,11 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                         <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-3 text-xs text-gray-200">
                             <p className="text-yellow-300 font-semibold mb-1">Rewards summary</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                {booking.status === 'Cancelled' || loyaltyPointsReversed > 0 ? (
+                                    <p>Points reversed (cancelled): <span className="font-semibold text-red-300">-{loyaltyPointsReversed || loyaltyPointsEarned}</span></p>
+                                ) : (
+                                    <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                )}
                                 <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
                                 <p>Referral activated: <span className="font-semibold text-green-300">${referralDollarsActivated.toFixed(2)}</span></p>
                                 <p>Referral redeemed: <span className="font-semibold text-blue-300">${referralDollarsRedeemed.toFixed(2)}</span></p>
