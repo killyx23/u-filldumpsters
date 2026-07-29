@@ -1,8 +1,8 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History, AlertTriangle, CreditCard } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History, AlertTriangle, CreditCard, MapPin, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,120 @@ import { VerificationImageDisplay } from '@/components/VerificationImageDisplay'
 import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
 import { format, parseISO, isValid } from 'date-fns';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
+import {
+    getPendingAddressChange,
+    markAddressChangesApproved,
+    normalizeAddress,
+    formatAddressDisplay,
+} from '@/utils/addressHelpers';
 
+const DEFAULT_CANCELLATION_DESCRIPTION =
+    'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
+
+const fetchPendingCancellationLog = async (bookingId) => {
+    if (!bookingId) return null;
+    const { data, error } = await supabase
+        .from('reschedule_history_logs')
+        .select('*')
+        .eq('booking_id', bookingId)
+        .eq('request_type', 'cancellation')
+        .eq('request_status', 'pending')
+        .order('reschedule_request_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (error) {
+        console.error('[cancellation] Failed to load pending log:', error.message);
+        return null;
+    }
+    return data;
+};
+
+const usePendingCancellationLog = (bookingId, enabled = true) => {
+    const [log, setLog] = useState(null);
+    const [loading, setLoading] = useState(Boolean(enabled && bookingId));
+
+    useEffect(() => {
+        if (!enabled || !bookingId) {
+            setLog(null);
+            setLoading(false);
+            return;
+        }
+        let cancelled = false;
+        setLoading(true);
+        fetchPendingCancellationLog(bookingId).then((data) => {
+            if (!cancelled) {
+                setLog(data);
+                setLoading(false);
+            }
+        });
+        return () => { cancelled = true; };
+    }, [bookingId, enabled]);
+
+    return { log, loading };
+};
+
+const formatCancellationFeeSummary = (log, booking = null) => {
+    let hoursRaw = log?.hours_before_appointment;
+    if ((hoursRaw == null || hoursRaw === '') && booking?.drop_off_date && log?.reschedule_request_time) {
+        try {
+            const appt = parseISO(booking.drop_off_date);
+            const requested = parseISO(log.reschedule_request_time);
+            if (isValid(appt) && isValid(requested)) {
+                hoursRaw = Math.round((appt.getTime() - requested.getTime()) / (1000 * 60 * 60));
+            }
+        } catch { /* ignore */ }
+    }
+    const hours = hoursRaw != null && hoursRaw !== '' ? Math.max(0, Math.round(Number(hoursRaw))) : null;
+    const isLate = log?.fee_type === 'late' || (hours != null && hours <= 24);
+    const kind = isLate ? 'Late cancellation' : 'Advance cancellation';
+    let pct = Number(log?.fee_percentage ?? 0);
+    const maxFee = Number(log?.fee_amount ?? 0);
+    const total = Number(booking?.total_price || 0);
+    if ((!pct || pct === 0) && maxFee > 0 && total > 0) {
+        pct = Number(((maxFee / total) * 100).toFixed(2));
+    }
+    return {
+        feeTypeLine:
+            hours != null
+                ? `Cancelled ${hours} hours before appointment — ${kind}`
+                : kind,
+        percentageLabel: `${pct}%`,
+        maxFeeLabel: `$${maxFee.toFixed(2)}`,
+        hours,
+        pct,
+        maxFee,
+        isLate,
+    };
+};
+
+const CancellationPendingDetails = ({ booking }) => {
+    const { log, loading } = usePendingCancellationLog(booking?.id, true);
+    const summary = formatCancellationFeeSummary(log, booking);
+
+    if (loading) {
+        return (
+            <div className="mt-3 rounded-md border border-red-500/40 bg-red-950/40 p-3 text-xs text-red-200 flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading cancellation details…
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-3 rounded-md border border-red-500/40 bg-red-950/40 p-3 space-y-1">
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Service:</span> {booking.plan?.name || 'Service'}</p>
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Total Price:</span> ${(booking.total_price || 0).toFixed(2)}</p>
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Fee Type:</span> {summary.feeTypeLine}</p>
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Percentage Fee:</span> {summary.percentageLabel}</p>
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Maximum Fee:</span> {summary.maxFeeLabel}</p>
+            {log?.reschedule_request_time && (
+                <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Requested:</span> {format(parseISO(log.reschedule_request_time), 'MMM d, yyyy h:mm a')}</p>
+            )}
+            {booking.drop_off_date && (
+                <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Scheduled Date:</span> {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}</p>
+            )}
+        </div>
+    );
+};
 
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
@@ -75,15 +188,8 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
                 },
             });
             
-            const updatedBookingForEmail = {
-                ...booking, 
-                customers: customer, 
-                status: 'Cancelled', 
-                refund_details: { amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString() }
-            };
-            
             await supabase.functions.invoke('send-booking-confirmation', {
-                body: { booking: updatedBookingForEmail, customMessage: `This booking has been cancelled and a refund of $${refundAmount} has been processed. Reason: ${reason}` }
+                body: { bookingId: booking.id }
             });
             
             toast({ title: "Refund Processed & Customer Notified", description: `Successfully refunded $${refundAmount}.` });
@@ -368,9 +474,322 @@ const ChargeDifferenceDialog = ({ booking, customer, open, onOpenChange, onUpdat
     );
 };
 
+const CancellationApprovalDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
+    const [cancellationFee, setCancellationFee] = useState('');
+    const [refundAmount, setRefundAmount] = useState(0);
+    const [description, setDescription] = useState(DEFAULT_CANCELLATION_DESCRIPTION);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const receiptRef = React.useRef();
+    const { log: cancellationLog, loading: logLoading } = usePendingCancellationLog(booking?.id, open && !!booking);
+    const summary = formatCancellationFeeSummary(cancellationLog, booking);
+
+    const handlePrint = useReactToPrint({
+        content: () => receiptRef.current,
+        documentTitle: `U-Fill-Cancellation-Receipt-${booking?.id || 'booking'}`,
+    });
+
+    useEffect(() => {
+        if (booking && open) {
+            setCancellationFee(String(summary.maxFee || 0));
+            setDescription(DEFAULT_CANCELLATION_DESCRIPTION);
+        }
+    }, [booking?.id, open, summary.maxFee]);
+
+    useEffect(() => {
+        const total = booking?.total_price || 0;
+        const fee = parseFloat(cancellationFee) || 0;
+        setRefundAmount(Math.max(0, total - fee));
+    }, [cancellationFee, booking?.total_price]);
+
+    const paymentInfo = Array.isArray(booking?.stripe_payment_info)
+        ? booking.stripe_payment_info[0]
+        : booking?.stripe_payment_info;
+
+    const handleApprove = async () => {
+        if (!paymentInfo?.stripe_charge_id) {
+            toast({ title: 'Refund Failed', description: 'Missing Stripe Charge ID.', variant: 'destructive' });
+            return;
+        }
+        setIsProcessing(true);
+        try {
+            const fee = parseFloat(cancellationFee) || 0;
+            const refund = Math.max(0, (booking.total_price || 0) - fee);
+            const reasonText = description.trim() || DEFAULT_CANCELLATION_DESCRIPTION;
+
+            const { data: refundData, error: refundError } = await supabase.functions.invoke('refund-payment', {
+                body: {
+                    bookingId: booking.id,
+                    amount: refund,
+                    reason: reasonText,
+                    chargeId: paymentInfo.stripe_charge_id,
+                },
+            });
+            if (refundError) throw refundError;
+
+            const now = new Date().toISOString();
+            // Loyalty reverse runs in DB (cancel trigger + refund-payment RPC). Re-read addons so we don't clobber the reverse.
+            const { data: refreshedBooking } = await supabase
+                .from('bookings')
+                .select('addons')
+                .eq('id', booking.id)
+                .maybeSingle();
+            const refreshedAddons = refreshedBooking?.addons && typeof refreshedBooking.addons === 'object'
+                ? refreshedBooking.addons
+                : (booking.addons && typeof booking.addons === 'object' ? booking.addons : {});
+            const pointsReversed = Number(
+                refundData?.loyalty?.points_reversed
+                || refreshedAddons.loyaltyPointsReversedOnCancel
+                || 0
+            );
+
+            await supabase.from('bookings').update({
+                cancellation_details: {
+                    fee_type: cancellationLog?.fee_type || (summary.isLate ? 'late' : 'advance'),
+                    fee_percentage: summary.pct,
+                    fee_amount: fee,
+                    refund_amount: refund,
+                    reason: reasonText,
+                    approved_at: now,
+                    requested_at: cancellationLog?.reschedule_request_time || null,
+                    hours_before_appointment: summary.hours,
+                    loyalty_points_reversed: pointsReversed,
+                },
+                addons: {
+                    ...refreshedAddons,
+                    loyaltyPointsEarned: 0,
+                    loyaltyPointsReversedOnCancel: Number(refreshedAddons.loyaltyPointsReversedOnCancel || pointsReversed || 0),
+                },
+            }).eq('id', booking.id);
+
+            if (cancellationLog?.id) {
+                await supabase.from('reschedule_history_logs').update({
+                    request_status: 'approved',
+                    admin_notes: reasonText,
+                    resolved_at: now,
+                    fee_amount: fee,
+                }).eq('id', cancellationLog.id);
+            }
+
+            await expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
+
+            const chatMsg =
+                `We're sorry to see you go! Your cancellation for Booking #${booking.id} has been approved. ` +
+                `A refund of $${refund.toFixed(2)} has been processed` +
+                (fee > 0 ? ` (cancellation fee: $${fee.toFixed(2)})` : '') +
+                `. If you ever need our services again, we'd be more than happy to help!`;
+            await supabase.from('chat_messages').insert({
+                conversation_id: `cust_${customer.id}`,
+                customer_id: customer.id,
+                booking_id: booking.id,
+                sender_type: 'admin',
+                message_content: chatMsg,
+                is_read: false,
+                message_severity: 'urgent',
+                message_context: { action: 'cancellation_approved', amount: refund, fee, booking_id: booking.id },
+            });
+
+            await supabase.from('customer_notes').insert({
+                customer_id: customer.id,
+                booking_id: booking.id,
+                source: 'Cancellation Approved',
+                content: `Cancellation approved. Fee: $${fee.toFixed(2)}, Refund: $${refund.toFixed(2)}. ${reasonText}${pointsReversed > 0 ? ` Loyalty points reversed: ${pointsReversed}.` : ''}`,
+                author_type: 'admin',
+                is_read: false,
+            });
+
+            await supabase.functions.invoke('send-booking-confirmation', {
+                body: { bookingId: booking.id },
+            });
+
+            toast({ title: 'Cancellation Approved', description: `Refund of $${refund.toFixed(2)} processed.` });
+            onUpdate();
+            onOpenChange(false);
+        } catch (error) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    if (!booking) return null;
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <div className="hidden">
+                <PrintableReceipt ref={receiptRef} booking={{
+                    ...booking,
+                    customers: customer,
+                    status: 'Cancelled',
+                    addons: { ...(booking.addons || {}), loyaltyPointsEarned: 0 },
+                    refund_details: { amount: refundAmount, reason: description || DEFAULT_CANCELLATION_DESCRIPTION, created_at: new Date().toISOString() },
+                    cancellation_details: {
+                        fee_type: cancellationLog?.fee_type || (summary.isLate ? 'late' : 'advance'),
+                        fee_percentage: summary.pct,
+                        fee_amount: parseFloat(cancellationFee) || 0,
+                        refund_amount: refundAmount,
+                        reason: description || DEFAULT_CANCELLATION_DESCRIPTION,
+                        hours_before_appointment: summary.hours,
+                    },
+                }} />
+            </div>
+            <DialogContent className="bg-gray-900 border-green-500 text-white max-w-lg">
+                <DialogHeader>
+                    <DialogTitle className="text-green-400 flex items-center gap-2">
+                        <CheckCircle className="h-5 w-5" /> Approve Cancellation
+                    </DialogTitle>
+                    <DialogDescription>
+                        Booking #{booking.id} — Original total: ${(booking.total_price || 0).toFixed(2)}
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-4">
+                    <div className="rounded-lg bg-amber-900/30 border border-amber-500/40 p-3 text-sm space-y-1">
+                        {logLoading ? (
+                            <p className="text-amber-200 flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading fee details…</p>
+                        ) : (
+                            <>
+                                <p className="text-amber-200"><strong>Fee Type:</strong> {summary.feeTypeLine}</p>
+                                <p className="text-amber-200"><strong>Percentage Fee:</strong> {summary.percentageLabel}</p>
+                                <p className="text-amber-200"><strong>Maximum Fee:</strong> {summary.maxFeeLabel}</p>
+                            </>
+                        )}
+                        {cancellationLog?.reschedule_request_time && (
+                            <p className="text-amber-200 mt-1"><strong>Requested:</strong> {format(parseISO(cancellationLog.reschedule_request_time), 'MMM d, yyyy h:mm a')}</p>
+                        )}
+                    </div>
+                    <div>
+                        <Label htmlFor="cancel-fee">Cancellation Fee (adjustable)</Label>
+                        <Input id="cancel-fee" type="number" step="0.01" value={cancellationFee} onChange={(e) => setCancellationFee(e.target.value)} placeholder="0.00" className="bg-white/20" />
+                    </div>
+                    <div>
+                        <Label>Amount to Refund</Label>
+                        <p className="text-2xl font-bold text-green-400">${refundAmount.toFixed(2)}</p>
+                    </div>
+                    <div>
+                        <Label htmlFor="cancel-desc">Description / Reason (optional)</Label>
+                        <textarea
+                            id="cancel-desc"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            rows={3}
+                            className="w-full bg-white/20 border border-white/10 rounded-md p-2 text-white text-sm placeholder:text-gray-500"
+                            placeholder={DEFAULT_CANCELLATION_DESCRIPTION}
+                        />
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={handlePrint}>Print Receipt</Button>
+                    <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                    <Button className="bg-green-600 hover:bg-green-700" onClick={handleApprove} disabled={isProcessing || logLoading}>
+                        {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                        Confirm & Process Refund
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+const CancellationRejectionDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
+    const [reason, setReason] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const { log: cancellationLog } = usePendingCancellationLog(booking?.id, open && !!booking);
+
+    const handleReject = async () => {
+        setIsProcessing(true);
+        try {
+            const previousStatus = cancellationLog?.previous_status || 'Confirmed';
+            const now = new Date().toISOString();
+
+            await supabase.from('bookings').update({
+                status: previousStatus,
+                ...reinstatePinTrackingPatch('cancellation_pending', previousStatus),
+            }).eq('id', booking.id);
+
+            if (cancellationLog?.id) {
+                await supabase.from('reschedule_history_logs').update({
+                    request_status: 'rejected',
+                    admin_notes: reason || 'Cancellation rejected by admin.',
+                    resolved_at: now,
+                }).eq('id', cancellationLog.id);
+            }
+
+            const chatMsg =
+                `We've reviewed your cancellation request for Booking #${booking.id}. ` +
+                `Unfortunately, we're unable to process the cancellation at this time. ` +
+                `The full amount will remain charged as the service window has passed. ` +
+                `If you have any questions, please don't hesitate to reach out.`;
+            await supabase.from('chat_messages').insert({
+                conversation_id: `cust_${customer.id}`,
+                customer_id: customer.id,
+                booking_id: booking.id,
+                sender_type: 'admin',
+                message_content: chatMsg,
+                is_read: false,
+                message_severity: 'info',
+                message_context: { action: 'cancellation_rejected', booking_id: booking.id },
+            });
+
+            await supabase.from('customer_notes').insert({
+                customer_id: customer.id,
+                booking_id: booking.id,
+                source: 'Cancellation Rejected',
+                content: `Cancellation rejected. ${reason ? 'Reason: ' + reason : 'No reason provided.'} Booking restored to ${previousStatus}.`,
+                author_type: 'admin',
+                is_read: false,
+            });
+
+            toast({ title: 'Cancellation Rejected', description: `Booking restored to ${previousStatus}.` });
+            onUpdate();
+            onOpenChange(false);
+        } catch (error) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    if (!booking) return null;
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="bg-gray-900 border-red-500 text-white max-w-md">
+                <DialogHeader>
+                    <DialogTitle className="text-red-400 flex items-center gap-2">
+                        <Ban className="h-5 w-5" /> Reject Cancellation
+                    </DialogTitle>
+                    <DialogDescription>
+                        Booking #{booking.id} will be restored. The customer will be notified that the full charge stands.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                    <p className="text-sm text-gray-300">
+                        The booking status will be restored to <strong className="text-white">{cancellationLog?.previous_status || 'Confirmed'}</strong> and
+                        the customer will be notified that their cancellation request was rejected.
+                    </p>
+                    <div>
+                        <Label htmlFor="reject-reason">Reason (optional)</Label>
+                        <textarea id="reject-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full bg-white/20 border border-white/10 rounded-md p-2 text-white text-sm placeholder:text-gray-500" placeholder="Optional reason for rejection..." />
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+                    <Button variant="destructive" onClick={handleReject} disabled={isProcessing}>
+                        {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ban className="mr-2 h-4 w-4" />}
+                        Confirm Rejection
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+};
+
 export const CustomerVerification = ({ customer, verificationBookings, notes, onUpdate }) => {
     const [selectedBookingForRefund, setSelectedBookingForRefund] = useState(null);
     const [selectedBookingForCharge, setSelectedBookingForCharge] = useState(null);
+    const [selectedBookingForCancelApproval, setSelectedBookingForCancelApproval] = useState(null);
+    const [selectedBookingForCancelRejection, setSelectedBookingForCancelRejection] = useState(null);
     const [isEditingPlate, setIsEditingPlate] = useState(false);
     const [plate, setPlate] = useState(customer?.license_plate || '');
     const [isSavingPlate, setIsSavingPlate] = useState(false);
@@ -414,25 +833,97 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     const handleApprove = async (booking) => {
         if (!customer?.id) return;
         const prevStatus = booking.status;
+        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
+        const toAddress = normalizeAddress(pendingAddress?.to_address);
+        const fromAddress = normalizeAddress(pendingAddress?.from_address);
+        const approvedAt = new Date().toISOString();
+
+        const bookingUpdate = {
+            status: 'Confirmed',
+            verification_notes: 'Admin approved verification.',
+            is_manually_verified: true,
+            ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
+        };
+
+        if (toAddress) {
+            const addressPayload = {
+                street: toAddress.street,
+                city: toAddress.city,
+                state: toAddress.state,
+                zip: toAddress.zip,
+                formatted_address: toAddress.formatted_address,
+                isVerified: !pendingAddress?.is_manual_address,
+            };
+            bookingUpdate.street = toAddress.street;
+            bookingUpdate.city = toAddress.city;
+            bookingUpdate.state = toAddress.state;
+            bookingUpdate.zip = toAddress.zip;
+            bookingUpdate.delivery_address = addressPayload;
+            bookingUpdate.contact_address = addressPayload;
+            if (pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
+                bookingUpdate.distance_miles = Number(pendingAddress.distance_miles);
+            }
+            bookingUpdate.reschedule_history = markAddressChangesApproved(
+                booking.reschedule_history,
+                approvedAt
+            );
+        }
+
         const { error } = await supabase
             .from('bookings')
-            .update({
-                status: 'Confirmed',
-                verification_notes: 'Admin approved verification.',
-                is_manually_verified: true,
-                ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
-            })
+            .update(bookingUpdate)
             .eq('id', booking.id);
             
         if (error) {
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
+            if (toAddress) {
+                const customerUpdate = {
+                    street: toAddress.street,
+                    city: toAddress.city,
+                    state: toAddress.state,
+                    zip: toAddress.zip,
+                    unverified_address: Boolean(pendingAddress?.is_manual_address),
+                };
+                if (pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
+                    customerUpdate.distance_miles = Number(pendingAddress.distance_miles);
+                    customerUpdate.travel_time_minutes = null;
+                } else {
+                    customerUpdate.distance_miles = null;
+                    customerUpdate.travel_time_minutes = null;
+                }
+
+                const { error: customerError } = await supabase
+                    .from('customers')
+                    .update(customerUpdate)
+                    .eq('id', customer.id);
+
+                if (customerError) {
+                    console.error('Failed to update customer address on approve:', customerError.message);
+                    toast({
+                        title: 'Address partially applied',
+                        description: 'Booking was approved but the customer profile address could not be updated.',
+                        variant: 'destructive',
+                    });
+                }
+
+                const fromDisplay = formatAddressDisplay(fromAddress) || 'N/A';
+                const toDisplay = formatAddressDisplay(toAddress);
+                await supabase.from('customer_notes').insert({
+                    customer_id: customer.id,
+                    booking_id: booking.id,
+                    source: 'Address Change',
+                    content: `Address updated via reschedule approval for booking #${booking.id}.\nFrom: ${fromDisplay}\nTo: ${toDisplay}`,
+                    author_type: 'admin',
+                    is_read: false,
+                });
+            }
+
             if (prevStatus === 'pending_review') {
                 await expireActiveRentalAccessCodesForOrder(booking.id);
             }
-            const updatedBookingForEmail = { ...booking, customers: customer, status: 'Confirmed' };
             await supabase.functions.invoke('send-booking-confirmation', {
-                body: { booking: updatedBookingForEmail, customMessage: `Your booking #${booking.id} has been approved and is now confirmed.` }
+                body: { bookingId: booking.id }
             });
             toast({ title: "Booking Approved", description: `The booking is now confirmed and the customer has been notified.` });
             onUpdate();
@@ -461,6 +952,14 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     titleText: "Payment Difference Pending for Booking #",
                     nextStep: "Open charge dialog, attempt auto-charge, then confirm or cancel with reason."
                 };
+            case 'cancellation_pending':
+                return {
+                    container: "bg-red-900/40 border-red-600",
+                    title: "text-red-300 font-bold",
+                    icon: <Ban className="mr-2 h-4 w-4"/>,
+                    titleText: "Cancellation Request for Booking #",
+                    nextStep: "Review cancellation details and fee, then approve or reject."
+                };
             default:
                 return {
                     container: "bg-orange-900/30 border-orange-500",
@@ -476,7 +975,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         const noteMap = {};
         if (notes) {
             for (const note of notes) {
-                if (note.booking_id && (note.source === 'Change Request' || note.source === 'Verification Skip Reason' || note.source === 'Booking Special Instructions')) {
+                if (note.booking_id && (note.source === 'Change Request' || note.source === 'Verification Skip Reason' || note.source === 'Booking Special Instructions' || note.source === 'Cancellation Request')) {
                     if (!noteMap[note.booking_id]) {
                         noteMap[note.booking_id] = [];
                     }
@@ -525,6 +1024,20 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                 onUpdate={onUpdate}
             />
         )}
+        <CancellationApprovalDialog
+            booking={selectedBookingForCancelApproval}
+            customer={customer}
+            open={!!selectedBookingForCancelApproval}
+            onOpenChange={() => setSelectedBookingForCancelApproval(null)}
+            onUpdate={onUpdate}
+        />
+        <CancellationRejectionDialog
+            booking={selectedBookingForCancelRejection}
+            customer={customer}
+            open={!!selectedBookingForCancelRejection}
+            onOpenChange={() => setSelectedBookingForCancelRejection(null)}
+            onUpdate={onUpdate}
+        />
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="bg-white/5 p-6 rounded-lg shadow-lg space-y-6">
@@ -597,12 +1110,40 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     {verificationBookings?.length > 0 ? verificationBookings.map(booking => {
                         const styles = getVerificationCardStyles(booking.status);
                         const requestNotes = verificationNotes[booking.id] || [];
+                        const pendingAddress = booking.status === 'pending_review'
+                            ? getPendingAddressChange(booking.reschedule_history)
+                            : null;
+                        const currentAddressDisplay = formatAddressDisplay(pendingAddress?.from_address) ||
+                            formatAddressDisplay(booking.delivery_address || booking.contact_address) ||
+                            formatAddressDisplay({
+                                street: booking.street,
+                                city: booking.city,
+                                state: booking.state,
+                                zip: booking.zip,
+                            }) ||
+                            'N/A';
+                        const requestedAddressDisplay = formatAddressDisplay(pendingAddress?.to_address);
                         return (
                             <div key={booking.id} className={`${styles.container} p-4 rounded-lg`}>
                                 <p className={styles.title}>{styles.titleText}{booking.id}</p>
                                 <p className="text-xs text-yellow-200 mt-2">
                                     <strong>Next step:</strong> {styles.nextStep}
                                 </p>
+                                {pendingAddress && requestedAddressDisplay && (
+                                    <div className="mt-3 rounded-md border border-orange-500/40 bg-black/20 p-3 space-y-2">
+                                        <p className="text-xs font-semibold text-orange-200 flex items-center">
+                                            <MapPin className="h-3.5 w-3.5 mr-1.5" />
+                                            Requested Address Change
+                                            {pendingAddress.is_manual_address ? ' (manual entry)' : ''}
+                                        </p>
+                                        <p className="text-xs text-gray-300">
+                                            <span className="font-semibold text-gray-400">Current:</span> {currentAddressDisplay}
+                                        </p>
+                                        <p className="text-xs text-orange-100">
+                                            <span className="font-semibold text-orange-300">Requested:</span> {requestedAddressDisplay}
+                                        </p>
+                                    </div>
+                                )}
                                 {requestNotes.length > 0 && (
                                     <div className="mt-2 space-y-2">
                                          {requestNotes.map((note, i) => (
@@ -622,6 +1163,9 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                         ))}
                                     </div>
                                 )}
+                                {booking.status === 'cancellation_pending' && (
+                                    <CancellationPendingDetails booking={booking} />
+                                )}
                                 <div className="flex justify-end space-x-2 mt-4">
                                     {booking.status === 'pending_payment' ? (
                                         <>
@@ -629,6 +1173,11 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                             <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => setSelectedBookingForCharge(booking)}>
                                                 Open Charge Dialog
                                             </Button>
+                                        </>
+                                    ) : booking.status === 'cancellation_pending' ? (
+                                        <>
+                                            <Button size="sm" variant="destructive" onClick={() => setSelectedBookingForCancelRejection(booking)}><Ban className="mr-2 h-4 w-4"/>Reject Cancellation</Button>
+                                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setSelectedBookingForCancelApproval(booking)}><CheckCircle className="mr-2 h-4 w-4"/>Approve Cancellation</Button>
                                         </>
                                     ) : (
                                         <>

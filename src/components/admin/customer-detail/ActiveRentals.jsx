@@ -390,6 +390,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 
                 const totalPrice = booking.total_price && typeof booking.total_price === 'number' ? booking.total_price.toFixed(2) : '0.00';
                 const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                const loyaltyPointsReversed = Number(booking.addons?.loyaltyPointsReversedOnCancel || 0);
                 const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
                 const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
@@ -424,7 +425,11 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                         <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-4">
                             <p className="text-sm font-semibold text-yellow-400 mb-2">Rewards & Referrals for this booking</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-xs text-gray-200">
-                                <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                {booking.status === 'Cancelled' || loyaltyPointsReversed > 0 ? (
+                                    <p>Points reversed (cancelled): <span className="font-semibold text-red-300">-{loyaltyPointsReversed || loyaltyPointsEarned}</span></p>
+                                ) : (
+                                    <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                )}
                                 <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
                                 <p>Referral pending: <span className="font-semibold text-orange-300">${referralDollarsPending.toFixed(2)}</span></p>
                                 <p>Referral redeemed: <span className="font-semibold text-green-300">${referralDollarsRedeemed.toFixed(2)}</span></p>

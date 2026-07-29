@@ -13,8 +13,10 @@ import {
   FileText, 
   LineChart, 
   Settings, 
-  History 
+  History,
+  Percent,
 } from 'lucide-react';
+import { TaxCollectionModule } from './financial/TaxCollectionModule';
 
 export const FinancialBooksManager = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -29,7 +31,7 @@ export const FinancialBooksManager = () => {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 lg:grid-cols-9 gap-1 bg-gray-800/50 p-2 rounded-lg h-auto">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 lg:grid-cols-10 gap-1 bg-gray-800/50 p-2 rounded-lg h-auto">
           <TabsTrigger value="dashboard" className="py-2">
             <LayoutDashboard className="w-4 h-4 mr-1 lg:mr-2" />
             <span className="hidden lg:inline">Dashboard</span>
@@ -37,6 +39,10 @@ export const FinancialBooksManager = () => {
           <TabsTrigger value="revenue" className="py-2">
             <TrendingUp className="w-4 h-4 mr-1 lg:mr-2" />
             <span className="hidden lg:inline">Revenue</span>
+          </TabsTrigger>
+          <TabsTrigger value="taxes" className="py-2">
+            <Percent className="w-4 h-4 mr-1 lg:mr-2" />
+            <span className="hidden lg:inline">Taxes</span>
           </TabsTrigger>
           <TabsTrigger value="equipment" className="py-2">
             <Truck className="w-4 h-4 mr-1 lg:mr-2" />
@@ -74,6 +80,10 @@ export const FinancialBooksManager = () => {
 
         <TabsContent value="revenue" className="mt-6">
           <RevenueTrackingModule />
+        </TabsContent>
+
+        <TabsContent value="taxes" className="mt-6">
+          <TaxCollectionModule />
         </TabsContent>
 
         <TabsContent value="equipment" className="mt-6">

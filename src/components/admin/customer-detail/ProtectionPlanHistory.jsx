@@ -14,6 +14,18 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 const planTypeLabel = (planType) =>
   planType === 'driveway_protection' ? 'Driveway Protection' : 'Rental Insurance';
 
+const isPlanCancelled = (record) => Boolean(record?.cancelled_at);
+
+const coverageBadge = (record) => {
+  if (isPlanCancelled(record)) {
+    return { label: 'Cancelled', className: 'bg-red-900/40 text-red-300' };
+  }
+  if (record.election === 'accept') {
+    return { label: 'Accepted', className: 'bg-green-900/40 text-green-300' };
+  }
+  return { label: 'Declined', className: 'bg-gray-800 text-gray-300' };
+};
+
 export const ProtectionPlanHistory = ({ customerId }) => {
   const { user } = useAuth();
   const [records, setRecords] = useState([]);
@@ -68,6 +80,14 @@ export const ProtectionPlanHistory = ({ customerId }) => {
   }, [loadData]);
 
   const openClaimDialog = (record) => {
+    if (isPlanCancelled(record)) {
+      toast({
+        title: 'Plan cancelled',
+        description: 'Claims cannot be filed against a cancelled booking protection plan.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (record.election !== 'accept') {
       toast({
         title: 'No accepted plan',
@@ -89,6 +109,14 @@ export const ProtectionPlanHistory = ({ customerId }) => {
 
   const handleSaveClaim = async () => {
     if (!selectedRecord) return;
+    if (isPlanCancelled(selectedRecord)) {
+      toast({
+        title: 'Plan cancelled',
+        description: 'Claims cannot be filed against a cancelled booking protection plan.',
+        variant: 'destructive',
+      });
+      return;
+    }
     try {
       const { error } = await supabase.from('protection_plan_claims').insert([{
         booking_protection_plan_id: selectedRecord.id,
@@ -146,6 +174,8 @@ export const ProtectionPlanHistory = ({ customerId }) => {
           {records.map((record) => {
             const recordClaims = claimsForRecord(record.id);
             const usedClaim = recordClaims.length > 0;
+            const cancelled = isPlanCancelled(record);
+            const badge = coverageBadge(record);
             return (
               <Card key={record.id} className="bg-white/5 border-white/10">
                 <CardHeader className="pb-2">
@@ -153,10 +183,8 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                     <span>
                       Order #{record.booking_id} — {record.plan_name_snapshot}
                     </span>
-                    <span className={`text-sm px-2 py-1 rounded-full ${
-                      record.election === 'accept' ? 'bg-green-900/40 text-green-300' : 'bg-gray-800 text-gray-300'
-                    }`}>
-                      {record.election === 'accept' ? 'Accepted' : 'Declined'}
+                    <span className={`text-sm px-2 py-1 rounded-full ${badge.className}`}>
+                      {badge.label}
                     </span>
                   </CardTitle>
                 </CardHeader>
@@ -166,6 +194,13 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                     <p><span className="text-gray-400">Amount:</span> ${Number(record.price_applied || 0).toFixed(2)}</p>
                     <p><span className="text-gray-400">Date/Time:</span> {format(parseISO(record.elected_at), 'PPP p')}</p>
                     <p><span className="text-gray-400">Service ID:</span> {record.service_id_at_purchase ?? 'N/A'}</p>
+                    {cancelled && (
+                      <p className="md:col-span-2">
+                        <span className="text-gray-400">Cancelled:</span>{' '}
+                        {format(parseISO(record.cancelled_at), 'PPP p')}
+                        {record.election === 'accept' ? ' (was accepted before cancellation)' : ''}
+                      </p>
+                    )}
                   </div>
 
                   {usedClaim && (
@@ -184,7 +219,7 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                     </div>
                   )}
 
-                  {record.election === 'accept' && (
+                  {record.election === 'accept' && !cancelled && (
                     <Button
                       size="sm"
                       variant="outline"

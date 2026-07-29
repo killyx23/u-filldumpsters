@@ -44,6 +44,29 @@ const toPositiveInt = (value: unknown): number => {
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.floor(n);
 };
+
+async function upsertTaxLedgerForBooking(booking: Record<string, unknown>) {
+  const bookingId = Number(booking?.id);
+  if (!Number.isFinite(bookingId) || bookingId <= 0) return;
+
+  const taxAmount = Number(booking.tax_amount || 0);
+  const taxRate = Number(booking.tax_rate_used || 0);
+  if (taxAmount <= 0 && taxRate <= 0) return;
+
+  try {
+    const { error } = await supabase.rpc("upsert_booking_tax_record", {
+      p_booking_id: bookingId,
+    });
+    if (error) {
+      console.error("[finalize-booking] upsert_booking_tax_record failed:", error);
+    } else {
+      log("Tax ledger upserted for booking", bookingId);
+    }
+  } catch (err) {
+    console.error("[finalize-booking] tax ledger exception:", err);
+  }
+}
+
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -106,6 +129,7 @@ Deno.serve(async (req)=>{
         }
       }
 
+      await upsertTaxLedgerForBooking(booking);
       let emailError: string | null = null;
       const emailResult = await sendBookingConfirmationEmail(booking.id, siteUrl);
       if (emailResult.sent) {
@@ -403,6 +427,9 @@ Deno.serve(async (req)=>{
     } else if (bookingWithRewards) {
       Object.assign(updatedBooking, bookingWithRewards);
     }
+
+    await upsertTaxLedgerForBooking(updatedBooking);
+
     // ----------------------------------------------------------------
     // Step 5c: Notify admin chat when verification was skipped
     // ----------------------------------------------------------------

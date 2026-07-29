@@ -33,6 +33,8 @@ const ActionItemsDialog = ({ isOpen, onOpenChange, title, items, onNavigate }) =
                 return `Booking #${item.id} for ${item.customers?.name || 'N/A'} is pending ${reason}.`;
             case 'flagged':
                 return `Booking #${item.id} for ${item.customers?.name || 'N/A'} was flagged for follow-up.`;
+            case 'cancellation':
+                return `Booking #${item.id} for ${item.customers?.name || 'N/A'}: Cancellation request pending review.`;
             case 'payment':
                 return `Booking #${item.id} for ${item.customers?.name || 'N/A'} is pending payment.`;
             case 'unread_notes':
@@ -73,7 +75,7 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [dialogContent, setDialogContent] = useState({ title: '', items: [] });
 
-    const flaggedForFollowUp = bookings ? bookings.filter(b => b.status === 'flagged').map(b => ({ ...b, type: 'flagged' })) : [];
+    const flaggedForFollowUp = bookings ? bookings.filter(b => b.status === 'flagged' || b.status === 'cancellation_pending').map(b => ({ ...b, type: b.status === 'cancellation_pending' ? 'cancellation' : 'flagged' })) : [];
     const pendingVerification = bookings ? bookings.filter(b => ['pending_verification', 'pending_review', 'pending_payment'].includes(b.status)).map(b => ({ ...b, type: 'verification' })) : [];
     const unreadNotesItems = customersWithUnreadNotes ? customersWithUnreadNotes.map(c => ({ ...c, type: 'unread_notes' })) : [];
 
@@ -91,6 +93,7 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes }) => {
         let tab = 'profile';
         if (item.type === 'verification') tab = 'verification';
         if (item.type === 'flagged') tab = 'rentals';
+        if (item.type === 'cancellation') tab = 'verification';
         if (item.type === 'unread_notes') tab = 'notes';
         
         navigate(`/admin/customer/${targetCustomerId}?tab=${tab}`);

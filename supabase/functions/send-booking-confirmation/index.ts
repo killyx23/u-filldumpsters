@@ -227,6 +227,111 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
         ${thankYouRewardsHTML}
       </div>`;
 };
+
+const generateRefundEmailHTML = (booking) => {
+  const customerName = booking.customers?.name || booking.name || "there";
+  const refundDetails = booking.refund_details || {};
+  const cancellationDetails = booking.cancellation_details || {};
+  const originalTotal = Number(booking.total_price || 0);
+  const refundAmount = Number(
+    refundDetails.amount ?? cancellationDetails.refund_amount ?? 0,
+  );
+  const feeAmount = Number(
+    cancellationDetails.fee_amount ??
+      Math.max(0, originalTotal - refundAmount),
+  );
+  const hoursRaw = cancellationDetails.hours_before_appointment;
+  const hours =
+    hoursRaw != null && hoursRaw !== ""
+      ? Math.max(0, Math.round(Number(hoursRaw)))
+      : null;
+  const isLate =
+    cancellationDetails.fee_type === "late" ||
+    (hours != null && hours <= 24);
+  const feeTypeLabel = isLate
+    ? "Last-minute exception cancellation fee"
+    : "Standard cancellation fee";
+  const feePct = cancellationDetails.fee_percentage != null
+    ? Number(cancellationDetails.fee_percentage)
+    : null;
+  const reason =
+    cancellationDetails.reason ||
+    refundDetails.reason ||
+    null;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Refund Confirmation - U-Fill Dumpsters</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); padding: 40px 20px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold;">Refund Confirmation</h1>
+      <p style="color: #e0f2fe; margin: 10px 0 0 0; font-size: 16px;">Booking #${booking.id}</p>
+    </div>
+    <div style="padding: 30px 20px;">
+      <div style="background-color: #dbeafe; border-left: 4px solid #2563eb; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
+        <p style="margin: 0; color: #1e3a8a; font-weight: bold;">Your cancellation has been approved and your refund has been processed.</p>
+      </div>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        Hi ${customerName},
+      </p>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        We're sorry to see you go. We truly miss your business and hope you'll choose U-Fill Dumpsters again whenever you need us.
+        Your cancellation for Booking #${booking.id} has been approved, and a refund of
+        <strong>${formatCurrency(refundAmount)}</strong> has been processed
+        ${feeAmount > 0 ? ` (cancellation fee: <strong>${formatCurrency(feeAmount)}</strong>)` : ""}.
+      </p>
+      <div style="margin-top: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Refund Summary</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Original Total</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${formatCurrency(originalTotal)}</td>
+          </tr>
+          ${hours != null ? `
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Hours before appointment</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${hours} hours</td>
+          </tr>` : ""}
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Fee type</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">
+              ${feeTypeLabel}${feePct != null ? ` — up to ${feePct}%` : ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Cancellation fee charged</td>
+            <td style="padding: 8px 0; color: #b91c1c; text-align: right;">-${formatCurrency(feeAmount)}</td>
+          </tr>
+          <tr style="border-top: 2px solid #3b82f6;">
+            <td style="padding: 12px 0 6px; color: #047857; font-weight: bold; font-size: 16px;">Amount Refunded</td>
+            <td style="padding: 12px 0 6px; color: #047857; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(refundAmount)}</td>
+          </tr>
+        </table>
+      </div>
+      ${reason ? `
+      <div style="margin-top: 20px; padding: 12px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <p style="margin: 0 0 6px 0; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Note</p>
+        <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.5;">${reason}</p>
+      </div>` : ""}
+      <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-top: 25px;">
+        Refunds typically appear on your original payment method within a few business days, depending on your bank or card issuer.
+        If you have any questions, reply to this email or contact us through your Customer Portal.
+      </p>
+    </div>
+    <div style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">Thank you for considering U-Fill Dumpsters. We hope to serve you again soon.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
 const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
   const grandTotal = resolveBookingGrandTotal(booking);
   const plan = booking.plan || {};
@@ -768,16 +873,27 @@ Deno.serve(async (req)=>{
       insuranceFallbackPrice = Number(premiumPlan.price);
     }
     const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
-    const emailHTML = generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
-    const subject = `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
-    console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail}`);
+    const isCancelledRefund =
+      booking.status === "Cancelled" &&
+      (booking.refund_details || booking.cancellation_details);
+    const emailHTML = isCancelledRefund
+      ? generateRefundEmailHTML(booking)
+      : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
+    const subject = isCancelledRefund
+      ? `Refund Confirmation #${booking.id} — U-Fill Dumpsters`
+      : `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
+    console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail} (type=${isCancelledRefund ? "refund" : "confirmation"})`);
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
     if (emailResult.success) {
       console.log(`[${timestamp}] [send-booking-confirmation] SUCCESS: Email sent via ${emailResult.provider}`);
-      const referrerEmailResult = await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
+      const referrerEmailResult = isCancelledRefund
+        ? { skipped: true, reason: "cancelled_refund" }
+        : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
       return new Response(JSON.stringify({
         success: true,
-        message: "Confirmation email sent successfully",
+        message: isCancelledRefund
+          ? "Refund confirmation email sent successfully"
+          : "Confirmation email sent successfully",
         provider: emailResult.provider,
         recipient: recipientEmail,
         referrerThankYou: referrerEmailResult,

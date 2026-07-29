@@ -218,9 +218,10 @@ export const BookingConfirmation = () => {
         
         const taxResult = await createTaxRecord(
           bookingId,
-          bookingForTax.tax_amount,
-          bookingForTax.tax_rate_used,
-          bookingForTax.subtotal_before_tax
+          Number(bookingForTax.tax_amount || 0),
+          Number(bookingForTax.tax_rate_used || 0),
+          Number(bookingForTax.subtotal_before_tax || 0),
+          bookingForTax
         );
 
         if (taxResult.success) {

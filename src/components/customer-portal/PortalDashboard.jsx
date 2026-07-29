@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format, isFuture, parseISO, differenceInDays } from 'date-fns';
 import { StatusDetailsModal } from './StatusDetailsModal';
+import { ImportantAppointmentDetails } from './ImportantAppointmentDetails';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
@@ -197,6 +198,11 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
         open={attentionDialogOpen}
         onOpenChange={setAttentionDialogOpen}
         items={attentionItems}
+        onNavigateToTab={onNavigateToTab}
+      />
+
+      <ImportantAppointmentDetails
+        bookings={bookings}
         onNavigateToTab={onNavigateToTab}
       />
 

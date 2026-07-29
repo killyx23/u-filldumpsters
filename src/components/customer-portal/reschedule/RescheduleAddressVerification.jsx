@@ -36,15 +36,42 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
     const mileageRate = newService?.mileage_rate || booking?.plan?.mileage_rate || 0.85;
     const dryRunFee = 100; // Default dry run fee
 
+    const toAddressObj = (address, fullAddress) => ({
+        street: address?.street || '',
+        city: address?.city || '',
+        state: address?.state || '',
+        zip: address?.zip || '',
+        formatted_address: fullAddress || `${address?.street || ''}, ${address?.city || ''}, ${address?.state || ''} ${address?.zip || ''}`.trim(),
+        isVerified: Boolean(address?.isVerified),
+    });
+
     // Initialize with original address distance
     useEffect(() => {
         if (useSameAddress) {
             const originalDistance = booking?.customers?.distance_miles || 0;
             setVerificationResult({ success: true, distance: originalDistance, totalFee: 0 });
-            handleAddressUpdated(originalAddressStr, { 
-                error: false, 
+            const originalObj = originalAddressObj
+                ? {
+                    street: originalAddressObj.street || booking?.street || booking?.customers?.street || '',
+                    city: originalAddressObj.city || booking?.city || booking?.customers?.city || '',
+                    state: originalAddressObj.state || booking?.state || booking?.customers?.state || '',
+                    zip: originalAddressObj.zip || booking?.zip || booking?.customers?.zip || '',
+                    formatted_address: originalAddressStr,
+                    isVerified: true,
+                }
+                : {
+                    street: booking?.street || booking?.customers?.street || '',
+                    city: booking?.city || booking?.customers?.city || '',
+                    state: booking?.state || booking?.customers?.state || '',
+                    zip: booking?.zip || booking?.customers?.zip || '',
+                    formatted_address: originalAddressStr,
+                    isVerified: true,
+                };
+            handleAddressUpdated(originalAddressStr, {
+                error: false,
                 distance: originalDistance,
-                isVerified: true 
+                isVerified: true,
+                addressObj: originalObj,
             });
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,7 +79,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
 
     const calculateDistance = useCallback(async (address) => {
         if (!address || !address.street || !address.isVerified) {
-            handleAddressUpdated('', { error: true, distance: 0, isVerified: false });
+            handleAddressUpdated('', { error: true, distance: 0, isVerified: false, addressObj: null });
             return;
         }
 
@@ -61,13 +88,14 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
         
         try {
             const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
+            const addressObj = toAddressObj(address, fullAddress);
             
             const result = await fetchDistanceAndCalculateFee(fullAddress, newService?.id || booking?.plan?.id, mileageRate);
 
             if (result.error) {
                 setError(result.error);
                 setVerificationResult(null);
-                handleAddressUpdated(fullAddress, { error: true, distance: 0, isVerified: false });
+                handleAddressUpdated(fullAddress, { error: true, distance: 0, isVerified: false, addressObj });
             } else {
                 setVerificationResult({ 
                     success: true, 
@@ -78,7 +106,8 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
                 handleAddressUpdated(fullAddress, { 
                     error: false, 
                     distance: result.distance,
-                    isVerified: true 
+                    isVerified: true,
+                    addressObj,
                 });
                 setError(null);
             }
@@ -86,7 +115,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
             console.error("Distance calculation error:", err);
             setError(err.message || "Failed to calculate delivery distance. Please try again.");
             toast({ title: "Distance calculation failed", description: err.message, variant: "destructive" });
-            handleAddressUpdated('', { error: true, distance: 0, isVerified: false });
+            handleAddressUpdated('', { error: true, distance: 0, isVerified: false, addressObj: null });
         } finally {
             setCalculating(false);
         }
@@ -111,7 +140,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
             if (field === 'street' && !value) {
                 setVerificationResult(null);
                 setManualAddressAccepted(false);
-                handleAddressUpdated('', { error: true, distance: 0, isVerified: false });
+                handleAddressUpdated('', { error: true, distance: 0, isVerified: false, addressObj: null });
             }
             return updated;
         });
@@ -127,7 +156,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
         setUseSameAddress(false);
         setVerificationResult(null);
         setManualAddressAccepted(false);
-        handleAddressUpdated('', { error: true, distance: 0, isVerified: false });
+        handleAddressUpdated('', { error: true, distance: 0, isVerified: false, addressObj: null });
     };
 
     const handleContinueWithManualAddress = () => {
@@ -142,11 +171,13 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
 
         // Proceed with manual address - update the parent state to mark address as "verified" but flag as manual
         const fullAddress = `${newAddress.street}, ${newAddress.city}, ${newAddress.state} ${newAddress.zip}`;
+        const addressObj = toAddressObj({ ...newAddress, isVerified: true }, fullAddress);
         handleAddressUpdated(fullAddress, { 
             error: false, 
             distance: 0, // No distance calculated for manual entry
             isVerified: true, // Allow proceeding
-            isManualEntry: true // Flag for backend processing
+            isManualEntry: true, // Flag for backend processing
+            addressObj,
         });
         
         setVerificationResult({ success: true, distance: 0, totalFee: 0, isManual: true });

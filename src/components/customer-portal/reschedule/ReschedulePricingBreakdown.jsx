@@ -436,7 +436,7 @@ export const ReschedulePricingBreakdown = ({
                             </div>
                             
                             <div className="flex justify-between items-center text-gray-400">
-                                <span>Estimated Tax ({taxRateUsed || taxRate}%)</span>
+                                <span>Estimated Tax ({Number(taxRateUsed || taxRate).toFixed(2)}%)</span>
                                 <span>{formatCurrency(originalDetailedCosts.tax * 100, currencyInfo)}</span>
                             </div>
                         </div>
@@ -529,7 +529,7 @@ export const ReschedulePricingBreakdown = ({
                             </div>
 
                             <div className="flex justify-between items-center text-gray-300">
-                                <span>Estimated Tax ({taxRateUsed || taxRate}%)</span>
+                                <span>Estimated Tax ({Number(taxRateUsed || taxRate).toFixed(2)}%)</span>
                                 <span>{formatCurrency(newCosts.tax * 100, currencyInfo)}</span>
                             </div>
                         </div>

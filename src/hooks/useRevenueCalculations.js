@@ -62,11 +62,20 @@ export const useRevenueCalculations = (options = {}) => {
       ? totalRevenue / bookings.length 
       : 0;
 
+    const totalTaxCollected = bookings.reduce((sum, b) => sum + Number(b.tax_amount || 0), 0);
+    const netRevenueExTax = bookings.reduce((sum, b) => {
+      const subtotal = Number(b.subtotal_before_tax);
+      if (Number.isFinite(subtotal) && subtotal >= 0) return sum + subtotal;
+      return sum + Math.max(0, Number(b.total_price || 0) - Number(b.tax_amount || 0));
+    }, 0);
+
     return {
       totalRevenue,
       additionalIncome,
       grandTotal: totalRevenue + additionalIncome,
       avgRevenuePerBooking,
+      totalTaxCollected,
+      netRevenueExTax,
       revenueByService: Object.entries(revenueByService).map(([name, amount]) => ({
         name,
         amount,

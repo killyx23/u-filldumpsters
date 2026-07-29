@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet } from 'lucide-react';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
+import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -123,11 +124,13 @@ export const ComprehensiveHistoryDialog = ({
 
                         <Section title="Loyalty Points Ledger" icon={<Gift className="mr-2 h-5 w-5"/>} className="md:grid-cols-1">
                             <LedgerList emptyLabel="No loyalty point transactions.">
-                                {loyaltyTransactions.length > 0 && loyaltyTransactions.map((tx) => (
+                                {loyaltyTransactions.length > 0 && loyaltyTransactions.map((tx) => {
+                                    const { debit, signedLabel } = formatLoyaltyTxAmount(tx);
+                                    return (
                                     <div key={tx.id} className="bg-black/30 border border-white/10 rounded p-2 text-sm">
                                         <div className="flex justify-between gap-2">
-                                            <span className="capitalize text-blue-200">{fmtType(tx.transaction_type)}</span>
-                                            <span className="font-semibold text-yellow-300">{tx.points_amount} pts</span>
+                                            <span className="text-blue-200">{formatLoyaltyTxLabel(tx)}</span>
+                                            <span className={`font-semibold ${debit ? 'text-red-300' : 'text-yellow-300'}`}>{signedLabel} pts</span>
                                         </div>
                                         <p className="text-xs text-gray-400 mt-1">
                                             {tx.booking_id ? `Booking #${tx.booking_id} • ` : ''}
@@ -135,7 +138,8 @@ export const ComprehensiveHistoryDialog = ({
                                         </p>
                                         {tx.notes && <p className="text-xs text-gray-300 mt-1">{tx.notes}</p>}
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </LedgerList>
                         </Section>
 
@@ -224,8 +228,26 @@ export const ComprehensiveHistoryDialog = ({
                                     </Section>
 
                                     <Section title="Add-ons & Equipment" icon={<Package className="mr-2 h-5 w-5"/>}>
-                                        <DetailItem icon={<ShieldCheck />} label="Insurance" value={booking.addons.insurance === 'accept' ? 'Accepted' : 'Declined'} />
-                                        {booking.plan.id !== 2 && <DetailItem icon={<ShieldCheck />} label="Driveway Protection" value={booking.addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'} />}
+                                        <DetailItem
+                                          icon={<ShieldCheck />}
+                                          label="Insurance"
+                                          value={
+                                            booking.status === 'Cancelled' && booking.addons.insurance === 'accept'
+                                              ? 'Cancelled (was accepted)'
+                                              : booking.addons.insurance === 'accept' ? 'Accepted' : 'Declined'
+                                          }
+                                        />
+                                        {booking.plan.id !== 2 && (
+                                          <DetailItem
+                                            icon={<ShieldCheck />}
+                                            label="Driveway Protection"
+                                            value={
+                                              booking.status === 'Cancelled' && booking.addons.drivewayProtection === 'accept'
+                                                ? 'Cancelled (was accepted)'
+                                                : booking.addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'
+                                            }
+                                          />
+                                        )}
                                         <div className="md:col-span-2">
                                             <DetailItem icon={<Package />} label="Rented Equipment" value={
                                                 relevantEquipment.length > 0 ? (

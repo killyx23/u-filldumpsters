@@ -14,6 +14,7 @@ export const StatusBadge = ({ status }) => {
         'flagged': 'bg-red-500/20 text-red-300',
         'waiting_to_be_returned': 'bg-purple-500/20 text-purple-300',
         'Cancelled': 'bg-gray-500/20 text-gray-300',
+        'cancellation_pending': 'bg-amber-500/20 text-amber-300',
     };
 
     const statusText = {
@@ -27,6 +28,7 @@ export const StatusBadge = ({ status }) => {
         'Completed': 'Completed',
         'flagged': 'Flagged for Follow-up',
         'Cancelled': 'Cancelled',
+        'cancellation_pending': 'Cancellation Pending',
     };
 
     const displayStatus = statusText[status] || status.replace(/_/g, ' ');

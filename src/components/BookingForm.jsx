@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid, addDays, differenceInDays } from 'date-fns';
@@ -25,7 +25,8 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
-import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
+import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
+import { useNavigate } from 'react-router-dom';
 
 export const BookingForm = ({
   plan,
@@ -53,6 +54,9 @@ export const BookingForm = ({
   const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(false);
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
+  const [showDeliveryUnavailableDialog, setShowDeliveryUnavailableDialog] = useState(false);
+  const [checkingDeliveryAvailability, setCheckingDeliveryAvailability] = useState(false);
+  const navigate = useNavigate();
   
   // Disposal fees state
   const [mattressFee, setMattressFee] = useState(null);
@@ -204,6 +208,36 @@ export const BookingForm = ({
       }));
     }
   }, [isDelivery, setBookingData]);
+
+  const handleDeliveryServiceChange = useCallback(async (checked) => {
+    if (!checked) {
+      setDeliveryService(false);
+      return;
+    }
+
+    setCheckingDeliveryAvailability(true);
+    try {
+      const deliveryServiceId = plan?.delivery_variant_service_id ?? 4;
+      const selectedDate = bookingData.dropOffDate || bookingData.pickupDate || null;
+      const isClosed = await isDeliveryServiceClosedForBooking(deliveryServiceId, selectedDate, 30);
+      if (isClosed) {
+        setDeliveryService(false);
+        setShowDeliveryUnavailableDialog(true);
+        return;
+      }
+      setDeliveryService(true);
+    } catch (error) {
+      console.error('[BookingForm] Delivery closed check failed:', error);
+      toast({
+        title: 'Could not verify delivery availability',
+        description: 'Please try again in a moment.',
+        variant: 'destructive',
+      });
+      setDeliveryService(false);
+    } finally {
+      setCheckingDeliveryAvailability(false);
+    }
+  }, [plan?.delivery_variant_service_id, bookingData.dropOffDate, bookingData.pickupDate, setDeliveryService]);
 
   useEffect(() => {
     if (!isHourlySelfPickupPlan(currentPlan, isDelivery) || !bookingData.dropOffDate) {
@@ -1146,9 +1180,20 @@ export const BookingForm = ({
               x: 0
             }} className="space-y-4">
               {plan?.id === 2 && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
-                    <Checkbox id="deliveryService" checked={deliveryService} onCheckedChange={setDeliveryService} className="border-yellow-400 data-[state=checked]:bg-yellow-400" />
+                    <Checkbox
+                      id="deliveryService"
+                      checked={deliveryService}
+                      disabled={checkingDeliveryAvailability}
+                      onCheckedChange={handleDeliveryServiceChange}
+                      className="border-yellow-400 data-[state=checked]:bg-yellow-400"
+                    />
                     <label htmlFor="deliveryService" className="text-sm font-semibold text-white cursor-pointer flex-1">
                       Don't have a truck. Need delivery? We've got you covered! Check here for delivery.
+                      {checkingDeliveryAvailability && (
+                        <span className="ml-2 inline-flex items-center text-xs text-yellow-300 font-normal">
+                          <Loader2 className="h-3 w-3 animate-spin mr-1" /> Checking…
+                        </span>
+                      )}
                     </label>
                     <DeliveryServiceInfo deliveryFee={currentDeliveryFee > 0 ? currentDeliveryFee : 30} />
                   </div>}
@@ -1258,6 +1303,48 @@ export const BookingForm = ({
     </motion.div>
     
     <UnavailableServiceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} serviceName={planName} />
+
+    <Dialog open={showDeliveryUnavailableDialog} onOpenChange={setShowDeliveryUnavailableDialog}>
+      <DialogContent className="bg-gray-900 border-yellow-500 text-white max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center text-2xl text-yellow-400">
+            <AlertTriangle className="mr-3 h-8 w-8 flex-shrink-0" />
+            Delivery Temporarily Unavailable
+          </DialogTitle>
+        </DialogHeader>
+        <DialogDescription asChild>
+          <div className="my-4 text-base text-blue-200 space-y-4">
+            <p>
+              We apologize for the inconvenience. Dump Loader Trailer delivery is temporarily
+              unavailable on our current schedule, and we are working to have it available again soon.
+            </p>
+            <p>
+              If you still need delivery, are willing to wait, or have a more open schedule, we may
+              still be able to make an exception. Please contact our support team to discuss options.
+              Otherwise, you can return here and continue booking without delivery.
+            </p>
+          </div>
+        </DialogDescription>
+        <DialogFooter className="sm:justify-between gap-2 mt-4">
+          <Button
+            onClick={() => setShowDeliveryUnavailableDialog(false)}
+            variant="outline"
+            className="text-white border-white/50 hover:bg-white/20"
+          >
+            Return
+          </Button>
+          <Button
+            onClick={() => {
+              setShowDeliveryUnavailableDialog(false);
+              navigate('/contact');
+            }}
+            className="bg-yellow-500 hover:bg-yellow-600 text-black"
+          >
+            Contact Us
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     
     <ReturningCustomerVerificationModal
       isOpen={isReturningCustomerModalOpen}
