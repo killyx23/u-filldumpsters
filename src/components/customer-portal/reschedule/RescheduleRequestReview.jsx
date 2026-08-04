@@ -111,7 +111,7 @@ export const RescheduleRequestReview = ({
                     <ShieldCheck className="w-5 h-5 mr-2" /> Official Request Review
                 </div>
                 <h2 className="text-4xl font-extrabold text-white tracking-tight">Confirm Details</h2>
-                <p className="text-base text-gray-400 max-w-2xl mx-auto">Please meticulously review all parameters of your request. Submitting this form formally requests new dates pending admin approval.</p>
+                <p className="text-base text-gray-400 max-w-2xl mx-auto">Please meticulously review all parameters of your request. Submitting this form formally requests new dates pending scheduling department approval.</p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-6 items-stretch">
@@ -240,7 +240,7 @@ export const RescheduleRequestReview = ({
             </div>
 
             <div className="bg-red-950/30 border-2 border-red-900/60 p-5 rounded-2xl text-center text-red-400 text-sm font-bold shadow-lg flex items-center justify-center">
-                <span className="text-xl mr-3">⚠️</span> IMPORTANT: Submitting this request sends it to administration for review. Approval is required before dates are locked in.
+                <span className="text-xl mr-3">⚠️</span> IMPORTANT: Submitting this request sends it to the scheduling department for review. Approval is required before dates are locked in.
             </div>
         </div>
     );

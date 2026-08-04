@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { format, parseISO } from 'date-fns';
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
 
 const NoteCard = ({ note, onToggleReadStatus }) => {
     const [isToggling, setIsToggling] = useState(false);
@@ -22,7 +23,7 @@ const NoteCard = ({ note, onToggleReadStatus }) => {
             <div>
                 <p className="font-semibold text-blue-200 flex items-center">
                     <BookOpen className="mr-2 h-4 w-4" />
-                    {note.source}
+                    {note.source === 'Change Request' ? 'Scheduling Change Request' : note.source}
                 </p>
                 <p className="text-xs text-gray-400 flex items-center mt-1">
                     <Clock className="mr-1 h-3 w-3" />
@@ -42,7 +43,7 @@ const NoteCard = ({ note, onToggleReadStatus }) => {
                 />
             </div>
         </div>
-        <p className="text-white whitespace-pre-wrap">{note.content}</p>
+        <ChangeRequestNoteContent content={note.content} source={note.source} />
         {note.booking_id && <p className="text-xs text-gray-500 mt-2">Related to Booking #{note.booking_id}</p>}
     </div>
 )};

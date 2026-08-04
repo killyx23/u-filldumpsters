@@ -3,12 +3,16 @@ import { getCorsHeaders } from "./cors.ts";
 import { PDFDocument, rgb, StandardFonts } from 'https://esm.sh/pdf-lib@1.17.1';
 import { format } from 'https://deno.land/std@0.208.0/datetime/mod.ts';
 import { resolveBookingGrandTotal } from '../_shared/resolveBookingGrandTotal.ts';
+import { formatPlainBookingTime } from '../_shared/formatBookingTime.ts';
 
 const formatDate = (dateStr: string | null) =>
   dateStr ? format(new Date(dateStr), 'MM/dd/yyyy') : 'N/A';
 
 const formatCurrency = (amount: number | null | undefined) =>
   amount != null ? `$${Number(amount).toFixed(2)}` : '$0.00';
+
+const formatSlot = (slot: string | null | undefined) =>
+  slot ? formatPlainBookingTime(String(slot)) : 'N/A';
 
 const drawDivider = (page: any, y: number, margin: number, pageWidth: number, color: any) => {
   page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.5, color });
@@ -84,9 +88,31 @@ async function generatePDFReceipt(booking: any) {
   drawText(serviceName, margin, y, { font: fontBold, size: 10, color: black });
   drawText(formatCurrency(booking.plan?.price || 0), width - margin, y, { size: 10, align: 'right' });
   y -= 14;
-  drawText(`Drop-off: ${dropOff}  (${booking.drop_off_time_slot || 'N/A'})`, margin + 10, y, { size: 9, color: gray });
+  drawText(`Drop-off: ${dropOff}  (${formatSlot(booking.drop_off_time_slot)})`, margin + 10, y, { size: 9, color: gray });
   y -= 12;
-  drawText(`Pick-up:  ${pickup}  (${booking.pickup_time_slot || 'N/A'})`, margin + 10, y, { size: 9, color: gray });
+  drawText(`Pick-up:  ${pickup}  (${formatSlot(booking.pickup_time_slot)})`, margin + 10, y, { size: 9, color: gray });
+
+  const receiptHistory = Array.isArray(booking.receipt_status_history) ? booking.receipt_status_history : [];
+  const rescheduleApproval = [...receiptHistory].reverse().find((e: any) => e?.action === 'reschedule_approved');
+  if (rescheduleApproval) {
+    y -= 18;
+    drawText('RESCHEDULE CONFIRMATION', margin, y, { font: fontBold, size: 9, color: navy });
+    y -= 12;
+    drawText(
+      `Original total: ${formatCurrency(rescheduleApproval.original_total)}  →  New total: ${formatCurrency(rescheduleApproval.new_total)}`,
+      margin + 10,
+      y,
+      { size: 9, color: gray },
+    );
+    y -= 12;
+    const stripeLine =
+      rescheduleApproval.stripe_type === 'charge'
+        ? `Card charged ${formatCurrency(rescheduleApproval.amount_processed ?? Math.abs(Number(rescheduleApproval.delta) || 0))}`
+        : rescheduleApproval.stripe_type === 'refund'
+          ? `Refunded ${formatCurrency(rescheduleApproval.amount_processed ?? Math.abs(Number(rescheduleApproval.delta) || 0))}`
+          : 'No additional charge or refund';
+    drawText(stripeLine, margin + 10, y, { size: 9, color: gray });
+  }
 
   // ── Fees ──────────────────────────────────────────────────────────────
   const fees: { name: string; amount: number }[] = [];

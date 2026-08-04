@@ -438,7 +438,7 @@ Deno.serve(async (req)=>{
       const chatContent =
         `Driver & Vehicle Verification was skipped for Booking #${bookingId}. ` +
         `Reason: ${skipReason} ` +
-        `This booking requires admin review before it can be confirmed.`;
+        `This booking requires customer service review before it can be confirmed.`;
       const { error: chatError } = await supabase.from("chat_messages").insert({
         conversation_id: `cust_${updatedBooking.customer_id}`,
         customer_id: updatedBooking.customer_id,

@@ -13,6 +13,22 @@ import {
 import { AlertTriangle, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+const highlightSaratogaSprings = (text) => {
+    if (typeof text !== 'string') return text;
+    const parts = text.split(/(South Saratoga Springs|Saratoga Springs)/gi);
+    return parts.map((part, index) => {
+        const normalized = part.toLowerCase();
+        if (normalized === 'south saratoga springs' || normalized === 'saratoga springs') {
+            return (
+                <span key={index} className="text-yellow-400 font-semibold">
+                    {part}
+                </span>
+            );
+        }
+        return part;
+    });
+};
+
 export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
     const [showUnavailableDialog, setShowUnavailableDialog] = useState(false);
     const navigate = useNavigate();
@@ -133,7 +149,9 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     <div className="flex-grow pt-8">
                         <h3 className={cn("text-2xl xl:text-3xl font-bold mb-3 text-center leading-tight", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
                         <p className="text-white/80 mb-6 min-h-[5.5rem] text-sm xl:text-[15px] leading-relaxed text-center" >
-                            {typeof displayDescription === 'string' ? displayDescription : 'Description unavailable'}
+                            {typeof displayDescription === 'string'
+                                ? highlightSaratogaSprings(displayDescription)
+                                : 'Description unavailable'}
                         </p>
                         <div className="mb-6 text-center">
                             <span className="text-4xl xl:text-5xl font-bold text-white">${parseFloat(displayPrice).toFixed(2)}</span>

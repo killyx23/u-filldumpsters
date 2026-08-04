@@ -213,7 +213,21 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
 }
 
 /**
+ * Apply the pending multi-day quote onto plan.price (catalog base_price stays daily).
+ * @param {object|null} plan
+ * @param {Object} pending
+ * @returns {object|null}
+ */
+function withQuotedPlanPrice(plan, pending) {
+  if (!plan) return plan;
+  const quoted = Number(pending?.base_price);
+  if (!Number.isFinite(quoted) || quoted <= 0) return plan;
+  return { ...plan, price: quoted };
+}
+
+/**
  * Load live service for a pending row (service_id preferred; legacy plan_data fallback).
+ * Restores pending.base_price onto plan.price so late steps use the same multi-day quote as BookingForm.
  * @param {Object} pending
  * @returns {Promise<object|null>}
  */
@@ -221,10 +235,10 @@ export async function hydratePlanFromPending(pending) {
   const serviceId = getServiceIdFromBooking(pending);
   if (serviceId) {
     const { data, error } = await fetchServiceById(supabase, serviceId);
-    if (!error && data) return data;
+    if (!error && data) return withQuotedPlanPrice(data, pending);
   }
   const legacy = pending?.plan_data;
-  if (legacy && Object.keys(legacy).length > 0) return legacy;
+  if (legacy && Object.keys(legacy).length > 0) return withQuotedPlanPrice(legacy, pending);
   return null;
 }
 
@@ -245,7 +259,7 @@ export function isDriverVerificationComplete(addons = {}) {
 }
 
 export function mapPendingToBookingState(pending, hydratedPlan = null) {
-  const plan = hydratedPlan || pending.plan_data || {};
+  const plan = withQuotedPlanPrice(hydratedPlan || pending.plan_data || {}, pending);
   const addons = pending.addons_data || {};
   const deliveryService = pending.delivery_service ?? false;
   const requiresDriverVerification = Boolean(

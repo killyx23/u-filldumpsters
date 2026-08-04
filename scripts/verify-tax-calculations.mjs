@@ -115,7 +115,7 @@ const taxDiff = withIns.tax - rentalOnly.tax;
 const passIns = taxDiff === 0 && withIns.total === rentalOnly.total + 25;
 console.log(passIns ? 'PASS' : 'FAIL', '- insurance adds to total but not tax');
 
-console.log('\n=== screenshot scenario: $105 rental + $25 insurance @ 7.45% ===');
+console.log('\n=== screenshot scenario: $105 rental + $25 insurance EXEMPT @ 7.45% ===');
 const screenshot = calculateTaxFromLineItems(
   [
     { key: 'base_rental', amount: 105, is_taxable: true },
@@ -131,9 +131,28 @@ const passScreenshot =
 console.log(
   `Tax: $${screenshot.tax} (expect $7.82), Total: $${screenshot.total} (expect $137.82)`
 );
-console.log(passScreenshot ? 'PASS' : 'FAIL', '- insurance excluded (prod bug was $9.68 tax)');
+console.log(passScreenshot ? 'PASS' : 'FAIL', '- insurance exempt when checkmarked');
 
-const allPass = pass1 && passMixed && passCoupon && passIns && passScreenshot;
+console.log('\n=== default: full subtotal taxable (insurance NOT exempt) ===');
+const fullTaxable = calculateTaxFromLineItems(
+  [
+    { key: 'base_rental', amount: 1601, is_taxable: true },
+    { key: 'insurance', amount: 25, is_taxable: true },
+  ],
+  7.45
+);
+// 1626 * 0.0745 = 121.137 → 121.14
+const passFull =
+  fullTaxable.taxableSubtotal === 1626 &&
+  fullTaxable.nonTaxableSubtotal === 0 &&
+  fullTaxable.tax === 121.14 &&
+  fullTaxable.total === 1747.14;
+console.log(
+  `Tax: $${fullTaxable.tax} (expect $121.14), Total: $${fullTaxable.total} (expect $1747.14)`
+);
+console.log(passFull ? 'PASS' : 'FAIL', '- full subtotal taxed at admin rate');
+
+const allPass = pass1 && passMixed && passCoupon && passIns && passScreenshot && passFull;
 if (!allPass) {
   process.exit(1);
 }

@@ -12,6 +12,7 @@ import {
   calculateRescheduleCosts,
   isDeliveryServiceId,
 } from '@/utils/rescheduleTaxCalculator';
+import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 
 export const ReschedulePricingBreakdown = ({
     bookingId,
@@ -572,8 +573,11 @@ export const ReschedulePricingBreakdown = ({
                         : 'bg-gray-900 border-gray-800'
             }`}>
                 <div className="text-center md:text-left">
-                    <h3 className="text-xl font-extrabold text-white mb-2">Final Amount Due / (Credit)</h3>
-                    <p className="text-sm text-gray-400 max-w-md">Price difference after admin approval. Rescheduling fees assessed at final approval.</p>
+                    <h3 className="text-xl font-extrabold text-white mb-2 inline-flex items-center justify-center md:justify-start gap-1.5">
+                        Final Amount Due / (Credit)
+                        <RescheduleFeeInfoPopover />
+                    </h3>
+                    <p className="text-sm text-gray-400 max-w-md">Price difference after scheduling department approval. Rescheduling fees assessed at final approval.</p>
                 </div>
                 <div className="flex items-center gap-4 bg-gray-950 px-6 py-4 rounded-xl border border-gray-800">
                     <div className="hidden sm:flex flex-col items-end mr-2">

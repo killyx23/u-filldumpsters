@@ -5,6 +5,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { FileText, ShieldAlert, CreditCard, Info, MessageSquare } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatPercent } from '@/utils/chargesAndFeesConfig';
 
 export const RescheduleAgreementsSection = ({ 
     agreementsAccepted, 
@@ -13,6 +15,8 @@ export const RescheduleAgreementsSection = ({
     setComments,
     booking 
 }) => {
+    const { fee } = useChargesAndFees();
+    const lateReschedulePct = formatPercent(fee('late_reschedule_percentage'));
     // Safety check: provide default empty function if callback not provided
     const handleAgreementsUpdate = setAgreementsAccepted || (() => {
         console.warn('RescheduleAgreementsSection: setAgreementsAccepted callback not provided');
@@ -65,7 +69,7 @@ export const RescheduleAgreementsSection = ({
                                     <ShieldAlert className="w-5 h-5 mr-2 text-yellow-500" /> Rescheduling Policy
                                 </h4>
                                 <p className="leading-relaxed text-gray-400 text-sm">
-                                    By requesting a reschedule, your original appointment dates will be released and made available to others IF you have chosen new dates. Your new requested dates are subject to final admin approval and inventory availability. <span className="text-yellow-400 font-semibold">If the new dates cannot be accommodated, we will contact you to find an alternative.</span>
+                                    By requesting a reschedule, your original appointment dates will be released and made available to others IF you have chosen new dates. Your new requested dates are subject to final scheduling department approval and inventory availability. <span className="text-yellow-400 font-semibold">If the new dates cannot be accommodated, we will contact you to find an alternative.</span>
                                 </p>
                             </div>
                             
@@ -74,7 +78,7 @@ export const RescheduleAgreementsSection = ({
                                     <CreditCard className="w-5 h-5 mr-2 text-yellow-500" /> Fees & Pricing Changes
                                 </h4>
                                 <p className="leading-relaxed text-gray-400 text-sm">
-                                    Requests made within 24 hours of the original scheduled appointment will incur a <span className="text-red-400 font-semibold">5% rescheduling fee</span> based on the original base total. Pricing for new services is recalculated dynamically based on our current base rates, daily rates, and mileage fees. Any differences in price will be charged or credited accordingly.
+                                    Requests made within 24 hours of the original scheduled appointment will incur a <span className="text-red-400 font-semibold">{lateReschedulePct}% rescheduling fee</span> based on the original base total. Pricing for new services is recalculated dynamically based on our current base rates, daily rates, and mileage fees. Any differences in price will be charged or credited accordingly.
                                 </p>
                             </div>
 

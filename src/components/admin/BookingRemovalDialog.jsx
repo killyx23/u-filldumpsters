@@ -77,7 +77,7 @@ export const BookingRemovalDialog = ({
     const [initiatedBy, setInitiatedBy] = useState('admin');
     const [processRefund, setProcessRefund] = useState(false);
     const [refundAmount, setRefundAmount] = useState('');
-    const [refundReason, setRefundReason] = useState('Admin cancelled booking.');
+    const [refundReason, setRefundReason] = useState('Customer service cancelled booking.');
     const [cancelNotes, setCancelNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showSecureDelete, setShowSecureDelete] = useState(false);
@@ -98,7 +98,7 @@ export const BookingRemovalDialog = ({
         setInitiatedBy('admin');
         setProcessRefund(false);
         setRefundAmount(booking?.total_price != null ? Number(booking.total_price).toFixed(2) : '');
-        setRefundReason('Admin cancelled booking.');
+        setRefundReason('Customer service cancelled booking.');
         setCancelNotes('');
         setIsSubmitting(false);
         setShowSecureDelete(false);

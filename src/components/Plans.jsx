@@ -4,9 +4,9 @@ import { PlanCard } from '@/components/PlanCard';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatISO, startOfDay, addDays } from 'date-fns';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { fetchHomepageServices, mapServiceToPlanCard } from '@/utils/servicePlan';
+import { fetchTemporaryServiceAvailabilityMap } from '@/utils/temporaryServiceAvailability';
 
 export const Plans = ({ onSelectPlan }) => {
     const [plans, setPlans] = useState([]);
@@ -22,7 +22,7 @@ export const Plans = ({ onSelectPlan }) => {
             setError(null);
 
             try {
-                const { data: testData, error: testError } = await supabase
+                const { error: testError } = await supabase
                     .from('services')
                     .select('id')
                     .limit(1);
@@ -45,96 +45,8 @@ export const Plans = ({ onSelectPlan }) => {
                     return;
                 }
 
-                const todayStr = formatISO(startOfDay(new Date()), { representation: 'date' });
-
-                const { data: dateSpecificAvailData, error: dateSpecificError } = await supabase
-                    .from('date_specific_availability')
-                    .select('service_id, is_available')
-                    .eq('date', todayStr);
-
-                if (dateSpecificError) {
-                    console.warn('[Plans] Date-specific availability fetch failed:', dateSpecificError);
-                }
-
-                const todayAvailabilityMap = {};
-                if (dateSpecificAvailData) {
-                    dateSpecificAvailData.forEach((item) => {
-                        todayAvailabilityMap[item.service_id] = item.is_available;
-                    });
-                }
-
-                const startDate = todayStr;
-                const endDate = formatISO(addDays(startOfDay(new Date()), 30), { representation: 'date' });
-
-                const availabilityPromises = frontendPlans.map((plan) =>
-                    supabase.functions.invoke('get-availability', {
-                        body: {
-                            serviceId: plan.id,
-                            startDate,
-                            endDate,
-                            isDelivery: plan.delivery_variant_service_id ? false : undefined,
-                        },
-                    })
-                );
-
-                const trailerPlan = frontendPlans.find((p) => p.delivery_variant_service_id);
-                const deliveryForTrailerPromise = trailerPlan
-                    ? supabase.functions.invoke('get-availability', {
-                          body: {
-                              serviceId: trailerPlan.id,
-                              startDate,
-                              endDate,
-                              isDelivery: true,
-                          },
-                      })
-                    : Promise.resolve({ data: null });
-
-                try {
-                    const results = await Promise.all([
-                        ...availabilityPromises,
-                        deliveryForTrailerPromise,
-                    ]);
-                    const newAvailability = {};
-                    const deliveryResultIndex = results.length - 1;
-
-                    frontendPlans.forEach((plan, index) => {
-                        if (todayAvailabilityMap[plan.id] === false) {
-                            newAvailability[plan.id] = false;
-                            return;
-                        }
-
-                        const result = results[index];
-                        const availByDate = result.data?.availability;
-                        let isAnyDayAvailable = todayAvailabilityMap[plan.id] !== false;
-
-                        if (availByDate && Object.keys(availByDate).length > 0) {
-                            isAnyDayAvailable = Object.values(availByDate).some(
-                                (day) => day.available
-                            );
-                        }
-
-                        if (plan.delivery_variant_service_id) {
-                            const deliveryResult = results[deliveryResultIndex];
-                            if (deliveryResult?.data?.availability) {
-                                const isDeliveryAvailable = Object.values(
-                                    deliveryResult.data.availability
-                                ).some((day) => day.available);
-                                isAnyDayAvailable = isAnyDayAvailable || isDeliveryAvailable;
-                            }
-                        }
-
-                        newAvailability[plan.id] = isAnyDayAvailable;
-                    });
-
-                    setAvailability(newAvailability);
-                } catch (availError) {
-                    console.error('[Plans] Availability fetch failed:', availError);
-                    const fallbackAvail = {};
-                    frontendPlans.forEach((p) => {
-                        fallbackAvail[p.id] = todayAvailabilityMap[p.id] !== false;
-                    });
-                    setAvailability(fallbackAvail);
-                }
+                const newAvailability = await fetchTemporaryServiceAvailabilityMap(frontendPlans);
+                setAvailability(newAvailability);
             } catch (err) {
                 console.error('[Plans] Fatal error:', err);
                 setError(err.message);
@@ -202,7 +114,7 @@ export const Plans = ({ onSelectPlan }) => {
             : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 xl:gap-8 gap-y-16 w-full';
 
     return (
-        <section className="py-20 px-4 sm:px-6 lg:px-8 xl:px-10">
+        <section id="choose-your-service" className="py-20 px-4 sm:px-6 lg:px-8 xl:px-10 scroll-mt-24">
             <div className="w-full max-w-[1920px] mx-auto">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}

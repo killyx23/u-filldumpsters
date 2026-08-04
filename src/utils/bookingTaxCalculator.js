@@ -29,7 +29,7 @@ export function buildBookingLineItems({
   serviceTaxFlags = {},
   deliveryService = false,
   insurancePrice = 0,
-  insuranceIsTaxable = false,
+  insuranceIsTaxable = true,
   drivewayPrice = 0,
   drivewayIsTaxable = true,
 }) {
@@ -75,7 +75,7 @@ export function buildBookingLineItems({
       key: 'insurance',
       label: 'Premium Insurance',
       amount: insuranceCost,
-      is_taxable: insuranceIsTaxable === true,
+      is_taxable: insuranceIsTaxable !== false,
     });
   }
 

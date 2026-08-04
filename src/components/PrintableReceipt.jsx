@@ -11,6 +11,9 @@ import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
+import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -185,14 +188,19 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const pickup = parseISO(pickup_date);
     const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
 
-    // Calculate base service price
-    let baseServicePrice = currentPlan.base_price || 0;
-    if (currentPlan.id === 1 && duration === 7) {
-        baseServicePrice = 500;
-    } else if (currentPlan.id === 1) {
-        baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
-    } else if (currentPlan.id === 2 || currentPlan.id === 4) {
-        baseServicePrice = (currentPlan.base_price || 0) * duration;
+    // Prefer audit quote (plan.price) when present; otherwise recompute from daily rate × days
+    const quotedBasePrice = Number(currentPlan.price);
+    let baseServicePrice = Number.isFinite(quotedBasePrice) && quotedBasePrice > 0
+        ? quotedBasePrice
+        : (currentPlan.base_price || 0);
+    if (!(Number.isFinite(quotedBasePrice) && quotedBasePrice > 0)) {
+        if (currentPlan.id === 1 && duration === 7) {
+            baseServicePrice = 500;
+        } else if (currentPlan.id === 1) {
+            baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
+        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+            baseServicePrice = (currentPlan.base_price || 0) * duration;
+        }
     }
 
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
@@ -338,20 +346,46 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     </div>
                 </section>
 
-                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0)) && (
+                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0) || getLatestRescheduleApproval(booking)) && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Receipt History</h3>
                         {receipt_original_snapshot && (
                             <p className="text-sm text-blue-900">
-                                Original receipt snapshot stored on {format(parseISO(receipt_original_snapshot.captured_at), 'PPP p')}
+                                {receipt_original_snapshot.status === 'pending_review' || getLatestRescheduleApproval(booking)
+                                    ? 'Reschedule requested on '
+                                    : 'Original receipt snapshot stored on '}
+                                {receipt_original_snapshot.captured_at
+                                    ? format(parseISO(receipt_original_snapshot.captured_at), 'PPP p')
+                                    : 'N/A'}
                                 {receipt_original_snapshot.status ? ` (status: ${receipt_original_snapshot.status})` : ''}.
                             </p>
                         )}
+                        {(() => {
+                            const approval = getLatestRescheduleApproval(booking);
+                            if (!approval) return null;
+                            return (
+                                <div className="mt-3 p-3 bg-white border border-blue-200 rounded-md text-sm text-blue-950 space-y-1">
+                                    <p className="font-bold text-blue-800">Reschedule Confirmation</p>
+                                    <p>Approved {approval.at ? format(parseISO(approval.at), 'PPP p') : ''}</p>
+                                    <p>Previous schedule: {formatFriendlyDateTime(approval.original_drop_off_date, approval.original_drop_off_time) || 'N/A'} → {formatFriendlyDateTime(approval.original_pickup_date, approval.original_pickup_time) || 'N/A'}</p>
+                                    <p>Approved schedule: {formatFriendlyDateTime(approval.new_drop_off_date, approval.new_drop_off_time) || 'N/A'} → {formatFriendlyDateTime(approval.new_pickup_date, approval.new_pickup_time) || 'N/A'}</p>
+                                    {(approval.original_service_name || approval.new_service_name) && (
+                                        <p>Service: {approval.original_service_name || 'N/A'} → {approval.new_service_name || 'N/A'}</p>
+                                    )}
+                                    {approval.address_changed && (
+                                        <p>Address: {approval.original_address || 'N/A'} → {approval.new_address || 'N/A'}</p>
+                                    )}
+                                    <p>Original total: ${Number(approval.original_total || 0).toFixed(2)}</p>
+                                    <p>New total: ${Number(approval.new_total || 0).toFixed(2)}</p>
+                                    <p>{formatRescheduleStripeLine(approval)}</p>
+                                </div>
+                            );
+                        })()}
                         {Array.isArray(receipt_status_history) && receipt_status_history.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs text-blue-900">
-                                {receipt_status_history.slice(-3).reverse().map((entry, idx) => (
+                                {receipt_status_history.slice(-5).reverse().map((entry, idx) => (
                                     <p key={idx}>
-                                        • {entry.at ? format(parseISO(entry.at), 'PPP p') : 'Timeline update'} — {entry.type || 'status_update'}
+                                        • {entry.at ? format(parseISO(entry.at), 'PPP p') : 'Timeline update'} — {entry.action || entry.type || 'status_update'}
                                         {entry.status ? ` (${entry.status})` : ''}
                                         {entry.amount ? ` $${Number(entry.amount).toFixed(2)}` : ''}
                                     </p>
@@ -451,6 +485,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     {/* Service Details */}
                     <div className="mb-4 p-3 bg-gray-50 rounded">
                         <p className="font-semibold text-lg">{serviceName}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}
+                        </p>
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
@@ -706,14 +743,14 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
                             <p className="font-bold text-sm text-blue-800">Cancellation update</p>
                             <p className="text-xs text-blue-900 mt-1">
-                                {`We're sorry to see you go! Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${
+                                {`We're sorry to see you go. Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${
                                     (() => {
                                         const feeAmt = booking.cancellation_details?.fee_amount != null
                                             ? Number(booking.cancellation_details.fee_amount)
                                             : Math.max(0, calculatedTotal - Number(refund_details?.amount || 0));
                                         return feeAmt > 0 ? ` (cancellation fee: $${feeAmt.toFixed(2)})` : '';
                                     })()
-                                }. If you ever need our services again, we'd be more than happy to help!`}
+                                }. Per our rental agreement, refunds are typically processed within 1–2 business days and usually appear on your original payment method within 5–10 business days (rarely up to 30). We hope that in the future you'll be able to provide the proper verification information so we can welcome you back.`}
                             </p>
                         </div>
                     ) : (pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (

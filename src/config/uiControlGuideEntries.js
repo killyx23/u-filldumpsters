@@ -253,7 +253,7 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           iconClassName: 'text-orange-400',
           shortLabel: 'Continue without Info',
           summary: 'Skip with reason',
-          description: 'If you cannot upload now, explain why. Your booking may require admin review before confirmation.',
+          description: 'If you cannot upload now, explain why. Your booking may require customer service review before confirmation.',
           howToUse: 'Enter a reason in the box, then tap Continue without Info.',
         }),
         entry({

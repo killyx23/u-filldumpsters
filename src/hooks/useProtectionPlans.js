@@ -44,7 +44,7 @@ export const useProtectionPlans = (serviceId) => {
     rentalInsurance,
     drivewayProtection,
     insurancePrice: rentalInsurance?.price ?? DEFAULT_INSURANCE_PRICE,
-    insuranceIsTaxable: rentalInsurance?.isTaxable ?? false,
+    insuranceIsTaxable: rentalInsurance?.isTaxable ?? true,
     drivewayPrice: drivewayProtection?.price ?? DEFAULT_DRIVEWAY_PRICE,
     drivewayIsTaxable: drivewayProtection?.isTaxable ?? true,
     loading,

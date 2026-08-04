@@ -4,6 +4,8 @@ import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCateg
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { getTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 /**
  * Reusable Price Breakdown Component
@@ -19,6 +21,7 @@ export const PriceBreakdown = ({
 }) => {
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
+  const [taxRate, setTaxRate] = useState(7.45);
 
   // Load equipment prices from database
   useEffect(() => {
@@ -27,6 +30,9 @@ export const PriceBreakdown = ({
       const prices = {};
 
       try {
+        const rateConfig = await getTaxRate();
+        setTaxRate(Number(rateConfig?.tax_rate) || 7.45);
+
         // Load equipment/rental items (IDs 1-3)
         const equipmentIds = [1, 2, 3];
         for (const id of equipmentIds) {
@@ -124,7 +130,11 @@ export const PriceBreakdown = ({
     }
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-    const tax = subtotal * 0.07; // 7% tax
+    const storedTax = Number(booking?.tax_amount);
+    const rateUsed = Number(booking?.tax_rate_used) || taxRate;
+    const tax = Number.isFinite(storedTax) && storedTax >= 0
+      ? storedTax
+      : calculateTaxAmount(subtotal, rateUsed);
     const total = subtotal + tax;
 
     return {
@@ -141,7 +151,7 @@ export const PriceBreakdown = ({
       tax,
       total
     };
-  }, [basePrice, plan, booking, addons, equipmentPrices]);
+  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate]);
 
   if (loading) {
     return <div className="text-center text-gray-400 py-4">Loading price breakdown...</div>;

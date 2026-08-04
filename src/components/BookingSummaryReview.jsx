@@ -376,7 +376,9 @@ export const BookingSummaryReview = ({
                             </div>
                             <div>
                                 <p className="text-sm text-gray-400">Location</p>
-                                <p className="font-semibold text-white text-lg">{displayLocation}</p>
+                                <p className={`font-semibold text-lg ${isDumpsterService ? 'text-yellow-400' : 'text-white'}`}>
+                                    {displayLocation}
+                                </p>
                             </div>
                             <div>
                                 <p className="text-sm text-gray-400">{dropoffLabel}</p>

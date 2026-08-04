@@ -315,15 +315,6 @@ const InsuranceItemForm = ({
                     className="bg-gray-800 border-gray-600 text-white"
                 />
             </div>
-            <div className="mt-3 flex items-center space-x-2">
-                <Checkbox
-                    id="plan-taxable"
-                    checked={formData.is_taxable}
-                    onCheckedChange={(checked) => setFormData({ ...formData, is_taxable: checked === true })}
-                    className="border-white/30 data-[state=checked]:bg-purple-500"
-                />
-                <Label htmlFor="plan-taxable" className="text-white cursor-pointer">Taxable</Label>
-            </div>
             <div className="mt-4">
                 <Label className="text-white mb-2">Applicable Services</Label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3 bg-black/20 rounded-md border border-white/10">
@@ -363,6 +354,17 @@ const TaxConfigurationCard = () => {
     const [taxCounty, setTaxCounty] = useState('2.0');
     const [taxCity, setTaxCity] = useState('0.6');
     const [effectiveDate, setEffectiveDate] = useState('2026-04-23');
+    // Checked = exempt (non-taxable). Unchecked = taxable.
+    const [exemptInsurance, setExemptInsurance] = useState(false);
+    const [exemptDriveway, setExemptDriveway] = useState(false);
+    const [exemptDeliveryFee, setExemptDeliveryFee] = useState(false);
+    const [exemptMileage, setExemptMileage] = useState(false);
+    const [exemptBaseByService, setExemptBaseByService] = useState({});
+    const [exemptEquipment, setExemptEquipment] = useState({});
+    const [servicesList, setServicesList] = useState([]);
+    const [equipmentList, setEquipmentList] = useState([]);
+    const [insurancePlanIds, setInsurancePlanIds] = useState([]);
+    const [drivewayPlanIds, setDrivewayPlanIds] = useState([]);
 
     useEffect(() => {
         loadTaxConfig();
@@ -375,6 +377,75 @@ const TaxConfigurationCard = () => {
             setTaxCounty(config.tax_county.toString());
             setTaxCity(config.tax_city.toString());
             setEffectiveDate(config.tax_effective_date);
+
+            const [plansRes, servicesRes, equipmentRes, equipmentNamesRes] = await Promise.all([
+                supabase
+                    .from('protection_plans')
+                    .select('id, plan_type, plan_key, name, is_taxable, is_active')
+                    .eq('is_active', true),
+                supabase
+                    .from('services')
+                    .select('id, name, is_taxable, delivery_fee_is_taxable, mileage_is_taxable, is_rentable')
+                    .order('id'),
+                supabase
+                    .from('equipment_pricing')
+                    .select('equipment_id, is_taxable')
+                    .in('equipment_id', [1, 2, 3, 4, 5, 6])
+                    .order('equipment_id'),
+                supabase
+                    .from('equipment')
+                    .select('id, name')
+                    .in('id', [1, 2, 3, 4, 5, 6]),
+            ]);
+
+            if (plansRes.error) throw plansRes.error;
+            if (servicesRes.error) throw servicesRes.error;
+            if (equipmentRes.error) throw equipmentRes.error;
+
+            const plans = plansRes.data || [];
+            const insurancePlans = plans.filter(
+                (p) => p.plan_type === 'rental_insurance' || p.plan_key === 'premium_insurance'
+            );
+            const drivewayPlans = plans.filter((p) => p.plan_type === 'driveway_protection');
+            setInsurancePlanIds(insurancePlans.map((p) => p.id));
+            setDrivewayPlanIds(drivewayPlans.map((p) => p.id));
+            // checked = exempt = !is_taxable
+            setExemptInsurance(insurancePlans.some((p) => p.is_taxable === false));
+            setExemptDriveway(drivewayPlans.some((p) => p.is_taxable === false));
+
+            const rentable = (servicesRes.data || []).filter(
+                (s) => s.is_rentable !== false && Number(s.id) !== 7
+            );
+            setServicesList(rentable);
+            setExemptDeliveryFee(rentable.some((s) => s.delivery_fee_is_taxable === false));
+            setExemptMileage(rentable.some((s) => s.mileage_is_taxable === false));
+            const baseMap = {};
+            rentable.forEach((s) => {
+                baseMap[s.id] = s.is_taxable === false;
+            });
+            setExemptBaseByService(baseMap);
+
+            const nameById = Object.fromEntries(
+                (equipmentNamesRes.data || []).map((row) => [row.id, row.name])
+            );
+            const FALLBACK_NAMES = {
+                1: 'Wheelbarrow',
+                2: 'Hand Truck',
+                3: 'Working Gloves (Pair)',
+                4: 'Mattress Disposal',
+                5: 'TV Disposal',
+                6: 'Appliance Disposal',
+            };
+            const equipment = (equipmentRes.data || []).map((row) => ({
+                ...row,
+                name: nameById[row.equipment_id] || FALLBACK_NAMES[row.equipment_id] || `Equipment ${row.equipment_id}`,
+            }));
+            setEquipmentList(equipment);
+            const equipMap = {};
+            equipment.forEach((row) => {
+                equipMap[row.equipment_id] = row.is_taxable === false;
+            });
+            setExemptEquipment(equipMap);
         } catch (error) {
             console.error('[TaxConfigurationCard] Error loading tax config:', error);
             toast({
@@ -408,11 +479,58 @@ const TaxConfigurationCard = () => {
 
             if (error) throw error;
 
+            // Persist exemptions: checked = non-taxable (is_taxable false)
+            if (insurancePlanIds.length > 0) {
+                const { error: insErr } = await supabase
+                    .from('protection_plans')
+                    .update({ is_taxable: !exemptInsurance })
+                    .in('id', insurancePlanIds);
+                if (insErr) throw insErr;
+            }
+            if (drivewayPlanIds.length > 0) {
+                const { error: drvErr } = await supabase
+                    .from('protection_plans')
+                    .update({ is_taxable: !exemptDriveway })
+                    .in('id', drivewayPlanIds);
+                if (drvErr) throw drvErr;
+            }
+
+            const serviceIds = servicesList.map((s) => s.id);
+            if (serviceIds.length > 0) {
+                const { error: feeErr } = await supabase
+                    .from('services')
+                    .update({
+                        delivery_fee_is_taxable: !exemptDeliveryFee,
+                        mileage_is_taxable: !exemptMileage,
+                    })
+                    .in('id', serviceIds);
+                if (feeErr) throw feeErr;
+
+                await Promise.all(
+                    servicesList.map((s) =>
+                        supabase
+                            .from('services')
+                            .update({ is_taxable: !exemptBaseByService[s.id] })
+                            .eq('id', s.id)
+                    )
+                );
+            }
+
+            await Promise.all(
+                equipmentList.map((row) =>
+                    supabase
+                        .from('equipment_pricing')
+                        .update({ is_taxable: !exemptEquipment[row.equipment_id] })
+                        .eq('equipment_id', row.equipment_id)
+                )
+            );
+
             invalidateTaxRateCache();
+            clearProtectionPlansCache();
 
             toast({
                 title: 'Tax Configuration Updated',
-                description: `New total tax rate: ${totalRate.toFixed(2)}%`
+                description: `New total tax rate: ${totalRate.toFixed(2)}%. Exemptions saved.`
             });
         } catch (error) {
             console.error('[TaxConfigurationCard] Error saving tax config:', error);
@@ -435,6 +553,24 @@ const TaxConfigurationCard = () => {
     }
 
     const totalRate = (parseFloat(taxState) || 0) + (parseFloat(taxCounty) || 0) + (parseFloat(taxCity) || 0);
+
+    const ExemptionCheckbox = ({ id, checked, onCheckedChange, label, hint }) => (
+        <div className="flex items-start space-x-2 py-1.5">
+            <Checkbox
+                id={id}
+                checked={checked}
+                onCheckedChange={(v) => onCheckedChange(v === true)}
+                className="mt-0.5 border-white/30 data-[state=checked]:bg-amber-500"
+                disabled={isSaving}
+            />
+            <div>
+                <Label htmlFor={id} className="text-white cursor-pointer text-sm font-medium">
+                    {label}
+                </Label>
+                {hint ? <p className="text-xs text-gray-400 mt-0.5">{hint}</p> : null}
+            </div>
+        </div>
+    );
 
     return (
         <div className="bg-white/5 p-6 rounded-lg border border-white/10 space-y-4">
@@ -521,6 +657,84 @@ const TaxConfigurationCard = () => {
                         <span className="font-mono text-green-400">{totalRate.toFixed(2)}%</span>
                     </div>
                 </div>
+            </div>
+
+            <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-4 space-y-3">
+                <div>
+                    <h4 className="text-sm font-semibold text-amber-300 mb-1">Tax Exemptions</h4>
+                    <p className="text-xs text-gray-400">
+                        Checked items are non-taxable. Unchecked items are taxed at the rate above on the full subtotal.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                    <ExemptionCheckbox
+                        id="exempt-insurance"
+                        checked={exemptInsurance}
+                        onCheckedChange={setExemptInsurance}
+                        label="Rental Insurance (damage waiver)"
+                        hint="Leave unchecked to tax insurance with the rest of the order"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-driveway"
+                        checked={exemptDriveway}
+                        onCheckedChange={setExemptDriveway}
+                        label="Driveway Protection"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-delivery-fee"
+                        checked={exemptDeliveryFee}
+                        onCheckedChange={setExemptDeliveryFee}
+                        label="Delivery Fee"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-mileage"
+                        checked={exemptMileage}
+                        onCheckedChange={setExemptMileage}
+                        label="Trip Mileage"
+                    />
+                </div>
+
+                {servicesList.length > 0 && (
+                    <div className="pt-2 border-t border-amber-500/20">
+                        <p className="text-xs font-semibold text-amber-200/90 mb-2">Base Rental by Service</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                            {servicesList.map((s) => (
+                                <ExemptionCheckbox
+                                    key={s.id}
+                                    id={`exempt-base-${s.id}`}
+                                    checked={Boolean(exemptBaseByService[s.id])}
+                                    onCheckedChange={(v) =>
+                                        setExemptBaseByService((prev) => ({ ...prev, [s.id]: v }))
+                                    }
+                                    label={s.name || `Service ${s.id}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {equipmentList.length > 0 && (
+                    <div className="pt-2 border-t border-amber-500/20">
+                        <p className="text-xs font-semibold text-amber-200/90 mb-2">Equipment &amp; Purchase Items</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                            {equipmentList.map((row) => (
+                                <ExemptionCheckbox
+                                    key={row.equipment_id}
+                                    id={`exempt-equip-${row.equipment_id}`}
+                                    checked={Boolean(exemptEquipment[row.equipment_id])}
+                                    onCheckedChange={(v) =>
+                                        setExemptEquipment((prev) => ({
+                                            ...prev,
+                                            [row.equipment_id]: v,
+                                        }))
+                                    }
+                                    label={row.name || `Equipment ${row.equipment_id}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <Button
@@ -651,7 +865,7 @@ export const PricingManager = () => {
         description: '',
         plan_type: 'rental_insurance',
         price_unit: '/rental',
-        is_taxable: false,
+        is_taxable: true,
         selectedServices: [],
     });
 
@@ -721,7 +935,7 @@ export const PricingManager = () => {
                     price: Number(plan.price || 0),
                     description: plan.description || '',
                     price_unit: plan.price_unit || '/rental',
-                    is_taxable: plan.is_taxable === true,
+                    is_taxable: plan.is_taxable !== false,
                     is_primary: plan.is_primary === true,
                     serviceIds: (plan.protection_plan_services || []).map((row) => row.service_id),
                 }));
@@ -763,10 +977,13 @@ export const PricingManager = () => {
                 description: insuranceFormData.description,
                 price: parseFloat(insuranceFormData.price),
                 price_unit: insuranceFormData.price_unit || '/rental',
-                is_taxable: insuranceFormData.is_taxable === true,
                 plan_type: insuranceFormData.plan_type || 'rental_insurance',
                 updated_at: new Date().toISOString(),
             };
+            // is_taxable is managed under Tax Calculations → Tax Exemptions only
+            if (!editingInsurance) {
+                payload.is_taxable = true;
+            }
 
             let planId = editingInsurance?.id;
 
@@ -824,7 +1041,7 @@ export const PricingManager = () => {
                 description: '',
                 plan_type: 'rental_insurance',
                 price_unit: '/rental',
-                is_taxable: false,
+                is_taxable: true,
                 selectedServices: [],
             });
             fetchData();
@@ -846,7 +1063,7 @@ export const PricingManager = () => {
             description: item.description || '',
             plan_type: item.plan_type || 'rental_insurance',
             price_unit: item.price_unit || '/rental',
-            is_taxable: item.is_taxable === true,
+            is_taxable: item.is_taxable !== false,
             selectedServices: item.serviceIds || [],
         });
         setAddingInsurance(true);
@@ -884,7 +1101,7 @@ export const PricingManager = () => {
             description: '',
             plan_type: 'rental_insurance',
             price_unit: '/rental',
-            is_taxable: false,
+            is_taxable: true,
             selectedServices: [],
         });
     };
@@ -952,7 +1169,7 @@ export const PricingManager = () => {
                                 description: '',
                                 plan_type: 'rental_insurance',
                                 price_unit: '/rental',
-                                is_taxable: false,
+                                is_taxable: true,
                                 selectedServices: [],
                             });
                             setAddingInsurance(true);

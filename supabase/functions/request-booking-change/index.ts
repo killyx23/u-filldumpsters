@@ -1,10 +1,15 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { buildRescheduleRequestChatMessage } from "../_shared/formatRescheduleChat.ts";
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
+
+function round2(n: unknown): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
 
 type AddressObj = {
   street: string;
@@ -152,40 +157,38 @@ function buildDetailedNote(
   details: Record<string, unknown> | null
 ): string {
   if (!details) {
-    return `Customer requested a booking change.\n\n${reason}`;
+    return `Customer requested a booking change.\nNeeds scheduling approval.\n\n${reason}`;
   }
 
-  let note = `Customer requested to reschedule booking #${booking.id}. Admin approval required.\n\n`;
-  note += reason;
-  note += '\n\n--- Structured request ---\n';
+  // Portal reason is already human-readable — avoid duplicating technical dumps
+  let note = (reason || "").trim();
+  if (!note) {
+    note = `Reschedule request for booking #${booking.id}.`;
+  }
+  if (!/scheduling approval|customer service approval/i.test(note)) {
+    note = `Reschedule request for booking #${booking.id}.\nNeeds scheduling approval.\n\n${note}`;
+  }
 
-  if (details.new_service_id != null) {
-    note += `New service ID: ${details.new_service_id}\n`;
-  }
-  note += `New drop-off: ${toDateString(details.new_drop_off_date) ?? 'N/A'} ${details.new_drop_off_time ?? ''}\n`;
-  note += `New pickup: ${toDateString(details.new_pickup_date) ?? 'N/A'} ${details.new_pickup_time ?? ''}\n`;
-
-  if (details.new_delivery_address) {
-    note += `Delivery address: ${details.new_delivery_address}\n`;
-  }
-  const contactNote = formatContactAddressForNote(details.new_contact_address);
-  if (contactNote) {
-    note += `Contact address: ${contactNote}\n`;
-  }
-  if (details.distance_miles != null) {
-    note += `Distance (miles): ${details.distance_miles}\n`;
-  }
-  if (details.is_manual_address) {
-    note += `Address flagged for manual verification.\n`;
+  if (details.is_manual_address && !/address verification/i.test(note)) {
+    note += `\nAddress needs verification by customer service.`;
   }
 
   const inv = details.inventory_changes as Record<string, unknown> | undefined;
   if (inv) {
-    note += `\nInventory — to return: ${JSON.stringify(inv.to_return ?? [])}\n`;
-    note += `Inventory — to allocate: ${JSON.stringify(inv.to_allocate ?? [])}\n`;
+    const toReturn = inv.to_return;
+    const toAllocate = inv.to_allocate;
+    const hasReturn = Array.isArray(toReturn) && toReturn.length > 0;
+    const hasAllocate = Array.isArray(toAllocate) && toAllocate.length > 0;
+    if ((hasReturn || hasAllocate) && !/Equipment to return:|Equipment to allocate:/i.test(note)) {
+      if (hasReturn) note += `\nEquipment to return: ${JSON.stringify(toReturn)}`;
+      if (hasAllocate) note += `\nEquipment to allocate: ${JSON.stringify(toAllocate)}`;
+    }
   }
 
-  note += `\nSubmitted at: ${details.request_timestamp ?? new Date().toISOString()}`;
+  const submitted = details.request_timestamp ?? new Date().toISOString();
+  if (!/Submitted\s*(at)?:/i.test(note)) {
+    note += `\n\nSubmitted at: ${submitted}`;
+  }
   return note;
 }
 
@@ -248,37 +251,109 @@ Deno.serve(async (req) => {
     }
 
     const noteContent = buildDetailedNote(booking, reason, rescheduleDetails);
+    const details = (rescheduleDetails && typeof rescheduleDetails === "object")
+      ? rescheduleDetails as Record<string, unknown>
+      : null;
+
+    const originalTotal = round2(
+      details?.original_total ?? details?.original_total_price ?? booking.total_price ?? 0
+    );
+    const newTotal = round2(
+      details?.new_total ?? details?.new_total_price ?? details?.pricing?.total ?? originalTotal
+    );
+    const amountDue = round2(newTotal - originalTotal);
+    const requestedAt = new Date().toISOString();
+
+    const fromAddress = resolveFromAddress(booking);
+    const { address: toAddress, kind: addressKind } = details
+      ? resolveToAddress(details)
+      : { address: null, kind: "delivery" as const };
+    const explicitlyChanged = details?.address_changed === true;
+    const addressChanged =
+      Boolean(toAddress) &&
+      (explicitlyChanged || (fromAddress ? !addressesAreEqual(toAddress, fromAddress) : true));
+
+    const existingHistory = Array.isArray(booking.reschedule_history)
+      ? [...booking.reschedule_history]
+      : [];
+
+    if (addressChanged && toAddress) {
+      existingHistory.push({
+        type: "address_change",
+        status: "pending",
+        requested_at: requestedAt,
+        from_address: fromAddress,
+        to_address: toAddress,
+        distance_miles: details?.distance_miles ?? null,
+        is_manual_address: Boolean(details?.is_manual_address),
+        address_kind: addressKind,
+      });
+    }
+
+    const originalServiceName =
+      String(details?.original_service_name || booking.plan?.name || "").trim() || null;
+    const newServiceName =
+      String(details?.new_service_name || "").trim() || originalServiceName;
+
+    const snapshotEntry = {
+      type: "reschedule_request",
+      status: "pending",
+      requested_at: requestedAt,
+      original_service_id: booking.plan?.id ?? null,
+      original_service_name: originalServiceName,
+      new_service_id: details?.new_service_id ?? null,
+      new_service_name: newServiceName,
+      original_drop_off_date: booking.drop_off_date,
+      original_pickup_date: booking.pickup_date,
+      original_drop_off_time: booking.drop_off_time_slot,
+      original_pickup_time: booking.pickup_time_slot,
+      new_drop_off_date: details ? toDateString(details.new_drop_off_date) : null,
+      new_pickup_date: details ? toDateString(details.new_pickup_date) : null,
+      new_drop_off_time: details?.new_drop_off_time ?? null,
+      new_pickup_time: details?.new_pickup_time ?? null,
+      original_address: fromAddress?.formatted_address ||
+        String(details?.original_address_display || "").trim() || null,
+      new_address: toAddress?.formatted_address ||
+        String(details?.new_address_display || details?.new_delivery_address || "").trim() || null,
+      address_changed: addressChanged,
+      is_manual_address: Boolean(details?.is_manual_address),
+      original_addons: details?.original_addons ?? [],
+      new_addons: details?.new_addons ?? [],
+      inventory_changes: details?.inventory_changes ?? null,
+      pricing: details?.pricing ?? null,
+      original_total: originalTotal,
+      new_total: newTotal,
+      amount_due: amountDue,
+      customer_comments: details?.customer_comments ?? null,
+    };
+    existingHistory.push(snapshotEntry);
 
     const bookingUpdate: Record<string, unknown> = {
       status: "pending_review",
       notes: reason,
+      reschedule_history: existingHistory,
+      payment_delta_details: {
+        amount_due: amountDue,
+        original_total_price: originalTotal,
+        new_total_price: newTotal,
+        reason: "Reschedule request pending scheduling approval",
+        state: "pending",
+        requested_at: requestedAt,
+        last_updated_at: requestedAt,
+      },
     };
 
-    // Persist pending address change in reschedule_history (do not overwrite live address yet)
-    if (rescheduleDetails) {
-      const { address: toAddress, kind: addressKind } = resolveToAddress(rescheduleDetails);
-      const fromAddress = resolveFromAddress(booking);
-      const explicitlyChanged = rescheduleDetails.address_changed === true;
-      const addressChanged =
-        Boolean(toAddress) &&
-        (explicitlyChanged || (fromAddress ? !addressesAreEqual(toAddress, fromAddress) : true));
-
-      if (addressChanged && toAddress) {
-        const existingHistory = Array.isArray(booking.reschedule_history)
-          ? booking.reschedule_history
-          : [];
-        const addressEntry = {
-          type: 'address_change',
-          status: 'pending',
-          requested_at: new Date().toISOString(),
-          from_address: fromAddress,
-          to_address: toAddress,
-          distance_miles: rescheduleDetails.distance_miles ?? null,
-          is_manual_address: Boolean(rescheduleDetails.is_manual_address),
-          address_kind: addressKind,
-        };
-        bookingUpdate.reschedule_history = [...existingHistory, addressEntry];
-      }
+    if (!booking.receipt_original_snapshot) {
+      bookingUpdate.receipt_original_snapshot = {
+        captured_at: requestedAt,
+        status: "pending_review",
+        total_price: originalTotal,
+        drop_off_date: booking.drop_off_date,
+        pickup_date: booking.pickup_date,
+        drop_off_time_slot: booking.drop_off_time_slot,
+        pickup_time_slot: booking.pickup_time_slot,
+        plan: booking.plan,
+      };
     }
 
     const { error: updateError } = await supabaseAdmin
@@ -289,27 +364,29 @@ Deno.serve(async (req) => {
     if (updateError) throw new Error(`Failed to update booking: ${updateError.message}`);
 
     const hasStructuredReschedule =
-      rescheduleDetails &&
-      (rescheduleDetails.new_drop_off_date != null ||
-        rescheduleDetails.new_service_id != null);
+      details &&
+      (details.new_drop_off_date != null || details.new_service_id != null);
 
     if (hasStructuredReschedule) {
       const logRow = {
         booking_id: numericBookingId,
-        request_type: 'reschedule',
-        request_status: 'pending',
-        reschedule_request_time: new Date().toISOString(),
+        request_type: "reschedule",
+        request_status: "pending",
+        reschedule_request_time: requestedAt,
         original_service_id: booking.plan?.id ?? null,
         original_drop_off_date: booking.drop_off_date,
         original_pickup_date: booking.pickup_date,
         original_drop_off_time: booking.drop_off_time_slot,
         original_pickup_time: booking.pickup_time_slot,
-        original_total: booking.total_price ?? null,
-        new_service_id: rescheduleDetails.new_service_id ?? null,
-        new_drop_off_date: toDateString(rescheduleDetails.new_drop_off_date),
-        new_pickup_date: toDateString(rescheduleDetails.new_pickup_date),
-        new_drop_off_time: rescheduleDetails.new_drop_off_time ?? null,
-        new_pickup_time: rescheduleDetails.new_pickup_time ?? null,
+        original_total: originalTotal,
+        new_total: newTotal,
+        fee_amount: amountDue > 0 ? amountDue : null,
+        refund_amount: amountDue < 0 ? Math.abs(amountDue) : null,
+        new_service_id: details.new_service_id ?? null,
+        new_drop_off_date: toDateString(details.new_drop_off_date),
+        new_pickup_date: toDateString(details.new_pickup_date),
+        new_drop_off_time: details.new_drop_off_time ?? null,
+        new_pickup_time: details.new_pickup_time ?? null,
       };
 
       const { error: logError } = await supabaseAdmin
@@ -331,6 +408,41 @@ Deno.serve(async (req) => {
     });
 
     if (noteError) console.error(`Failed to add customer note: ${noteError.message}`);
+
+    const chatMessage = buildRescheduleRequestChatMessage({
+      bookingId: numericBookingId,
+      originalBooking: booking,
+      originalServiceName,
+      newServiceName,
+      newDropOffDate: details?.new_drop_off_date,
+      newPickupDate: details?.new_pickup_date,
+      newDropOffTime: details?.new_drop_off_time,
+      newPickupTime: details?.new_pickup_time,
+      originalAddons: details?.original_addons,
+      newAddons: details?.new_addons,
+      originalAddress: snapshotEntry.original_address,
+      newAddress: snapshotEntry.new_address,
+      addressChanged,
+      isManualAddress: Boolean(details?.is_manual_address),
+      comments: typeof details?.customer_comments === "string" ? details.customer_comments : null,
+    });
+
+    const { error: chatError } = await supabaseAdmin.from("chat_messages").insert({
+      conversation_id: `cust_${booking.customer_id}`,
+      customer_id: booking.customer_id,
+      booking_id: numericBookingId,
+      sender_type: "customer",
+      message_content: chatMessage,
+      is_read: false,
+      message_context: {
+        action: "reschedule_requested",
+        booking_id: numericBookingId,
+      },
+    });
+
+    if (chatError) {
+      console.error(`[Request Booking Change] chat_messages insert failed:`, chatError.message);
+    }
 
     console.log(`[Request Booking Change] Successfully processed request for booking ${numericBookingId}`);
 

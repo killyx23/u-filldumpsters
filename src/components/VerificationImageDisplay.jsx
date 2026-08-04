@@ -2,7 +2,7 @@ import React from 'react';
 import { useVerificationImageLoader } from '@/hooks/useVerificationImageLoader';
 import { Loader2, Download, AlertTriangle, Image as ImageIcon, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { isVerificationPdf } from '@/utils/verificationImageHelper';
+import { isVerificationPdf, areVerificationDocumentsComplete } from '@/utils/verificationImageHelper';
 
 export const VerificationImageDisplay = ({ customerId, title = "Driver & Insurance Documents", refreshKey = 0 }) => {
     const { images, loading, error, downloadImage, refetch } = useVerificationImageLoader(customerId);
@@ -40,6 +40,18 @@ export const VerificationImageDisplay = ({ customerId, title = "Driver & Insuran
             </div>
         );
     }
+
+    const docsComplete = areVerificationDocumentsComplete(images);
+    const rawStatus = images.verification_status;
+    const isRejected = rawStatus === 'rejected';
+    const isComplete = !isRejected && (docsComplete || rawStatus === 'approved');
+    const showBadge = Boolean(rawStatus) || docsComplete;
+    const badgeLabel = isRejected ? 'Rejected' : isComplete ? 'Complete' : 'Needs documents';
+    const badgeClass = isRejected
+        ? 'bg-red-900/50 text-red-400 border border-red-500'
+        : isComplete
+          ? 'bg-green-900/50 text-green-400 border border-green-500'
+          : 'bg-orange-900/50 text-orange-400 border border-orange-500';
 
     const renderImageCard = (label, url, storagePath, alt, downloadName) => {
         const isPdf = isVerificationPdf(storagePath || url);
@@ -82,15 +94,11 @@ export const VerificationImageDisplay = ({ customerId, title = "Driver & Insuran
                         `insurance-${customerId}`,
                     )}
             </div>
-            {images.verification_status && (
+            {showBadge && (
                 <div className="mt-2 flex items-center text-sm text-gray-400">
                     <span className="mr-2">Status:</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
-                        images.verification_status === 'approved' ? 'bg-green-900/50 text-green-400 border border-green-500' :
-                        images.verification_status === 'rejected' ? 'bg-red-900/50 text-red-400 border border-red-500' :
-                        'bg-orange-900/50 text-orange-400 border border-orange-500'
-                    }`}>
-                        {images.verification_status}
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${badgeClass}`}>
+                        {badgeLabel}
                     </span>
                 </div>
             )}

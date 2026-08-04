@@ -1,7 +1,7 @@
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 
 /**
- * Full booking total with per-line taxability (insurance non-taxable when configured in DB).
+ * Full booking total with per-line taxability (exemptions via is_taxable flags).
  */
 export function calculateBookingTotal(
   plan,
@@ -11,7 +11,7 @@ export function calculateBookingTotal(
   deliveryService = false,
   insurancePrice = 0,
   {
-    insuranceIsTaxable = false,
+    insuranceIsTaxable = true,
     drivewayPrice = 0,
     drivewayIsTaxable = true,
     serviceTaxFlags = {},

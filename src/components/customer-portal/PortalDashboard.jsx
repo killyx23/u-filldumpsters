@@ -6,6 +6,11 @@ import { format, isFuture, parseISO, differenceInDays } from 'date-fns';
 import { StatusDetailsModal } from './StatusDetailsModal';
 import { ImportantAppointmentDetails } from './ImportantAppointmentDetails';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import {
+  bookingNeedsSkippedVerification,
+  formatVerificationDeadlineMessage,
+  getVerificationDeadlineInfo,
+} from '@/utils/verificationDeadline';
 
 const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
   return (
@@ -106,7 +111,28 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
       });
     }
     const pendingVerification = bookings.filter((b) => ['pending_review', 'pending_verification'].includes(b.status));
-    if (pendingVerification.length > 0) {
+    const skippedLicenseBookings = bookings.filter((b) => bookingNeedsSkippedVerification(b));
+
+    if (skippedLicenseBookings.length > 0) {
+      const primary = skippedLicenseBookings[0];
+      const deadlineInfo = getVerificationDeadlineInfo(primary);
+      const deadlineMsg = formatVerificationDeadlineMessage(primary);
+      if (deadlineMsg) {
+        urgent.push({ type: 'license-verification', text: deadlineMsg });
+      }
+      attention.push({
+        id: 'license-verification-deadline',
+        severity: deadlineInfo.isPastDeadline ? 'urgent' : 'warning',
+        title: deadlineInfo.isPastDeadline
+          ? 'License verification overdue'
+          : `License verification due in ${deadlineInfo.hoursRemaining ?? 0} hour${
+              deadlineInfo.hoursRemaining === 1 ? '' : 's'
+            }`,
+        description: deadlineMsg || 'Complete license plate, driver’s license, and insurance documents.',
+        nextStep: 'Open Verification and submit your documents before the 12-hour deadline.',
+        targetTab: 'verification',
+      });
+    } else if (pendingVerification.length > 0) {
       attention.push({
         id: 'pending-verification',
         severity: 'warning',
@@ -128,9 +154,13 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
       });
     }
 
-    const verySoon = upcoming.filter(b => differenceInDays(parseISO(b.drop_off_date), new Date()) <= 2);
-    if (verySoon.length > 0) {
-      urgent.push({ type: 'delivery', text: `You have ${verySoon.length} delivery coming up within 48 hours.` });
+    // Generic 48h notice only when not already covered by license verification countdown
+    const verySoon = upcoming.filter((b) => differenceInDays(parseISO(b.drop_off_date), new Date()) <= 2);
+    if (verySoon.length > 0 && skippedLicenseBookings.length === 0) {
+      urgent.push({
+        type: 'delivery',
+        text: `You have ${verySoon.length} delivery coming up within 48 hours.`,
+      });
     }
 
     setStats({

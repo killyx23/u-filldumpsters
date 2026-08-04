@@ -1,42 +1,163 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Calendar as ShadCalendar } from '@/components/ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { format, parseISO, isSameDay } from 'date-fns';
+import {
+    format,
+    parseISO,
+    startOfDay,
+    addDays,
+    startOfMonth,
+    endOfMonth,
+    addMonths,
+    formatISO,
+    eachDayOfInterval,
+    isBefore,
+} from 'date-fns';
 import { CalendarX, CalendarCheck, Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { convertTo12Hour, formatTimeRange12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
 import { supabase } from '@/lib/customSupabaseClient';
+import { toast } from '@/components/ui/use-toast';
 
-export const RescheduleDateTimeSelector = ({ 
-    booking, 
-    availableDates = [],
-    newDropOffDate, 
-    setNewDropOffDate, 
-    newPickupDate, 
+const isDateUnavailable = (date, availability) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return availability[dateStr]?.available === false;
+};
+
+const rangeHasUnavailableDay = (from, to, availability) => {
+    if (!from || !to) return false;
+    const start = startOfDay(from);
+    const end = startOfDay(to);
+    if (isBefore(end, start)) return false;
+    return eachDayOfInterval({ start, end }).some((day) => isDateUnavailable(day, availability));
+};
+
+export const RescheduleDateTimeSelector = ({
+    booking,
+    bookingId = null,
+    newDropOffDate,
+    setNewDropOffDate,
+    newPickupDate,
     setNewPickupDate,
     newDropOffTime,
     setNewDropOffTime,
     newPickupTime,
     setNewPickupTime,
-    selectedService
+    selectedService,
 }) => {
     const [dropOffTimeSlots, setDropOffTimeSlots] = useState([]);
     const [pickupTimeSlots, setPickupTimeSlots] = useState([]);
     const [fetchingTimes, setFetchingTimes] = useState(false);
+    const [availability, setAvailability] = useState({});
+    const [loadingAvailability, setLoadingAvailability] = useState(true);
+    const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(new Date()));
 
     const dropOffDateStr = safeExtractString(booking?.drop_off_date);
     const pickupDateStr = safeExtractString(booking?.pickup_date);
-    
+
     const originalDropOff = dropOffDateStr ? parseISO(dropOffDateStr) : new Date();
     const originalPickup = pickupDateStr ? parseISO(pickupDateStr) : new Date();
     const originalPlanName = safeExtractString(booking?.plan?.name, 'Standard Service');
-    
+
     const serviceId = selectedService?.id || booking?.plan?.id;
-    
+    const resolvedBookingId = bookingId ?? booking?.id ?? null;
+
     const dropOffTimeSlotStr = safeExtractString(booking?.drop_off_time_slot, '08:00');
     const pickupTimeSlotStr = safeExtractString(booking?.pickup_time_slot, '17:00');
+
+    const fetchAvailability = useCallback(async (month) => {
+        if (!serviceId) return;
+        setLoadingAvailability(true);
+        const startDate = formatISO(startOfMonth(month), { representation: 'date' });
+        // Cover two calendar months (desktop shows numberOfMonths=2)
+        const endDate = formatISO(endOfMonth(addMonths(month, 1)), { representation: 'date' });
+
+        try {
+            const body = {
+                serviceId,
+                startDate,
+                endDate,
+            };
+            if (resolvedBookingId != null) {
+                body.excludeBookingId = Number(resolvedBookingId);
+            }
+
+            const { data, error } = await supabase.functions.invoke('get-availability', { body });
+
+            let mergedAvailability = {};
+            if (!error && !data?.error) {
+                mergedAvailability = { ...data.availability };
+            } else if (error || data?.error) {
+                console.error('[RescheduleDateTimeSelector] Availability error:', error || data?.error);
+                toast({
+                    title: 'Availability Error',
+                    description: 'Failed to load date availability. Please try again.',
+                    variant: 'destructive',
+                });
+            }
+
+            setAvailability((prev) => ({ ...prev, ...mergedAvailability }));
+        } catch (err) {
+            console.error('[RescheduleDateTimeSelector] Error fetching availability:', err);
+            toast({
+                title: 'Availability Error',
+                description: 'Failed to load date availability.',
+                variant: 'destructive',
+            });
+        } finally {
+            setLoadingAvailability(false);
+        }
+    }, [serviceId, resolvedBookingId]);
+
+    useEffect(() => {
+        setAvailability({});
+        fetchAvailability(visibleMonth);
+    }, [fetchAvailability, visibleMonth]);
+
+    // Clear stale selections when availability refetch shows them unavailable
+    useEffect(() => {
+        if (loadingAvailability) return;
+
+        if (newDropOffDate) {
+            const dropStr = format(newDropOffDate, 'yyyy-MM-dd');
+            if (availability[dropStr] && !availability[dropStr].available) {
+                setNewDropOffDate(null);
+                setNewDropOffTime(null);
+                setNewPickupDate(null);
+                setNewPickupTime(null);
+                toast({
+                    title: 'Date Unavailable',
+                    description: 'Your selected start date is no longer available. Please choose another.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+        }
+
+        if (newPickupDate) {
+            const pickStr = format(newPickupDate, 'yyyy-MM-dd');
+            if (availability[pickStr] && !availability[pickStr].available) {
+                setNewPickupDate(null);
+                setNewPickupTime(null);
+                toast({
+                    title: 'Date Unavailable',
+                    description: 'Your selected end date is no longer available. Please choose another.',
+                    variant: 'destructive',
+                });
+            }
+        }
+    }, [
+        availability,
+        loadingAvailability,
+        newDropOffDate,
+        newPickupDate,
+        setNewDropOffDate,
+        setNewPickupDate,
+        setNewDropOffTime,
+        setNewPickupTime,
+    ]);
 
     useEffect(() => {
         if (!newDropOffDate || !serviceId) return;
@@ -47,7 +168,6 @@ export const RescheduleDateTimeSelector = ({
                 const dateStr = format(newDropOffDate, 'yyyy-MM-dd');
                 const dow = newDropOffDate.getDay();
 
-                // Query date_specific_availability first
                 const { data: dsa, error: dsaError } = await supabase
                     .from('date_specific_availability')
                     .select('*')
@@ -59,7 +179,6 @@ export const RescheduleDateTimeSelector = ({
                     console.error('Error fetching date_specific_availability:', dsaError);
                 }
 
-                // Fallback to service_availability
                 const { data: sa, error: saError } = await supabase
                     .from('service_availability')
                     .select('*')
@@ -71,11 +190,10 @@ export const RescheduleDateTimeSelector = ({
                     console.error('Error fetching service_availability:', saError);
                 }
 
-                const availability = dsa || sa;
+                const availabilityRow = dsa || sa;
 
-                if (!availability) {
+                if (!availabilityRow) {
                     console.warn(`No availability data found for service ${serviceId} on ${dateStr}`);
-                    // Provide default full-day availability
                     const defaultSlot = { value: '08:00|17:00', label: '8:00 AM - 5:00 PM' };
                     setDropOffTimeSlots([defaultSlot]);
                     setPickupTimeSlots([defaultSlot]);
@@ -85,36 +203,35 @@ export const RescheduleDateTimeSelector = ({
                     return;
                 }
 
-                // Service-specific time slot logic
                 if (serviceId === 1 || serviceId === 4) {
-                    const deliveryStart = availability.delivery_start_time || availability.delivery_window_start_time || '08:00';
-                    const deliveryEnd = availability.delivery_end_time || availability.delivery_window_end_time || '17:00';
-                    
+                    const deliveryStart = availabilityRow.delivery_start_time || availabilityRow.delivery_window_start_time || '08:00';
+                    const deliveryEnd = availabilityRow.delivery_end_time || availabilityRow.delivery_window_end_time || '17:00';
+
                     const timeWindowValue = `${deliveryStart}|${deliveryEnd}`;
                     setDropOffTimeSlots([{
                         value: timeWindowValue,
                         label: formatTimeRange12Hour(deliveryStart, deliveryEnd)
                     }]);
-                    
+
                     if (!newDropOffTime) {
                         setNewDropOffTime(timeWindowValue);
                     }
 
-                    const pickupStart = availability.delivery_pickup_start_time || availability.delivery_pickup_window_start_time || '08:00';
-                    const pickupEnd = availability.delivery_pickup_end_time || availability.delivery_pickup_window_end_time || '17:00';
-                    
+                    const pickupStart = availabilityRow.delivery_pickup_start_time || availabilityRow.delivery_pickup_window_start_time || '08:00';
+                    const pickupEnd = availabilityRow.delivery_pickup_end_time || availabilityRow.delivery_pickup_window_end_time || '17:00';
+
                     const pickupWindowValue = `${pickupStart}|${pickupEnd}`;
                     setPickupTimeSlots([{
                         value: pickupWindowValue,
                         label: formatTimeRange12Hour(pickupStart, pickupEnd)
                     }]);
-                    
+
                     if (!newPickupTime) {
                         setNewPickupTime(pickupWindowValue);
                     }
                 } else if (serviceId === 2) {
-                    const pickupStart = availability.pickup_start_time || '08:00';
-                    
+                    const pickupStart = availabilityRow.pickup_start_time || '08:00';
+
                     setNewDropOffTime(pickupStart);
                     setDropOffTimeSlots([{
                         value: pickupStart,
@@ -122,14 +239,14 @@ export const RescheduleDateTimeSelector = ({
                     }]);
 
                     if (newPickupDate) {
-                        const pickupDateStr = format(newPickupDate, 'yyyy-MM-dd');
+                        const pickupDateStrLocal = format(newPickupDate, 'yyyy-MM-dd');
                         const pickupDow = newPickupDate.getDay();
 
                         const { data: dsaPickup, error: dsaPickupError } = await supabase
                             .from('date_specific_availability')
                             .select('return_by_time')
                             .eq('service_id', serviceId)
-                            .eq('date', pickupDateStr)
+                            .eq('date', pickupDateStrLocal)
                             .maybeSingle();
 
                         if (dsaPickupError && dsaPickupError.code !== 'PGRST116') {
@@ -147,8 +264,8 @@ export const RescheduleDateTimeSelector = ({
                             console.error('Error fetching pickup service_availability:', saPickupError);
                         }
 
-                        const returnTime = dsaPickup?.return_by_time || saPickup?.return_by_time || availability.return_by_time || '17:00';
-                        
+                        const returnTime = dsaPickup?.return_by_time || saPickup?.return_by_time || availabilityRow.return_by_time || '17:00';
+
                         setNewPickupTime(returnTime);
                         setPickupTimeSlots([{
                             value: returnTime,
@@ -156,24 +273,23 @@ export const RescheduleDateTimeSelector = ({
                         }]);
                     }
                 } else if (serviceId === 3) {
-                    const deliveryStart = availability.delivery_start_time || availability.delivery_window_start_time || '08:00';
-                    const deliveryEnd = availability.delivery_end_time || availability.delivery_window_end_time || '17:00';
-                    
+                    const deliveryStart = availabilityRow.delivery_start_time || availabilityRow.delivery_window_start_time || '08:00';
+                    const deliveryEnd = availabilityRow.delivery_end_time || availabilityRow.delivery_window_end_time || '17:00';
+
                     const timeWindowValue = `${deliveryStart}|${deliveryEnd}`;
                     setDropOffTimeSlots([{
                         value: timeWindowValue,
                         label: formatTimeRange12Hour(deliveryStart, deliveryEnd)
                     }]);
-                    
+
                     if (!newDropOffTime) {
                         setNewDropOffTime(timeWindowValue);
                     }
-                    
+
                     setPickupTimeSlots([]);
                 }
             } catch (error) {
                 console.error("Error fetching time slots:", error);
-                // Provide default fallback
                 const defaultSlot = { value: '08:00|17:00', label: '8:00 AM - 5:00 PM' };
                 setDropOffTimeSlots([defaultSlot]);
                 setPickupTimeSlots([defaultSlot]);
@@ -187,41 +303,89 @@ export const RescheduleDateTimeSelector = ({
         fetchTimeSlots();
     }, [newDropOffDate, newPickupDate, serviceId, setNewDropOffTime, setNewPickupTime, newDropOffTime, newPickupTime]);
 
-    const isDateDisabled = (date) => {
-        if (isSameDay(date, originalDropOff) || isSameDay(date, originalPickup)) return false;
-        if (date < new Date(new Date().setHours(0,0,0,0))) return true;
-        return false; 
-    };
+    const isDateDisabled = useCallback((date) => {
+        const day = startOfDay(date);
+        const minBookable = startOfDay(addDays(new Date(), 1));
+        if (isBefore(day, minBookable)) return true;
+        const dateStr = format(day, 'yyyy-MM-dd');
+        if (availability[dateStr]?.available === false) return true;
+        // While loading or before a month is fetched, only past/today are blocked
+        return false;
+    }, [availability]);
 
-    const handleRangeSelect = (range) => {
-        setNewDropOffDate(range?.from || null);
-        setNewPickupDate(range?.to || null);
+    const handleRangeSelect = (rangeOrDate) => {
+        if (serviceId === 3) {
+            const date = rangeOrDate || null;
+            if (date && isDateUnavailable(date, availability)) {
+                toast({
+                    title: 'Date Unavailable',
+                    description: 'That date is not available. Please choose another.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            setNewDropOffDate(date);
+            setNewPickupDate(null);
+            return;
+        }
+
+        const from = rangeOrDate?.from || null;
+        const to = rangeOrDate?.to || null;
+
+        if (from && isDateUnavailable(from, availability)) {
+            toast({
+                title: 'Date Unavailable',
+                description: 'That start date is not available. Please choose another.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        if (to && isDateUnavailable(to, availability)) {
+            toast({
+                title: 'Date Unavailable',
+                description: 'That end date is not available. Please choose another.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        if (from && to && rangeHasUnavailableDay(from, to, availability)) {
+            toast({
+                title: 'Date Range Unavailable',
+                description: 'Your selected range includes a day that is fully booked or closed. Please choose different dates.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        setNewDropOffDate(from);
+        setNewPickupDate(to);
     };
 
     const getLabels = () => {
         if (serviceId === 1 || serviceId === 4) {
-            return { 
-                start: "Delivery (Time Window)", 
-                end: "Delivery (Pickup Window)" 
+            return {
+                start: "Delivery (Time Window)",
+                end: "Delivery (Pickup Window)"
             };
         } else if (serviceId === 2) {
-            return { 
-                start: "Pickup Start Time", 
-                end: "Return by Time" 
+            return {
+                start: "Pickup Start Time",
+                end: "Return by Time"
             };
         } else if (serviceId === 3) {
-            return { 
-                start: "Delivery (Time Window)", 
-                end: "" 
+            return {
+                start: "Delivery (Time Window)",
+                end: ""
             };
         }
-        return { 
-            start: "New Start Time", 
-            end: "New End Time" 
+        return {
+            start: "New Start Time",
+            end: "New End Time"
         };
     };
 
     const labels = getLabels();
+    const numberOfMonths = typeof window !== 'undefined' && window.innerWidth >= 768 ? 2 : 1;
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto w-full">
@@ -279,14 +443,21 @@ export const RescheduleDateTimeSelector = ({
                                 <CalendarCheck className="w-6 h-6 mr-2" /> Select Dates
                             </h3>
                         </div>
-                        
-                        <div className="bg-gray-950 rounded-2xl border border-[hsl(var(--gold)_/_0.2)] p-4 shadow-inner inline-block w-full overflow-x-auto custom-calendar-wrapper">
+
+                        <div className="bg-gray-950 rounded-2xl border border-[hsl(var(--gold)_/_0.2)] p-4 shadow-inner inline-block w-full overflow-x-auto custom-calendar-wrapper relative min-h-[320px]">
+                            {loadingAvailability && Object.keys(availability).length === 0 && (
+                                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-950/80 rounded-2xl">
+                                    <Loader2 className="w-8 h-8 animate-spin text-gold mb-2" />
+                                    <p className="text-gray-400 text-sm">Loading available dates...</p>
+                                </div>
+                            )}
                             <ShadCalendar
                                 mode={serviceId === 3 ? "single" : "range"}
                                 selected={serviceId === 3 ? newDropOffDate : { from: newDropOffDate, to: newPickupDate }}
                                 onSelect={handleRangeSelect}
                                 disabled={isDateDisabled}
-                                numberOfMonths={window.innerWidth >= 768 ? 2 : 1}
+                                numberOfMonths={numberOfMonths}
+                                onMonthChange={(month) => setVisibleMonth(startOfMonth(month))}
                                 className="mx-auto"
                             />
                         </div>
@@ -327,7 +498,7 @@ export const RescheduleDateTimeSelector = ({
                                             </Select>
                                         )}
                                     </div>
-                                    
+
                                     {serviceId !== 3 && (
                                         <div className="space-y-3">
                                             <Label className="text-gray-300 text-sm font-bold uppercase tracking-widest flex items-center">
@@ -363,3 +534,47 @@ export const RescheduleDateTimeSelector = ({
         </div>
     );
 };
+
+/** Re-verify chosen dates against get-availability before advancing the wizard. */
+export async function verifyRescheduleDatesAvailable({
+    serviceId,
+    bookingId,
+    dropOffDate,
+    pickupDate,
+}) {
+    if (!serviceId || !dropOffDate) {
+        return { ok: false, message: 'Please select a start date.' };
+    }
+
+    const start = startOfDay(dropOffDate);
+    const end = pickupDate ? startOfDay(pickupDate) : start;
+    const startDate = formatISO(start, { representation: 'date' });
+    const endDate = formatISO(end, { representation: 'date' });
+
+    const body = { serviceId, startDate, endDate };
+    if (bookingId != null) {
+        body.excludeBookingId = Number(bookingId);
+    }
+
+    const { data, error } = await supabase.functions.invoke('get-availability', { body });
+    if (error || data?.error) {
+        return {
+            ok: false,
+            message: 'Could not verify date availability. Please try again.',
+        };
+    }
+
+    const avail = data?.availability || {};
+    const days = eachDayOfInterval({ start, end });
+    for (const day of days) {
+        const key = format(day, 'yyyy-MM-dd');
+        if (avail[key]?.available === false) {
+            return {
+                ok: false,
+                message: `${format(day, 'MMM d, yyyy')} is no longer available. Please choose different dates.`,
+            };
+        }
+    }
+
+    return { ok: true };
+}

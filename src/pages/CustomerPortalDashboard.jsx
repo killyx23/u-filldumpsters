@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
 export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
@@ -139,7 +140,8 @@ export const CustomerPortalDashboard = () => {
     try {
       const date = parseISO(dateStr);
       const dateFormatted = format(date, 'MMM dd, yyyy');
-      return `${dateFormatted}${timeSlot ? ` at ${timeSlot}` : ''}`;
+      const timeLabel = timeSlot ? convertTo12Hour(timeSlot) || timeSlot : '';
+      return `${dateFormatted}${timeLabel ? ` at ${timeLabel}` : ''}`;
     } catch (e) {
       return dateStr;
     }

@@ -17,6 +17,7 @@ import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
@@ -25,6 +26,7 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { buildPlanSnapshot } from '@/utils/servicePlan';
+import { ensureBookingMileage } from '@/utils/bookingMileage';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -234,6 +236,7 @@ const CheckoutForm = ({
 
   // Service-specific labels
   const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+  const isCustomerPickup = isCustomerPickupService(plan, { ...addonsData, deliveryService });
   const dropoffLabel = getServiceSpecificDateLabel(plan, isDelivery, 'dropoff');
   const pickupLabel = getServiceSpecificDateLabel(plan, isDelivery, 'pickup');
 
@@ -262,12 +265,14 @@ const CheckoutForm = ({
   const formatConfirmationValue = (date, timeSlot, isDropOff, label) => {
     const formattedDate = formatDate(date);
     const time = getDisplayTime(timeSlot, isDropOff);
-    
+    const yardLocation =
+      isCustomerPickup && isDropOff ? '\nOn the South Side of Saratoga Springs' : '';
+
     if (isSelfService) {
       const timeLabel = isDropOff ? 'Pickup Start Time' : 'Return by Time';
-      return `${formattedDate}\n${timeLabel}: ${time}`;
+      return `${formattedDate}\n${timeLabel}: ${time}${yardLocation}`;
     } else {
-      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}`;
+      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}${yardLocation}`;
     }
   };
 
@@ -729,6 +734,11 @@ export const PaymentPage = ({ onBack }) => {
           status: 'pending_payment',
           was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
+          distance_miles: Number(
+            pendingData.addons_data?.oneWayDistanceMiles ||
+              pendingData.distance_miles ||
+              0
+          ) || 0,
           addons: {
             ...pendingData.addons_data,
             verificationSkipped: driverVerificationSkipped,
@@ -766,6 +776,30 @@ export const PaymentPage = ({ onBack }) => {
         setBookingId(data.id);
         if (normalizedReferralCode && typeof window !== 'undefined') {
           window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
+        }
+
+        try {
+          await ensureBookingMileage(
+            {
+              id: data.id,
+              customer_id: data.customer_id,
+              plan: auditPlan,
+              addons: bookingPayload.addons,
+              delivery_address: bookingPayload.delivery_address,
+              street: bookingPayload.street,
+              city: bookingPayload.city,
+              state: bookingPayload.state,
+              zip: bookingPayload.zip,
+              distance_miles: bookingPayload.distance_miles,
+            },
+            {
+              oneWayMilesOverride: bookingPayload.distance_miles || null,
+              source: 'booking_create',
+              recalculateIfMissing: !bookingPayload.distance_miles,
+            }
+          );
+        } catch (mileageErr) {
+          console.warn(`[${timestamp}] [PaymentPage] Mileage log sync failed:`, mileageErr);
         }
 
         // Persist license + insurance into customers + driver_verification_documents

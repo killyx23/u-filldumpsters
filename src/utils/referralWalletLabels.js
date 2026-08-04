@@ -8,8 +8,8 @@ export const REFERRAL_WALLET_TX_LABELS = {
   redeemed: 'Redeemed at checkout',
   expired: 'Expired',
   reversed: 'Reversed',
-  admin_adjustment_add: 'Admin add',
-  admin_adjustment_remove: 'Admin remove',
+  admin_adjustment_add: 'Customer service add',
+  admin_adjustment_remove: 'Customer service remove',
 };
 
 export const formatReferralWalletTxType = (type) =>

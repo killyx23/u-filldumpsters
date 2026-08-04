@@ -6,6 +6,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet } from 'lucide-react';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
 import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
+import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -29,11 +32,11 @@ const NoteCard = ({ note }) => (
         <div className="flex justify-between items-center mb-1">
             <p className="font-semibold text-sm text-blue-200 flex items-center">
                 <FileText className="mr-2 h-4 w-4" />
-                {note.source}
+                {note.source === 'Change Request' ? 'Scheduling Change Request' : note.source}
             </p>
-            <p className="text-xs text-gray-400">{format(parseISO(note.created_at), 'Pp')}</p>
+            <p className="text-xs text-gray-400">{format(parseISO(note.created_at), 'MMM d, yyyy @ h:mm a')}</p>
         </div>
-        <p className="text-white text-sm whitespace-pre-wrap">{note.content}</p>
+        <ChangeRequestNoteContent content={note.content} source={note.source} className="text-sm" />
     </div>
 );
 
@@ -207,6 +210,7 @@ export const ComprehensiveHistoryDialog = ({
                         {bookings.map((booking) => {
                             const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
                             const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
+                            const rescheduleApproval = getLatestRescheduleApproval(booking);
                             return (
                                 <div key={booking.id} className="bg-white/5 p-4 rounded-lg border-l-4 border-blue-500">
                                     <div className="flex justify-between items-center mb-2">
@@ -216,8 +220,16 @@ export const ComprehensiveHistoryDialog = ({
                                     <p className="text-xs text-gray-400 mb-4">Booking ID: {booking.id}</p>
 
                                     <Section title="Rental Details" icon={<Truck className="mr-2 h-5 w-5"/>}>
-                                        <DetailItem icon={<Clock />} label="Start Date" value={`${format(parseISO(booking.drop_off_date), 'PPP')} @ ${booking.drop_off_time_slot}`} />
-                                        <DetailItem icon={<Clock />} label="End Date" value={`${format(parseISO(booking.pickup_date), 'PPP')} @ ${booking.pickup_time_slot}`} />
+                                        <DetailItem icon={<Clock />} label="Start Date" value={`${format(parseISO(booking.drop_off_date), 'PPP')} @ ${convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A'}`} />
+                                        <DetailItem icon={<Clock />} label="End Date" value={`${format(parseISO(booking.pickup_date), 'PPP')} @ ${convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A'}`} />
+                                        {rescheduleApproval && (
+                                            <DetailItem
+                                                icon={<Repeat />}
+                                                label="Reschedule"
+                                                value={`${formatRescheduleStripeLine(rescheduleApproval)} · $${Number(rescheduleApproval.new_total || 0).toFixed(2)}`}
+                                                className="md:col-span-2"
+                                            />
+                                        )}
                                         <DetailItem icon={<DollarSign />} label="Base Price" value={`$${booking.total_price.toFixed(2)}`} />
                                         <DetailItem icon={<CheckCircle className={booking.returned_at || booking.picked_up_at ? "text-green-400" : "text-gray-500"} />} label="Returned/Picked Up" value={booking.returned_at ? format(parseISO(booking.returned_at), 'Pp') : booking.picked_up_at ? format(parseISO(booking.picked_up_at), 'Pp') : 'N/A'} />
                                     </Section>

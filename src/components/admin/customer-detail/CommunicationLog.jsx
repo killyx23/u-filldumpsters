@@ -12,34 +12,79 @@ import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
 
 const CHAT_NOTE_SOURCES = new Set([
     'Verification Skip Reason',
+    'Verification Completed',
     'Change Request',
     'Booking Special Instructions',
     'Booking Cancellation & Refund',
     'Cancellation Request',
+    'Reschedule Approved',
+    'Address Change',
 ]);
 
-const NoteFeedItem = ({ note, customerName }) => (
-    <div className={`mb-4 p-4 rounded-lg ${note.is_read ? 'bg-white/5' : 'bg-yellow-900/30 border border-yellow-500/50'}`}>
-        <div className="flex items-center gap-2 mb-2">
-            <BookOpen className="h-4 w-4 text-yellow-400" />
-            <span className="font-semibold text-yellow-300 text-sm">{note.source}</span>
-            <span className="text-xs text-gray-400 flex items-center ml-auto">
-                <Clock className="h-3 w-3 mr-1" />
-                {format(parseISO(note.created_at), 'MMM d, yyyy @ h:mm a')}
-            </span>
+const NoteFeedItem = ({ note, customerName }) => {
+    const isAdminNote = note.author_type === 'admin';
+    const isVerificationResolved = note.source === 'Verification Completed';
+    const needsCustomerReview = !isAdminNote && !note.is_read && !isVerificationResolved;
+    const footer = (() => {
+        if (isVerificationResolved) {
+            return 'Verification taken care of — no pending action';
+        }
+        if (needsCustomerReview) {
+            return `From ${customerName} — needs review`;
+        }
+        if (isAdminNote && note.source === 'Reschedule Approved') {
+            return 'From scheduling department — approved';
+        }
+        if (isAdminNote) {
+            return 'From scheduling department';
+        }
+        return null;
+    })();
+
+    return (
+        <div
+            className={`mb-4 p-4 rounded-lg ${
+                isVerificationResolved
+                    ? 'bg-green-900/25 border border-green-500/40'
+                    : needsCustomerReview
+                    ? 'bg-yellow-900/30 border border-yellow-500/50'
+                    : 'bg-white/5'
+            }`}
+        >
+            <div className="flex items-center gap-2 mb-2">
+                <BookOpen className={`h-4 w-4 ${isVerificationResolved ? 'text-green-400' : 'text-yellow-400'}`} />
+                <span className={`font-semibold text-sm ${isVerificationResolved ? 'text-green-300' : 'text-yellow-300'}`}>
+                    {note.source === 'Change Request' ? 'Scheduling Change Request' : note.source}
+                </span>
+                <span className="text-xs text-gray-400 flex items-center ml-auto">
+                    <Clock className="h-3 w-3 mr-1" />
+                    {format(parseISO(note.created_at), 'MMM d, yyyy @ h:mm a')}
+                </span>
+            </div>
+            <ChangeRequestNoteContent content={note.content} source={note.source} />
+            {note.booking_id && (
+                <p className="text-xs text-gray-500 mt-2">Related to Booking #{note.booking_id}</p>
+            )}
+            {footer && (
+                <p
+                    className={`text-xs mt-2 ${
+                        isVerificationResolved
+                            ? 'text-green-400'
+                            : needsCustomerReview
+                              ? 'text-yellow-400'
+                              : 'text-blue-300'
+                    }`}
+                >
+                    {footer}
+                </p>
+            )}
         </div>
-        <p className="text-white whitespace-pre-wrap">{note.content}</p>
-        {note.booking_id && (
-            <p className="text-xs text-gray-500 mt-2">Related to Booking #{note.booking_id}</p>
-        )}
-        {!note.is_read && (
-            <p className="text-xs text-yellow-400 mt-2">From {customerName} — needs review</p>
-        )}
-    </div>
-);
+    );
+};
 
 export const CommunicationLog = ({ customer, initialNotes = [], onUpdate }) => {
     const [input, setInput] = useState('');

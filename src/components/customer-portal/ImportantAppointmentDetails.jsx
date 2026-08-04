@@ -223,7 +223,9 @@ function AppointmentCard({ booking, isPrimary, onNavigateToTab }) {
           size="sm"
           variant="outline"
           onClick={handleOpenBooking}
-          className="border-yellow-500/40 text-yellow-200 hover:bg-yellow-400/10 text-xs"
+          className={`border-yellow-500/40 text-yellow-200 hover:bg-yellow-400/10 text-xs ${
+            phase === 'revealed' ? 'animate-open-booking-flash' : ''
+          }`}
         >
           Open Booking
           <ChevronRight className="ml-1 h-3.5 w-3.5" />

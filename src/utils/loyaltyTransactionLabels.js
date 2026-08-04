@@ -27,9 +27,9 @@ export function formatLoyaltyTxLabel(tx) {
       return `Reschedule adjustment${bookingSuffix}`;
     }
     case 'admin_adjustment_add':
-      return `Admin adjustment (added)${bookingSuffix}`;
+      return `Customer service adjustment (added)${bookingSuffix}`;
     case 'admin_adjustment_remove':
-      return `Admin adjustment (removed)${bookingSuffix}`;
+      return `Customer service adjustment (removed)${bookingSuffix}`;
     case 'referral_bonus':
       return `Referral bonus${bookingSuffix}`;
     default:

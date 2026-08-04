@@ -148,7 +148,7 @@ export const calculateBookingCosts = async (
     if (!resolvedTaxOptions) {
         try {
             const rateData = await getTaxRate();
-            taxRate = rateData?.rate ?? taxRate;
+            taxRate = rateData?.tax_rate ?? taxRate;
             const { data: serviceRow } = await supabase
                 .from('services')
                 .select('is_taxable, delivery_fee_is_taxable, mileage_is_taxable')
@@ -157,7 +157,7 @@ export const calculateBookingCosts = async (
             resolvedTaxOptions = {
                 serviceTaxFlags: serviceRow || {},
                 equipmentTaxFlags: {},
-                insuranceIsTaxable: false,
+                insuranceIsTaxable: true,
                 drivewayIsTaxable: true,
                 drivewayPrice: 0,
             };
@@ -165,7 +165,7 @@ export const calculateBookingCosts = async (
             resolvedTaxOptions = {
                 serviceTaxFlags: {},
                 equipmentTaxFlags: {},
-                insuranceIsTaxable: false,
+                insuranceIsTaxable: true,
                 drivewayIsTaxable: true,
                 drivewayPrice: 0,
             };
@@ -208,7 +208,12 @@ export const calculateRescheduleDifference = (originalCosts, newCosts) => {
     };
 };
 
-export const calculateRescheduleFee = (originalTotal, originalApptTime, requestTime) => {
+export const calculateRescheduleFee = (
+    originalTotal,
+    originalApptTime,
+    requestTime,
+    lateReschedulePercentage = 5,
+) => {
     const baseTotal = Number(originalTotal) || 0;
     if (!baseTotal || !originalApptTime || !requestTime) {
         return { feeApplies: false, feeAmount: 0, newTotal: baseTotal, timeDifferenceHours: 999 };
@@ -223,14 +228,17 @@ export const calculateRescheduleFee = (originalTotal, originalApptTime, requestT
 
     const timeDifferenceHours = differenceInHours(apptDate, reqDate);
     const feeApplies = timeDifferenceHours < 24 && timeDifferenceHours >= 0;
-    
-    const feeAmount = feeApplies ? (baseTotal * 0.05) : 0;
+    const pct = Number(lateReschedulePercentage);
+    const rate = Number.isFinite(pct) ? pct / 100 : 0.05;
+
+    const feeAmount = feeApplies ? (baseTotal * rate) : 0;
     
     return {
         feeApplies,
         feeAmount: round2(feeAmount),
         newTotal: round2(baseTotal + feeAmount),
-        timeDifferenceHours
+        timeDifferenceHours,
+        feePercentage: Number.isFinite(pct) ? pct : 5,
     };
 };
 
@@ -363,7 +371,7 @@ export async function calculateComprehensivePricing(
   let taxRatePercent = 7.45;
   try {
     const rateData = await getTaxRate();
-    taxRatePercent = rateData?.rate ?? taxRatePercent;
+    taxRatePercent = rateData?.tax_rate ?? taxRatePercent;
   } catch {
     // use default
   }
