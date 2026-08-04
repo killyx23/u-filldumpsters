@@ -14,6 +14,9 @@ import { Label } from '@/components/ui/label';
 import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -26,7 +29,9 @@ const DetailItem = ({ icon, label, value, className = '' }) => (
 );
 
 const DistanceWarning = ({ booking, customer }) => {
-    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || customer?.distance_miles || null);
+    const [distance, setDistance] = useState(
+        booking.distance_miles || booking.addons?.distanceInfo?.miles || customer?.distance_miles || null
+    );
     const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes || null);
 
     useEffect(() => {
@@ -137,7 +142,7 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
     );
 };
 
-const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
+const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) => {
     const returnableEquipment = equipment.filter(item => item.equipment?.name === 'Wheelbarrow' || item.equipment?.name === 'Hand Truck');
     
     const [checklist, setChecklist] = useState(() => {
@@ -218,7 +223,18 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
 
         const { error } = await supabase.from('bookings').update({ status: finalStatus, return_issues: returnIssues, damage_photos: damagePhotos }).eq('id', booking.id);
         if (error) toast({ title: "Error finalizing checklist", description: error.message, variant: "destructive" });
-        else { toast({ title: "Checklist finalized and status updated!" }); onUpdate(); }
+        else {
+            try {
+                await ensureBookingMileage(
+                    { ...booking, status: finalStatus },
+                    { customer, source: 'booking_complete', recalculateIfMissing: true }
+                );
+            } catch (mileageErr) {
+                console.warn('[ActiveRentals] mileage log on finalize failed:', mileageErr);
+            }
+            toast({ title: "Checklist finalized and status updated!" });
+            onUpdate();
+        }
     };
     
     const handlePhotoUpload = async (e) => {
@@ -334,12 +350,32 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
         );
     }
 
+    const syncMileageAfterStatus = async (bookingId, source = 'booking_complete') => {
+        const booking = bookings.find((b) => b.id === bookingId);
+        if (!booking) return;
+        try {
+            await ensureBookingMileage(booking, {
+                customer,
+                source,
+                recalculateIfMissing: true,
+            });
+        } catch (mileageErr) {
+            console.warn('[ActiveRentals] mileage log on status update failed:', mileageErr);
+        }
+    };
+
     const handleStatusUpdate = async (bookingId, newStatus, timestampField) => {
         let updates = { status: newStatus };
         if (timestampField) updates[timestampField] = new Date().toISOString();
         const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
         if (error) toast({ title: `Failed to mark as ${newStatus}`, variant: 'destructive' });
-        else { toast({ title: `Booking marked as ${newStatus}!` }); onUpdate(); }
+        else {
+            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+                await syncMileageAfterStatus(bookingId, 'booking_complete');
+            }
+            toast({ title: `Booking marked as ${newStatus}!` });
+            onUpdate();
+        }
     };
     
     const handleManualStatusChange = async (bookingId, newStatus) => {
@@ -373,6 +409,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             if (newStatus === 'Confirmed' && previousStatus === 'pending_review') {
                 await expireActiveRentalAccessCodesForOrder(bookingId);
             }
+            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+                await syncMileageAfterStatus(bookingId, 'booking_complete');
+            }
             toast({ title: 'Booking status updated successfully!' });
             onUpdate();
         }
@@ -394,6 +433,10 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
                 const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
+                const rescheduleApproval = getLatestRescheduleApproval(booking);
+                const dropOffTimeLabel = convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A';
+                const pickupTimeLabel = convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A';
+                const oneWayMiles = resolveOneWayMiles(booking, customer);
 
                 return (
                     <motion.div
@@ -417,10 +460,28 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Package />} label="Service" value={booking.plan?.name} />
                             <DetailItem icon={<DollarSign />} label="Total Price" value={`$${totalPrice}`} />
                             <DetailItem icon={<Calendar />} label="Booked On" value={booking.created_at ? format(parseISO(booking.created_at), 'Pp') : 'N/A'} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${booking.drop_off_time_slot || 'N/A'}`} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${booking.pickup_time_slot || 'N/A'}`} />
+                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
+                            <DetailItem icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(oneWayMiles)} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                         </div>
+
+                        {rescheduleApproval && (
+                            <div className="mt-4 bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-4">
+                                <p className="text-sm font-semibold text-emerald-300 mb-2">Reschedule Approval</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-200">
+                                    <p>Original total: <span className="font-semibold text-white">${Number(rescheduleApproval.original_total || 0).toFixed(2)}</span></p>
+                                    <p>New total: <span className="font-semibold text-white">${Number(rescheduleApproval.new_total || 0).toFixed(2)}</span></p>
+                                    <p>Stripe: <span className="font-semibold text-emerald-200">{formatRescheduleStripeLine(rescheduleApproval)}</span></p>
+                                    {rescheduleApproval.stripe_transaction_id && (
+                                        <p>Stripe ref: <span className="font-semibold text-white break-all">{rescheduleApproval.stripe_transaction_id}</span></p>
+                                    )}
+                                    {rescheduleApproval.at && (
+                                        <p>Approved: <span className="font-semibold text-white">{format(parseISO(rescheduleApproval.at), 'PPp')}</span></p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-4">
                             <p className="text-sm font-semibold text-yellow-400 mb-2">Rewards & Referrals for this booking</p>
@@ -471,7 +532,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                         </div>
                         </div>
 
-                        <PostRentalChecklist booking={booking} equipment={relevantEquipment} onUpdate={onUpdate} />
+                        <PostRentalChecklist booking={booking} equipment={relevantEquipment} onUpdate={onUpdate} customer={customer} />
                     </motion.div>
                 );
             })}

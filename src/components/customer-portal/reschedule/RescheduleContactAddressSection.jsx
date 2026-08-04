@@ -220,7 +220,7 @@ export const RescheduleContactAddressSection = ({ booking, onAddressUpdated }) =
                     <div className="flex items-start gap-2">
                       <AlertCircle className="h-5 w-5 text-orange-400 flex-shrink-0 mt-0.5" />
                       <p className="text-orange-200 text-sm">
-                        Manual address entry requires verification. Select from the dropdown for automatic verification, or continue with manual entry to flag your address for admin review.
+                        Manual address entry requires verification. Select from the dropdown for automatic verification, or continue with manual entry to flag your address for customer service review.
                       </p>
                     </div>
                     <Button
@@ -268,7 +268,7 @@ export const RescheduleContactAddressSection = ({ booking, onAddressUpdated }) =
               Manual Address Entry Warning
             </DialogTitle>
             <DialogDescription className="text-gray-300 text-sm leading-relaxed pt-4">
-              Manual address entry requires verification. By continuing without Google verification, your reschedule may be delayed while our team confirms your address. Addresses that need verification are flagged for admin review — the same process as when you first booked.
+              Manual address entry requires verification. By continuing without Google verification, your reschedule may be delayed while our team confirms your address. Addresses that need verification are flagged for customer service review — the same process as when you first booked.
             </DialogDescription>
           </DialogHeader>
 

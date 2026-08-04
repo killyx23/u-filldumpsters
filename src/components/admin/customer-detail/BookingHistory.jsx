@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPin, Clock } from 'lucide-react';
 import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -21,7 +23,9 @@ const DetailCard = ({ icon, title, children }) => (
 );
 
 const DistanceWarning = ({ booking, customer }) => {
-    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || customer?.distance_miles || null);
+    const [distance, setDistance] = useState(
+        booking.distance_miles || booking.addons?.distanceInfo?.miles || customer?.distance_miles || null
+    );
     const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes || null);
 
     useEffect(() => {
@@ -88,6 +92,8 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
         return 'Manual Review';
     };
     const pendingReason = getPendingReason();
+    const rescheduleApproval = getLatestRescheduleApproval(booking);
+    const oneWayMiles = resolveOneWayMiles(booking, customer);
 
     return (
         <div className="bg-white/10 p-4 rounded-md">
@@ -99,6 +105,9 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="font-bold text-lg text-white">{booking.plan?.name || 'N/A'}</p>
                     <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked: {format(parseISO(booking.created_at), 'Pp')}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
+                    <p className="text-sm text-blue-200 flex items-center mt-1">
+                        <MapPin className="mr-2 h-4 w-4"/>Distance (one-way): {formatMilesLabel(oneWayMiles)}
+                    </p>
                     <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {stripeChargeId}</p>
                 </div>
                 <div className="text-right">
@@ -113,6 +122,16 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                 <div className="mt-2 p-2 bg-orange-900/50 border border-orange-500/50 rounded-md text-sm text-orange-300 flex items-center">
                     <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
                     Pending Reason: <span className="font-semibold ml-1">{pendingReason}</span>
+                </div>
+            )}
+            {rescheduleApproval && (
+                <div className="mt-2 p-2 bg-emerald-900/40 border border-emerald-500/40 rounded-md text-sm text-emerald-200 space-y-1">
+                    <p className="font-semibold">Reschedule approved</p>
+                    <p>Original ${Number(rescheduleApproval.original_total || 0).toFixed(2)} → New ${Number(rescheduleApproval.new_total || 0).toFixed(2)}</p>
+                    <p>{formatRescheduleStripeLine(rescheduleApproval)}</p>
+                    {rescheduleApproval.stripe_transaction_id && (
+                        <p className="text-xs break-all">Stripe: {rescheduleApproval.stripe_transaction_id}</p>
+                    )}
                 </div>
             )}
             <div className="flex justify-end space-x-2 mt-3">

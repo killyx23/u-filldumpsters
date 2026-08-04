@@ -67,12 +67,6 @@ export const useRescheduleDataLoader = (bookingId) => {
                     distanceMiles
                 );
 
-                const { data: availability, error: availErr } = await supabase
-                    .from('date_specific_availability')
-                    .select('*')
-                    .eq('is_available', true);
-                if (availErr) throw availErr;
-
                 setData({
                     originalBooking: booking,
                     originalService,
@@ -87,7 +81,6 @@ export const useRescheduleDataLoader = (bookingId) => {
                         tax: originalCosts.tax,
                         total: originalCosts.total,
                     },
-                    availableDates: availability || [],
                     distanceMiles,
                 });
             } catch (err) {

@@ -1,9 +1,20 @@
-import React, { useState } from 'react';
-import { CheckCircle, Info, Star, Package } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { CheckCircle, Info, Star, Package, AlertTriangle } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { ServiceDescriptionModal } from './ServiceDescriptionModal';
 import { safeExtractString, safeExtractNumber } from '@/utils/stringExtractors';
 import { useServiceScheduleDescription } from '@/hooks/useServiceScheduleDescription';
+import { fetchTemporaryServiceAvailabilityMap } from '@/utils/temporaryServiceAvailability';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 
 const ServiceCardDescription = ({ service, referenceDate }) => {
     const { description, loading } = useServiceScheduleDescription(service, referenceDate, true);
@@ -26,11 +37,75 @@ export const RescheduleServiceSelectionSection = ({
     availableServices = [],
     referenceDate = null,
 }) => {
+    const navigate = useNavigate();
     const handleSelectService = onSelectService || (() => {
         console.warn('RescheduleServiceSelectionSection: onSelectService callback not provided');
     });
 
     const [infoModalService, setInfoModalService] = useState(null);
+    const [availability, setAvailability] = useState({});
+    const [availabilityLoaded, setAvailabilityLoaded] = useState(false);
+    const [unavailableDialogService, setUnavailableDialogService] = useState(null);
+    const clearedUnavailableRef = useRef(null);
+
+    const serviceIdsKey = useMemo(
+        () => (availableServices || []).map((s) => s?.id).filter((id) => id != null).join(','),
+        [availableServices]
+    );
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadAvailability = async () => {
+            setAvailabilityLoaded(false);
+            const map = await fetchTemporaryServiceAvailabilityMap(availableServices || []);
+            if (cancelled) return;
+            setAvailability(map);
+            setAvailabilityLoaded(true);
+        };
+
+        if (serviceIdsKey) {
+            loadAvailability();
+        } else {
+            setAvailability({});
+            setAvailabilityLoaded(true);
+        }
+
+        return () => {
+            cancelled = true;
+        };
+        // availableServices identity can change; serviceIdsKey is the stable signal
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [serviceIdsKey]);
+
+    useEffect(() => {
+        if (!availabilityLoaded || !selectedService?.id) return;
+        if (availability[selectedService.id] !== false) return;
+        if (clearedUnavailableRef.current === selectedService.id) return;
+
+        clearedUnavailableRef.current = selectedService.id;
+        handleSelectService(null);
+    }, [availabilityLoaded, availability, selectedService, handleSelectService]);
+
+    const handleCardClick = (service) => {
+        if (availability[service?.id] === false) {
+            setUnavailableDialogService(service);
+            return;
+        }
+        if (handleSelectService && typeof handleSelectService === 'function') {
+            handleSelectService(service);
+        }
+    };
+
+    const handleContact = () => {
+        setUnavailableDialogService(null);
+        navigate('/contact');
+    };
+
+    const unavailableName = safeExtractString(
+        unavailableDialogService?.name,
+        'selected service'
+    );
 
     return (
         <div className="w-full max-w-5xl mx-auto animate-in fade-in duration-500 space-y-8">
@@ -46,7 +121,8 @@ export const RescheduleServiceSelectionSection = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {availableServices?.map((service, idx) => {
                     const safeId = service?.id || `service-${idx}`;
-                    const isSelected = selectedService?.id === service?.id;
+                    const isTemporarilyUnavailable = availability[service?.id] === false;
+                    const isSelected = !isTemporarilyUnavailable && selectedService?.id === service?.id;
                     const isCurrent = currentServiceId === service?.id;
 
                     const serviceName = safeExtractString(service?.name, 'Standard Service');
@@ -57,19 +133,21 @@ export const RescheduleServiceSelectionSection = ({
                         <div
                             key={safeId}
                             className={`relative flex flex-col p-6 rounded-2xl border transition-all duration-300 overflow-hidden cursor-pointer group
-                                ${isSelected
-                                    ? 'bg-[hsl(var(--gold)_/_0.08)] border-gold shadow-[0_0_30px_hsla(var(--gold),0.15)] scale-[1.02]'
-                                    : 'bg-gray-900 border-gray-800 hover:border-gold/50 hover:bg-gray-800/80 hover:shadow-xl'
+                                ${isTemporarilyUnavailable
+                                    ? 'bg-gray-900/70 border-gray-800 opacity-70'
+                                    : isSelected
+                                        ? 'bg-[hsl(var(--gold)_/_0.08)] border-gold shadow-[0_0_30px_hsla(var(--gold),0.15)] scale-[1.02]'
+                                        : 'bg-gray-900 border-gray-800 hover:border-gold/50 hover:bg-gray-800/80 hover:shadow-xl'
                                 }
                             `}
-                            onClick={() => {
-                                if (handleSelectService && typeof handleSelectService === 'function') {
-                                    handleSelectService(service);
-                                } else {
-                                    console.warn('RescheduleServiceSelectionSection: onSelectService is not a function');
-                                }
-                            }}
+                            onClick={() => handleCardClick(service)}
                         >
+                            {isTemporarilyUnavailable && (
+                                <div className="absolute top-0 left-0 bg-gray-800/95 backdrop-blur-md text-gray-200 text-[10px] font-black px-4 py-1.5 rounded-br-xl z-10 flex items-center border-b border-r border-gray-700 shadow-sm tracking-wide uppercase">
+                                    Temporarily Unavailable
+                                </div>
+                            )}
+
                             {isCurrent && (
                                 <div className="absolute top-0 right-0 bg-gray-800/90 backdrop-blur-md text-white text-[10px] font-black px-4 py-1.5 rounded-bl-xl z-10 flex items-center border-b border-l border-gray-700 shadow-sm">
                                     <Star className="w-3.5 h-3.5 mr-1.5 text-gold fill-gold" /> CURRENT
@@ -84,14 +162,24 @@ export const RescheduleServiceSelectionSection = ({
 
                             <div className="mb-6">
                                 <div className={`w-16 h-16 rounded-2xl flex items-center justify-center border transition-colors shadow-sm
-                                    ${isSelected ? 'bg-[hsl(var(--gold)_/_0.15)] border-gold/40 text-gold' : 'bg-gray-950 border-gray-800 text-gray-400 group-hover:text-gray-200'}`}>
+                                    ${isTemporarilyUnavailable
+                                        ? 'bg-gray-950 border-gray-800 text-gray-600'
+                                        : isSelected
+                                            ? 'bg-[hsl(var(--gold)_/_0.15)] border-gold/40 text-gold'
+                                            : 'bg-gray-950 border-gray-800 text-gray-400 group-hover:text-gray-200'}`}>
                                     <Package className="w-8 h-8" />
                                 </div>
                             </div>
 
                             <div className="flex-1 flex flex-col">
                                 <div className="flex justify-between items-start mb-3 gap-2">
-                                    <h4 className={`font-extrabold text-xl leading-tight transition-colors ${isSelected ? 'text-gold-light' : 'text-white group-hover:text-gray-100'}`}>
+                                    <h4 className={`font-extrabold text-xl leading-tight transition-colors ${
+                                        isTemporarilyUnavailable
+                                            ? 'text-gray-400'
+                                            : isSelected
+                                                ? 'text-gold-light'
+                                                : 'text-white group-hover:text-gray-100'
+                                    }`}>
                                         {serviceName}
                                     </h4>
                                     <button
@@ -108,7 +196,13 @@ export const RescheduleServiceSelectionSection = ({
                                 <div className="mt-auto pt-5 border-t border-gray-800/60">
                                     <div className="flex justify-between items-end">
                                         <span className="text-xs text-gray-500 uppercase tracking-widest font-bold">Base Rate</span>
-                                        <span className={`text-2xl font-black tracking-tight ${isSelected ? 'text-gold drop-shadow-sm' : 'text-white'}`}>
+                                        <span className={`text-2xl font-black tracking-tight ${
+                                            isTemporarilyUnavailable
+                                                ? 'text-gray-500'
+                                                : isSelected
+                                                    ? 'text-gold drop-shadow-sm'
+                                                    : 'text-white'
+                                        }`}>
                                             {formatCurrency(basePrice * 100, { code: 'USD', symbol: '$' })}
                                             {priceUnit ? (
                                                 <span className="text-sm font-semibold text-gray-400 ml-1">{priceUnit}</span>
@@ -128,6 +222,48 @@ export const RescheduleServiceSelectionSection = ({
                 onClose={() => setInfoModalService(null)}
                 referenceDate={referenceDate}
             />
+
+            <Dialog
+                open={!!unavailableDialogService}
+                onOpenChange={(open) => {
+                    if (!open) setUnavailableDialogService(null);
+                }}
+            >
+                <DialogContent className="bg-gray-900 border-gold/60 text-white max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center text-2xl text-gold">
+                            <AlertTriangle className="mr-3 h-8 w-8 flex-shrink-0" />
+                            Service Temporarily Unavailable
+                        </DialogTitle>
+                    </DialogHeader>
+                    <DialogDescription asChild>
+                        <div className="my-4 text-base text-gray-300 space-y-4">
+                            <p>
+                                We apologize for the inconvenience. The{' '}
+                                <strong className="text-white">{unavailableName}</strong> is temporarily unavailable,
+                                and we are working to have it available again soon. Please check back here often.
+                            </p>
+                            <p>
+                                If you need this service and are willing to work with us, or your timeline is flexible
+                                and you do not need it right away, we may still be able to fit you in. Please contact
+                                our customer service team to discuss options.
+                            </p>
+                        </div>
+                    </DialogDescription>
+                    <DialogFooter className="sm:justify-between gap-2 mt-4">
+                        <Button
+                            onClick={() => setUnavailableDialogService(null)}
+                            variant="outline"
+                            className="text-white border-white/50 hover:bg-white/20"
+                        >
+                            See You Soon
+                        </Button>
+                        <Button onClick={handleContact} className="bg-gold hover:bg-gold-light text-black">
+                            Contact Us
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

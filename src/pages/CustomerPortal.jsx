@@ -749,7 +749,11 @@ export const CustomerPortal = () => {
                 )}
 
                 {activeTab === 'profile' && (
-                    <ProfileManagement customer={customerData} onUpdate={() => fetchData(false)} />
+                    <ProfileManagement
+                        customer={customerData}
+                        onUpdate={() => fetchData(false)}
+                        onNavigateToTab={handleTabChange}
+                    />
                 )}
 
                 {activeTab === 'verification' && (
@@ -758,7 +762,11 @@ export const CustomerPortal = () => {
                             <h2 className="text-2xl font-bold text-white mb-1">Identity Verification</h2>
                             <p className="text-sm text-blue-200">Manage your driver's license, auto insurance, and vehicle details securely.</p>
                         </div>
-                        <VerificationManager customer={customerData} onUpdate={() => fetchData(false)} />
+                        <VerificationManager
+                            customer={customerData}
+                            bookings={bookings}
+                            onUpdate={() => fetchData(false)}
+                        />
                     </div>
                 )}
 

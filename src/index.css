@@ -239,6 +239,20 @@
   animation-play-state: paused;
 }
 
+@keyframes open-booking-flash {
+  0%,
+  100% {
+    color: rgb(254 240 138); /* yellow-200 */
+  }
+  50% {
+    color: rgb(255 255 255); /* bright white flash */
+  }
+}
+
+.animate-open-booking-flash {
+  animation: open-booking-flash 1.3s ease-in-out infinite;
+}
+
 .animate-slide-in-up {
   animation: slide-in-up 0.4s ease-out;
 }

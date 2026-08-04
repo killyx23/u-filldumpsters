@@ -107,6 +107,15 @@ export function isVerificationPdf(pathOrUrl) {
   return String(pathOrUrl).toLowerCase().includes('.pdf');
 }
 
+/** True when front, back, and insurance document slots are all present (URLs or storage paths). */
+export function areVerificationDocumentsComplete(doc) {
+  if (!doc) return false;
+  const hasFront = Boolean(doc.license_front_url || doc.license_front_storage_path);
+  const hasBack = Boolean(doc.license_back_url || doc.license_back_storage_path);
+  const hasInsurance = Boolean(doc.insurance_url || doc.insurance_storage_path);
+  return hasFront && hasBack && hasInsurance;
+}
+
 /**
  * Resolve a verification document to a browser-loadable URL using the current Supabase client.
  */

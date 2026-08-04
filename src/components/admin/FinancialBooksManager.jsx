@@ -4,6 +4,7 @@ import { FinancialDashboard } from './financial/FinancialDashboard';
 import { RevenueTrackingModule } from './financial/RevenueTrackingModule';
 import { EquipmentCostManagement } from './financial/EquipmentCostManagement';
 import { OperationalExpensesTracker } from './financial/OperationalExpensesTracker';
+import { MileageServiceTrackingModule } from './financial/MileageServiceTrackingModule';
 import { 
   LayoutDashboard, 
   TrendingUp, 
@@ -95,12 +96,7 @@ export const FinancialBooksManager = () => {
         </TabsContent>
 
         <TabsContent value="mileage" className="mt-6">
-          <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 text-center">
-            <Gauge className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">Mileage & Service Tracking</h3>
-            <p className="text-gray-400">Track equipment mileage, service intervals, and maintenance schedules</p>
-            <p className="text-sm text-yellow-400 mt-4">Module under development</p>
-          </div>
+          <MileageServiceTrackingModule />
         </TabsContent>
 
         <TabsContent value="reports" className="mt-6">

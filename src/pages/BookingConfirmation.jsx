@@ -794,6 +794,23 @@ export const BookingConfirmation = () => {
             </div>
           </div>
 
+          {(bookingDetails.was_verification_skipped ||
+            bookingDetails.status === 'pending_verification' ||
+            bookingDetails.addons?.wasVerificationSkipped) && (
+            <div className="bg-orange-900/40 border border-orange-500/50 p-5 rounded-xl mb-6 text-left shadow-lg">
+              <h3 className="text-lg font-bold text-orange-300 mb-2 flex items-center">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Action Required — Finish Your Booking
+              </h3>
+              <p className="text-orange-100/90 text-sm leading-relaxed">
+                Your payment was received, but your booking is not complete until you add your towing vehicle license plate,
+                driver’s license (front and back), and auto insurance information in the Customer Portal.
+                Please complete verification as soon as possible — documents are required at least 12 hours before your pickup time.
+                Log in below to open Identity Verification and submit your information.
+              </p>
+            </div>
+          )}
+
           <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
             <h3 className="text-xl font-bold text-yellow-400 mb-2 flex items-center">
               <Key className="mr-2 h-5 w-5" /> Secure Customer Portal

@@ -12,6 +12,7 @@ import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPorta
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -368,7 +369,8 @@ export const AccessCodesPage = ({ customerData }) => {
     try {
       const date = parseISO(dateStr);
       const dateFormatted = format(date, 'MMM dd, yyyy');
-      return `${dateFormatted}${timeSlot ? ` at ${timeSlot}` : ''}`;
+      const timeLabel = timeSlot ? convertTo12Hour(timeSlot) || timeSlot : '';
+      return `${dateFormatted}${timeLabel ? ` at ${timeLabel}` : ''}`;
     } catch (e) {
       return dateStr;
     }

@@ -199,6 +199,7 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                         <span className="text-gray-400">Cancelled:</span>{' '}
                         {format(parseISO(record.cancelled_at), 'PPP p')}
                         {record.election === 'accept' ? ' (was accepted before cancellation)' : ''}
+                        {record.cancellation_reason ? ` — ${record.cancellation_reason}` : ''}
                       </p>
                     )}
                   </div>

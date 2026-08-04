@@ -996,7 +996,7 @@ export const BookingForm = ({
 
           <div>
             <h4 className="font-bold text-white text-base mb-2">Location:</h4>
-            <p className="ml-1">Pick up is located on the South Side of Saratoga Springs.</p>
+            <p className="ml-1">Pick up is located on the <span className="text-yellow-400 font-semibold">South Side of Saratoga Springs</span>.</p>
           </div>
 
           <div className="bg-black/20 p-3 rounded border border-blue-500/20">

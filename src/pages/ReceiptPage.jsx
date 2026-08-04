@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Helmet } from 'react-helmet';
 import { getDumpFeeForService } from '@/utils/getDumpFeeForService';
 import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { getTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
@@ -217,10 +219,20 @@ export const ReceiptPage = () => {
                 }
                 setCalculatingMileage(false);
 
-                // Calculate totals
+                // Calculate totals — prefer stored booking tax; else admin tax rate on subtotal
                 const subtotal = basePrice + deliveryFee + mileageCharge + addonsTotal;
-                const tax = subtotal * 0.07;
-                const total = subtotal + tax;
+                const storedTax = Number(booking.tax_amount);
+                let tax;
+                if (Number.isFinite(storedTax) && storedTax >= 0 && booking.tax_amount != null) {
+                    tax = storedTax;
+                } else {
+                    const rateConfig = await getTaxRate();
+                    const rate = Number(booking.tax_rate_used || rateConfig?.tax_rate) || 7.45;
+                    tax = calculateTaxAmount(subtotal, rate);
+                }
+                const total = Number(booking.total_price) > 0
+                    ? Number(booking.total_price)
+                    : subtotal + tax;
 
                 setReceiptDetails({
                     bookingId: booking.id,

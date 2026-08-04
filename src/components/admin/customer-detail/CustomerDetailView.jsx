@@ -345,7 +345,7 @@ export const CustomerDetailView = () => {
                 </TabsContent>
                 <TabsContent value="rentals">
                     <div className="space-y-8">
-                        <ActiveRentals bookings={activeBookings} equipment={equipment} onUpdate={() => fetchCustomerDetails(false)} />
+                        <ActiveRentals bookings={activeBookings} equipment={equipment} customer={customer} onUpdate={() => fetchCustomerDetails(false)} />
                     </div>
                 </TabsContent>
                 <TabsContent value="history">

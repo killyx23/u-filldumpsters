@@ -406,7 +406,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
 
             if (error) throw error;
 
-            toast({ title: 'Review submitted', description: 'Review submitted and pending admin approval. Thank you for your feedback!' });
+            toast({ title: 'Review submitted', description: 'Review submitted and pending customer service approval. Thank you for your feedback!' });
             resetReviewForm();
             fetchReviews();
             if (onRefreshData) onRefreshData();

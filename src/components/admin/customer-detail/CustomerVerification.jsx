@@ -12,7 +12,7 @@ import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { updateVerificationStatus } from '@/utils/verificationImageHelper';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 import { useVerificationImageHistory } from '@/hooks/useVerificationImageHistory';
-import { format, parseISO, isValid } from 'date-fns';
+import { format, parseISO, isValid, differenceInHours } from 'date-fns';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import {
     getPendingAddressChange,
@@ -20,9 +20,30 @@ import {
     normalizeAddress,
     formatAddressDisplay,
 } from '@/utils/addressHelpers';
+import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
+import { addonsListToAddonsData } from '@/utils/rescheduleTaxCalculator';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { getBookingDateTime } from '@/utils/bookingPickupWindow';
+import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
+
+const LATE_FEE_NOTE_WITHIN_24H =
+    'This rescheduling fee was charged because your request was submitted within 24 hours of your original scheduled appointment, per our rescheduling policy.';
+
+const LATE_FEE_NOTE_OUTSIDE_24H =
+    'This rescheduling fee was applied to your booking per our scheduling policy for this change request.';
+
+const moneyFmt = (n) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
+
+const hasPendingRescheduleRequest = (booking) => {
+    const history = Array.isArray(booking?.reschedule_history) ? booking.reschedule_history : [];
+    return history.some((e) => e?.type === 'reschedule_request' && e?.status === 'pending');
+};
 
 const fetchPendingCancellationLog = async (bookingId) => {
     if (!bookingId) return null;
@@ -132,7 +153,7 @@ const CancellationPendingDetails = ({ booking }) => {
 const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
     const [cancellationFee, setCancellationFee] = useState(0);
-    const [reason, setReason] = useState("Admin cancelled due to missing, not provided, or improper verification information.");
+    const [reason, setReason] = useState("Customer service cancelled due to missing, not provided, or improper verification information.");
     const [isRefunding, setIsRefunding] = useState(false);
     const receiptRef = React.useRef();
     const paymentInfo = Array.isArray(booking?.stripe_payment_info) ? booking.stripe_payment_info[0] : booking?.stripe_payment_info;
@@ -376,7 +397,7 @@ const ChargeDifferenceDialog = ({ booking, customer, open, onOpenChange, onUpdat
                     bookingId: booking.id,
                     action: 'cancel',
                     amount: Number.isFinite(parsed) && parsed > 0 ? parsed : 0.01,
-                    reason: reason || 'Charge approval cancelled by admin',
+                    reason: reason || 'Charge approval cancelled by customer service',
                 },
             });
             if (error) throw error;
@@ -794,8 +815,78 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
     const [plate, setPlate] = useState(customer?.license_plate || '');
     const [isSavingPlate, setIsSavingPlate] = useState(false);
     const [isProcessingStatus, setIsProcessingStatus] = useState(false);
+    const [lateFeeByBooking, setLateFeeByBooking] = useState({});
+    const { fees, fee: feeLookup } = useChargesAndFees();
 
     const { history, loading: historyLoading } = useVerificationImageHistory(customer?.id);
+
+    const getRescheduleHoursInfo = (booking) => {
+        const history = Array.isArray(booking?.reschedule_history) ? booking.reschedule_history : [];
+        const pendingSnap = [...history]
+            .reverse()
+            .find((e) => e?.type === 'reschedule_request' && e?.status === 'pending');
+        const dropDate = pendingSnap?.original_drop_off_date || booking.drop_off_date;
+        const dropTime = pendingSnap?.original_drop_off_time || booking.drop_off_time_slot;
+        const appt = getBookingDateTime(dropDate, dropTime);
+        if (!appt || !isValid(appt)) {
+            return { hoursUntil: null, isWithin24h: false, originalTotal: Number(booking.total_price || 0) };
+        }
+        const hoursUntil = differenceInHours(appt, new Date());
+        const originalTotal = Number(
+            pendingSnap?.original_total ??
+            booking.payment_delta_details?.original_total_price ??
+            booking.total_price ??
+            0
+        );
+        return {
+            hoursUntil,
+            isWithin24h: hoursUntil < 24,
+            originalTotal,
+            suggestedFee: Math.round((originalTotal * (Number(feeLookup('late_reschedule_percentage')) || 5) / 100) * 100) / 100,
+        };
+    };
+
+    const getLateFeeControls = (booking) => {
+        const existing = lateFeeByBooking[booking.id];
+        if (existing) return existing;
+        const info = getRescheduleHoursInfo(booking);
+        return {
+            chargeFee: Boolean(info.isWithin24h && info.suggestedFee > 0),
+            amount: info.suggestedFee || 0,
+            notes: info.isWithin24h ? LATE_FEE_NOTE_WITHIN_24H : LATE_FEE_NOTE_OUTSIDE_24H,
+        };
+    };
+
+    const updateLateFeeControls = (bookingId, patch) => {
+        setLateFeeByBooking((prev) => {
+            const booking = verificationBookings?.find((b) => b.id === bookingId);
+            const base = prev[bookingId] || (booking ? getLateFeeControls(booking) : {
+                chargeFee: false,
+                amount: 0,
+                notes: LATE_FEE_NOTE_WITHIN_24H,
+            });
+            return { ...prev, [bookingId]: { ...base, ...patch } };
+        });
+    };
+
+    useEffect(() => {
+        if (!verificationBookings?.length) return;
+        setLateFeeByBooking((prev) => {
+            const next = { ...prev };
+            let changed = false;
+            for (const booking of verificationBookings) {
+                if (booking.status !== 'pending_review' || next[booking.id]) continue;
+                const info = getRescheduleHoursInfo(booking);
+                next[booking.id] = {
+                    chargeFee: Boolean(info.isWithin24h && info.suggestedFee > 0),
+                    amount: info.suggestedFee || 0,
+                    notes: info.isWithin24h ? LATE_FEE_NOTE_WITHIN_24H : LATE_FEE_NOTE_OUTSIDE_24H,
+                };
+                changed = true;
+            }
+            return changed ? next : prev;
+        });
+    }, [verificationBookings, fees.late_reschedule_percentage]);
 
     const handleSavePlate = async () => {
         if (!customer?.id) return;
@@ -830,22 +921,544 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         }
     };
     
-    const handleApprove = async (booking) => {
+    const handleApproveAddress = async (booking) => {
         if (!customer?.id) return;
+        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
+        const toAddress = normalizeAddress(pendingAddress?.to_address);
+        const fromAddress = normalizeAddress(pendingAddress?.from_address);
+        if (!toAddress) {
+            toast({
+                title: 'No pending address',
+                description: 'There is no pending address change to approve for this booking.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const approvedAt = new Date().toISOString();
+        const scheduleStillPending = hasPendingRescheduleRequest(booking);
+        const { data: authData } = await supabase.auth.getUser();
+        const adminLabel = authData?.user?.email || 'scheduling department';
+        const addressPayload = {
+            street: toAddress.street,
+            city: toAddress.city,
+            state: toAddress.state,
+            zip: toAddress.zip,
+            formatted_address: toAddress.formatted_address,
+            isVerified: !pendingAddress?.is_manual_address,
+        };
+
+        const bookingUpdate = {
+            street: toAddress.street,
+            city: toAddress.city,
+            state: toAddress.state,
+            zip: toAddress.zip,
+            delivery_address: addressPayload,
+            contact_address: addressPayload,
+            reschedule_history: markAddressChangesApproved(booking.reschedule_history, approvedAt),
+            address_verified_by_admin: adminLabel,
+            address_verified_date: approvedAt,
+            pending_address_verification: false,
+        };
+
+        const toDisplay = formatAddressDisplay(toAddress) || 'N/A';
+        let oneWayMiles = null;
+        try {
+            oneWayMiles = await calculateOneWayMilesForAddress(toDisplay);
+        } catch (e) {
+            console.warn('[CustomerVerification] one-way miles calc failed on address approve:', e);
+        }
+        if (oneWayMiles == null && pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
+            oneWayMiles = Number(pendingAddress.distance_miles);
+        }
+        if (oneWayMiles != null && Number.isFinite(oneWayMiles) && oneWayMiles > 0) {
+            bookingUpdate.distance_miles = Number(oneWayMiles);
+        }
+
+        if (!scheduleStillPending) {
+            bookingUpdate.status = 'Confirmed';
+            bookingUpdate.is_manually_verified = true;
+            bookingUpdate.verification_notes = 'Scheduling approved address change.';
+            Object.assign(bookingUpdate, reinstatePinTrackingPatch(booking.status, 'Confirmed'));
+        }
+
+        const { error } = await supabase.from('bookings').update(bookingUpdate).eq('id', booking.id);
+        if (error) {
+            toast({ title: 'Address approval failed', description: error.message, variant: 'destructive' });
+            return;
+        }
+
+        const customerUpdate = {
+            street: toAddress.street,
+            city: toAddress.city,
+            state: toAddress.state,
+            zip: toAddress.zip,
+            unverified_address: Boolean(pendingAddress?.is_manual_address),
+        };
+        if (oneWayMiles != null && Number.isFinite(oneWayMiles) && oneWayMiles > 0) {
+            customerUpdate.distance_miles = Number(oneWayMiles);
+            customerUpdate.travel_time_minutes = null;
+        } else {
+            customerUpdate.distance_miles = null;
+            customerUpdate.travel_time_minutes = null;
+        }
+        await supabase.from('customers').update(customerUpdate).eq('id', customer.id);
+
+        try {
+            await ensureBookingMileage(
+                {
+                    ...booking,
+                    ...bookingUpdate,
+                    id: booking.id,
+                    customer_id: customer.id,
+                },
+                {
+                    customer: { ...customer, ...customerUpdate },
+                    oneWayMilesOverride: oneWayMiles,
+                    source: 'reschedule_address',
+                    recalculateIfMissing: !oneWayMiles,
+                }
+            );
+        } catch (mileageErr) {
+            console.warn('[CustomerVerification] mileage log update failed:', mileageErr);
+        }
+
+        const fromDisplay = formatAddressDisplay(fromAddress) || 'N/A';
+        const addressChat = [
+            `Address approved for booking #${booking.id}.`,
+            `From: ${fromDisplay}`,
+            `To: ${toDisplay}`,
+            'Status: Address verified — delivery location updated',
+        ].join('\n');
+
+        await supabase.from('customer_notes').insert({
+            customer_id: customer.id,
+            booking_id: booking.id,
+            source: 'Address Change',
+            content: `Address approved for booking #${booking.id}.\nFrom: ${fromDisplay}\nTo: ${toDisplay}`,
+            author_type: 'admin',
+            is_read: true,
+        });
+
+        await supabase.from('chat_messages').insert({
+            conversation_id: `cust_${customer.id}`,
+            customer_id: customer.id,
+            booking_id: booking.id,
+            sender_type: 'admin',
+            message_content: addressChat,
+            is_read: false,
+            message_severity: 'success',
+            message_context: {
+                action: 'address_approved',
+                booking_id: booking.id,
+            },
+        });
+
+        toast({
+            title: 'Address Approved',
+            description: scheduleStillPending
+                ? 'Address updated. Schedule and pricing still need approval.'
+                : 'Address updated and customer notified.',
+        });
+        onUpdate();
+    };
+
+    const handleApprove = async (booking, mode = 'full') => {
+        if (!customer?.id) return;
+        if (mode === 'address') {
+            await handleApproveAddress(booking);
+            return;
+        }
+
+        const scheduleOnly = mode === 'schedule';
         const prevStatus = booking.status;
         const pendingAddress = getPendingAddressChange(booking.reschedule_history);
         const toAddress = normalizeAddress(pendingAddress?.to_address);
         const fromAddress = normalizeAddress(pendingAddress?.from_address);
         const approvedAt = new Date().toISOString();
+        const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+        const history = Array.isArray(booking.reschedule_history) ? booking.reschedule_history : [];
+        const pendingSnapshot = [...history]
+            .reverse()
+            .find((e) => e?.type === 'reschedule_request' && e?.status === 'pending') || null;
+
+        let pendingRescheduleLog = null;
+        if (prevStatus === 'pending_review') {
+            const { data: logRow, error: logErr } = await supabase
+                .from('reschedule_history_logs')
+                .select('*')
+                .eq('booking_id', booking.id)
+                .eq('request_type', 'reschedule')
+                .eq('request_status', 'pending')
+                .order('reschedule_request_time', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (logErr) {
+                console.error('[handleApprove] Failed to load pending reschedule log:', logErr.message);
+            } else {
+                pendingRescheduleLog = logRow;
+            }
+        }
+
+        const isRescheduleApprove = Boolean(pendingRescheduleLog || pendingSnapshot);
+        if (scheduleOnly && !isRescheduleApprove) {
+            toast({
+                title: 'Nothing to approve',
+                description: 'There is no pending schedule/pricing change for this booking.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
+        const originalTotal = round2(
+            pendingSnapshot?.original_total ??
+            pendingRescheduleLog?.original_total ??
+            booking.payment_delta_details?.original_total_price ??
+            booking.total_price ??
+            0
+        );
+        const newTotal = round2(
+            pendingSnapshot?.new_total ??
+            pendingRescheduleLog?.new_total ??
+            booking.payment_delta_details?.new_total_price ??
+            booking.total_price ??
+            originalTotal
+        );
+        const delta = round2(newTotal - originalTotal);
+
+        let stripeType = 'none';
+        let stripeTransactionId = null;
+        let amountProcessed = 0;
+
+        if (isRescheduleApprove && Math.abs(delta) >= 0.01) {
+            if (delta > 0) {
+                const { data: chargeData, error: chargeError } = await supabase.functions.invoke('charge-customer', {
+                    body: {
+                        customerId: booking.customer_id || customer.id,
+                        bookingId: booking.id,
+                        amount: delta,
+                        description: `Reschedule difference for booking #${booking.id}`,
+                        feeType: 'reschedule_difference',
+                    },
+                });
+                if (chargeError || chargeData?.error || !chargeData?.success) {
+                    const msg =
+                        chargeData?.error ||
+                        chargeError?.message ||
+                        'Failed to charge the reschedule price difference.';
+                    toast({
+                        title: 'Stripe charge failed',
+                        description: msg,
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+                stripeType = 'charge';
+                stripeTransactionId = chargeData.latestCharge || chargeData.paymentIntentId || chargeData.invoiceId || null;
+                amountProcessed = delta;
+            } else {
+                const { data: refundData, error: refundError } = await supabase.functions.invoke(
+                    'refund-booking-difference',
+                    {
+                        body: {
+                            bookingId: booking.id,
+                            amount: Math.abs(delta),
+                            reason: `Reschedule price difference refund for booking #${booking.id}`,
+                        },
+                    }
+                );
+                if (refundError || refundData?.error || !refundData?.success) {
+                    const msg =
+                        refundData?.error ||
+                        refundError?.message ||
+                        'Failed to refund the reschedule price difference.';
+                    toast({
+                        title: 'Stripe refund failed',
+                        description: msg,
+                        variant: 'destructive',
+                    });
+                    return;
+                }
+                stripeType = 'refund';
+                stripeTransactionId = refundData.refundId || null;
+                amountProcessed = Math.abs(delta);
+            }
+        }
+
+        const feeControls = getLateFeeControls(booking);
+        let lateFeeCharged = 0;
+        let lateFeeNotes = '';
+        let lateFeeStripeId = null;
+        if (isRescheduleApprove && feeControls.chargeFee && Number(feeControls.amount) >= 0.01) {
+            const feeAmount = round2(feeControls.amount);
+            const { data: feeChargeData, error: feeChargeError } = await supabase.functions.invoke('charge-customer', {
+                body: {
+                    customerId: booking.customer_id || customer.id,
+                    bookingId: booking.id,
+                    amount: feeAmount,
+                    description: `Late reschedule fee for booking #${booking.id}`,
+                    feeType: 'late_reschedule_fee',
+                },
+            });
+            if (feeChargeError || feeChargeData?.error || !feeChargeData?.success) {
+                toast({
+                    title: 'Late reschedule fee charge failed',
+                    description:
+                        feeChargeData?.error ||
+                        feeChargeError?.message ||
+                        'Could not charge the late reschedule fee. Schedule was not approved.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            lateFeeCharged = feeAmount;
+            lateFeeNotes = (feeControls.notes || '').trim();
+            lateFeeStripeId =
+                feeChargeData.latestCharge || feeChargeData.paymentIntentId || feeChargeData.invoiceId || null;
+        }
+
+        const addressStillPending = scheduleOnly && Boolean(toAddress);
+        const nextStatus = addressStillPending ? 'pending_review' : 'Confirmed';
 
         const bookingUpdate = {
-            status: 'Confirmed',
-            verification_notes: 'Admin approved verification.',
+            status: nextStatus,
+            verification_notes: isRescheduleApprove
+                ? 'Scheduling approved reschedule request.'
+                : 'Customer service approved verification.',
             is_manually_verified: true,
-            ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
+            ...(nextStatus === 'Confirmed' ? reinstatePinTrackingPatch(prevStatus, 'Confirmed') : {}),
         };
 
-        if (toAddress) {
+        if (lateFeeCharged > 0) {
+            bookingUpdate.reschedule_fee = lateFeeCharged;
+            const existingFees =
+                booking.fees && typeof booking.fees === 'object' ? booking.fees : {};
+            bookingUpdate.fees = {
+                ...existingFees,
+                late_reschedule_fee: {
+                    amount: lateFeeCharged,
+                    charged_at: approvedAt,
+                    notes: lateFeeNotes || null,
+                    stripe_transaction_id: lateFeeStripeId,
+                },
+            };
+        }
+
+        if (pendingRescheduleLog) {
+            if (pendingRescheduleLog.new_drop_off_date) {
+                bookingUpdate.drop_off_date = pendingRescheduleLog.new_drop_off_date;
+            }
+            if (pendingRescheduleLog.new_pickup_date != null) {
+                bookingUpdate.pickup_date = pendingRescheduleLog.new_pickup_date;
+            }
+            if (pendingRescheduleLog.new_drop_off_time != null) {
+                bookingUpdate.drop_off_time_slot = pendingRescheduleLog.new_drop_off_time;
+            }
+            if (pendingRescheduleLog.new_pickup_time != null) {
+                bookingUpdate.pickup_time_slot = pendingRescheduleLog.new_pickup_time;
+            }
+
+            const newServiceId = pendingRescheduleLog.new_service_id != null
+                ? Number(pendingRescheduleLog.new_service_id)
+                : null;
+            const currentPlanId = booking.plan?.id != null ? Number(booking.plan.id) : null;
+            if (newServiceId != null && newServiceId !== currentPlanId) {
+                const { data: serviceRow, error: serviceErr } = await supabase
+                    .from('services')
+                    .select('id, name, base_price, price_unit, description')
+                    .eq('id', newServiceId)
+                    .maybeSingle();
+
+                if (serviceErr) {
+                    console.error('[handleApprove] Failed to load new service for plan update:', serviceErr.message);
+                } else if (serviceRow) {
+                    const existingPlan = booking.plan && typeof booking.plan === 'object' ? booking.plan : {};
+                    bookingUpdate.plan = {
+                        ...existingPlan,
+                        id: serviceRow.id,
+                        name: serviceRow.name,
+                        base_price: serviceRow.base_price,
+                        price_unit: serviceRow.price_unit,
+                        description: serviceRow.description ?? existingPlan.description,
+                    };
+                }
+            }
+        }
+
+        if (isRescheduleApprove) {
+            bookingUpdate.total_price = newTotal;
+            if (pendingSnapshot?.pricing?.subtotal != null) {
+                bookingUpdate.subtotal_before_tax = Number(pendingSnapshot.pricing.subtotal);
+            }
+            if (pendingSnapshot?.pricing?.tax != null) {
+                bookingUpdate.tax_amount = Number(pendingSnapshot.pricing.tax);
+            }
+            if (pendingSnapshot?.pricing?.taxRate != null) {
+                bookingUpdate.tax_rate_used = Number(pendingSnapshot.pricing.taxRate);
+            }
+
+            if (Array.isArray(pendingSnapshot?.new_addons)) {
+                const existingAddons =
+                    booking.addons && typeof booking.addons === 'object' ? booking.addons : {};
+                const mapped = addonsListToAddonsData(pendingSnapshot.new_addons, {
+                    deliveryFee: Number(existingAddons.deliveryFee || 0),
+                    mileageCharge: Number(existingAddons.mileageCharge || 0),
+                });
+                const hadInsurance = existingAddons.insurance === 'accept';
+                const hadDriveway = existingAddons.drivewayProtection === 'accept';
+                const removingCoverage =
+                    (hadInsurance && mapped.insurance !== 'accept') ||
+                    (hadDriveway && mapped.drivewayProtection !== 'accept');
+
+                const nextAddons = {
+                    ...existingAddons,
+                    ...mapped,
+                    equipment: (mapped.equipment || []).map((a) => ({
+                        id: a.id ?? a.equipment_id,
+                        dbId: a.equipment_id ?? a.dbId ?? a.id,
+                        name: a.name,
+                        label: a.name,
+                        quantity: Number(a.quantity || 1),
+                        price: Number(a.price || 0),
+                    })),
+                    insurancePriceApplied:
+                        mapped.insurance === 'accept'
+                            ? Number(mapped.insurancePriceApplied || existingAddons.insurancePriceApplied || 0)
+                            : 0,
+                    drivewayPriceApplied:
+                        mapped.drivewayProtection === 'accept'
+                            ? Number(mapped.drivewayPriceApplied || existingAddons.drivewayPriceApplied || 0)
+                            : 0,
+                };
+
+                if (removingCoverage) {
+                    nextAddons.protectionCancellationReason = 'Removed during reschedule approval';
+                } else {
+                    delete nextAddons.protectionCancellationReason;
+                }
+
+                bookingUpdate.addons = nextAddons;
+            }
+
+            bookingUpdate.payment_delta_details = {
+                ...(booking.payment_delta_details || {}),
+                amount_due: delta,
+                original_total_price: originalTotal,
+                new_total_price: newTotal,
+                reason: 'Reschedule approved',
+                state: 'settled',
+                requested_at: booking.payment_delta_details?.requested_at || pendingSnapshot?.requested_at,
+                last_updated_at: approvedAt,
+                settled_at: approvedAt,
+                stripe_type: stripeType,
+                stripe_transaction_id: stripeTransactionId,
+                amount_processed: amountProcessed,
+                late_reschedule_fee: lateFeeCharged > 0 ? lateFeeCharged : null,
+                late_reschedule_fee_notes: lateFeeNotes || null,
+            };
+
+            const receiptEntry = {
+                action: 'reschedule_approved',
+                at: approvedAt,
+                original_drop_off_date: pendingSnapshot?.original_drop_off_date || pendingRescheduleLog?.original_drop_off_date || booking.drop_off_date,
+                original_pickup_date: pendingSnapshot?.original_pickup_date || pendingRescheduleLog?.original_pickup_date || booking.pickup_date,
+                original_drop_off_time: pendingSnapshot?.original_drop_off_time || pendingRescheduleLog?.original_drop_off_time || booking.drop_off_time_slot,
+                original_pickup_time: pendingSnapshot?.original_pickup_time || pendingRescheduleLog?.original_pickup_time || booking.pickup_time_slot,
+                new_drop_off_date: bookingUpdate.drop_off_date || pendingRescheduleLog?.new_drop_off_date,
+                new_pickup_date: bookingUpdate.pickup_date ?? pendingRescheduleLog?.new_pickup_date,
+                new_drop_off_time: bookingUpdate.drop_off_time_slot || pendingRescheduleLog?.new_drop_off_time,
+                new_pickup_time: bookingUpdate.pickup_time_slot || pendingRescheduleLog?.new_pickup_time,
+                original_service_name: pendingSnapshot?.original_service_name || booking.plan?.name,
+                new_service_name: pendingSnapshot?.new_service_name || bookingUpdate.plan?.name || booking.plan?.name,
+                original_address: pendingSnapshot?.original_address || formatAddressDisplay(fromAddress) || null,
+                new_address: pendingSnapshot?.new_address || formatAddressDisplay(toAddress) || null,
+                address_changed: Boolean(pendingSnapshot?.address_changed || toAddress),
+                original_addons: pendingSnapshot?.original_addons || [],
+                new_addons: pendingSnapshot?.new_addons || [],
+                original_total: originalTotal,
+                new_total: newTotal,
+                delta,
+                stripe_type: stripeType,
+                stripe_transaction_id: stripeTransactionId,
+                amount_processed: amountProcessed,
+                late_reschedule_fee: lateFeeCharged > 0 ? lateFeeCharged : null,
+            };
+
+            const priorHistory = Array.isArray(booking.receipt_status_history)
+                ? booking.receipt_status_history
+                : [];
+            bookingUpdate.receipt_status_history = [...priorHistory, receiptEntry];
+
+            if (!booking.receipt_original_snapshot) {
+                const requestedAt =
+                    pendingSnapshot?.requested_at ||
+                    booking.payment_delta_details?.requested_at ||
+                    pendingRescheduleLog?.reschedule_request_time ||
+                    approvedAt;
+                bookingUpdate.receipt_original_snapshot = {
+                    captured_at: requestedAt,
+                    status: prevStatus || 'pending_review',
+                    total_price: originalTotal,
+                    drop_off_date:
+                        pendingSnapshot?.original_drop_off_date ||
+                        pendingRescheduleLog?.original_drop_off_date ||
+                        booking.drop_off_date,
+                    pickup_date:
+                        pendingSnapshot?.original_pickup_date ||
+                        pendingRescheduleLog?.original_pickup_date ||
+                        booking.pickup_date,
+                    drop_off_time_slot:
+                        pendingSnapshot?.original_drop_off_time ||
+                        pendingRescheduleLog?.original_drop_off_time ||
+                        booking.drop_off_time_slot,
+                    pickup_time_slot:
+                        pendingSnapshot?.original_pickup_time ||
+                        pendingRescheduleLog?.original_pickup_time ||
+                        booking.pickup_time_slot,
+                    plan: booking.plan,
+                };
+            }
+
+            let nextHistory = history.map((entry) => {
+                if (entry?.type === 'reschedule_request' && entry?.status === 'pending') {
+                    return {
+                        ...entry,
+                        status: 'approved',
+                        approved_at: approvedAt,
+                        stripe_type: stripeType,
+                        stripe_transaction_id: stripeTransactionId,
+                        amount_processed: amountProcessed,
+                        late_reschedule_fee: lateFeeCharged > 0 ? lateFeeCharged : null,
+                    };
+                }
+                return entry;
+            });
+            if (!scheduleOnly) {
+                nextHistory = markAddressChangesApproved(nextHistory, approvedAt);
+            }
+            bookingUpdate.reschedule_history = nextHistory;
+        }
+
+        const applyAddress = Boolean(toAddress) && !scheduleOnly;
+        let approvedOneWayMiles = null;
+        if (applyAddress) {
+            const toDisplayForMiles = formatAddressDisplay(toAddress) || '';
+            try {
+                approvedOneWayMiles = await calculateOneWayMilesForAddress(toDisplayForMiles);
+            } catch (e) {
+                console.warn('[CustomerVerification] one-way miles calc failed on full approve:', e);
+            }
+            if (
+                approvedOneWayMiles == null &&
+                pendingAddress?.distance_miles != null &&
+                pendingAddress.distance_miles !== ''
+            ) {
+                approvedOneWayMiles = Number(pendingAddress.distance_miles);
+            }
+        }
+        if (applyAddress && !isRescheduleApprove) {
             const addressPayload = {
                 street: toAddress.street,
                 city: toAddress.city,
@@ -860,13 +1473,31 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             bookingUpdate.zip = toAddress.zip;
             bookingUpdate.delivery_address = addressPayload;
             bookingUpdate.contact_address = addressPayload;
-            if (pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
-                bookingUpdate.distance_miles = Number(pendingAddress.distance_miles);
+            if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
+                bookingUpdate.distance_miles = Number(approvedOneWayMiles);
             }
             bookingUpdate.reschedule_history = markAddressChangesApproved(
                 booking.reschedule_history,
                 approvedAt
             );
+        } else if (applyAddress && isRescheduleApprove) {
+            const addressPayload = {
+                street: toAddress.street,
+                city: toAddress.city,
+                state: toAddress.state,
+                zip: toAddress.zip,
+                formatted_address: toAddress.formatted_address,
+                isVerified: !pendingAddress?.is_manual_address,
+            };
+            bookingUpdate.street = toAddress.street;
+            bookingUpdate.city = toAddress.city;
+            bookingUpdate.state = toAddress.state;
+            bookingUpdate.zip = toAddress.zip;
+            bookingUpdate.delivery_address = addressPayload;
+            bookingUpdate.contact_address = addressPayload;
+            if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
+                bookingUpdate.distance_miles = Number(approvedOneWayMiles);
+            }
         }
 
         const { error } = await supabase
@@ -877,7 +1508,31 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         if (error) {
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
-            if (toAddress) {
+            if (pendingRescheduleLog?.id) {
+                const logUpdate = {
+                    request_status: 'approved',
+                    resolved_at: approvedAt,
+                    admin_notes: lateFeeCharged > 0
+                        ? `Reschedule approved; late fee ${moneyFmt(lateFeeCharged)}.`
+                        : 'Reschedule approved; schedule and pricing applied.',
+                    new_total: newTotal,
+                    transaction_id: stripeTransactionId,
+                };
+                if (stripeType === 'charge') {
+                    logUpdate.fee_amount = amountProcessed;
+                    logUpdate.fee_applied = true;
+                } else if (stripeType === 'refund') {
+                    logUpdate.refund_amount = amountProcessed;
+                }
+                if (lateFeeCharged > 0) {
+                    logUpdate.fee_applied = true;
+                    logUpdate.fee_type = 'late_reschedule';
+                    logUpdate.fee_percentage = Number(feeLookup('late_reschedule_percentage')) || 5;
+                }
+                await supabase.from('reschedule_history_logs').update(logUpdate).eq('id', pendingRescheduleLog.id);
+            }
+
+            if (applyAddress) {
                 const customerUpdate = {
                     street: toAddress.street,
                     city: toAddress.city,
@@ -885,8 +1540,8 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     zip: toAddress.zip,
                     unverified_address: Boolean(pendingAddress?.is_manual_address),
                 };
-                if (pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
-                    customerUpdate.distance_miles = Number(pendingAddress.distance_miles);
+                if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
+                    customerUpdate.distance_miles = Number(approvedOneWayMiles);
                     customerUpdate.travel_time_minutes = null;
                 } else {
                     customerUpdate.distance_miles = null;
@@ -907,6 +1562,25 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     });
                 }
 
+                try {
+                    await ensureBookingMileage(
+                        {
+                            ...booking,
+                            ...bookingUpdate,
+                            id: booking.id,
+                            customer_id: customer.id,
+                        },
+                        {
+                            customer: { ...customer, ...customerUpdate },
+                            oneWayMilesOverride: approvedOneWayMiles,
+                            source: 'reschedule_address',
+                            recalculateIfMissing: !approvedOneWayMiles,
+                        }
+                    );
+                } catch (mileageErr) {
+                    console.warn('[CustomerVerification] mileage log update failed on full approve:', mileageErr);
+                }
+
                 const fromDisplay = formatAddressDisplay(fromAddress) || 'N/A';
                 const toDisplay = formatAddressDisplay(toAddress);
                 await supabase.from('customer_notes').insert({
@@ -915,17 +1589,124 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     source: 'Address Change',
                     content: `Address updated via reschedule approval for booking #${booking.id}.\nFrom: ${fromDisplay}\nTo: ${toDisplay}`,
                     author_type: 'admin',
+                    is_read: true,
+                });
+
+                const addressChat = [
+                    `Address approved for booking #${booking.id}.`,
+                    `From: ${fromDisplay}`,
+                    `To: ${toDisplay}`,
+                    'Status: Address verified — delivery location updated',
+                ].join('\n');
+                await supabase.from('chat_messages').insert({
+                    conversation_id: `cust_${customer.id}`,
+                    customer_id: customer.id,
+                    booking_id: booking.id,
+                    sender_type: 'admin',
+                    message_content: addressChat,
                     is_read: false,
+                    message_severity: 'success',
+                    message_context: {
+                        action: 'address_approved',
+                        booking_id: booking.id,
+                    },
                 });
             }
 
-            if (prevStatus === 'pending_review') {
+            if (isRescheduleApprove) {
+                let stripeLine = 'No additional charge or refund.';
+                if (stripeType === 'charge') stripeLine = `Card charged: ${moneyFmt(amountProcessed)}`;
+                if (stripeType === 'refund') stripeLine = `Refunded to card: ${moneyFmt(amountProcessed)}`;
+
+                const approvalNotePublic = [
+                    `Reschedule approved for booking #${booking.id}.`,
+                    `Original total: ${moneyFmt(originalTotal)}`,
+                    `New total: ${moneyFmt(newTotal)}`,
+                    stripeLine,
+                    lateFeeCharged > 0 ? `Late reschedule fee charged: ${moneyFmt(lateFeeCharged)}` : null,
+                    lateFeeCharged > 0 && lateFeeNotes ? `Note: ${lateFeeNotes}` : null,
+                ]
+                    .filter(Boolean)
+                    .join('\n');
+
+                const approvalNoteAdmin = [
+                    approvalNotePublic,
+                    stripeTransactionId ? `Stripe reference: ${stripeTransactionId}` : null,
+                    lateFeeStripeId ? `Late fee Stripe reference: ${lateFeeStripeId}` : null,
+                ]
+                    .filter(Boolean)
+                    .join('\n');
+
+                await supabase.from('customer_notes').insert({
+                    customer_id: customer.id,
+                    booking_id: booking.id,
+                    source: 'Reschedule Approved',
+                    content: approvalNoteAdmin,
+                    author_type: 'admin',
+                    is_read: true,
+                });
+
+                await supabase.from('chat_messages').insert({
+                    conversation_id: `cust_${customer.id}`,
+                    customer_id: customer.id,
+                    booking_id: booking.id,
+                    sender_type: 'admin',
+                    message_content: approvalNotePublic,
+                    is_read: false,
+                    message_severity: 'success',
+                    message_context: {
+                        action: 'reschedule_approved',
+                        booking_id: booking.id,
+                        stripe_type: stripeType,
+                        stripe_transaction_id: stripeTransactionId,
+                        amount_processed: amountProcessed,
+                        original_total: originalTotal,
+                        new_total: newTotal,
+                        late_reschedule_fee: lateFeeCharged || null,
+                    },
+                });
+            }
+
+            if (prevStatus === 'pending_review' && nextStatus === 'Confirmed') {
                 await expireActiveRentalAccessCodesForOrder(booking.id);
             }
-            await supabase.functions.invoke('send-booking-confirmation', {
-                body: { bookingId: booking.id }
-            });
-            toast({ title: "Booking Approved", description: `The booking is now confirmed and the customer has been notified.` });
+
+            if (isRescheduleApprove) {
+                await supabase.functions.invoke('send-reschedule-confirmation-email', {
+                    body: {
+                        bookingId: booking.id,
+                        originalTotal,
+                        newTotal,
+                        delta,
+                        stripeType,
+                        stripeTransactionId,
+                        amountProcessed,
+                        approvalSnapshot: pendingSnapshot,
+                        pendingLog: pendingRescheduleLog,
+                        lateRescheduleFee: lateFeeCharged || 0,
+                        lateRescheduleFeeNotes: lateFeeNotes || null,
+                    },
+                });
+                toast({
+                    title: 'Reschedule Approved',
+                    description: [
+                        stripeType === 'charge'
+                            ? `Price difference charged ${moneyFmt(amountProcessed)}.`
+                            : stripeType === 'refund'
+                              ? `Refunded ${moneyFmt(amountProcessed)}.`
+                              : 'No price difference charge.',
+                        lateFeeCharged > 0 ? `Late fee charged ${moneyFmt(lateFeeCharged)}.` : null,
+                        addressStillPending ? 'Address still needs approval.' : null,
+                    ]
+                        .filter(Boolean)
+                        .join(' '),
+                });
+            } else {
+                await supabase.functions.invoke('send-booking-confirmation', {
+                    body: { bookingId: booking.id },
+                });
+                toast({ title: "Booking Approved", description: `The booking is now confirmed and the customer has been notified.` });
+            }
             onUpdate();
         }
     };
@@ -941,8 +1722,8 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     container: "bg-orange-900/30 border-orange-500",
                     title: "text-orange-300 font-bold",
                     icon: <MessageSquare className="mr-2 h-4 w-4"/>,
-                    titleText: "Change Request for Booking #",
-                    nextStep: "Review change details, then approve booking or cancel/refund."
+                    titleText: "Scheduling Change Request for Booking #",
+                    nextStep: "Approve address and schedule/pricing separately. Review hours until the original appointment and any late reschedule fee before approving pricing."
                 };
             case 'pending_payment':
                  return {
@@ -1113,6 +1894,15 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         const pendingAddress = booking.status === 'pending_review'
                             ? getPendingAddressChange(booking.reschedule_history)
                             : null;
+                        const pendingSchedule = booking.status === 'pending_review'
+                            ? hasPendingRescheduleRequest(booking)
+                            : false;
+                        const hoursInfo = booking.status === 'pending_review'
+                            ? getRescheduleHoursInfo(booking)
+                            : null;
+                        const feeControls = booking.status === 'pending_review'
+                            ? getLateFeeControls(booking)
+                            : null;
                         const currentAddressDisplay = formatAddressDisplay(pendingAddress?.from_address) ||
                             formatAddressDisplay(booking.delivery_address || booking.contact_address) ||
                             formatAddressDisplay({
@@ -1144,12 +1934,96 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                         </p>
                                     </div>
                                 )}
+                                {pendingSchedule && hoursInfo && (
+                                    <div className={`mt-3 rounded-md border p-3 space-y-3 ${
+                                        hoursInfo.isWithin24h
+                                            ? 'border-red-500/50 bg-red-950/40'
+                                            : 'border-emerald-500/30 bg-black/20'
+                                    }`}>
+                                        <p className={`text-xs font-semibold flex items-center ${
+                                            hoursInfo.isWithin24h ? 'text-red-300' : 'text-emerald-200'
+                                        }`}>
+                                            <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />
+                                            {hoursInfo.hoursUntil == null
+                                                ? 'Could not determine hours until original appointment'
+                                                : `${hoursInfo.hoursUntil} hours until original appointment`}
+                                        </p>
+                                        {hoursInfo.isWithin24h ? (
+                                            <p className="text-xs text-red-200">
+                                                Less than 24 hours — a late reschedule fee of{' '}
+                                                {feeLookup('late_reschedule_percentage')}% may apply
+                                                ({moneyFmt(hoursInfo.suggestedFee)} of original total {moneyFmt(hoursInfo.originalTotal)}).
+                                            </p>
+                                        ) : (
+                                            <p className="text-xs text-emerald-100/90">
+                                                More than 24 hours remain — late reschedule fee is not required. You may still charge or waive it.
+                                            </p>
+                                        )}
+                                        <div className="flex items-center justify-between gap-3">
+                                            <Label htmlFor={`late-fee-${booking.id}`} className="text-xs text-gray-200">
+                                                Charge late reschedule fee
+                                            </Label>
+                                            <Switch
+                                                id={`late-fee-${booking.id}`}
+                                                checked={Boolean(feeControls?.chargeFee)}
+                                                onCheckedChange={(checked) => {
+                                                    updateLateFeeControls(booking.id, {
+                                                        chargeFee: checked,
+                                                        notes: checked
+                                                            ? (hoursInfo.isWithin24h
+                                                                ? LATE_FEE_NOTE_WITHIN_24H
+                                                                : LATE_FEE_NOTE_OUTSIDE_24H)
+                                                            : (feeControls?.notes || ''),
+                                                    });
+                                                }}
+                                            />
+                                        </div>
+                                        {feeControls?.chargeFee && (
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <Label className="text-xs text-gray-300">Fee amount</Label>
+                                                    <Input
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        value={feeControls.amount}
+                                                        onChange={(e) =>
+                                                            updateLateFeeControls(booking.id, {
+                                                                amount: Number(e.target.value) || 0,
+                                                            })
+                                                        }
+                                                        className="mt-1 bg-black/30 border-white/20 text-white h-8"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs text-gray-300">Customer note (optional)</Label>
+                                                    <Textarea
+                                                        value={feeControls.notes || ''}
+                                                        onChange={(e) =>
+                                                            updateLateFeeControls(booking.id, {
+                                                                notes: e.target.value,
+                                                            })
+                                                        }
+                                                        className="mt-1 bg-black/30 border-white/20 text-white text-xs min-h-[72px]"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 {requestNotes.length > 0 && (
-                                    <div className="mt-2 space-y-2">
+                                    <div className="mt-3 space-y-3">
                                          {requestNotes.map((note, i) => (
-                                            <div key={i} className="mt-1">
-                                                <p className="font-semibold text-blue-200 flex items-center">{styles.icon}{note.source}:</p>
-                                                <p className="text-orange-200 italic bg-black/20 p-2 rounded-md mt-1">"{note.content}"</p>
+                                            <div key={i} className="rounded-md border border-orange-500/30 bg-black/25 p-3">
+                                                <p className="font-semibold text-blue-200 flex items-center text-sm mb-2">
+                                                    {styles.icon}
+                                                    {note.source === 'Change Request' ? 'Scheduling change details' : `${note.source}:`}
+                                                </p>
+                                                <ChangeRequestNoteContent
+                                                    content={note.content}
+                                                    source={note.source}
+                                                    className="text-orange-50"
+                                                />
                                             </div>
                                          ))}
                                     </div>
@@ -1166,7 +2040,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                 {booking.status === 'cancellation_pending' && (
                                     <CancellationPendingDetails booking={booking} />
                                 )}
-                                <div className="flex justify-end space-x-2 mt-4">
+                                <div className="flex flex-wrap justify-end gap-2 mt-4">
                                     {booking.status === 'pending_payment' ? (
                                         <>
                                             <Button size="sm" variant="destructive" onClick={() => setSelectedBookingForCharge(booking)}>Charge / Cancel</Button>
@@ -1178,6 +2052,33 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                         <>
                                             <Button size="sm" variant="destructive" onClick={() => setSelectedBookingForCancelRejection(booking)}><Ban className="mr-2 h-4 w-4"/>Reject Cancellation</Button>
                                             <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setSelectedBookingForCancelApproval(booking)}><CheckCircle className="mr-2 h-4 w-4"/>Approve Cancellation</Button>
+                                        </>
+                                    ) : booking.status === 'pending_review' ? (
+                                        <>
+                                            <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
+                                            {pendingAddress && requestedAddressDisplay && (
+                                                <Button
+                                                    size="sm"
+                                                    className="bg-orange-600 hover:bg-orange-700"
+                                                    onClick={() => handleApprove(booking, 'address')}
+                                                >
+                                                    <MapPin className="mr-2 h-4 w-4"/>Approve Address
+                                                </Button>
+                                            )}
+                                            {pendingSchedule && (
+                                                <Button
+                                                    size="sm"
+                                                    className="bg-green-600 hover:bg-green-700"
+                                                    onClick={() => handleApprove(booking, 'schedule')}
+                                                >
+                                                    <Check className="mr-2 h-4 w-4"/>Approve Schedule & Pricing
+                                                </Button>
+                                            )}
+                                            {!pendingSchedule && !pendingAddress && (
+                                                <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(booking)}>
+                                                    <Check className="mr-2 h-4 w-4"/>Approve Booking
+                                                </Button>
+                                            )}
                                         </>
                                     ) : (
                                         <>

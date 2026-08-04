@@ -11,6 +11,7 @@ export const DEFAULT_FEES = {
   cleaning_fee: 20,
   advance_cancel_percentage: 10,
   late_cancel_percentage: 50,
+  late_reschedule_percentage: 5,
   small_equipment_admin_rate: 15,
   driveway_protection_plan_cost: 15,
   hardware_protection_plan_cost: 15,

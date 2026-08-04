@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { RescheduleServiceSelectionSection } from './RescheduleServiceSelectionSection';
-import { RescheduleDateTimeSelector } from './RescheduleDateTimeSelector';
+import { RescheduleDateTimeSelector, verifyRescheduleDatesAvailable } from './RescheduleDateTimeSelector';
 import { RescheduleAddonsSection } from './RescheduleAddonsSection';
 import { RescheduleAddressVerification } from './RescheduleAddressVerification';
 import { RescheduleContactAddressSection } from './RescheduleContactAddressSection';
@@ -16,7 +16,10 @@ import { toast } from '@/components/ui/use-toast';
 import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
 import { filterAddonsForService } from '@/utils/rescheduleAddons';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
-import { buildRescheduleReason, extractEdgeFunctionError } from '@/utils/rescheduleRequestFormatter';
+import {
+  buildRescheduleReason,
+  extractEdgeFunctionError,
+} from '@/utils/rescheduleRequestFormatter';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
 import { normalizeAddress, addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
@@ -112,10 +115,10 @@ export const RescheduleDialog = ({
     }
   }, [data]);
 
-  // Callback to handle service selection
+  // Callback to handle service selection (null clears when a service becomes unavailable)
   const handleServiceSelect = useCallback((service) => {
     if (!service) {
-      console.warn('RescheduleDialog: handleServiceSelect called with no service data');
+      setSelectedService(null);
       return;
     }
 
@@ -167,7 +170,7 @@ export const RescheduleDialog = ({
     setPendingAddressVerification(Boolean(addressData.pending_address_verification));
   }, []);
 
-  const handleNext = () => {
+  const handleNext = async () => {
     // Validate current step before proceeding
     if (currentStep === STEPS.SERVICE && !selectedService) {
       toast({ title: "Service Required", description: "Please select a service plan.", variant: "destructive" });
@@ -181,6 +184,21 @@ export const RescheduleDialog = ({
       }
       if (selectedService?.id !== 3 && (!newPickupDate || !newPickupTime)) {
         toast({ title: "End Date/Time Required", description: "Please select end date and time.", variant: "destructive" });
+        return;
+      }
+
+      const verification = await verifyRescheduleDatesAvailable({
+        serviceId: selectedService?.id,
+        bookingId,
+        dropOffDate: newDropOffDate,
+        pickupDate: selectedService?.id === 3 ? null : newPickupDate,
+      });
+      if (!verification.ok) {
+        toast({
+          title: "Dates Unavailable",
+          description: verification.message,
+          variant: "destructive",
+        });
         return;
       }
     }
@@ -284,9 +302,27 @@ export const RescheduleDialog = ({
         ? Boolean(structuredContact && !addressesAreEqual(structuredContact, originalAddressSource))
         : Boolean(structuredDelivery && !addressesAreEqual(structuredDelivery, originalAddressSource));
 
+      const originalAddressDisplay = formatAddressDisplay(originalAddressSource);
+      const newAddressDisplay =
+        formatAddressDisplay(isDumpLoaderPickup ? structuredContact : structuredDelivery) ||
+        (isDumpLoaderPickup ? null : verifiedAddress) ||
+        '';
+
+      const days = calculateDays(newDropOffDate, newPickupDate);
+      const newCosts = await calculateBookingCosts(
+        selectedService,
+        days,
+        selectedAddonsList,
+        selectedService?.id === 2 ? 0 : distanceMiles
+      );
+      const originalTotal = Number(data?.originalCosts?.total ?? originalBooking?.total_price ?? 0);
+      const newTotal = Number(newCosts?.total ?? originalTotal);
+
       const rescheduleData = {
         booking_id: bookingId,
         new_service_id: selectedService?.id,
+        new_service_name: selectedService?.name || null,
+        original_service_name: data?.originalService?.name || originalBooking?.plan?.name || null,
         new_drop_off_date: newDropOffDate,
         new_pickup_date: newPickupDate,
         new_drop_off_time: newDropOffTime,
@@ -301,6 +337,8 @@ export const RescheduleDialog = ({
         new_delivery_address: isDumpLoaderPickup ? null : verifiedAddress,
         new_delivery_address_obj: isDumpLoaderPickup ? null : structuredDelivery,
         new_contact_address: isDumpLoaderPickup ? contactAddress : null,
+        original_address_display: originalAddressDisplay,
+        new_address_display: newAddressDisplay,
         address_changed: addressChanged,
         pending_address_verification: pendingAddressVerification,
         unverified_address: contactAddress?.unverified_address || null,
@@ -310,6 +348,19 @@ export const RescheduleDialog = ({
         customer_comments: comments,
         agreements_accepted: agreementsAccepted,
         request_timestamp: new Date().toISOString(),
+        original_total: originalTotal,
+        new_total: newTotal,
+        original_total_price: originalTotal,
+        new_total_price: newTotal,
+        pricing: {
+          serviceCost: newCosts.serviceCost,
+          addonsCost: newCosts.addonsCost,
+          mileageCharge: newCosts.mileageCharge,
+          subtotal: newCosts.subtotal,
+          tax: newCosts.tax,
+          taxRate: newCosts.taxRate,
+          total: newTotal,
+        },
       };
 
       const reason = buildRescheduleReason({
@@ -333,20 +384,12 @@ export const RescheduleDialog = ({
       console.log('Submitting reschedule request:', { bookingId, reasonLength: reason.length, adminMode });
 
       if (adminMode) {
-        const days = calculateDays(newDropOffDate, newPickupDate);
-        const newCosts = await calculateBookingCosts(
-          selectedService,
-          days,
-          selectedAddonsList,
-          selectedService?.id === 2 ? 0 : distanceMiles
-        );
-
         const { data: adminData, error: adminError } = await supabase.functions.invoke('admin-complete-reschedule', {
           body: {
             bookingId: Number(bookingId),
             initiatedBy,
             adminEmail,
-            newTotalPrice: newCosts.total,
+            newTotalPrice: newTotal,
             rescheduleDetails: rescheduleData,
           },
         });
@@ -390,7 +433,7 @@ export const RescheduleDialog = ({
 
         toast({
           title: 'Reschedule Request Submitted!',
-          description: 'Your request has been submitted for admin review. Inventory changes will be processed upon approval.',
+          description: 'Your request has been submitted for scheduling department review. Inventory changes will be processed upon approval.',
         });
 
         onSuccess?.();
@@ -481,7 +524,7 @@ export const RescheduleDialog = ({
           {currentStep === STEPS.DATETIME && (
             <RescheduleDateTimeSelector
               booking={data.originalBooking}
-              availableDates={data.availableDates}
+              bookingId={bookingId}
               newDropOffDate={newDropOffDate}
               setNewDropOffDate={setNewDropOffDate}
               newPickupDate={newPickupDate}

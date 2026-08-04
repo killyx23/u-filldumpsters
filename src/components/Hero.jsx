@@ -10,35 +10,46 @@ const ServiceCard = ({
   id,
   onClick
 }) => {
-  // Common visual layout for ID 1 (16 Yard Dumpster), ID 2 (Dump Loader Trailer), and ID 3 (Rock Mulch and Gravel)
+  const numericId = Number(id);
   let imageUrl = "";
-  if (id === 1) {
+  if (numericId === 1) {
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
-  } else if (id === 2) {
+  } else if (numericId === 2) {
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/71ba93b0b17b71051b7ab08600b18632.jpg";
-  } else if (id === 3) {
+  } else if (numericId === 3) {
     imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
-  } else if (id === 5) {
+  } else if (numericId === 5) {
     imageUrl = "/images/diy-heavy-equipment.png";
   }
+
+  const handleActivate = () => onClick(numericId);
   
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }} 
       animate={{ opacity: 1, y: 0 }} 
       transition={{ duration: 0.5, delay }} 
-      onClick={() => onClick(id)} 
-      className="bg-white/10 backdrop-blur-md rounded-xl shadow-lg border border-white/20 text-center flex flex-col h-full overflow-hidden group cursor-pointer"
+      onClick={handleActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleActivate();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`View ${name} pricing and book`}
+      className="bg-white/10 backdrop-blur-md rounded-xl shadow-lg border border-white/20 text-center flex flex-col h-full overflow-hidden group cursor-pointer hover:border-yellow-400/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
     >
       <div className="w-full aspect-[16/10] overflow-hidden">
         <img 
           src={imageUrl} 
           alt={name} 
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none" 
         />
       </div>
       <div className="p-8 flex flex-col items-center justify-center flex-grow">
-        <h3 className="text-2xl font-bold text-yellow-400 leading-tight">
+        <h3 className="text-2xl font-bold text-yellow-400 leading-tight group-hover:underline underline-offset-4">
           {name}
         </h3>
       </div>
@@ -103,56 +114,61 @@ export const Hero = () => {
   }, []);
 
   const scrollToService = serviceId => {
-    const idMap = {
-      1: '16-yard-dumpster',
-      2: 'dump-loader-trailer',
-      3: 'rock-mulch-gravel',
-      5: 'mini-excavator',
-    };
-    const targetId = idMap[serviceId];
-    if (!targetId) return;
+    const numericId = Number(serviceId);
+    if (!Number.isFinite(numericId)) return;
 
-    // Try finding the exact container by ID or data attribute
-    let targetElement = document.getElementById(targetId) || document.querySelector(`[data-service-id="${targetId}"]`);
+    // PlanCard sets data-service-id to the numeric service id
+    let targetElement = document.querySelector(`[data-service-id="${numericId}"]`);
 
-    // Fallback: search for headings containing the service name if explicit IDs are missing
+    // Fallback: match plan card headings by service name
     if (!targetElement) {
       const headings = Array.from(document.querySelectorAll('h3, h2'));
       const searchTexts = {
         1: '16 Yard Dumpster',
         2: 'Dump Loader Trailer',
-        3: 'Rock Mulch',
-        4: 'Mulch',
-        5: 'Excavator',
+        3: 'Rock, Mulch',
+        5: 'DIY Heavy Equipment',
       };
-      const match = headings.find(h => h.textContent.includes(searchTexts[serviceId]) || h.textContent.includes('Decorative Rock'));
+      const needle = searchTexts[numericId];
+      const match = needle
+        ? headings.find((h) => h.textContent.includes(needle))
+        : null;
       if (match) {
-        // Assume the parent wrapper is the card containing the book button
-        targetElement = match.closest('.bg-white\\/10') || match.closest('div[class*="rounded"]') || match.parentElement;
+        targetElement =
+          match.closest('[data-service-id]') ||
+          match.closest('div[class*="rounded"]') ||
+          match.parentElement;
       }
     }
-    
-    if (targetElement) {
-      // Calculate offset to move the page down
-      const elementRect = targetElement.getBoundingClientRect();
-      const absoluteTop = elementRect.top + window.scrollY;
 
-      // Reduced scroll offset by an additional 1/8 of the viewport height
-      const offsetPosition = absoluteTop + window.innerHeight - window.innerHeight / 4 - window.innerHeight / 8;
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: 'smooth'
+    if (!targetElement) {
+      document.getElementById('choose-your-service')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
       });
-
-      // Find the corresponding "Book Now" button and focus it
-      setTimeout(() => {
-        const buttons = Array.from(targetElement.querySelectorAll('button'));
-        const bookBtn = buttons.find(b => b.textContent.toLowerCase().includes('book')) || buttons[0];
-        if (bookBtn) {
-          bookBtn.focus({ preventScroll: true });
-        }
-      }, 300);
+      return;
     }
+
+    const headerOffset = 96;
+    const absoluteTop = targetElement.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({
+      top: Math.max(0, absoluteTop - headerOffset),
+      behavior: 'smooth',
+    });
+
+    targetElement.classList.add('ring-2', 'ring-yellow-400', 'ring-offset-2', 'ring-offset-slate-900');
+    window.setTimeout(() => {
+      targetElement.classList.remove('ring-2', 'ring-yellow-400', 'ring-offset-2', 'ring-offset-slate-900');
+    }, 1600);
+
+    window.setTimeout(() => {
+      const buttons = Array.from(targetElement.querySelectorAll('button'));
+      const bookBtn =
+        buttons.find((b) => b.textContent.toLowerCase().includes('book')) || buttons[0];
+      if (bookBtn) {
+        bookBtn.focus({ preventScroll: true });
+      }
+    }, 400);
   };
 
   return (

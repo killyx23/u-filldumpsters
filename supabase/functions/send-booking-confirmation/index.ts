@@ -112,7 +112,7 @@ const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE)
 const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const plan = booking.plan || {};
   const addons = booking.addons || {};
-  const basePrice = Number(plan.base_price ?? plan.price ?? 0);
+  const basePrice = Number(plan.price ?? plan.base_price ?? 0);
   const subtotal = Number(booking.subtotal_before_tax ?? 0);
   const tax = Number(booking.tax_amount ?? 0);
   const total = resolveBookingGrandTotal(booking);
@@ -281,7 +281,7 @@ const generateRefundEmailHTML = (booking) => {
         Hi ${customerName},
       </p>
       <p style="color: #374151; font-size: 15px; line-height: 1.6;">
-        We're sorry to see you go. We truly miss your business and hope you'll choose U-Fill Dumpsters again whenever you need us.
+        We're sorry to see you go. We truly miss your business and hope that in the future you'll be able to provide the proper verification information so we can welcome you back to purchase with us again.
         Your cancellation for Booking #${booking.id} has been approved, and a refund of
         <strong>${formatCurrency(refundAmount)}</strong> has been processed
         ${feeAmount > 0 ? ` (cancellation fee: <strong>${formatCurrency(feeAmount)}</strong>)` : ""}.
@@ -320,12 +320,12 @@ const generateRefundEmailHTML = (booking) => {
         <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.5;">${reason}</p>
       </div>` : ""}
       <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-top: 25px;">
-        Refunds typically appear on your original payment method within a few business days, depending on your bank or card issuer.
+        Per our rental agreement, refunds are typically processed within 1–2 business days. Your bank or card issuer usually posts the credit within 5–10 business days; in rare cases it may take up to 30 days.
         If you have any questions, reply to this email or contact us through your Customer Portal.
       </p>
     </div>
     <div style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
-      <p style="margin: 0; color: #6b7280; font-size: 13px;">Thank you for considering U-Fill Dumpsters. We hope to serve you again soon.</p>
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">Thank you for considering U-Fill Dumpsters. We hope to serve you again soon with complete verification on file.</p>
     </div>
   </div>
 </body>
