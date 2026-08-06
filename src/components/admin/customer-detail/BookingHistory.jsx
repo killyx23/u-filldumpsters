@@ -111,7 +111,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {stripeChargeId}</p>
                 </div>
                 <div className="text-right">
-                    <StatusBadge status={booking.status} />
+                    <StatusBadge status={booking.status} booking={booking} />
                     <p className="font-bold text-lg text-green-400 mt-1">${Number(booking.total_price || 0).toFixed(2)}</p>
                 </div>
             </div>

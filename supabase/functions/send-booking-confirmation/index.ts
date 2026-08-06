@@ -862,6 +862,78 @@ Deno.serve(async (req)=>{
         }
       });
     }
+
+    // PIN delivery email (issued ~12h before pickup). Uses appointment times only — no grace hour.
+    const emailType = body.email_type || body.emailType || "confirmation";
+    if (emailType === "pin_update") {
+      const pin = body.pin || body.access_pin;
+      if (!pin) {
+        return new Response(JSON.stringify({ error: "pin is required for pin_update" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const pickupDateLabel = formatDate(booking.drop_off_date);
+      const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
+      const returnDateLabel = formatDate(booking.pickup_date);
+      const returnTimeLabel = formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot || "";
+      // Activation is 5 minutes before the scheduled pickup (matches getPinActivationStart).
+      const activationLabel = pickupTimeLabel
+        ? `${pickupDateLabel} at ${pickupTimeLabel} (code works 5 minutes early)`
+        : `${pickupDateLabel} (code works 5 minutes early)`;
+      const pinHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:22px;">Your Access Code — Order #${booking.id}</h1>
+    </div>
+    <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
+      <p>Hi ${booking.name || "there"},</p>
+      <p>Your Dump Loader access code is ready. Enter it on the padlock at pickup.</p>
+      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>
+      <p><strong>Activates:</strong> ${activationLabel}</p>
+      <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
+      <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+      </p>
+    </div>
+  </div>
+</body></html>`;
+      const pinSubject = `Your Access Code for Order #${booking.id} — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_update to ${recipientEmail}`);
+      const pinResult = await sendEmailWithRetry(recipientEmail, pinSubject, pinHtml);
+      if (!pinResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send PIN email",
+          details: pinResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const notifiedAt = new Date().toISOString();
+      await supabase.from("bookings").update({ pin_notification_sent_at: notifiedAt }).eq("id", booking.id);
+      await supabase
+        .from("rental_access_codes")
+        .update({ notified_at: notifiedAt })
+        .eq("order_id", booking.id)
+        .eq("status", "active");
+      return new Response(JSON.stringify({
+        success: true,
+        message: "PIN email sent successfully",
+        provider: pinResult.provider,
+        recipient: recipientEmail,
+        email_type: "pin_update",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
     let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
     const { data: premiumPlan } = await supabase

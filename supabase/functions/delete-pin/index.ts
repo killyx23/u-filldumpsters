@@ -165,8 +165,7 @@ Deno.serve(async (req)=>{
       }, 401);
     }
     if (callerType === "admin") {
-      const { data: adminCheck } = await supabase.from("admin_users").select("id").eq("user_id", user.id).single();
-      if (!adminCheck) {
+      if (user.app_metadata?.is_admin !== true) {
         return jsonResponse({
           success: false,
           error: "Admin access required"

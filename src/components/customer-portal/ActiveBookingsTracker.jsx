@@ -1,11 +1,12 @@
 import React from 'react';
-import { Clock, Truck, CheckCircle, MapPin } from 'lucide-react';
+import { Clock, Truck, CheckCircle, MapPin, KeyRound } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format, parseISO, isValid } from 'date-fns';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 
 export const ActiveBookingsTracker = ({ bookings }) => {
   const activeBookings = bookings.filter(b => 
-    ['pending_payment', 'Confirmed', 'Delivered', 'waiting_to_be_returned', 'in_transit', 'Rescheduled'].includes(b.status) || 
+    ['pending_payment', 'Confirmed', 'Delivered', 'waiting_to_be_returned', 'in_transit', 'Rescheduled', 'pending_checklist'].includes(b.status) || 
     b.pending_address_verification
   ).sort((a, b) => new Date(a.drop_off_date) - new Date(b.drop_off_date));
 
@@ -20,8 +21,23 @@ export const ActiveBookingsTracker = ({ bookings }) => {
   }
 
   const getStageInfo = (booking) => {
-    if (booking.pending_address_verification) return { stage: 0, text: 'Verification Pending', color: 'badge-pending' };
-    
+    if (booking.pending_address_verification) {
+      return { stage: 0, text: 'Verification Pending', color: 'badge-pending' };
+    }
+
+    const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
+
+    if (isPickup) {
+      // Self-pickup timeline driven by lock timestamps
+      if (booking.returned_at || booking.status === 'pending_checklist') {
+        return { stage: 3, text: 'Returned', color: 'badge-delivered' };
+      }
+      if (booking.rented_out_at || booking.status === 'Delivered' || booking.status === 'waiting_to_be_returned') {
+        return { stage: 2, text: 'Rented', color: 'badge-in-transit' };
+      }
+      return { stage: 1, text: 'Scheduled', color: 'badge-scheduled' };
+    }
+
     switch (booking.status) {
       case 'pending_payment':
       case 'Confirmed':
@@ -31,6 +47,7 @@ export const ActiveBookingsTracker = ({ bookings }) => {
         return { stage: 2, text: 'In Transit', color: 'badge-in-transit' };
       case 'Delivered':
       case 'waiting_to_be_returned':
+      case 'pending_checklist':
         return { stage: 3, text: 'Active/Delivered', color: 'badge-delivered' };
       default:
         return { stage: 1, text: 'Scheduled', color: 'badge-scheduled' };
@@ -60,8 +77,13 @@ export const ActiveBookingsTracker = ({ bookings }) => {
       <div className="space-y-6">
         {activeBookings.map(booking => {
           const isDelivery = booking.addons?.isDelivery;
+          const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
           const serviceName = (booking.plan?.name || 'Service') + (isDelivery ? ' with Delivery' : '');
           const { stage, text, color } = getStageInfo(booking);
+
+          const step2Label = isPickup ? 'Rented' : 'In Transit';
+          const step3Label = isPickup ? 'Returned' : 'Delivered';
+          const Step2Icon = isPickup ? KeyRound : Truck;
 
           return (
             <Card key={booking.id} className="bg-white/5 border-white/10 text-white overflow-hidden">
@@ -94,16 +116,16 @@ export const ActiveBookingsTracker = ({ bookings }) => {
 
                   <div className="relative z-10 flex flex-col items-center">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-gray-900 transition-colors ${stage >= 2 ? 'bg-orange-500 text-white' : 'bg-gray-700 text-gray-400'}`}>
-                      <Truck className="w-5 h-5" />
+                      <Step2Icon className="w-5 h-5" />
                     </div>
-                    <span className="text-xs font-semibold mt-2 absolute top-full pt-1">In Transit</span>
+                    <span className="text-xs font-semibold mt-2 absolute top-full pt-1">{step2Label}</span>
                   </div>
 
                   <div className="relative z-10 flex flex-col items-center">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-gray-900 transition-colors ${stage >= 3 ? 'bg-green-500 text-white' : 'bg-gray-700 text-gray-400'}`}>
                       <CheckCircle className="w-5 h-5" />
                     </div>
-                    <span className="text-xs font-semibold mt-2 absolute top-full pt-1">Delivered</span>
+                    <span className="text-xs font-semibold mt-2 absolute top-full pt-1">{step3Label}</span>
                   </div>
                 </div>
 
@@ -111,16 +133,26 @@ export const ActiveBookingsTracker = ({ bookings }) => {
                   <div className="flex items-start gap-3">
                     <MapPin className="text-blue-400 w-5 h-5 mt-0.5" />
                     <div>
-                      <p className="text-xs text-gray-400 uppercase font-semibold">Delivery Address</p>
+                      <p className="text-xs text-gray-400 uppercase font-semibold">
+                        {isPickup ? 'Pickup Location' : 'Delivery Address'}
+                      </p>
                       <p className="text-sm font-medium">{booking.delivery_address?.street || booking.street || 'Not provided'}</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <Clock className="text-yellow-400 w-5 h-5 mt-0.5" />
                     <div>
-                      <p className="text-xs text-gray-400 uppercase font-semibold">Estimated Time</p>
+                      <p className="text-xs text-gray-400 uppercase font-semibold">
+                        {isPickup
+                          ? (booking.returned_at ? 'Returned At' : booking.rented_out_at ? 'Rented At' : 'Scheduled Pickup')
+                          : 'Estimated Time'}
+                      </p>
                       <p className="text-sm font-medium">
-                        {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • {formatTime(booking.drop_off_time_slot)}
+                        {booking.returned_at
+                          ? format(parseISO(booking.returned_at), 'MMM d, yyyy • h:mm a')
+                          : booking.rented_out_at && isPickup
+                            ? format(parseISO(booking.rented_out_at), 'MMM d, yyyy • h:mm a')
+                            : `${format(parseISO(booking.drop_off_date), 'MMM d, yyyy')} • ${formatTime(booking.drop_off_time_slot)}`}
                       </p>
                     </div>
                   </div>

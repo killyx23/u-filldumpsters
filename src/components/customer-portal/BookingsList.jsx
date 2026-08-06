@@ -14,6 +14,7 @@ import {
   Star
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 
 export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onRescheduleClick }) => {
   const [filterStatus, setFilterStatus] = useState('all');
@@ -24,7 +25,7 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
       if (filterStatus === 'upcoming') {
          result = result.filter(b => ['pending_payment', 'Confirmed', 'Rescheduled'].includes(b.status) && !b.pending_address_verification);
       } else if (filterStatus === 'past') {
-         result = result.filter(b => ['Completed', 'flagged', 'Returned', 'Cancelled'].includes(b.status));
+         result = result.filter(b => ['Completed', 'flagged', 'Returned', 'Cancelled', 'pending_checklist'].includes(b.status));
       } else if (filterStatus === 'pending') {
          result = result.filter(b => b.pending_address_verification || ['pending_verification', 'pending_review'].includes(b.status));
       }
@@ -35,6 +36,15 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
   const getStatusInfo = (booking) => {
     if (booking.pending_address_verification) {
         return { text: 'Address Pending', class: 'badge-pending', icon: <MapPin className="h-3 w-3" /> };
+    }
+    const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
+    if (isPickup) {
+      if (booking.returned_at || booking.status === 'pending_checklist') {
+        return { text: 'Returned', class: 'badge-delivered', icon: <CheckCircle className="h-3 w-3" /> };
+      }
+      if (booking.rented_out_at || booking.status === 'Delivered' || booking.status === 'waiting_to_be_returned') {
+        return { text: 'Rented', class: 'badge-in-transit', icon: <Truck className="h-3 w-3" /> };
+      }
     }
     switch (booking.status) {
         case 'pending_verification':
@@ -48,6 +58,8 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
         case 'Delivered':
         case 'waiting_to_be_returned':
             return { text: 'Active Rental', class: 'badge-in-transit', icon: <Truck className="h-3 w-3" /> };
+        case 'pending_checklist':
+            return { text: isPickup ? 'Returned' : 'Pending Checklist', class: 'badge-delivered', icon: <CheckCircle className="h-3 w-3" /> };
         case 'Completed':
         case 'flagged':
         case 'Returned':

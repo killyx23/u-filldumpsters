@@ -17,6 +17,7 @@ import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/dist
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -340,6 +341,32 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
 };
 
 export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, customer = {} }) => {
+    const [pinStatusByOrder, setPinStatusByOrder] = useState({});
+
+    useEffect(() => {
+        const pickupIds = (bookings || [])
+            .filter((b) => isCustomerPickupService(b.plan, b.addons || {}))
+            .map((b) => b.id);
+        if (!pickupIds.length) {
+            setPinStatusByOrder({});
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const { data } = await supabase
+                .from('rental_access_codes')
+                .select('order_id, status, lock_confirmed_at, pin_type, access_pin')
+                .in('order_id', pickupIds)
+                .eq('status', 'active');
+            if (cancelled) return;
+            const map = {};
+            for (const row of data || []) {
+                map[row.order_id] = row;
+            }
+            setPinStatusByOrder(map);
+        })();
+        return () => { cancelled = true; };
+    }, [bookings]);
     if (bookings.length === 0) {
         return (
             <div className="text-center py-12 bg-white/5 rounded-lg">
@@ -388,12 +415,12 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             case 'Delivered':
                  updates = { ...updates, picked_up_at: null, returned_at: null };
                  const booking = bookings.find(b => b.id === bookingId);
-                 const timestampField = booking?.plan?.id === 2 ? 'rented_out_at' : 'delivered_at';
+                 const timestampField = isCustomerPickupService(booking?.plan, booking?.addons || {}) ? 'rented_out_at' : 'delivered_at';
                  if (!booking?.[timestampField]) updates[timestampField] = new Date().toISOString();
                 break;
             case 'pending_checklist':
                  const bookingToComplete = bookings.find(b => b.id === bookingId);
-                 const completionTimestampField = bookingToComplete?.plan?.id === 2 ? 'returned_at' : 'picked_up_at';
+                 const completionTimestampField = isCustomerPickupService(bookingToComplete?.plan, bookingToComplete?.addons || {}) ? 'returned_at' : 'picked_up_at';
                  if(!bookingToComplete?.[completionTimestampField]) updates[completionTimestampField] = new Date().toISOString();
                 break;
             default: break;
@@ -437,6 +464,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const dropOffTimeLabel = convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A';
                 const pickupTimeLabel = convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A';
                 const oneWayMiles = resolveOneWayMiles(booking, customer);
+                const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
 
                 return (
                     <motion.div
@@ -451,8 +479,21 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 <h3 className="text-2xl font-bold text-white">Active Rental Details</h3>
                                 <p className="text-blue-200">Booking ID: {booking.id}</p>
                             </div>
-                            <StatusBadge status={booking.status} />
+                            <StatusBadge status={booking.status} booking={booking} />
                         </div>
+
+                        {isPickup && booking.pin_generated_at && pinStatusByOrder[booking.id] && !pinStatusByOrder[booking.id].lock_confirmed_at && (
+                            <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+                                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                <span>
+                                    PIN not confirmed on lock
+                                    {pinStatusByOrder[booking.id].access_pin
+                                        ? ` (${pinStatusByOrder[booking.id].access_pin})`
+                                        : ''}
+                                    — bridge delivery pending. Watchdog will retry; AlgoPIN fallback in the final hour.
+                                </span>
+                            </div>
+                        )}
 
                         <DistanceWarning booking={booking} customer={customer} />
 
@@ -460,8 +501,8 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Package />} label="Service" value={booking.plan?.name} />
                             <DetailItem icon={<DollarSign />} label="Total Price" value={`$${totalPrice}`} />
                             <DetailItem icon={<Calendar />} label="Booked On" value={booking.created_at ? format(parseISO(booking.created_at), 'Pp') : 'N/A'} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
                             <DetailItem icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(oneWayMiles)} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                         </div>
@@ -501,18 +542,36 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <div className="space-y-2">
                                 {booking.delivered_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}
                                 {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
-                                {booking.rented_out_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Rented Out On" value={format(parseISO(booking.rented_out_at), 'Pp')} />}
-                                {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                                {booking.rented_out_at && (
+                                  <DetailItem
+                                    icon={<CheckCircle className="text-green-400" />}
+                                    label={booking.rental_started_notified_at ? 'Rented Out On (lock detected)' : 'Rented Out On'}
+                                    value={format(parseISO(booking.rented_out_at), 'Pp')}
+                                  />
+                                )}
+                                {booking.returned_at && (
+                                  <DetailItem
+                                    icon={<CheckCircle className="text-green-400" />}
+                                    label={booking.return_notified_at ? 'Returned On (lock detected)' : 'Returned On'}
+                                    value={format(parseISO(booking.returned_at), 'Pp')}
+                                  />
+                                )}
+                                {isPickup && !booking.rented_out_at && (
+                                  <p className="text-xs text-blue-200/80 italic">Waiting for first unlock via Wi-Fi bridge — or mark rented manually.</p>
+                                )}
+                                {isPickup && booking.rented_out_at && !booking.returned_at && (
+                                  <p className="text-xs text-blue-200/80 italic">Rental in progress. Final lock at/after return time will mark Returned automatically.</p>
+                                )}
                             </div>
                            
                             <div className="flex flex-wrap items-center gap-2">
-                            {booking.plan?.id !== 2 && (
+                            {!isPickup && (
                                 <>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'Delivered', 'delivered_at')} disabled={!!booking.delivered_at}><Truck className="mr-2 h-4 w-4" /> Mark Delivered</Button>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'pending_checklist', 'picked_up_at')} disabled={!booking.delivered_at || !!booking.picked_up_at}><CheckCircle className="mr-2 h-4 w-4" /> Mark Picked Up</Button>
                                 </>
                             )}
-                            {booking.plan?.id === 2 && (
+                            {isPickup && (
                                 <>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'Delivered', 'rented_out_at')} disabled={!!booking.rented_out_at}>Mark as Rented</Button>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'pending_checklist', 'returned_at')} disabled={!booking.rented_out_at || !!booking.returned_at}>Mark as Returned</Button>

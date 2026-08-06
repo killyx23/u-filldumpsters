@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Key, UserPlus, Copy } from 'lucide-react';
+import { Loader2, Key, UserPlus, Copy, Unlock } from 'lucide-react';
 
 export const SettingsManager = () => {
   const { isAdmin } = useAuth();
@@ -142,6 +143,20 @@ export const SettingsManager = () => {
 
   return (
     <div className="space-y-6">
+      <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+        <h2 className="text-xl font-bold text-white mb-2 flex items-center">
+          <Unlock className="mr-2 h-5 w-5 text-purple-400" />
+          Lock lifecycle testing
+        </h2>
+        <p className="text-sm text-gray-400 mb-4">
+          Create a short-lived real padlock PIN on a booking and simulate unlock/lock events
+          so you can verify Rented → Returned + email/SMS without waiting for a full rental window.
+        </p>
+        <Button asChild className="bg-purple-600 hover:bg-purple-700">
+          <Link to="/admin/lock-test">Open Lock Test Lab</Link>
+        </Button>
+      </div>
+
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
         <h2 className="text-xl font-bold text-white mb-4 flex items-center">
           <Key className="mr-2 h-5 w-5 text-yellow-400" />

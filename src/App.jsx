@@ -24,6 +24,7 @@ import { BookingConfirmation } from '@/pages/BookingConfirmation';
 import { ReceiptPage } from '@/pages/ReceiptPage';
 import { ProductShowcasePage } from '@/pages/ProductShowcasePage';
 import AccessCodesPage from '@/pages/AccessCodesPage';
+import LockLifecycleTestPage from '@/pages/LockLifecycleTestPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
@@ -146,6 +147,7 @@ function App() {
                 <Route path="dashboard" element={<AdminDashboard />} />
                 <Route path="customer/:customerId" element={<CustomerDetailView />} />
                 <Route path="access-codes" element={<AccessCodesPage />} />
+                <Route path="lock-test" element={<LockLifecycleTestPage />} />
                 <Route index element={<Navigate to="dashboard" replace />} />
                 <Route path="*" element={<Navigate to="dashboard" replace />} />
               </Route>
