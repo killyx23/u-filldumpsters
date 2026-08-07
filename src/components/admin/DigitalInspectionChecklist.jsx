@@ -139,7 +139,7 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
       const inspectionReport = {
         inspection_type: inspectionType,
         inspection_date: new Date().toISOString(),
-        trailer_id: 'REDACTED_LOCK_ID', // Lock ID
+        trailer_id: booking.equipment_id || booking.id, // Prefer equipment; never hardcode lock IDs
         customer_name: booking.name,
         checklist: inspectionData,
         needs_cleaning: needsCleaning,
@@ -253,7 +253,7 @@ export const DigitalInspectionChecklist = ({ booking, inspectionType = 'pickup',
           </div>
           <div>
             <p className="text-sm text-gray-400">Trailer ID</p>
-            <p className="text-white font-semibold">REDACTED_LOCK_ID</p>
+            <p className="text-white font-semibold">{booking.equipment_id || booking.id || '—'}</p>
           </div>
           <div>
             <p className="text-sm text-gray-400">Date/Time</p>

@@ -1,16 +1,23 @@
 node_modules
 # Supabase temporary folder
 supabase/.temp/
-supabase/.env
  *:Zone.Identifier
 dist/
-.env
-env
-.env.local
-.env.prod
-.env.*.local
-!.env.example
 .idea/workspace.xml
+
+# Env / secrets — never commit real values (.env.example is the only exception)
+.env
+.env.*
+!.env.example
+env
+*.env
+!*.env.example
+supabase/.env
+supabase/functions/.env
+supabase/functions/env
+**/.env
+**/.env.local
+**/.env.prod
 
 # AI/MCP deploy session artifacts (never commit)
 .deploy-*.json
