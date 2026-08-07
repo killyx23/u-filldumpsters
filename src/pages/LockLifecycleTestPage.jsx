@@ -106,7 +106,39 @@ export default function LockLifecycleTestPage() {
       setResult(data);
       const pinText = typeof data.pin === 'string' ? data.pin : data.pin?.access_pin || null;
       let description = data.result || data.action || 'Done';
-      if (data.needsConfirm) {
+      let toastTitle = data.needsConfirm ? 'Waiting on Bridge' : `${action} OK`;
+      let toastVariant = 'default';
+
+      if (action === 'sync' || action === 'probe') {
+        const parsed = Number(data.eventsParsed ?? data.parsedEvents?.length ?? 0);
+        const actionsList = Array.isArray(data.actions) ? data.actions : [];
+        const stateChanging = Number(
+          data.stateChanging ??
+            actionsList.filter(
+              (a) =>
+                String(a).includes('marked_rented') || String(a).includes('marked_returned'),
+            ).length,
+        );
+        if (action === 'probe') {
+          description = `Parsed ${parsed} event(s) from Igloohome activity. Inspect raw result below.`;
+        } else if (stateChanging > 0) {
+          toastTitle = 'Sync updated rental';
+          description = `Marked rented/returned from ${stateChanging} event(s) (${parsed} parsed). Check admin timestamps.`;
+        } else if (actionsList.length > 0) {
+          toastTitle = 'Sync OK — no rental change';
+          description =
+            data.bridgeHint ||
+            `Logged ${actionsList.length} in-window event(s) but rented/returned did not change (already set or outside rules).`;
+        } else {
+          toastTitle = 'Sync found nothing to apply';
+          toastVariant = 'destructive';
+          description =
+            data.bridgeHint ||
+            (parsed === 0
+              ? 'Bridge responded OK, but no unlock/lock events were found. Unlock and lock with this booking’s PIN near the Bridge, wait ~30–60s, then Sync again.'
+              : `Parsed ${parsed} historical event(s), but none match this booking’s PIN / time window — rented/returned were not updated.`);
+        }
+      } else if (data.needsConfirm) {
         description = pinText
           ? `PIN ${pinText} queued — waiting for Bridge delivery`
           : 'Waiting for Bridge to confirm PIN delivery';
@@ -121,8 +153,9 @@ export default function LockLifecycleTestPage() {
         description = `Cleared ${data.cleared?.confirmed ?? 0} PIN(s); stale remaining: ${data.stalePinCount ?? 0}`;
       }
       toast({
-        title: data.needsConfirm ? 'Waiting on Bridge' : `${action} OK`,
+        title: toastTitle,
         description,
+        variant: toastVariant,
       });
       return data;
     } catch (err) {
@@ -342,8 +375,11 @@ export default function LockLifecycleTestPage() {
               Sync Lock Activity (real)
             </Button>
             <p className="sm:col-span-2 text-xs text-slate-500 -mt-1">
-              Sync needs the Igloohome scope <code className="text-slate-400">create-bridge-proxied-job</code>.
-              If you get HTTP 403, enable that scope at web.igloohome.co/api, or use Simulate Unlock / Lock below.
+              Sync asks the Bridge to upload padlock logs, then reads Igloohome cloud activity.
+              Unlock must happen with the <strong className="text-slate-300">Confirmed PIN</strong> while
+              the lock is within a few feet of the Bridge (LED alone is not enough). If Sync still
+              finds 0 unlocks, open the Igloo app → Logs → Sync on your phone against the lock, then
+              Sync here — or use Simulate Unlock to advance admin without waiting on Igloohome.
             </p>
             <Button
               className="bg-orange-600 hover:bg-orange-700"
@@ -481,6 +517,87 @@ export default function LockLifecycleTestPage() {
                 </div>
               )}
 
+              {(result?.action === 'sync' || result?.action === 'probe') && (
+                <div
+                  className={`rounded-lg p-4 text-sm space-y-2 border ${
+                    (Array.isArray(result.actions) ? result.actions.length : 0) === 0 &&
+                    result.action === 'sync'
+                      ? 'bg-amber-950/40 border-amber-500/40 text-amber-100'
+                      : 'bg-black/30 border-white/10 text-slate-200'
+                  }`}
+                >
+                  <p className="font-semibold flex items-center gap-2">
+                    {Number(result.stateChanging || 0) > 0 ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-400" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-amber-400" />
+                    )}
+                    Sync / activity log result
+                  </p>
+                  <p className="font-mono text-xs">
+                    jobId: {String(result.jobId || 'none')}
+                  </p>
+                  <p className="font-mono text-xs">
+                    eventsParsed:{' '}
+                    {String(
+                      result.eventsParsed ??
+                        (Array.isArray(result.parsedEvents) ? result.parsedEvents.length : 0),
+                    )}
+                  </p>
+                  <p className="font-mono text-xs">
+                    eventsRelevant / stateChanging:{' '}
+                    {String(result.eventsRelevant ?? (Array.isArray(result.actions) ? result.actions.length : 0))}
+                    {' / '}
+                    {String(result.stateChanging ?? 0)}
+                  </p>
+                  {result.skipped ? (
+                    <p className="font-mono text-xs text-muted-foreground">
+                      skipped: outsideWindow={String(result.skipped.outsideWindow ?? 0)}, pinMismatch=
+                      {String(result.skipped.pinMismatch ?? 0)}, noPin={String(result.skipped.noPin ?? 0)}
+                    </p>
+                  ) : null}
+                  {result.diagnostics ? (
+                    <p className="font-mono text-xs text-muted-foreground">
+                      activePin…{String(result.diagnostics.activePinSuffix || '??')}, unlocksForActivePin=
+                      {String(result.diagnostics.unlocksForActivePin ?? 0)}, bridgeContactAt=
+                      {String(result.diagnostics.bridgeContactAt || 'none')}
+                    </p>
+                  ) : null}
+                  {Array.isArray(result.failedUnlockAttemptsInWindow) &&
+                  result.failedUnlockAttemptsInWindow.length > 0 ? (
+                    <p className="text-xs font-mono text-amber-200/90">
+                      failed PIN attempts in window:{' '}
+                      {result.failedUnlockAttemptsInWindow
+                        .map(
+                          (f) =>
+                            `${f.eventTimestamp} (*${f.pinSuffix || '??'})`,
+                        )
+                        .join('; ')}
+                    </p>
+                  ) : null}
+                  {typeof result.activityRowsFetched === "number" ? (
+                    <p className="text-xs font-mono text-muted-foreground">
+                      activityRowsFetched: {result.activityRowsFetched}
+                    </p>
+                  ) : null}
+                  {result.emptyBridgePayload ? (
+                    <p className="text-xs font-mono text-amber-200/90">
+                      emptyBridgePayload: true (jobType 15 body had no log rows — expected; history comes from /activity)
+                    </p>
+                  ) : null}
+                  {result.bridgeHint ? (
+                    <p className="text-xs text-amber-100/90">{result.bridgeHint}</p>
+                  ) : null}
+                  {Array.isArray(result.actions) && result.actions.length > 0 ? (
+                    <ul className="list-disc pl-5 text-xs font-mono space-y-1">
+                      {result.actions.map((a, i) => (
+                        <li key={i}>{typeof a === 'string' ? a : JSON.stringify(a)}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
+
               {Array.isArray(result?.instructions) && (
                 <ol className="list-decimal list-inside text-sm text-slate-300 space-y-1 bg-black/20 rounded-lg p-4">
                   {result.instructions.map((line, i) => (
@@ -515,8 +632,9 @@ export default function LockLifecycleTestPage() {
                 Client id {result.credentials?.clientIdLength} chars, secret{' '}
                 {result.credentials?.clientSecretLength} chars.
                 Green = that exact scope list is accepted. Red on a multi-scope row usually means
-                one unauthorized scope (often <code>create-bridge-proxied-job</code>) — Cognito
-                rejects the whole request. Setup still works via fallback.
+                one unauthorized scope — Cognito rejects the whole request. Activity sync needs
+                <code className="mx-1">get-activity-logs-bridge-proxied-job</code>
+                (legacy <code className="mx-1">create-bridge-proxied-job</code> is often unused).
                 Bridge Setup failing with HTTP 406 is hardware offline, not OAuth.
               </CardDescription>
             </CardHeader>

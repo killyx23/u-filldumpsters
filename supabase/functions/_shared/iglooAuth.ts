@@ -12,7 +12,6 @@ export const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 /** Scopes used by bridge PIN create/delete + job polling + device listing. */
 export const BRIDGE_PIN_SCOPES = [
   "igloohomeapi/create-pin-bridge-proxied-job",
-  "igloohomeapi/create-bridge-proxied-job",
   "igloohomeapi/delete-pin-bridge-proxied-job",
   "igloohomeapi/get-devices",
   "igloohomeapi/get-job-status",
@@ -22,7 +21,6 @@ export const BRIDGE_PIN_SCOPES = [
 /** Scopes used by generate-pin / AlgoPIN production path. */
 export const GENERATE_PIN_SCOPES = [
   "igloohomeapi/create-pin-bridge-proxied-job",
-  "igloohomeapi/create-bridge-proxied-job",
   "igloohomeapi/get-devices",
   "igloohomeapi/get-job-status",
   "igloohomeapi/algopin-onetime",
@@ -30,9 +28,9 @@ export const GENERATE_PIN_SCOPES = [
 ] as const;
 
 /**
- * Not every Igloohome app client is granted these. Including them in a PIN-token
- * request causes Cognito to reject the whole exchange — drop on retry for PIN flows.
- * Activity sync must NOT drop create-bridge-proxied-job (see getActivitySyncToken).
+ * Legacy umbrella scope — newer Igloohome apps use per-job scopes instead
+ * (e.g. create-pin-bridge-proxied-job, get-activity-logs-bridge-proxied-job).
+ * Including an unauthorized scope causes Cognito to reject the whole exchange.
  */
 export const OPTIONAL_OAUTH_SCOPES = [
   "igloohomeapi/create-bridge-proxied-job",
@@ -40,7 +38,16 @@ export const OPTIONAL_OAUTH_SCOPES = [
 
 export type OAuthResult = { token: string | null; reason?: string; scopesUsed?: string };
 
-export const ACTIVITY_SYNC_SCOPE = "igloohomeapi/create-bridge-proxied-job";
+/** Correct scope for bridge activity-log jobs (jobType 15). */
+export const ACTIVITY_SYNC_SCOPE = "igloohomeapi/get-activity-logs-bridge-proxied-job";
+
+/**
+ * Scope for GET /devices/{id}/activity.
+ * Empirically this endpoint 403s unless the access token was issued with ONLY
+ * this scope (mixing it with get-activity-logs-bridge-proxied-job or using an
+ * unscoped "all owned scopes" grant returns 403).
+ */
+export const DEVICE_ACTIVITY_SCOPE = "igloohomeapi/get-device-activity";
 
 /** Scopes required to pull lock activity logs (jobType 15). */
 export const ACTIVITY_SYNC_SCOPES = [
@@ -51,9 +58,13 @@ export const ACTIVITY_SYNC_SCOPES = [
 ] as const;
 
 export const ACTIVITY_SYNC_SCOPE_HINT =
-  "Enable the Igloohome API scope igloohomeapi/create-bridge-proxied-job on your developer credentials " +
-  "(https://web.igloohome.co/api/). PIN create uses a different scope and can work without it; " +
+  "Enable the Igloohome API scope igloohomeapi/get-activity-logs-bridge-proxied-job on your developer credentials " +
+  "(https://web.igloohome.co/api/). PIN create uses create-pin-bridge-proxied-job and can work without it; " +
   "Sync Lock Activity (jobType 15) cannot. Until then, use Simulate Unlock / Simulate Lock in the test lab.";
+
+export const DEVICE_ACTIVITY_SCOPE_HINT =
+  "Enable igloohomeapi/get-device-activity on your Igloohome developer credentials " +
+  "(https://web.igloohome.co/api/). Sync needs it to read unlock/lock history after the Bridge pull.";
 
 /** Decode Cognito access-token scope claim (space-separated). */
 export function tokenScopes(accessToken: string): string[] {
@@ -73,8 +84,8 @@ export function tokenHasScope(accessToken: string, scope: string): boolean {
 }
 
 /**
- * Token for activity-log sync. Requires create-bridge-proxied-job — do not silently
- * fall back to a weaker token that will only 403 on jobType 15.
+ * Token for activity-log sync. Requires get-activity-logs-bridge-proxied-job —
+ * do not silently fall back to a weaker token that will only 403 on jobType 15.
  */
 export async function getActivitySyncToken(
   clientId: string,
@@ -109,6 +120,25 @@ export async function getActivitySyncToken(
     token: null,
     reason: `${onlyRequired.reason || explicit.reason || "OAuth failed"}. ${ACTIVITY_SYNC_SCOPE_HINT}`,
     scopesUsed: onlyRequired.scopesUsed || explicit.scopesUsed,
+  };
+}
+
+/**
+ * Token for GET /devices/{id}/activity. Must be a solo-scope grant — see
+ * DEVICE_ACTIVITY_SCOPE comment.
+ */
+export async function getDeviceActivityToken(
+  clientId: string,
+  clientSecret: string,
+): Promise<OAuthResult> {
+  const only = await requestOAuthToken(clientId, clientSecret, [DEVICE_ACTIVITY_SCOPE]);
+  if (only.token && tokenHasScope(only.token, DEVICE_ACTIVITY_SCOPE)) {
+    return only;
+  }
+  return {
+    token: null,
+    reason: `${only.reason || "OAuth failed"}. ${DEVICE_ACTIVITY_SCOPE_HINT}`,
+    scopesUsed: only.scopesUsed,
   };
 }
 
@@ -214,10 +244,7 @@ export async function diagnoseOAuth(
     { label: "no scope requested (Cognito grants all owned)", scopes: [] },
     { label: "bridge PIN set (setup/clear)", scopes: BRIDGE_PIN_SCOPES },
     { label: "generate-pin / AlgoPIN set", scopes: GENERATE_PIN_SCOPES },
-    {
-      label: "bridge set minus create-bridge-proxied-job",
-      scopes: BRIDGE_PIN_SCOPES.filter((s) => !OPTIONAL_OAUTH_SCOPES.includes(s as typeof OPTIONAL_OAUTH_SCOPES[number])),
-    },
+    { label: "activity sync set (jobType 15)", scopes: ACTIVITY_SYNC_SCOPES },
     {
       label: "create-pin + get-devices",
       scopes: [
@@ -226,6 +253,9 @@ export async function diagnoseOAuth(
       ],
     },
     { label: "only igloohomeapi/algopin-onetime", scopes: ["igloohomeapi/algopin-onetime"] },
+    { label: `only ${ACTIVITY_SYNC_SCOPE}`, scopes: [ACTIVITY_SYNC_SCOPE] },
+    { label: `only ${DEVICE_ACTIVITY_SCOPE}`, scopes: [DEVICE_ACTIVITY_SCOPE] },
+    { label: "only igloohomeapi/create-bridge-proxied-job (legacy)", scopes: ["igloohomeapi/create-bridge-proxied-job"] },
     ...BRIDGE_PIN_SCOPES.map((s) => ({ label: `only ${s}`, scopes: [s] as const })),
   ];
 

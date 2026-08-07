@@ -1,17 +1,22 @@
 /**
  * sync-lock-activity
  *
- * Polls the Igloohome bridge for lock activity logs (jobType 15), matches PINs
- * to bookings, writes rental_tracking_logs, and advances the rented/returned
- * state machine.
+ * 1) Bridge jobType 15 (GET_LOGS) — uploads on-device logs to Igloohome cloud
+ * 2) GET /devices/{id}/activity — reads stored unlock/lock history
+ * 3) Match PINs → bookings, apply rented/returned state machine
  *
- * Probe mode: POST { "probe": true } or ?probe=1 — returns raw job response
- * without applying state changes (use once to confirm payload shape).
+ * Probe mode: POST { "probe": true } or ?probe=1 — returns raw payloads
+ * without applying state changes.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
-import { parseActivityLogsFromPayload } from "../_shared/iglooActivity.ts";
+import {
+  fetchDeviceActivityRows,
+  mergeActivityEvents,
+  parseActivityLogsFromPayload,
+  isEmptyActivityLogPayload,
+} from "../_shared/iglooActivity.ts";
 import {
   applyLockEvent,
   resolveOrderIdByPin,
@@ -19,7 +24,9 @@ import {
 } from "../_shared/lockEventState.ts";
 import {
   getActivitySyncToken,
+  getDeviceActivityToken,
   ACTIVITY_SYNC_SCOPE_HINT,
+  DEVICE_ACTIVITY_SCOPE_HINT,
 } from "../_shared/iglooAuth.ts";
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
@@ -111,6 +118,20 @@ async function pollJobStatus(
   return { completed: false as const, timedOut: true as const, raw: last };
 }
 
+function syncEmptyHint(activityRows: number, eventsParsed: number): string | undefined {
+  if (eventsParsed > 0) return undefined;
+  if (activityRows === 0) {
+    return (
+      "Bridge pull finished, but Igloohome cloud has no activity rows yet. " +
+      "Unlock/lock with this booking’s PIN while the padlock is near the Bridge, wait ~30–60s, then Sync again."
+    );
+  }
+  return (
+    `Fetched ${activityRows} activity row(s) from Igloohome, but none were unlock/lock events ` +
+    "we could match to a booking PIN. Confirm the PIN was used (not Bluetooth app unlock)."
+  );
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   const jsonResponse = makeJsonResponse(corsHeaders);
@@ -175,19 +196,7 @@ Deno.serve(async (req) => {
     }
 
     const jobResult = await pollJobStatus(accessToken, jobCreate.jobId);
-    if (probe) {
-      return jsonResponse({
-        success: true,
-        probe: true,
-        jobId: jobCreate.jobId,
-        jobCreate: jobCreate.raw,
-        jobResult: jobResult.raw,
-        parsedEvents: parseActivityLogsFromPayload(jobResult.raw),
-        message: "Probe complete — inspect jobResult / parsedEvents to confirm field mapping",
-      });
-    }
-
-    if (!jobResult.completed) {
+    if (!jobResult.completed && !probe) {
       return jsonResponse({
         success: false,
         error: jobResult.expired ? "Job expired" : "Job timed out",
@@ -196,8 +205,55 @@ Deno.serve(async (req) => {
       }, 504);
     }
 
-    const events = parseActivityLogsFromPayload(jobResult.raw);
-    console.log(`[sync-lock-activity] Parsed ${events.length} events from job ${jobCreate.jobId}`);
+    // Bridge job body usually has no log array (opResult.result=0 = success).
+    // Real history is on GET /devices/{id}/activity with a solo-scope token.
+    const activityOauth = await getDeviceActivityToken(clientId, clientSecret);
+    let activityRows: unknown[] = [];
+    let activityError: string | undefined;
+    if (!activityOauth.token) {
+      activityError = activityOauth.reason || DEVICE_ACTIVITY_SCOPE_HINT;
+    } else {
+      const fetched = await fetchDeviceActivityRows(activityOauth.token, lockId, {
+        maxPages: 5,
+        pageSize: 50,
+      });
+      activityRows = fetched.rows;
+      if (fetched.error) activityError = fetched.error;
+    }
+
+    const events = mergeActivityEvents(jobResult.raw, activityRows);
+    const emptyBridgePayload = isEmptyActivityLogPayload(jobResult.raw);
+
+    if (probe) {
+      return jsonResponse({
+        success: true,
+        probe: true,
+        jobId: jobCreate.jobId,
+        jobCreate: jobCreate.raw,
+        jobResult: jobResult.raw,
+        emptyBridgePayload,
+        activityRowsFetched: activityRows.length,
+        activityError,
+        activitySample: activityRows.slice(0, 3),
+        parsedEvents: events,
+        message:
+          "Probe complete — unlock/lock events come from GET /devices/.../activity after jobType 15",
+      });
+    }
+
+    if (activityError && events.length === 0) {
+      return jsonResponse({
+        success: false,
+        error: activityError,
+        hint: DEVICE_ACTIVITY_SCOPE_HINT,
+        jobId: jobCreate.jobId,
+        emptyBridgePayload,
+      }, 502);
+    }
+
+    console.log(
+      `[sync-lock-activity] Parsed ${events.length} events (activityRows=${activityRows.length}) from job ${jobCreate.jobId}`,
+    );
 
     const supabase = createClient(supabaseUrl, serviceKey);
     const actions: Array<{ pin: string | null; orderId: number | null; action: string }> = [];
@@ -223,6 +279,9 @@ Deno.serve(async (req) => {
       success: true,
       jobId: jobCreate.jobId,
       eventsParsed: events.length,
+      activityRowsFetched: activityRows.length,
+      emptyBridgePayload,
+      bridgeHint: syncEmptyHint(activityRows.length, events.length),
       actions,
       graceHourClosed: swept,
     });

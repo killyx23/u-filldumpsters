@@ -21,7 +21,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
 import { getBookingWindow, clampIgloohomeStart } from "../_shared/pinTiming.ts";
-import { parseActivityLogsFromPayload } from "../_shared/iglooActivity.ts";
+import {
+  fetchDeviceActivityRows,
+  mergeActivityEvents,
+  isEmptyActivityLogPayload,
+  parseFailedPinAttempt,
+} from "../_shared/iglooActivity.ts";
 import { ensurePinOnLock, clearKnownPins } from "../_shared/lockPin.ts";
 import {
   getOAuthToken,
@@ -29,7 +34,9 @@ import {
   bridgeOfflineHint,
   GENERATE_PIN_SCOPES,
   getActivitySyncToken,
+  getDeviceActivityToken,
   ACTIVITY_SYNC_SCOPE_HINT,
+  DEVICE_ACTIVITY_SCOPE_HINT,
 } from "../_shared/iglooAuth.ts";
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
@@ -458,7 +465,7 @@ Deno.serve(async (req) => {
         interpretation: [
           "Green = Cognito accepted that exact scope list.",
           "Red on a multi-scope set usually means ONE scope in the list is not authorized — Cognito rejects the whole request.",
-          "create-bridge-proxied-job is often unauthorized; Setup still works because we drop it and retry.",
+          "Per-job scopes are preferred (create-pin / get-activity-logs). Legacy create-bridge-proxied-job is often unauthorized and is dropped for PIN flows.",
           "If Setup fails with HTTP 406 / bridge offline, that is hardware connectivity — not OAuth. Use AlgoPIN until the Bridge is back online.",
         ],
         results: await diagnoseOAuth(clientId, clientSecret),
@@ -1065,13 +1072,42 @@ Deno.serve(async (req) => {
         if (pollBody.json?.jobResponse?.jobStatus === 2) break;
       }
 
+      // Bridge job body usually has no log array. Read cloud activity next.
+      const activityOauth = await getDeviceActivityToken(clientId, clientSecret);
+      let activityRows: unknown[] = [];
+      let activityError: string | undefined;
+      if (!activityOauth.token) {
+        activityError = activityOauth.reason || DEVICE_ACTIVITY_SCOPE_HINT;
+      } else {
+        const fetched = await fetchDeviceActivityRows(activityOauth.token, lockId, {
+          maxPages: 8,
+          pageSize: 50,
+        });
+        activityRows = fetched.rows;
+        if (fetched.error) activityError = fetched.error;
+      }
+
+      const events = mergeActivityEvents(jobRaw, activityRows);
+      const emptyBridgePayload = isEmptyActivityLogPayload(jobRaw);
+      const failedAttempts = (activityRows || [])
+        .map(parseFailedPinAttempt)
+        .filter(Boolean) as Array<{
+          eventTimestamp: string;
+          pinCode: string | null;
+          activityType: string;
+        }>;
+
       if (action === "probe") {
         return jsonResponse({
           success: true,
           probe: true,
           jobId,
           jobResult: jobRaw,
-          parsedEvents: parseActivityLogsFromPayload(jobRaw),
+          emptyBridgePayload,
+          activityRowsFetched: activityRows.length,
+          activityError,
+          activitySample: activityRows.slice(0, 3),
+          parsedEvents: events,
         });
       }
 
@@ -1084,24 +1120,118 @@ Deno.serve(async (req) => {
         }, 504);
       }
 
-      // Delegate to the shared sync path via internal invoke would recurse;
-      // instead apply events that match this booking's PIN.
-      const events = parseActivityLogsFromPayload(jobRaw);
-      const { data: pinRow } = await supabase
+      if (activityError && events.length === 0) {
+        return jsonResponse({
+          success: false,
+          error: activityError,
+          hint: DEVICE_ACTIVITY_SCOPE_HINT,
+          jobId,
+          emptyBridgePayload,
+        }, 502);
+      }
+
+      // Match unlocks to this booking's PIN validity windows (not only the
+      // compressed test schedule label). Pin-less AUTO_RELOCKs from months ago
+      // must not count as "applied".
+      const { data: pinRows } = await supabase
         .from("rental_access_codes")
-        .select("access_pin")
+        .select("access_pin, start_time, end_time, status")
         .eq("order_id", bookingId)
-        .eq("status", "active")
+        .in("status", ["active", "expired", "used"])
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(20);
+
+      const bookingStatus = await fetchBookingStatus(supabase, bookingId);
+      if ("error" in bookingStatus && bookingStatus.error && !bookingStatus.booking) {
+        return jsonResponse({ success: false, error: bookingStatus.error }, 404);
+      }
+      const window = getBookingWindow(bookingStatus.booking || {});
+      const pinSet = new Set(
+        (pinRows || []).map((r: { access_pin?: string }) => String(r.access_pin || "")).filter(Boolean),
+      );
+      const activePinRow = (pinRows || []).find((r: { status?: string }) => r.status === "active") ||
+        (pinRows || [])[0];
+      const activePin = String(activePinRow?.access_pin || "");
+
+      // Prefer each PIN's own validity; also allow booking window ±1h.
+      const pinWindows = (pinRows || []).map((r: {
+        access_pin?: string;
+        start_time?: string;
+        end_time?: string;
+      }) => ({
+        pin: String(r.access_pin || ""),
+        lo: new Date(r.start_time || 0).getTime() - 60 * 60 * 1000,
+        hi: new Date(r.end_time || 0).getTime() + 2 * 60 * 60 * 1000,
+      })).filter((w: { pin: string; lo: number; hi: number }) =>
+        w.pin && !Number.isNaN(w.lo) && !Number.isNaN(w.hi)
+      );
+      const windowLo = Math.min(
+        window.startMs - 60 * 60 * 1000,
+        ...pinWindows.map((w: { lo: number }) => w.lo),
+      );
+      const windowHi = Math.max(
+        window.graceEndMs + 60 * 60 * 1000,
+        ...pinWindows.map((w: { hi: number }) => w.hi),
+      );
+
+      function eventMatchesBooking(event: {
+        eventType: string;
+        eventTimestamp: string;
+        pinCode: string | null;
+      }): "ok" | "outside" | "pin_mismatch" | "no_pin" {
+        const eventMs = new Date(event.eventTimestamp).getTime();
+        if (Number.isNaN(eventMs)) return "outside";
+
+        if (event.pinCode) {
+          if (pinSet.size > 0 && !pinSet.has(event.pinCode)) return "pin_mismatch";
+          const forPin = pinWindows.filter((w: { pin: string }) => w.pin === event.pinCode);
+          if (forPin.length > 0) {
+            if (forPin.some((w: { lo: number; hi: number }) => eventMs >= w.lo && eventMs <= w.hi)) {
+              return "ok";
+            }
+            return "outside";
+          }
+          if (eventMs >= windowLo && eventMs <= windowHi) return "ok";
+          return "outside";
+        }
+
+        if (event.eventType === "unlock") return "no_pin";
+
+        // AUTO_RELOCK has no PIN — only after an unlock for this booking
+        const alreadyRented = !!(bookingStatus.booking as { rented_out_at?: string } | null)
+          ?.rented_out_at;
+        const unlockInBatch = events.some(
+          (e) =>
+            e.eventType === "unlock" &&
+            e.pinCode &&
+            pinSet.has(e.pinCode) &&
+            eventMatchesBooking(e) === "ok" &&
+            new Date(e.eventTimestamp).getTime() <= eventMs,
+        );
+        if (!alreadyRented && !unlockInBatch) return "no_pin";
+        if (eventMs < windowLo || eventMs > windowHi) return "outside";
+        return "ok";
+      }
 
       const actions: string[] = [];
+      let skippedOutsideWindow = 0;
+      let skippedPinMismatch = 0;
+      let skippedNoPin = 0;
       for (const event of events) {
-        if (pinRow?.access_pin && event.pinCode && event.pinCode !== pinRow.access_pin) {
+        const match = eventMatchesBooking(event);
+        if (match === "outside") {
+          skippedOutsideWindow += 1;
           continue;
         }
-        // If no PIN on event, still apply to this booking when testing a single lock
+        if (match === "pin_mismatch") {
+          skippedPinMismatch += 1;
+          continue;
+        }
+        if (match === "no_pin") {
+          skippedNoPin += 1;
+          continue;
+        }
+
         const result = await applyLockEvent(supabase, {
           orderId: bookingId,
           eventType: event.eventType,
@@ -1110,14 +1240,93 @@ Deno.serve(async (req) => {
         });
         actions.push(`${event.eventType}@${event.eventTimestamp}:${result}`);
       }
+
+      // Raw cloud activity in the active PIN window (for diagnostics).
+      const activeLo = activePinRow
+        ? new Date(activePinRow.start_time).getTime() - 60 * 60 * 1000
+        : windowLo;
+      const activeHi = activePinRow
+        ? new Date(activePinRow.end_time).getTime() + 2 * 60 * 60 * 1000
+        : windowHi;
+      let bridgeContactAt: string | null = null;
+      let unlocksForActivePin = 0;
+      for (const row of activityRows) {
+        const rec = row as Record<string, unknown>;
+        const ts = String(rec.localActionAt || rec.activityTimeAt || "");
+        const ms = new Date(ts).getTime();
+        if (Number.isNaN(ms) || ms < activeLo || ms > activeHi) continue;
+        const type = String(rec.activityType || "");
+        if (/SET_TIME|GENERATE_PIN/i.test(type) && (!bridgeContactAt || ts > bridgeContactAt)) {
+          bridgeContactAt = ts;
+        }
+        if (/UNLOCK/i.test(type) && !/FAIL/i.test(type) && String(rec.pin || "") === activePin) {
+          unlocksForActivePin += 1;
+        }
+      }
+
       const swept = await sweepGraceHourReturns(supabase);
       const after = await fetchBookingStatus(supabase, bookingId);
+      const stateChanging = actions.filter((a) =>
+        a.includes(":marked_rented") || a.includes(":marked_returned")
+      );
+      const failedInWindow = failedAttempts.filter((f) => {
+        const ms = new Date(f.eventTimestamp).getTime();
+        return ms >= activeLo && ms <= activeHi;
+      });
+      let bridgeHint: string | undefined;
+      if (stateChanging.length > 0) {
+        bridgeHint = undefined;
+      } else if (failedInWindow.length > 0) {
+        const last = failedInWindow.sort((a, b) =>
+          a.eventTimestamp < b.eventTimestamp ? 1 : -1
+        )[0];
+        const tried = last.pinCode ? `…${last.pinCode.slice(-2)}` : "unknown";
+        const expect = activePin ? `…${activePin.slice(-2)}` : "the Setup PIN";
+        bridgeHint =
+          `Igloohome recorded PIN_UNLOCK_FAILED at ${last.eventTimestamp} (tried PIN ending ${tried}). ` +
+          `Active booking PIN ends with ${expect}. Use the exact PIN from Setup, unlock near the Bridge, wait ~30–60s, Sync again.`;
+      } else if (activePin && unlocksForActivePin === 0) {
+        bridgeHint = bridgeContactAt
+          ? `Bridge reached the padlock (${bridgeContactAt}) but Igloohome has no unlock for PIN …${activePin.slice(-2)}. ` +
+            `Stand within a few feet of the Bridge, unlock with ${activePin}, wait for the lock LED to finish, then Sync again. ` +
+            `If it still fails: open the Igloo Home app → this lock → Logs → Sync (phone Bluetooth against the lock), then Sync here. ` +
+            `Or use Simulate Unlock to advance admin without waiting on Igloohome logs.`
+          : `Igloohome has no unlock for PIN …${activePin.slice(-2)} yet. Unlock with that PIN while the padlock is next to the Bridge, wait ~30–60s, Sync again. ` +
+            `Or use Simulate Unlock.`;
+      } else if (events.length === 0) {
+        bridgeHint = activityRows.length === 0
+          ? "Bridge pull finished, but Igloohome cloud has no activity rows yet."
+          : `Fetched ${activityRows.length} activity row(s), but none were unlock/lock events.`;
+      } else {
+        bridgeHint =
+          `No rented/returned update (skipped: ${skippedOutsideWindow} outside PIN window, ${skippedPinMismatch} other PIN, ${skippedNoPin} no PIN).`;
+      }
       return jsonResponse({
         success: true,
         action: "sync",
         jobId,
         eventsParsed: events.length,
+        eventsRelevant: actions.length,
+        stateChanging: stateChanging.length,
+        activityRowsFetched: activityRows.length,
         actions,
+        skipped: {
+          outsideWindow: skippedOutsideWindow,
+          pinMismatch: skippedPinMismatch,
+          noPin: skippedNoPin,
+        },
+        diagnostics: {
+          activePinSuffix: activePin ? activePin.slice(-2) : null,
+          unlocksForActivePin,
+          bridgeContactAt,
+        },
+        failedUnlockAttemptsInWindow: failedInWindow.map((f) => ({
+          eventTimestamp: f.eventTimestamp,
+          pinSuffix: f.pinCode ? f.pinCode.slice(-2) : null,
+          activityType: f.activityType,
+        })),
+        emptyBridgePayload,
+        bridgeHint,
         graceHourClosed: swept,
         ...after,
       });
