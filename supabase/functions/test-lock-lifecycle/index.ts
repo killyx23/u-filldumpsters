@@ -12,8 +12,8 @@
  *   restore           — restore original booking dates from snapshot
  *   simulate_unlock   — inject unlock event → mark Rented + notify
  *   simulate_lock     — inject lock at/after scheduled end → mark Returned + notify
- *   simulate_webhook  — POST a synthetic igloohome type-5 delivery at the real
- *                       webhook endpoint (kind: unlock | lock | breakin)
+ *   simulate_webhook  — run the type-5 activity path in-process (kind: unlock|lock|breakin)
+ *                       without HTTP self-fetch (avoids edge-runtime deadlock)
  *   sync              — pull real activity logs from the Wi-Fi bridge
  *   probe             — raw jobType 15 response (payload discovery)
  *   algopin           — offline one-time AlgoPIN (no bridge)
@@ -22,12 +22,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
+import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
+import { alertBreakInAttempt } from "../_shared/lockAlerts.ts";
 import { getBookingWindow, clampIgloohomeStart } from "../_shared/pinTiming.ts";
 import {
   fetchDeviceActivityRows,
   mergeActivityEvents,
   isEmptyActivityLogPayload,
   parseFailedPinAttempt,
+  parseActivityLogEntry,
+  type LockActivityEvent,
 } from "../_shared/iglooActivity.ts";
 import { ensurePinOnLock, clearKnownPins } from "../_shared/lockPin.ts";
 import {
@@ -1007,12 +1011,15 @@ Deno.serve(async (req) => {
     }
 
     // -------- simulate_webhook --------
-    // Posts a synthetic igloohome type-5 delivery at the real webhook endpoint
-    // so signature handling, event routing and device-state updates are all
-    // exercised before the physical lock is touched.
+    // Runs the same device + booking path as igloohome-webhook in-process.
+    // Do NOT HTTP-call the webhook from here: from inside the edge runtime that
+    // self-fetch deadlocks until wall-clock kill, and the UI then shows a
+    // misleading "Function not found (404)" toast.
     if (action === "simulate_webhook") {
       const status = await fetchBookingStatus(supabase, bookingId);
-      if (status.error) return jsonResponse({ success: false, error: status.error }, 404);
+      if (status.error) {
+        return jsonResponse({ success: false, error: status.error }, 400);
+      }
 
       const kind = String(body.kind || "unlock");
       const logTypeByKind: Record<string, number> = { unlock: 50, lock: 49, breakin: 53 };
@@ -1030,99 +1037,74 @@ Deno.serve(async (req) => {
       const entryDate = Math.floor(eventMs / 1000);
       const pin = status.pin?.access_pin || null;
 
-      const payload = {
-        payload: {
-          event: {
-            type: 5,
-            data: {
-              deviceId: lockId,
-              bridgeId,
-              activityLogs: [{
-                logType,
-                entryDate,
-                ...(pin && kind !== "breakin" ? { pin } : {}),
-                keyId: `test-${bookingId}`,
-                operationId: `test-${entryDate}`,
-              }],
-            },
-          },
-        },
+      const rawEntry = {
+        logType,
+        entryDate,
+        ...(pin && kind !== "breakin" ? { pin } : {}),
+        keyId: `test-${bookingId}`,
+        operationId: `test-${entryDate}-${kind}`,
+        deviceId: lockId || undefined,
       };
-      const rawBody = JSON.stringify(payload);
-
-      const webhookUrl = `${supabaseUrl}/functions/v1/igloohome-webhook`;
-      const date = new Date().toUTCString();
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Date: date,
-        // Not part of the signed string; only present so the call still works
-        // if the function was deployed without --no-verify-jwt.
-        Authorization: `Bearer ${serviceKey}`,
-      };
-
-      // We can produce a valid shared-secret signature, but not an RSA one
-      // (that needs igloohome's private key), so that path relies on the
-      // IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED dev flag.
-      const webhookSecret = Deno.env.get("IGLOOHOME_WEBHOOK_SECRET");
-      if (webhookSecret) {
-        const url = new URL(webhookUrl);
-        const signed = [
-          "POST",
-          url.host,
-          url.pathname,
-          "application/json",
-          date,
-          rawBody,
-        ].join("|");
-        const key = await crypto.subtle.importKey(
-          "raw",
-          new TextEncoder().encode(webhookSecret),
-          { name: "HMAC", hash: "SHA-256" },
-          false,
-          ["sign"],
-        );
-        const sig = new Uint8Array(
-          await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signed)),
-        );
-        let binary = "";
-        for (const b of sig) binary += String.fromCharCode(b);
-        headers["x-igloocompany-sha256"] = btoa(binary);
+      const parsed = parseActivityLogEntry(rawEntry);
+      if (!parsed) {
+        return jsonResponse({
+          success: false,
+          error: `Could not parse synthetic activity entry for logType ${logType}`,
+          rawEntry,
+        }, 400);
       }
 
-      const res = await fetch(webhookUrl, { method: "POST", headers, body: rawBody });
-      const text = await res.text();
-      let webhookResponse: unknown = text;
-      try {
-        webhookResponse = text ? JSON.parse(text) : null;
-      } catch {
-        // keep the raw text
+      const events: LockActivityEvent[] = [parsed];
+      const deviceTracking = await recordDeviceEvents(supabase, events, {
+        deviceId: lockId || null,
+        bridgeId: bridgeId || null,
+      });
+
+      const bookingActions: string[] = [];
+      for (const recorded of deviceTracking.recorded) {
+        if (recorded.event.eventType === "breakin") {
+          await alertBreakInAttempt({
+            deviceId: recorded.deviceId,
+            occurredAt: recorded.event.eventTimestamp,
+            orderId: recorded.orderId ?? bookingId,
+          });
+          bookingActions.push("alerted_breakin");
+        }
+
+        // Prefer the PIN-resolved booking; fall back to the test booking id so
+        // Setup-less runs still exercise the state machine against this order.
+        const orderId = recorded.orderId ?? bookingId;
+        const actionResult = await applyLockEvent(supabase, {
+          orderId,
+          eventType: recorded.event.eventType,
+          eventTimestamp: recorded.event.eventTimestamp,
+          notes: `${recorded.event.eventType} via simulate_webhook (logType ${logType})`,
+        });
+        bookingActions.push(actionResult);
       }
 
-      // Booking updates and notifications run after the webhook's 200.
-      await new Promise((r) => setTimeout(r, 2000));
+      const swept = await sweepGraceHourReturns(supabase);
       const after = await fetchBookingStatus(supabase, bookingId);
-
       const { data: deviceState } = await supabase
         .from("lock_device_presence")
         .select("*")
-        .eq("device_id", lockId)
+        .eq("device_id", lockId || "")
         .maybeSingle();
 
       return jsonResponse({
-        success: res.ok,
+        success: true,
         action: "simulate_webhook",
         kind,
         logType,
-        pinUsed: pin ? "active booking PIN" : "none (event will not match a booking)",
-        signedWith: webhookSecret ? "shared_secret" : "unsigned",
-        webhookStatus: res.status,
-        webhookResponse,
+        pinUsed: pin ? "active booking PIN" : "none — matched to this booking id as fallback",
+        mode: "in_process",
+        deviceEventsStored: deviceTracking.stored,
+        bookingActions,
+        graceHourClosed: swept,
         deviceState,
-        hint: res.status === 401
-          ? "Webhook rejected the signature. With IGLOOHOME_PUBLIC_KEY set we cannot forge a valid signature — set IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true temporarily to test."
-          : !pin
-          ? "No active PIN on this booking, so the event was stored at device level but not matched to a booking. Run Setup first."
-          : undefined,
+        hint: !pin
+          ? "No active PIN on this booking. Event still applied to this booking id. Run Setup for real PIN matching."
+          : "Synthetic type-5 path ran in-process (same code as the webhook). Portal deliveries still hit /igloohome-webhook over HTTP.",
         ...after,
       });
     }

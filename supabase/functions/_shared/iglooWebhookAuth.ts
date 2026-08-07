@@ -152,6 +152,12 @@ export async function verifyIglooWebhook(
   const sharedSecret = Deno.env.get("IGLOOHOME_WEBHOOK_SECRET");
   const allowUnsigned = Deno.env.get("IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED") === "true";
 
+  // Dev override must win even when a public key is present — local simulate
+  // tools cannot forge igloohome's RSA signature.
+  if (allowUnsigned && !req.headers.get("x-igloocompany-sha256")) {
+    return { valid: true, method: "unsigned_allowed" };
+  }
+
   if (!publicKey && !sharedSecret) {
     return allowUnsigned
       ? { valid: true, method: "unsigned_allowed" }

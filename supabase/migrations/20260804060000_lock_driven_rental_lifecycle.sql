@@ -42,13 +42,17 @@ BEGIN
 END;
 $cron_setup$;
 
--- Every 5 minutes. Requires vault secret 'service_role_key' (same as generate-daily-pins).
+-- Every 5 minutes. Requires vault secrets 'service_role_key' and 'supabase_url'.
 SELECT cron.schedule(
   'sync-lock-activity-5min',
   '*/5 * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://REDACTED_PROJECT_REF.supabase.co/functions/v1/sync-lock-activity',
+    url := (
+      SELECT decrypted_secret
+      FROM vault.decrypted_secrets
+      WHERE name = 'supabase_url'
+    ) || '/functions/v1/sync-lock-activity',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || (

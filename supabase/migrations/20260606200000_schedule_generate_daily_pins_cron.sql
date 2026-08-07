@@ -1,8 +1,10 @@
 -- Schedule generate-daily-pins edge function via pg_cron + pg_net.
 --
 -- PREREQUISITE (manual, not in migration):
---   vault.secrets must contain a row named 'service_role_key' with the project's
---   service role JWT. The cron job reads it via vault.decrypted_secrets.
+--   vault.secrets must contain:
+--     * 'service_role_key' — project service role JWT
+--     * 'supabase_url' — project API URL (e.g. https://<ref>.supabase.co, no trailing slash)
+--   The cron job reads both via vault.decrypted_secrets.
 --
 -- Runs 4x daily at midnight, 6am, noon, and 6pm Mountain (MST = UTC+6):
 --   12:00 AM MST -> 06:00 UTC
@@ -32,7 +34,11 @@ SELECT cron.schedule(
   '0 0,6,12,18 * * *',
   $$
   SELECT net.http_post(
-    url := 'https://REDACTED_PROJECT_REF.supabase.co/functions/v1/generate-daily-pins',
+    url := (
+      SELECT decrypted_secret
+      FROM vault.decrypted_secrets
+      WHERE name = 'supabase_url'
+    ) || '/functions/v1/generate-daily-pins',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || (

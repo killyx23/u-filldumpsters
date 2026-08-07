@@ -38,7 +38,11 @@ SELECT cron.schedule(
   '*/15 * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://REDACTED_PROJECT_REF.supabase.co/functions/v1/ensure-lock-pin-ready',
+    url := (
+      SELECT decrypted_secret
+      FROM vault.decrypted_secrets
+      WHERE name = 'supabase_url'
+    ) || '/functions/v1/ensure-lock-pin-ready',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'Authorization', 'Bearer ' || (

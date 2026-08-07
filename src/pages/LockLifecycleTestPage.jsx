@@ -56,9 +56,15 @@ async function formatInvokeError(error, data) {
     null;
 
   if (status === 404) {
+    // Prefer the function's own error body (e.g. booking not found) over a
+    // misleading "function missing / wrong project-ref" guess.
+    if (nestedError) {
+      return status ? `HTTP ${status}: ${nestedError}` : String(nestedError);
+    }
     return (
-      'Function not found (HTTP 404). Local: restart `npx supabase functions serve`. ' +
-      'Hosted: `npx supabase functions deploy test-lock-lifecycle --project-ref REDACTED_PROJECT_REF`'
+      'Function not found (HTTP 404). Local: restart with ' +
+      '`npx --yes supabase@2.98.2 functions serve --env-file supabase/functions/.env`. ' +
+      'You are still on localhost — the project-ref in older toasts was only deploy help text.'
     );
   }
 
@@ -403,9 +409,9 @@ export default function LockLifecycleTestPage() {
               Simulate Lock → Returned
             </Button>
             <p className="sm:col-span-2 text-xs text-slate-500 mt-2">
-              The buttons below post a synthetic igloohome delivery at the real webhook endpoint,
-              so signature checks, event routing and the device status above are all exercised
-              without touching the padlock.
+              These buttons exercise the same lock/unlock/break-in path the webhook uses,
+              against the booking id above (in-process — no self-HTTP). Enter a booking id
+              first; run Setup for real PIN matching.
             </p>
             <Button
               className="bg-sky-600 hover:bg-sky-700"

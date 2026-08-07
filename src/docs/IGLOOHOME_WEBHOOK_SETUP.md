@@ -171,7 +171,7 @@ npm run test:igloohome
 | Events stored but booking not updated | PIN did not match an active `rental_access_codes` row — run Setup first |
 | Presence stuck on `unknown` | No type-5 activity yet — use Simulate Webhook or Sync Lock Activity |
 | `SUPABASE_*` skipped when serving | Normal — the CLI injects those; other keys still load from `--env-file` |
-| `functions serve` / `supabase start` dies with `unexpected EOF` or `Effect.tryPromise` | Unpinned `npx supabase` pulled 2.111+. Use `npx --yes supabase@2.98.2 …` instead |
+| `simulate_webhook` hangs then UI shows Function not found / remote project-ref | Old flow self-fetched the webhook inside the edge runtime (deadlock). Pull latest — simulate is in-process now. The project-ref text was only deploy help, not a remote call. |
 
 ## Production checklist
 

@@ -108,12 +108,19 @@ check("rejects a tampered body under the shared secret", !result.valid);
 
 console.log("\nFail-closed behaviour");
 delete env.IGLOOHOME_WEBHOOK_SECRET;
+delete env.IGLOOHOME_PUBLIC_KEY;
 result = await verifyIglooWebhook(request(hmacSignature), BODY);
 check("rejects when no credential is configured", !result.valid && result.method === "none");
 env.IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED = "true";
-result = await verifyIglooWebhook(request(hmacSignature), BODY);
+result = await verifyIglooWebhook(request(null), BODY);
 check("allows unsigned posts only with the explicit dev opt-in", result.valid);
+
+// PUBLIC_KEY must not block the unsigned dev override when no signature is sent.
+env.IGLOOHOME_PUBLIC_KEY = pkcs1Der.toString("base64");
+result = await verifyIglooWebhook(request(null), BODY);
+check("unsigned opt-in still works when a public key is also set", result.valid);
 delete env.IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED;
+delete env.IGLOOHOME_PUBLIC_KEY;
 
 console.log("\nActivity log parsing");
 check("logType 50 is an unlock", logTypeToEventKind(50) === "unlock");
