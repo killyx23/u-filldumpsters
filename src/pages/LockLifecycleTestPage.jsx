@@ -18,8 +18,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   Trash2,
+  Webhook,
+  ShieldAlert,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import LockPresencePanel from '@/components/admin/LockPresencePanel';
 
 async function formatInvokeError(error, data) {
   if (data?.success === false && data?.error) {
@@ -276,6 +279,8 @@ export default function LockLifecycleTestPage() {
           </CardContent>
         </Card>
 
+        <LockPresencePanel />
+
         <Card className="bg-white/5 border-white/10">
           <CardHeader>
             <CardTitle>1. Choose booking</CardTitle>
@@ -396,6 +401,36 @@ export default function LockLifecycleTestPage() {
             >
               {busy === 'simulate_lock' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
               Simulate Lock → Returned
+            </Button>
+            <p className="sm:col-span-2 text-xs text-slate-500 mt-2">
+              The buttons below post a synthetic igloohome delivery at the real webhook endpoint,
+              so signature checks, event routing and the device status above are all exercised
+              without touching the padlock.
+            </p>
+            <Button
+              className="bg-sky-600 hover:bg-sky-700"
+              disabled={!!busy}
+              onClick={() => run('simulate_webhook', { kind: 'unlock' })}
+            >
+              {busy === 'simulate_webhook' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Webhook className="h-4 w-4 mr-2" />}
+              Webhook: Unlock (logType 50)
+            </Button>
+            <Button
+              className="bg-teal-600 hover:bg-teal-700"
+              disabled={!!busy}
+              onClick={() => run('simulate_webhook', { kind: 'lock' })}
+            >
+              {busy === 'simulate_webhook' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Webhook className="h-4 w-4 mr-2" />}
+              Webhook: Lock (logType 49)
+            </Button>
+            <Button
+              variant="outline"
+              className="sm:col-span-2 border-red-500/40 text-red-300 hover:bg-red-950/40"
+              disabled={!!busy}
+              onClick={() => run('simulate_webhook', { kind: 'breakin' })}
+            >
+              {busy === 'simulate_webhook' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ShieldAlert className="h-4 w-4 mr-2" />}
+              Webhook: Break-in attempt (logType 53)
             </Button>
             <Button
               variant="outline"

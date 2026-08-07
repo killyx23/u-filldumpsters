@@ -22,6 +22,7 @@ import {
   resolveOrderIdByPin,
   sweepGraceHourReturns,
 } from "../_shared/lockEventState.ts";
+import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import {
   getActivitySyncToken,
   getDeviceActivityToken,
@@ -256,6 +257,11 @@ Deno.serve(async (req) => {
     );
 
     const supabase = createClient(supabaseUrl, serviceKey);
+
+    // Keep device-level presence current even when the webhook missed a
+    // delivery. Duplicates are dropped by the unique index.
+    const deviceTracking = await recordDeviceEvents(supabase, events, { deviceId: lockId, bridgeId });
+
     const actions: Array<{ pin: string | null; orderId: number | null; action: string }> = [];
 
     for (const event of events) {
@@ -283,6 +289,7 @@ Deno.serve(async (req) => {
       emptyBridgePayload,
       bridgeHint: syncEmptyHint(activityRows.length, events.length),
       actions,
+      deviceEventsStored: deviceTracking.stored,
       graceHourClosed: swept,
     });
   } catch (error) {

@@ -366,6 +366,12 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+[functions.igloohome-webhook]
+# Igloohome authenticates with the x-igloocompany-sha256 signature, not a JWT.
+# With the default verify_jwt = true the gateway 401s every delivery before the
+# function runs. Deploy with: supabase functions deploy igloohome-webhook --no-verify-jwt
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

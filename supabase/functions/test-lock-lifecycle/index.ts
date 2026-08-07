@@ -12,6 +12,8 @@
  *   restore           — restore original booking dates from snapshot
  *   simulate_unlock   — inject unlock event → mark Rented + notify
  *   simulate_lock     — inject lock at/after scheduled end → mark Returned + notify
+ *   simulate_webhook  — POST a synthetic igloohome type-5 delivery at the real
+ *                       webhook endpoint (kind: unlock | lock | breakin)
  *   sync              — pull real activity logs from the Wi-Fi bridge
  *   probe             — raw jobType 15 response (payload discovery)
  *   algopin           — offline one-time AlgoPIN (no bridge)
@@ -1000,6 +1002,127 @@ Deno.serve(async (req) => {
         action: "simulate_lock",
         result,
         graceHourClosed: swept,
+        ...after,
+      });
+    }
+
+    // -------- simulate_webhook --------
+    // Posts a synthetic igloohome type-5 delivery at the real webhook endpoint
+    // so signature handling, event routing and device-state updates are all
+    // exercised before the physical lock is touched.
+    if (action === "simulate_webhook") {
+      const status = await fetchBookingStatus(supabase, bookingId);
+      if (status.error) return jsonResponse({ success: false, error: status.error }, 404);
+
+      const kind = String(body.kind || "unlock");
+      const logTypeByKind: Record<string, number> = { unlock: 50, lock: 49, breakin: 53 };
+      const logType = Number(body.logType) || logTypeByKind[kind];
+      if (!logType) {
+        return jsonResponse({
+          success: false,
+          error: `Unknown kind "${kind}" — use unlock, lock or breakin, or pass logType.`,
+        }, 400);
+      }
+
+      // Returns only register at/after the scheduled end, same as simulate_lock.
+      const window = getBookingWindow(status.booking!);
+      const eventMs = kind === "lock" ? Math.max(Date.now(), window.endMs) : Date.now();
+      const entryDate = Math.floor(eventMs / 1000);
+      const pin = status.pin?.access_pin || null;
+
+      const payload = {
+        payload: {
+          event: {
+            type: 5,
+            data: {
+              deviceId: lockId,
+              bridgeId,
+              activityLogs: [{
+                logType,
+                entryDate,
+                ...(pin && kind !== "breakin" ? { pin } : {}),
+                keyId: `test-${bookingId}`,
+                operationId: `test-${entryDate}`,
+              }],
+            },
+          },
+        },
+      };
+      const rawBody = JSON.stringify(payload);
+
+      const webhookUrl = `${supabaseUrl}/functions/v1/igloohome-webhook`;
+      const date = new Date().toUTCString();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Date: date,
+        // Not part of the signed string; only present so the call still works
+        // if the function was deployed without --no-verify-jwt.
+        Authorization: `Bearer ${serviceKey}`,
+      };
+
+      // We can produce a valid shared-secret signature, but not an RSA one
+      // (that needs igloohome's private key), so that path relies on the
+      // IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED dev flag.
+      const webhookSecret = Deno.env.get("IGLOOHOME_WEBHOOK_SECRET");
+      if (webhookSecret) {
+        const url = new URL(webhookUrl);
+        const signed = [
+          "POST",
+          url.host,
+          url.pathname,
+          "application/json",
+          date,
+          rawBody,
+        ].join("|");
+        const key = await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(webhookSecret),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        );
+        const sig = new Uint8Array(
+          await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signed)),
+        );
+        let binary = "";
+        for (const b of sig) binary += String.fromCharCode(b);
+        headers["x-igloocompany-sha256"] = btoa(binary);
+      }
+
+      const res = await fetch(webhookUrl, { method: "POST", headers, body: rawBody });
+      const text = await res.text();
+      let webhookResponse: unknown = text;
+      try {
+        webhookResponse = text ? JSON.parse(text) : null;
+      } catch {
+        // keep the raw text
+      }
+
+      // Booking updates and notifications run after the webhook's 200.
+      await new Promise((r) => setTimeout(r, 2000));
+      const after = await fetchBookingStatus(supabase, bookingId);
+
+      const { data: deviceState } = await supabase
+        .from("lock_device_presence")
+        .select("*")
+        .eq("device_id", lockId)
+        .maybeSingle();
+
+      return jsonResponse({
+        success: res.ok,
+        action: "simulate_webhook",
+        kind,
+        logType,
+        pinUsed: pin ? "active booking PIN" : "none (event will not match a booking)",
+        signedWith: webhookSecret ? "shared_secret" : "unsigned",
+        webhookStatus: res.status,
+        webhookResponse,
+        deviceState,
+        hint: res.status === 401
+          ? "Webhook rejected the signature. With IGLOOHOME_PUBLIC_KEY set we cannot forge a valid signature — set IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true temporarily to test."
+          : !pin
+          ? "No active PIN on this booking, so the event was stored at device level but not matched to a booking. Run Setup first."
+          : undefined,
         ...after,
       });
     }

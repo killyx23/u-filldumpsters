@@ -9,12 +9,67 @@
 
 export const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
+export type LockEventKind = "unlock" | "lock" | "breakin";
+
 export type LockActivityEvent = {
-  eventType: "unlock" | "lock";
+  eventType: LockEventKind;
   eventTimestamp: string;
   pinCode: string | null;
+  logType: number | null;
+  keyId: string | null;
+  operationId: string | null;
+  deviceId: string | null;
   raw: Record<string, unknown>;
 };
+
+/**
+ * Numeric activity log codes from the igloohome webhook (event type 5).
+ * These arrive as `logType` on each entry in `activityLogs[]`.
+ */
+export const LOCK_LOG_TYPES = new Set([
+  37, // Bluetooth lock
+  49, // lock via keypad/button
+  51, // lock with key/thumbturn
+]);
+
+export const UNLOCK_LOG_TYPES = new Set([
+  11, // Bluetooth unlock
+  18,
+  19,
+  20, // one-time PIN
+  21,
+  22,
+  23,
+  24,
+  25,
+  26, // unlock with the various PIN types
+  50, // unlock via button
+  52, // unlock with key/thumbturn
+  56, // fingerprint unlock
+]);
+
+export const BREAKIN_LOG_TYPE = 53;
+
+/** Map a numeric igloohome logType to an event kind, or null if not access-related. */
+export function logTypeToEventKind(logType: unknown): LockEventKind | null {
+  const n = typeof logType === "number"
+    ? logType
+    : typeof logType === "string" && /^\d+$/.test(logType.trim())
+    ? Number(logType.trim())
+    : null;
+  if (n === null) return null;
+  if (n === BREAKIN_LOG_TYPE) return "breakin";
+  if (UNLOCK_LOG_TYPES.has(n)) return "unlock";
+  if (LOCK_LOG_TYPES.has(n)) return "lock";
+  return null;
+}
+
+function extractLogType(entry: Record<string, unknown>): number | null {
+  const val = entry.logType ?? entry.log_type;
+  if (typeof val === "number" && Number.isFinite(val)) return val;
+  if (typeof val === "string" && /^\d+$/.test(val.trim())) return Number(val.trim());
+  return null;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -42,7 +97,7 @@ function isFailedActivity(raw: string | null, entry: Record<string, unknown>): b
   return false;
 }
 
-function normalizeEventType(raw: string | null): "unlock" | "lock" | null {
+function normalizeEventType(raw: string | null): LockEventKind | null {
   if (!raw) return null;
   const lower = raw.toLowerCase().replace(/[\s_-]+/g, "");
   // Ignore non-access noise (time sync, battery, etc.)
@@ -79,7 +134,29 @@ function normalizeEventType(raw: string | null): "unlock" | "lock" | null {
   return null;
 }
 
+/**
+ * Webhook activity entries carry `entryDate` as epoch seconds. That is the
+ * authoritative time the event happened at the lock — logs can be batched and
+ * delivered long after the fact, so never fall back to delivery time.
+ */
+function extractEpochTimestamp(entry: Record<string, unknown>): string | null {
+  for (const key of ["entryDate", "entry_date", "eventDate", "logDate"]) {
+    const val = entry[key];
+    let num: number | null = null;
+    if (typeof val === "number" && Number.isFinite(val)) num = val;
+    else if (typeof val === "string" && /^\d{9,13}$/.test(val.trim())) num = Number(val.trim());
+    if (num === null || num <= 0) continue;
+    // Values below ~1e11 are seconds; above that they are already milliseconds.
+    const ms = num < 1e11 ? num * 1000 : num;
+    const date = new Date(ms);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  return null;
+}
+
 function extractTimestamp(entry: Record<string, unknown>): string | null {
+  const epoch = extractEpochTimestamp(entry);
+  if (epoch) return epoch;
   const raw = pickString(entry, [
     "localActionAt",
     "activityTimeAt",
@@ -156,20 +233,49 @@ export function parseActivityLogEntry(entry: unknown): LockActivityEvent | null 
 
   // Nested data wrappers
   const nested = asRecord(obj.data) || asRecord(obj.event) || asRecord(obj.activity) || obj;
-  const typeRaw = extractTypeRaw(nested) || extractTypeRaw(obj);
-  if (isFailedActivity(typeRaw, nested) || isFailedActivity(typeRaw, obj)) {
-    return null;
-  }
-  const eventType = normalizeEventType(typeRaw);
+  const logType = extractLogType(nested) ?? extractLogType(obj);
   const eventTimestamp = extractTimestamp(nested) || extractTimestamp(obj);
-  if (!eventType || !eventTimestamp) return null;
+  if (!eventTimestamp) return null;
+
+  // Numeric logType is authoritative when present — the webhook sends codes,
+  // not descriptive strings, so this must win over the text heuristics below.
+  let eventType = logTypeToEventKind(logType);
+  if (!eventType) {
+    if (logType !== null) return null;
+    const typeRaw = extractTypeRaw(nested) || extractTypeRaw(obj);
+    if (isFailedActivity(typeRaw, nested) || isFailedActivity(typeRaw, obj)) return null;
+    eventType = normalizeEventType(typeRaw);
+  }
+  if (!eventType) return null;
 
   return {
     eventType,
     eventTimestamp,
     pinCode: extractPin(nested) || extractPin(obj),
+    logType,
+    keyId: pickString(nested, ["keyId", "key_id"]) || pickString(obj, ["keyId", "key_id"]),
+    operationId: pickString(nested, ["operationId", "operation_id"]) ||
+      pickString(obj, ["operationId", "operation_id"]),
+    deviceId: pickString(nested, ["deviceId", "device_id", "lockId", "productId"]) ||
+      pickString(obj, ["deviceId", "device_id", "lockId", "productId"]),
     raw: obj,
   };
+}
+
+/** Strip PIN material so raw payloads can be persisted or logged safely. */
+export function redactPins(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactPins);
+  const obj = asRecord(value);
+  if (!obj) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (/^(pin|newpin|oldpin|pincode|pin_code|accesscode|access_code|code)$/i.test(key)) {
+      out[key] = val ? "[redacted]" : val;
+      continue;
+    }
+    out[key] = redactPins(val);
+  }
+  return out;
 }
 
 /**
@@ -260,7 +366,8 @@ export function eventsFromSource(source: unknown): LockActivityEvent[] {
     // Already-normalized LockActivityEvent[]
     if (
       first &&
-      (first.eventType === "unlock" || first.eventType === "lock") &&
+      (first.eventType === "unlock" || first.eventType === "lock" ||
+        first.eventType === "breakin") &&
       typeof first.eventTimestamp === "string"
     ) {
       return source as LockActivityEvent[];

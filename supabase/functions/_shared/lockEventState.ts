@@ -12,7 +12,7 @@ type SupabaseClient = any;
 
 export type LockEventInput = {
   orderId: number;
-  eventType: "unlock" | "lock";
+  eventType: "unlock" | "lock" | "breakin";
   eventTimestamp: string;
   notes?: string;
 };
@@ -145,6 +145,11 @@ export async function applyLockEvent(
   event: LockEventInput,
 ): Promise<string> {
   const inserted = await insertTrackingLog(supabase, event);
+
+  // Break-ins belong on the booking timeline but never move rental state.
+  if (event.eventType === "breakin") {
+    return inserted ? "logged_breakin" : "duplicate_breakin";
+  }
 
   const { data: booking, error } = await supabase
     .from("bookings")
