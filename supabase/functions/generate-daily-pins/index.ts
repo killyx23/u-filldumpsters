@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
-  buildBookingDateUTC,
+  getBookingWindow,
   getPinWindowSkipReason,
   isWithinPinGenerationWindow,
 } from "../_shared/pinTiming.ts";
@@ -37,18 +37,22 @@ function sleep(ms) {
   return new Promise((resolve)=>setTimeout(resolve, ms));
 }
 /**
- * Parse a time slot string like "6:00 AM" or "11:00 PM" and convert MST -> UTC.
- * Returns an ISO string like "2026-05-06T12:00:00+00:00"
+ * The booking's rental window as UTC instants.
  *
- * MST is UTC-6, so we add 6 hours to convert local -> UTC.
- * If the UTC hour crosses midnight (>= 24), we roll to the next day.
- *
- * Falls back to the provided fallbackHourUTC if the slot cannot be parsed.
- */ function buildIgloohomeDate(date, timeSlot, fallbackHourUTC) {
-  if (timeSlot && !timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)) {
-    console.warn(`[generate-daily-pins] Could not parse time slot: "${timeSlot}" — using fallback`);
+ * Resolved from the typed drop_off_window_* / pickup_window_* columns, falling back to parsing
+ * the legacy text slot. Previously this rebuilt the window from the text slot with a regex that
+ * only matched the 12-hour format, so every booking stored as '06:00:00' or as a pipe window
+ * silently fell back to fixed hours; the conversion also assumed a single UTC offset, which is
+ * wrong for half the year in America/Denver.
+ */
+function bookingPinWindow(booking) {
+  const { startIso, endIso } = getBookingWindow(booking);
+  if (!startIso || !endIso) {
+    console.warn(
+      `[generate-daily-pins] Could not resolve a rental window for booking #${booking?.id}`,
+    );
   }
-  return buildBookingDateUTC(date, timeSlot, fallbackHourUTC);
+  return { startIso, endIso };
 }
 
 async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
@@ -191,14 +195,14 @@ async function createBridgePin(accessToken, lockId, bridgeId, pin, startDate, en
     pinId: body.json?.jobId || body.json?.pinId || body.json?.id || ""
   };
 }
-async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, pickupDate, orderId) {
-  const startDate = buildIgloohomeDate(dropOffDate, dropOffTimeSlot, 12);
+async function createAlgoPin(accessToken, lockId, booking, orderId) {
+  const { startIso } = bookingPinWindow(booking);
   // AlgoPIN requires zeroed minutes format: YYYY-MM-DDTHH:00:00+hh:mm
   // Round down to nearest whole hour so e.g. 05:10 becomes 05:00
   // This means the PIN activates slightly early rather than failing entirely
-  const startDateHourOnly = startDate.replace(/T(\d{2}):\d{2}:00/, "T$1:00:00");
+  const startDateHourOnly = startIso.replace(/T(\d{2}):\d{2}:\d{2}/, "T$1:00:00");
   const startUnix = new Date(startDateHourOnly).getTime() / 1000;
-  const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
+  const endUnix = new Date(booking.pickup_date + "T23:59:59Z").getTime() / 1000;
   const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
   const payload = {
     accessName: `Dump Loader Rental - Order #${orderId} (AlgoPIN)`,
@@ -240,10 +244,9 @@ async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, 
     pinId: body.json?.pinId || body.json?.id || ""
   };
 }
-async function generatePinWithFallback(accessToken, lockId, bridgeId, dropOffDate, dropOffTimeSlot, pickupDate, pickupTimeSlot, orderId) {
+async function generatePinWithFallback(accessToken, lockId, bridgeId, booking, orderId) {
   const randomPin = generateRandomPin();
-  const startDate = buildIgloohomeDate(dropOffDate, dropOffTimeSlot, 12);
-  const endDate = buildIgloohomeDate(pickupDate, pickupTimeSlot, 5);
+  const { startIso: startDate, endIso: endDate } = bookingPinWindow(booking);
   console.log("[generate-daily-pins] PIN window:", {
     startDate,
     endDate
@@ -260,7 +263,7 @@ async function generatePinWithFallback(accessToken, lockId, bridgeId, dropOffDat
     };
   }
   console.warn(`[generate-daily-pins] Bridge failed for order #${orderId}, trying AlgoPIN. Error: ${bridgeResult.error}`);
-  const algoResult = await createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, pickupDate, orderId);
+  const algoResult = await createAlgoPin(accessToken, lockId, booking, orderId);
   if (algoResult.success) {
     console.log(`[generate-daily-pins] ✓ AlgoPIN succeeded for order #${orderId}`);
     return {
@@ -477,7 +480,7 @@ Deno.serve(async (req)=>{
       jobIndex++;
       console.log(`[generate-daily-pins] Processing booking #${booking.id} | drop_off: ${booking.drop_off_date} ${booking.drop_off_time_slot} | pickup: ${booking.pickup_date} ${booking.pickup_time_slot}`);
       try {
-        const pinResult = await generatePinWithFallback(accessToken, lockId, bridgeId, booking.drop_off_date, booking.drop_off_time_slot, booking.pickup_date, booking.pickup_time_slot, booking.id);
+        const pinResult = await generatePinWithFallback(accessToken, lockId, bridgeId, booking, booking.id);
         if (!pinResult.success) {
           console.error(`[generate-daily-pins] PIN generation failed for booking #${booking.id}:`, pinResult.error);
           generateResults.push({
@@ -499,8 +502,7 @@ Deno.serve(async (req)=>{
           });
           continue;
         }
-        const startTimeUTC = buildIgloohomeDate(booking.drop_off_date, booking.drop_off_time_slot, 12);
-        const endTimeUTC = buildIgloohomeDate(booking.pickup_date, booking.pickup_time_slot, 5);
+        const { startIso: startTimeUTC, endIso: endTimeUTC } = bookingPinWindow(booking);
         const { error: insertError } = await supabase.from("rental_access_codes").insert({
           order_id: booking.id,
           customer_email: booking.email,

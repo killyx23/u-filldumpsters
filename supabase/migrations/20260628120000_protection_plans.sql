@@ -160,9 +160,13 @@ DECLARE
   v_premium_id uuid;
   v_driveway_id uuid;
   v_equip record;
+  -- Service id 7 (legacy "Premium Insurance") comes from seed.sql, which on a fresh database
+  -- runs after migrations. Only set the FK when the row it points at actually exists yet, or
+  -- this insert violates protection_plans_legacy_service_id_fkey on a clean `supabase db reset`.
+  v_legacy_service_id integer;
 BEGIN
-  SELECT base_price, name, description, is_taxable
-  INTO v_insurance_price, v_insurance_name, v_insurance_desc, v_insurance_taxable
+  SELECT base_price, name, description, is_taxable, id
+  INTO v_insurance_price, v_insurance_name, v_insurance_desc, v_insurance_taxable, v_legacy_service_id
   FROM public.services
   WHERE id = 7;
 
@@ -191,7 +195,7 @@ BEGIN
     COALESCE(v_insurance_name, 'Premium Insurance'),
     COALESCE(v_insurance_desc, 'Complete protection coverage for your rental'),
     v_insurance_price, '/rental',
-    COALESCE(v_insurance_taxable, false), true, true, 1, 7
+    COALESCE(v_insurance_taxable, false), true, true, 1, v_legacy_service_id
   )
   ON CONFLICT (plan_key) DO UPDATE SET
     name = EXCLUDED.name,

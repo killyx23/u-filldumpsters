@@ -26,6 +26,7 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { buildPlanSnapshot } from '@/utils/servicePlan';
+import { isBookingCapacityError, describeBookingCapacityError } from '@/utils/bookingCapacityError';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -878,8 +879,14 @@ export const PaymentPage = ({ onBack }) => {
         setBookingCreated(true);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Pricing validation/booking creation failed:`, err);
-        setDataErrorTitle('Booking Creation Failed');
-        setDataError(err.message);
+        if (isBookingCapacityError(err)) {
+          const { title, description } = describeBookingCapacityError(err);
+          setDataErrorTitle(title);
+          setDataError(description);
+        } else {
+          setDataErrorTitle('Booking Creation Failed');
+          setDataError(err.message);
+        }
       }
     };
     

@@ -249,10 +249,13 @@ export async function fetchHomepageServicesLegacy(supabase) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  */
 export async function fetchHomepageServices(supabase) {
+  // services_resolved (Phase 3) is a view over services left-joined to service_groups, so this
+  // carries group_slug/group_name/group_display_order plus resolved_* fallback columns for free.
   const filtered = await supabase
-    .from('services')
+    .from('services_resolved')
     .select('*')
     .eq('show_on_homepage', true)
+    .order('group_display_order', { ascending: true, nullsFirst: false })
     .order('display_order', { ascending: true });
 
   if (!filtered.error && filtered.data?.length > 0) {
@@ -266,6 +269,41 @@ export async function fetchHomepageServices(supabase) {
   }
 
   return fetchHomepageServicesLegacy(supabase);
+}
+
+/**
+ * Bucket resolved services into their presentation groups, sorted by group display order.
+ * Ungrouped services (group_slug null) land in a trailing, header-less bucket rather than
+ * being dropped, so a service always renders even if nobody has assigned it a group yet.
+ * @param {object[]} services - rows from services_resolved (or plain services; group_slug just won't be set)
+ * @returns {{ slug: string, name: string|null, description: string|null, displayOrder: number, services: object[] }[]}
+ */
+export function groupServicesForDisplay(services = []) {
+  const groupsBySlug = new Map();
+  const ungrouped = [];
+
+  for (const service of services) {
+    if (service?.group_slug) {
+      if (!groupsBySlug.has(service.group_slug)) {
+        groupsBySlug.set(service.group_slug, {
+          slug: service.group_slug,
+          name: service.group_name ?? null,
+          description: service.group_description ?? null,
+          displayOrder: service.group_display_order ?? 0,
+          services: [],
+        });
+      }
+      groupsBySlug.get(service.group_slug).services.push(service);
+    } else {
+      ungrouped.push(service);
+    }
+  }
+
+  const groups = [...groupsBySlug.values()].sort((a, b) => a.displayOrder - b.displayOrder);
+  if (ungrouped.length > 0) {
+    groups.push({ slug: '__ungrouped__', name: null, description: null, displayOrder: Infinity, services: ungrouped });
+  }
+  return groups;
 }
 
 /**

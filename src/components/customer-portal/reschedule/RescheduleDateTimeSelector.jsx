@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { format, parseISO, isSameDay } from 'date-fns';
 import { CalendarX, CalendarCheck, Clock, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { convertTo12Hour, formatTimeRange12Hour } from '@/utils/timeFormatConverter';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
 import { supabase } from '@/lib/customSupabaseClient';
 
@@ -38,154 +38,94 @@ export const RescheduleDateTimeSelector = ({
     const dropOffTimeSlotStr = safeExtractString(booking?.drop_off_time_slot, '08:00');
     const pickupTimeSlotStr = safeExtractString(booking?.pickup_time_slot, '17:00');
 
+    // Picks the current value if it's still a valid, in-stock option; otherwise falls back to
+    // the first available slot (or the first slot at all, if every option is full) so the field
+    // never silently keeps a stale/invalid value across a date change.
+    const ensureSelectableSlot = (currentValue, slots, setValue) => {
+        if (slots.length === 0) return;
+        const stillValid = currentValue && slots.some((s) => s.value === currentValue);
+        if (stillValid) return;
+        const fallback = slots.find((s) => s.available !== false) ?? slots[0];
+        setValue(fallback.value);
+    };
+
     useEffect(() => {
         if (!newDropOffDate || !serviceId) return;
 
         const fetchTimeSlots = async () => {
             setFetchingTimes(true);
             try {
-                const dateStr = format(newDropOffDate, 'yyyy-MM-dd');
-                const dow = newDropOffDate.getDay();
+                const dropOffDateStr = format(newDropOffDate, 'yyyy-MM-dd');
+                const pickupDateStr = newPickupDate ? format(newPickupDate, 'yyyy-MM-dd') : dropOffDateStr;
+                const startDate = dropOffDateStr <= pickupDateStr ? dropOffDateStr : pickupDateStr;
+                const endDate = dropOffDateStr <= pickupDateStr ? pickupDateStr : dropOffDateStr;
 
-                // Query date_specific_availability first
-                const { data: dsa, error: dsaError } = await supabase
-                    .from('date_specific_availability')
-                    .select('*')
-                    .eq('service_id', serviceId)
-                    .eq('date', dateStr)
-                    .maybeSingle();
+                // Same edge function BookingForm uses, so a reschedule is checked against live
+                // resource capacity (booking_resource_reservations) instead of only the calendar
+                // open/closed flag — and produces slot values in one consistent shape.
+                const { data, error } = await supabase.functions.invoke('get-availability', {
+                    body: { serviceId, startDate, endDate },
+                });
 
-                if (dsaError && dsaError.code !== 'PGRST116') {
-                    console.error('Error fetching date_specific_availability:', dsaError);
-                }
+                if (error) throw error;
+                if (data?.error) throw new Error(data.error);
 
-                // Fallback to service_availability
-                const { data: sa, error: saError } = await supabase
-                    .from('service_availability')
-                    .select('*')
-                    .eq('service_id', serviceId)
-                    .eq('day_of_week', dow)
-                    .maybeSingle();
+                const availability = data?.availability || {};
+                const dropOffAvail = availability[dropOffDateStr];
+                const pickupAvail = availability[pickupDateStr];
 
-                if (saError && saError.code !== 'PGRST116') {
-                    console.error('Error fetching service_availability:', saError);
-                }
+                // Window services (1/3/4): a slot's value/end become the pipe-joined
+                // "start|end" the rest of the app (and parse_booking_time_slot) already expects.
+                const toWindowSlots = (rawSlots) =>
+                    (rawSlots || []).map((slot) => ({
+                        value: slot.end ? `${slot.value}|${slot.end}` : slot.value,
+                        label: slot.label || slot.value,
+                        available: slot.available !== false,
+                    }));
 
-                const availability = dsa || sa;
-
-                if (!availability) {
-                    console.warn(`No availability data found for service ${serviceId} on ${dateStr}`);
-                    // Provide default full-day availability
-                    const defaultSlot = { value: '08:00|17:00', label: '8:00 AM - 5:00 PM' };
-                    setDropOffTimeSlots([defaultSlot]);
-                    setPickupTimeSlots([defaultSlot]);
-                    if (!newDropOffTime) setNewDropOffTime(defaultSlot.value);
-                    if (!newPickupTime) setNewPickupTime(defaultSlot.value);
-                    setFetchingTimes(false);
-                    return;
-                }
-
-                // Service-specific time slot logic
                 if (serviceId === 1 || serviceId === 4) {
-                    const deliveryStart = availability.delivery_start_time || availability.delivery_window_start_time || '08:00';
-                    const deliveryEnd = availability.delivery_end_time || availability.delivery_window_end_time || '17:00';
-                    
-                    const timeWindowValue = `${deliveryStart}|${deliveryEnd}`;
-                    setDropOffTimeSlots([{
-                        value: timeWindowValue,
-                        label: formatTimeRange12Hour(deliveryStart, deliveryEnd)
-                    }]);
-                    
-                    if (!newDropOffTime) {
-                        setNewDropOffTime(timeWindowValue);
-                    }
+                    const dropSlots = toWindowSlots(dropOffAvail?.deliverySlots);
+                    setDropOffTimeSlots(dropSlots);
+                    ensureSelectableSlot(newDropOffTime, dropSlots, setNewDropOffTime);
 
-                    const pickupStart = availability.delivery_pickup_start_time || availability.delivery_pickup_window_start_time || '08:00';
-                    const pickupEnd = availability.delivery_pickup_end_time || availability.delivery_pickup_window_end_time || '17:00';
-                    
-                    const pickupWindowValue = `${pickupStart}|${pickupEnd}`;
-                    setPickupTimeSlots([{
-                        value: pickupWindowValue,
-                        label: formatTimeRange12Hour(pickupStart, pickupEnd)
-                    }]);
-                    
-                    if (!newPickupTime) {
-                        setNewPickupTime(pickupWindowValue);
-                    }
+                    const pickSlots = toWindowSlots(pickupAvail?.pickupSlots);
+                    setPickupTimeSlots(pickSlots);
+                    ensureSelectableSlot(newPickupTime, pickSlots, setNewPickupTime);
+                } else if (serviceId === 3) {
+                    const dropSlots = toWindowSlots(dropOffAvail?.deliverySlots);
+                    setDropOffTimeSlots(dropSlots);
+                    ensureSelectableSlot(newDropOffTime, dropSlots, setNewDropOffTime);
+                    setPickupTimeSlots([]);
                 } else if (serviceId === 2) {
-                    const pickupStart = availability.pickup_start_time || '08:00';
-                    
-                    setNewDropOffTime(pickupStart);
-                    setDropOffTimeSlots([{
-                        value: pickupStart,
-                        label: convertTo12Hour(pickupStart)
-                    }]);
+                    // Hourly self-pickup: one fixed pickup-start and one fixed return-by time
+                    // per day (matching BookingForm's ReadOnlyTimeField), not a range of options.
+                    const dropSlot = (dropOffAvail?.pickupSlots || [])[0];
+                    setDropOffTimeSlots(dropSlot ? [dropSlot] : []);
+                    if (dropSlot) setNewDropOffTime(dropSlot.value);
 
                     if (newPickupDate) {
-                        const pickupDateStr = format(newPickupDate, 'yyyy-MM-dd');
-                        const pickupDow = newPickupDate.getDay();
-
-                        const { data: dsaPickup, error: dsaPickupError } = await supabase
-                            .from('date_specific_availability')
-                            .select('return_by_time')
-                            .eq('service_id', serviceId)
-                            .eq('date', pickupDateStr)
-                            .maybeSingle();
-
-                        if (dsaPickupError && dsaPickupError.code !== 'PGRST116') {
-                            console.error('Error fetching pickup date_specific_availability:', dsaPickupError);
-                        }
-
-                        const { data: saPickup, error: saPickupError } = await supabase
-                            .from('service_availability')
-                            .select('return_by_time')
-                            .eq('service_id', serviceId)
-                            .eq('day_of_week', pickupDow)
-                            .maybeSingle();
-
-                        if (saPickupError && saPickupError.code !== 'PGRST116') {
-                            console.error('Error fetching pickup service_availability:', saPickupError);
-                        }
-
-                        const returnTime = dsaPickup?.return_by_time || saPickup?.return_by_time || availability.return_by_time || '17:00';
-                        
-                        setNewPickupTime(returnTime);
-                        setPickupTimeSlots([{
-                            value: returnTime,
-                            label: convertTo12Hour(returnTime)
-                        }]);
+                        const pickSlot = (pickupAvail?.returnSlots || [])[0];
+                        setPickupTimeSlots(pickSlot ? [pickSlot] : []);
+                        if (pickSlot) setNewPickupTime(pickSlot.value);
+                    } else {
+                        setPickupTimeSlots([]);
                     }
-                } else if (serviceId === 3) {
-                    const deliveryStart = availability.delivery_start_time || availability.delivery_window_start_time || '08:00';
-                    const deliveryEnd = availability.delivery_end_time || availability.delivery_window_end_time || '17:00';
-                    
-                    const timeWindowValue = `${deliveryStart}|${deliveryEnd}`;
-                    setDropOffTimeSlots([{
-                        value: timeWindowValue,
-                        label: formatTimeRange12Hour(deliveryStart, deliveryEnd)
-                    }]);
-                    
-                    if (!newDropOffTime) {
-                        setNewDropOffTime(timeWindowValue);
-                    }
-                    
+                } else {
+                    setDropOffTimeSlots([]);
                     setPickupTimeSlots([]);
                 }
             } catch (error) {
-                console.error("Error fetching time slots:", error);
-                // Provide default fallback
-                const defaultSlot = { value: '08:00|17:00', label: '8:00 AM - 5:00 PM' };
-                setDropOffTimeSlots([defaultSlot]);
-                setPickupTimeSlots([defaultSlot]);
-                if (!newDropOffTime) setNewDropOffTime(defaultSlot.value);
-                if (!newPickupTime && serviceId !== 3) setNewPickupTime(defaultSlot.value);
+                console.error("Error fetching time slots from get-availability:", error);
+                setDropOffTimeSlots([]);
+                setPickupTimeSlots([]);
             } finally {
                 setFetchingTimes(false);
             }
         };
 
         fetchTimeSlots();
-    }, [newDropOffDate, newPickupDate, serviceId, setNewDropOffTime, setNewPickupTime, newDropOffTime, newPickupTime]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [newDropOffDate, newPickupDate, serviceId, setNewDropOffTime, setNewPickupTime]);
 
     const isDateDisabled = (date) => {
         if (isSameDay(date, originalDropOff) || isSameDay(date, originalPickup)) return false;
@@ -319,8 +259,8 @@ export const RescheduleDateTimeSelector = ({
                                                 </SelectTrigger>
                                                 <SelectContent className="bg-gray-900 border-gray-700 text-white max-h-[300px]">
                                                     {dropOffTimeSlots.map((slot, idx) => (
-                                                        <SelectItem key={`start-${idx}-${slot.value}`} value={slot.value} className="focus:bg-gold/20 focus:text-gold py-3 cursor-pointer">
-                                                            {slot.label}
+                                                        <SelectItem key={`start-${idx}-${slot.value}`} value={slot.value} disabled={slot.available === false} className="focus:bg-gold/20 focus:text-gold py-3 cursor-pointer">
+                                                            {slot.label}{slot.available === false ? ' (Full)' : ''}
                                                         </SelectItem>
                                                     ))}
                                                 </SelectContent>
@@ -345,8 +285,8 @@ export const RescheduleDateTimeSelector = ({
                                                     </SelectTrigger>
                                                     <SelectContent className="bg-gray-900 border-gray-700 text-white max-h-[300px]">
                                                         {pickupTimeSlots.map((slot, idx) => (
-                                                            <SelectItem key={`end-${idx}-${slot.value}`} value={slot.value} className="focus:bg-gold/20 focus:text-gold py-3 cursor-pointer">
-                                                                {slot.label}
+                                                            <SelectItem key={`end-${idx}-${slot.value}`} value={slot.value} disabled={slot.available === false} className="focus:bg-gold/20 focus:text-gold py-3 cursor-pointer">
+                                                                {slot.label}{slot.available === false ? ' (Full)' : ''}
                                                             </SelectItem>
                                                         ))}
                                                     </SelectContent>

@@ -14,7 +14,6 @@ import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
 import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
-import { AvailabilityService } from '@/services/AvailabilityService';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
@@ -43,7 +42,6 @@ export const BookingForm = ({
   const [availability, setAvailability] = useState({});
   const [loadingAvailability, setLoadingAvailability] = useState(true);
   const [fetchingExactTimes, setFetchingExactTimes] = useState(false);
-  const [fetchedPickupWindows, setFetchedPickupWindows] = useState([]);
   const [currentMonth, setCurrentMonth] = useState(startOfMonth(new Date()));
   const [baseRentalPrice, setBaseRentalPrice] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
@@ -411,70 +409,6 @@ export const BookingForm = ({
     fetchExactTimes();
   }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, isDelivery, setBookingData]);
   
-  useEffect(() => {
-    if (!currentPlan || (currentPlan.id !== 1 && currentPlan.id !== 4)) return;
-    
-    const targetDate = bookingData.dropOffDate; 
-    
-    if (!targetDate) {
-        setFetchedPickupWindows([]);
-        return;
-    }
-
-    const fetchPickupWindow = async () => {
-        console.log('[BookingForm] Fetching delivery pickup window for service', currentPlan.id);
-        const dateStr = format(targetDate, 'yyyy-MM-dd');
-        const dow = targetDate.getDay();
-
-        try {
-          const { data: dsa, error: dsaError } = await supabase
-            .from('date_specific_availability')
-            .select('delivery_pickup_start_time, delivery_pickup_end_time')
-            .eq('service_id', currentPlan.id)
-            .eq('date', dateStr)
-            .maybeSingle();
-
-          if (dsaError) {
-            console.warn('[BookingForm] Error fetching date-specific delivery pickup window:', dsaError);
-          }
-
-          let startTime = dsa?.delivery_pickup_start_time;
-          let endTime = dsa?.delivery_pickup_end_time;
-
-          if (!startTime || !endTime) {
-            const { data: sa, error: saError } = await supabase
-              .from('service_availability')
-              .select('delivery_pickup_window_start_time, delivery_pickup_window_end_time')
-              .eq('service_id', currentPlan.id)
-              .eq('day_of_week', dow)
-              .maybeSingle();
-
-            if (saError) {
-              console.warn('[BookingForm] Error fetching service availability delivery pickup window:', saError);
-            }
-
-            startTime = startTime || sa?.delivery_pickup_window_start_time;
-            endTime = endTime || sa?.delivery_pickup_window_end_time;
-          }
-
-          if (startTime && endTime) {
-            const formattedLabel = `${formatTimeToAmPm(startTime)} - ${formatTimeToAmPm(endTime)}`;
-            const rawValue = `${startTime}|${endTime}`;
-            setFetchedPickupWindows([{ label: formattedLabel, value: rawValue }]);
-            console.log('[BookingForm] ✓ Delivery pickup window:', formattedLabel);
-          } else {
-            console.warn('[BookingForm] No delivery pickup window found for service_id=' + currentPlan.id);
-            setFetchedPickupWindows([]);
-          }
-        } catch (error) {
-          console.warn('[BookingForm] Unexpected error fetching delivery pickup window:', error);
-          setFetchedPickupWindows([]);
-        }
-    };
-
-    fetchPickupWindow();
-  }, [bookingData.dropOffDate, currentPlan]);
-  
   const disabledDates = useMemo(() => {
     const dates = [{ before: startOfDay(addDays(new Date(), 1)) }];
     for (const dateStr in availability) {
@@ -508,13 +442,12 @@ export const BookingForm = ({
       else if (plan.id === 3) dropOffSlots = dropOffAvail.deliverySlots || [];
     }
     if (pickupAvail && pickupAvail.available) {
+      // get-availability sources pickupSlots from each service's own calendar columns
+      // (delivery-pickup window for window services, pickup/return-by for hourly self-pickup),
+      // so no client-side override or direct table query is needed here.
       if (plan.id === 1) pickupSlots = pickupAvail.pickupSlots || [];
       else if (hourlyPickup) pickupSlots = pickupAvail.returnSlots || [];
       else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
-    }
-    
-    if (currentPlan && (currentPlan.id === 1 || currentPlan.id === 4)) {
-        pickupSlots = fetchedPickupWindows.length > 0 ? fetchedPickupWindows : [];
     }
     
     console.log('[BookingForm] Time slots:', {
@@ -523,7 +456,7 @@ export const BookingForm = ({
     });
     
     return { dropOff: dropOffSlots, pickup: pickupSlots };
-  }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery, fetchedPickupWindows]);
+  }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery]);
   
   const handleDateSelect = async (field, date) => {
     const newDate = date ? startOfDay(date) : null;
@@ -1314,7 +1247,11 @@ const TimeSlotPicker = ({
     <Select onValueChange={onValueChange} value={value} disabled={disabled || loading}>
       <SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder="Select a time" /></SelectTrigger>
       <SelectContent className="bg-gray-800 border-gray-700 text-white">
-        {loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots?.length > 0 ? slots.map(slot => <SelectItem key={slot.value} value={slot.value}>{slot.label || slot.value}</SelectItem>) : <SelectItem value="no-slots" disabled>None</SelectItem>}
+        {loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots?.length > 0 ? slots.map(slot => (
+          <SelectItem key={slot.value} value={slot.value} disabled={slot.available === false}>
+            {slot.label || slot.value}{slot.available === false ? ' (Full)' : ''}
+          </SelectItem>
+        )) : <SelectItem value="no-slots" disabled>None</SelectItem>}
       </SelectContent>
     </Select>
   </div>;

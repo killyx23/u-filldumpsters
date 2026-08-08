@@ -1,0 +1,37 @@
+-- Phase 2f.6 (concurrency hardening) — decision record.
+--
+-- The plan suggested an additional partial unique index for singleton slot-granular
+-- resources:
+--
+--   create unique index brr_singleton_slot_idx
+--     on public.booking_resource_reservations (resource_id, reserved_date, slot_start)
+--     where granularity = 'slot' and quantity = 1;
+--
+-- Skipped deliberately, for two reasons:
+--
+-- 1. Postgres index predicates cannot reference other tables, so "singleton resource" can't
+--    be expressed as "inventory_items.total_quantity = 1" in the predicate — only as a
+--    hardcoded list of resource_ids. The admin Capacity tab (CapacityManager.jsx, Phase 2e)
+--    now lets non-technical staff edit total_quantity directly. A hardcoded-id index would
+--    silently go stale the moment someone bumps a "singleton" resource's stock to 2 through
+--    that UI: the index would keep rejecting perfectly legitimate concurrent slot bookings
+--    even though there is now capacity for them.
+-- 2. It would be redundant defense anyway. scripts/verify-concurrent-booking-capacity.mjs
+--    fires 8 truly simultaneous create_pending_booking calls (via Promise.all, not sequential
+--    awaits) against a stock-1 resource and confirms exactly one wins and the rest are
+--    rejected with the capacity marker. That proves the FOR UPDATE row lock in
+--    check_booking_inventory_capacity (see 20260728121000 and 20260730141000) already
+--    serializes concurrent writers correctly under real contention, not just sequential
+--    request ordering.
+--
+-- If a specific singleton resource ever needs belt-and-suspenders protection, the safer form
+-- is a partial index scoped to that resource_id explicitly (not to a quantity heuristic that
+-- can drift from the resource it was meant to describe):
+--
+--   create unique index brr_trailer_slot_idx
+--     on public.booking_resource_reservations (reserved_date, slot_start)
+--     where resource_id = 2 and granularity = 'slot';
+--
+-- No schema change in this migration — this file exists purely so the decision and its
+-- rationale live in the migration history alongside the code it concerns.
+select 1;
