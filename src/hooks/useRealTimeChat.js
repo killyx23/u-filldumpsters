@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 
+const SIGNED_URL_TTL_SECONDS = 3600;
+
 function generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         const r = Math.random() * 16 | 0;
@@ -18,6 +20,41 @@ export function useRealTimeChat(customerId) {
     const conversationId = `cust_${customerId}`;
     const channelRef = useRef(null);
 
+    const isAbsoluteUrl = useCallback((value) => (
+        typeof value === 'string' && /^https?:\/\//i.test(value)
+    ), []);
+
+    const resolveAttachmentUrl = useCallback(async (attachmentValue) => {
+        if (!attachmentValue) return null;
+        if (isAbsoluteUrl(attachmentValue)) return attachmentValue;
+
+        const { data, error: signedUrlError } = await supabase
+            .storage
+            .from('customer-uploads')
+            .createSignedUrl(attachmentValue, SIGNED_URL_TTL_SECONDS);
+
+        if (signedUrlError) {
+            console.warn('[useRealTimeChat] Failed to create signed URL:', signedUrlError);
+            return null;
+        }
+
+        return data?.signedUrl || null;
+    }, [isAbsoluteUrl]);
+
+    const hydrateMessageAttachment = useCallback(async (message) => {
+        if (!message?.attachment_url) {
+            return { ...message, resolved_attachment_url: null };
+        }
+
+        const resolvedUrl = await resolveAttachmentUrl(message.attachment_url);
+        return { ...message, resolved_attachment_url: resolvedUrl };
+    }, [resolveAttachmentUrl]);
+
+    const hydrateMessagesAttachments = useCallback(async (rows) => {
+        if (!rows || rows.length === 0) return [];
+        return Promise.all(rows.map(hydrateMessageAttachment));
+    }, [hydrateMessageAttachment]);
+
     const fetchMessages = useCallback(async () => {
         if (!customerId) return;
         setIsLoading(true);
@@ -29,8 +66,9 @@ export function useRealTimeChat(customerId) {
                 .order('created_at', { ascending: true });
                 
             if (fetchError) throw fetchError;
-            
-            setMessages(data || []);
+
+            const hydratedMessages = await hydrateMessagesAttachments(data || []);
+            setMessages(hydratedMessages);
             setError(null);
         } catch (err) {
             console.error("Error fetching messages:", err);
@@ -38,7 +76,7 @@ export function useRealTimeChat(customerId) {
         } finally {
             setIsLoading(false);
         }
-    }, [conversationId, customerId]);
+    }, [conversationId, customerId, hydrateMessagesAttachments]);
 
     const setupSubscription = useCallback(() => {
         if (!customerId) return;
@@ -61,10 +99,13 @@ export function useRealTimeChat(customerId) {
                     filter: `conversation_id=eq.${conversationId}`
                 },
                 (payload) => {
-                    setMessages(prev => {
-                        if (prev.some(m => m.id === payload.new.id)) return prev;
-                        return [...prev, payload.new].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-                    });
+                    void (async () => {
+                        const hydratedNew = await hydrateMessageAttachment(payload.new);
+                        setMessages(prev => {
+                            if (prev.some(m => m.id === hydratedNew.id)) return prev;
+                            return [...prev, hydratedNew].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                        });
+                    })();
                 }
             )
             .on(
@@ -76,7 +117,10 @@ export function useRealTimeChat(customerId) {
                     filter: `conversation_id=eq.${conversationId}`
                 },
                 (payload) => {
-                    setMessages(prev => prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
+                    void (async () => {
+                        const hydratedUpdate = await hydrateMessageAttachment(payload.new);
+                        setMessages(prev => prev.map(m => m.id === hydratedUpdate.id ? { ...m, ...hydratedUpdate } : m));
+                    })();
                 }
             )
             .subscribe((status) => {
@@ -88,7 +132,7 @@ export function useRealTimeChat(customerId) {
                     setConnectionStatus('error');
                 }
             });
-    }, [conversationId, customerId]);
+    }, [conversationId, customerId, hydrateMessageAttachment]);
 
     useEffect(() => {
         fetchMessages();
@@ -110,12 +154,16 @@ export function useRealTimeChat(customerId) {
             customer_id: customerId,
             sender_type: senderType,
             message_content: content,
-            attachment_url: attachment?.url || null,
+            attachment_url: attachment?.path || attachment?.url || null,
             attachment_name: attachment?.name || null,
             is_read: false
         };
 
-        const newMessage = { ...dbPayload, created_at: new Date().toISOString() };
+        const newMessage = {
+            ...dbPayload,
+            resolved_attachment_url: attachment?.url || null,
+            created_at: new Date().toISOString()
+        };
 
         // Optimistic update
         setMessages(prev => [...prev, newMessage]);
@@ -123,14 +171,15 @@ export function useRealTimeChat(customerId) {
         try {
             const { data, error } = await supabase.from('chat_messages').insert([dbPayload]).select().single();
             if (error) throw error;
-            setMessages(prev => prev.map(m => m.id === messageId ? data : m));
-            return data;
+            const hydratedData = await hydrateMessageAttachment(data);
+            setMessages(prev => prev.map(m => m.id === messageId ? hydratedData : m));
+            return hydratedData;
         } catch (err) {
             console.error("Error sending message:", err);
             setMessages(prev => prev.filter(m => m.id !== messageId));
             throw err;
         }
-    }, [conversationId, customerId]);
+    }, [conversationId, customerId, hydrateMessageAttachment]);
 
     const markAsRead = useCallback(async (messageIds) => {
         if (!messageIds || messageIds.length === 0) return;

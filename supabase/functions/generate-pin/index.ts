@@ -1,9 +1,30 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { corsHeaders } from "./cors.ts";
-const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
+import { getCorsHeaders } from "./cors.ts";
+import {
+  addGraceHour,
+  buildBookingDateUTC,
+  getPinActivationStart,
+  isBookingEnded,
+  isWithinPinGenerationWindow,
+} from "../_shared/pinTiming.ts";
+import { ensurePinOnLock } from "../_shared/lockPin.ts";
+import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
+
+/** Statuses eligible for customer portal + daily pin jobs */
+const ELIGIBLE_BOOKING_STATUSES = [
+  "Confirmed",
+  "confirmed",
+  "Delivered",
+  "delivered",
+  "waiting_to_be_returned",
+  "Rescheduled",
+  "rescheduled",
+  "pending_verification",
+  "pending_review",
+];
+function makeJsonResponse(corsHeaders) {
+  return (body, status = 200) => new Response(JSON.stringify(body), {
     status,
     headers: {
       ...corsHeaders,
@@ -37,58 +58,35 @@ function generateRandomPin() {
  *
  * Falls back to the provided fallbackHourUTC if the slot cannot be parsed.
  */ function buildIgloohomeDate(date, timeSlot, fallbackHourUTC) {
-  const pad = (n)=>String(n).padStart(2, "0");
-  if (timeSlot) {
-    // Expected format: "6:00 AM", "11:00 PM", "12:00 PM" etc.
-    const match = timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (match) {
-      let hour = parseInt(match[1], 10);
-      const minute = parseInt(match[2], 10);
-      const meridiem = match[3].toUpperCase();
-      // Convert 12-hour to 24-hour
-      if (meridiem === "PM" && hour !== 12) hour += 12;
-      if (meridiem === "AM" && hour === 12) hour = 0;
-      // MST -> UTC: add 6 hours
-      const utcHour = hour + 6;
-      if (utcHour >= 24) {
-        // Rolls over to next day
-        const nextDay = new Date(date + "T00:00:00Z");
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-        const nextDayStr = nextDay.toISOString().split("T")[0];
-        return `${nextDayStr}T${pad(utcHour - 24)}:${pad(minute)}:00+00:00`;
-      }
-      return `${date}T${pad(utcHour)}:${pad(minute)}:00+00:00`;
-    }
+  if (timeSlot && !timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)) {
     console.warn(`[generate-pin] Could not parse time slot: "${timeSlot}" — using fallback`);
   }
-  return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
+  return buildBookingDateUTC(date, timeSlot, fallbackHourUTC);
 }
-async function getOAuthToken(clientId, clientSecret) {
-  const credentials = btoa(`${clientId}:${clientSecret}`);
-  const res = await fetch(IGLOOHOME_OAUTH_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
+
+async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+  if (booking.pin_notification_sent_at) return;
+  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: booking.id,
+      email_type: "pin_update",
+      pin,
+      start_time: startTime,
+      end_time: endTime,
     },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      scope: [
-        "igloohomeapi/create-pin-bridge-proxied-job",
-        "igloohomeapi/get-devices",
-        "igloohomeapi/get-job-status",
-        "igloohomeapi/algopin-onetime"
-      ].join(" ")
-    })
   });
-  const body = await readResponse(res);
-  console.log("[generate-pin] OAuth status:", res.status);
-  if (!res.ok || !body.json?.access_token) {
-    console.error("[generate-pin] OAuth failed:", body.text);
-    return null;
+  if (error) {
+    console.error(`[generate-pin] PIN notification failed for booking #${booking.id}:`, error.message);
+    return;
   }
-  return body.json.access_token;
+  const now = new Date().toISOString();
+  await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
+  await supabase.from("rental_access_codes").update({ notified_at: now }).eq("order_id", booking.id).eq("status", "active");
+}
+async function getOAuthTokenForPin(clientId, clientSecret) {
+  const result = await getOAuthToken(clientId, clientSecret, GENERATE_PIN_SCOPES);
+  console.log("[generate-pin] OAuth:", result.token ? `ok (${result.scopesUsed})` : result.reason);
+  return result.token;
 }
 async function isLockOnline(accessToken, lockId) {
   const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices`, {
@@ -196,44 +194,75 @@ async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, 
     pinId: body.json?.pinId || body.json?.id || ""
   };
 }
-async function generatePinWithFallback(accessToken, lockId, bridgeId, dropOffDate, dropOffTimeSlot, pickupDate, pickupTimeSlot, orderId) {
-  const randomPin = generateRandomPin();
-  // Build start and end from actual booking time slots (MST -> UTC)
-  // Fallback: 12:00 UTC = 6:00 AM MST for start, 05:00 UTC = 11:00 PM MST for end
-  const startDate = buildIgloohomeDate(dropOffDate, dropOffTimeSlot, 12);
-  const endDate = buildIgloohomeDate(pickupDate, pickupTimeSlot, 5);
-  console.log("[generate-pin] PIN window:", {
-    startDate,
-    endDate
-  });
+async function generatePinWithFallback(accessToken, lockId, bridgeId, supabase, booking) {
+  const orderId = booking.id;
+  const startDate = getPinActivationStart(booking);
+  // PIN stays valid 1 hour past scheduled return so late returns still open the lock
+  const endDate = addGraceHour(buildIgloohomeDate(booking.pickup_date, booking.pickup_time_slot, 5));
+  console.log("[generate-pin] PIN window:", { startDate, endDate });
   const accessName = `Dump Loader Rental - Order #${orderId}`;
-  const bridgeResult = await createBridgePin(accessToken, lockId, bridgeId, randomPin, startDate, endDate, accessName);
-  if (bridgeResult.success) {
-    console.log(`[generate-pin] ✓ Bridge PIN succeeded for order #${orderId}`);
+
+  const bridgeResult = await ensurePinOnLock(supabase, accessToken, {
+    orderId,
+    lockId,
+    bridgeId,
+    startDate,
+    endDate,
+    accessName,
+    clearBudgetMs: 50_000,
+    createBudgetMs: 60_000,
+  });
+
+  if (bridgeResult.lockConfirmed || bridgeResult.jobId) {
+    console.log(
+      `[generate-pin] Bridge PIN for order #${orderId}: state=${bridgeResult.createState} confirmed=${bridgeResult.lockConfirmed}`,
+    );
     return {
       success: true,
-      pin: randomPin,
-      pinId: bridgeResult.pinId,
-      pinType: "bridge_proxied"
+      pin: bridgeResult.pin,
+      pinId: bridgeResult.jobId,
+      pinType: "bridge_proxied",
+      startDate,
+      endDate,
+      lockConfirmed: bridgeResult.lockConfirmed,
+      createState: bridgeResult.createState,
+      clear: bridgeResult.clear,
+      error: bridgeResult.lockConfirmed ? undefined : bridgeResult.error,
     };
   }
+
   console.warn(`[generate-pin] Bridge failed for order #${orderId}, trying AlgoPIN. Error: ${bridgeResult.error}`);
-  const algoResult = await createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, pickupDate, orderId);
+  const algoResult = await createAlgoPin(
+    accessToken,
+    lockId,
+    booking.drop_off_date,
+    booking.drop_off_time_slot,
+    booking.pickup_date,
+    orderId,
+  );
   if (algoResult.success) {
     console.log(`[generate-pin] ✓ AlgoPIN succeeded for order #${orderId}`);
     return {
       success: true,
       pin: algoResult.pin,
       pinId: algoResult.pinId,
-      pinType: "algopin"
+      pinType: "algopin",
+      startDate,
+      endDate,
+      lockConfirmed: true,
+      createState: "completed",
     };
   }
   return {
     success: false,
-    error: `Bridge: ${bridgeResult.error} | AlgoPIN: ${algoResult.error}`
+    error: `Bridge: ${bridgeResult.error} | AlgoPIN: ${algoResult.error}`,
+    startDate,
+    endDate,
   };
 }
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
+  const jsonResponse = makeJsonResponse(corsHeaders);
   if (req.method === "OPTIONS") return new Response(null, {
     headers: corsHeaders
   });
@@ -309,8 +338,7 @@ Deno.serve(async (req)=>{
       }, 401);
     }
     if (callerType === "admin") {
-      const { data: adminCheck } = await supabase.from("admin_users").select("id").eq("user_id", user.id).single();
-      if (!adminCheck) {
+      if (user.app_metadata?.is_admin !== true) {
         return jsonResponse({
           success: false,
           error: "Admin access required"
@@ -318,14 +346,37 @@ Deno.serve(async (req)=>{
       }
     }
     if (callerType === "customer") {
-      const { data: customer } = await supabase.from("customers").select("id").eq("user_id", user.id).single();
-      if (!customer) {
+      const metadataCustomerId = user.user_metadata?.customer_db_id;
+      let customerId = null;
+
+      if (metadataCustomerId != null && metadataCustomerId !== "") {
+        const parsed = Number.parseInt(String(metadataCustomerId), 10);
+        if (Number.isFinite(parsed)) customerId = parsed;
+      }
+
+      if (!customerId) {
+        const { data: customer } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        customerId = customer?.id ?? null;
+      }
+
+      if (!customerId) {
         return jsonResponse({
           success: false,
           error: "Customer not found"
         }, 403);
       }
-      const { data: ownerCheck } = await supabase.from("bookings").select("id").eq("id", bookingId).eq("customer_id", customer.id).single();
+
+      const { data: ownerCheck } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("id", bookingId)
+        .eq("customer_id", customerId)
+        .maybeSingle();
+
       if (!ownerCheck) {
         return jsonResponse({
           success: false,
@@ -336,25 +387,40 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Fetch and validate booking
     // ----------------------------------------------------------------
-    const { data: booking, error: fetchError } = await supabase.from("bookings").select("*").eq("id", bookingId).eq("status", "Confirmed").is("pin_generated_at", null).single();
+    const { data: booking, error: fetchError } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("id", bookingId)
+      .in("status", ELIGIBLE_BOOKING_STATUSES)
+      .single();
+
     if (fetchError || !booking) {
       return jsonResponse({
         success: false,
-        error: "Booking not found, not confirmed, or already has a PIN"
+        error: "Booking not found or not eligible for PIN generation"
       }, 404);
     }
-    // Guard: check rental_access_codes directly as a second layer
-    const { data: existingPin } = await supabase.from("rental_access_codes").select("id, access_pin").eq("order_id", bookingId).eq("status", "active").single();
-    if (existingPin) {
-      return jsonResponse({
-        success: false,
-        error: "An active PIN already exists for this booking"
-      }, 409);
+
+    if (callerType === "customer") {
+      if (isBookingEnded(booking)) {
+        return jsonResponse({
+          success: false,
+          error: "This rental period has ended."
+        }, 403);
+      }
+      if (!isWithinPinGenerationWindow(booking)) {
+        return jsonResponse({
+          success: false,
+          error: "Access PIN is not available yet. Codes are issued 12 hours before your scheduled pickup."
+        }, 403);
+      }
     }
+
+    // Clear any prior PIN (verified) then create — regeneration is allowed.
     // ----------------------------------------------------------------
-    // Generate PIN — bridge first, algopin fallback
+    // Generate PIN — bridge first (with verified clear), algopin fallback
     // ----------------------------------------------------------------
-    const accessToken = await getOAuthToken(clientId, clientSecret);
+    const accessToken = await getOAuthTokenForPin(clientId, clientSecret);
     if (!accessToken) return jsonResponse({
       success: false,
       error: "Failed to get OAuth token"
@@ -362,7 +428,7 @@ Deno.serve(async (req)=>{
     const lockOnline = await isLockOnline(accessToken, lockId);
     console.log(`[generate-pin] Lock online: ${lockOnline}`);
     console.log(`[generate-pin] Booking #${bookingId} | drop_off: ${booking.drop_off_date} ${booking.drop_off_time_slot} | pickup: ${booking.pickup_date} ${booking.pickup_time_slot}`);
-    const pinResult = await generatePinWithFallback(accessToken, lockId, bridgeId, booking.drop_off_date, booking.drop_off_time_slot, booking.pickup_date, booking.pickup_time_slot, booking.id);
+    const pinResult = await generatePinWithFallback(accessToken, lockId, bridgeId, supabase, booking);
     if (!pinResult.success) {
       return jsonResponse({
         success: false,
@@ -376,9 +442,8 @@ Deno.serve(async (req)=>{
     await supabase.from("bookings").update({
       pin_generated_at: now
     }).eq("id", bookingId);
-    // Build the same UTC times for DB storage so portal displays correctly
-    const startTimeUTC = buildIgloohomeDate(booking.drop_off_date, booking.drop_off_time_slot, 12);
-    const endTimeUTC = buildIgloohomeDate(booking.pickup_date, booking.pickup_time_slot, 5);
+    const startTimeUTC = pinResult.startDate;
+    const endTimeUTC = pinResult.endDate;
     await supabase.from("rental_access_codes").insert({
       order_id: booking.id,
       customer_email: booking.email,
@@ -389,23 +454,24 @@ Deno.serve(async (req)=>{
       lock_id: lockId,
       start_time: startTimeUTC,
       end_time: endTimeUTC,
-      status: "active"
+      status: "active",
+      lock_confirmed_at: pinResult.lockConfirmed ? now : null,
+      confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
     });
-    // TODO: uncomment when send-pin-notification is deployed
-    // const { error: emailError } = await supabase.functions.invoke("send-pin-notification", {
-    //   body: { bookingId: booking.id, pin: pinResult.pin, dropOffDate: booking.drop_off_date, pickupDate: booking.pickup_date },
-    // });
-    // if (!emailError) {
-    //   await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", bookingId);
-    // }
-    console.log(`[generate-pin] ✓ PIN generated for booking #${bookingId} via ${pinResult.pinType}`);
+    if (pinResult.lockConfirmed) {
+      await maybeSendPinNotification(supabase, booking, pinResult.pin, startTimeUTC, endTimeUTC);
+    }
+    console.log(`[generate-pin] ✓ PIN generated for booking #${bookingId} via ${pinResult.pinType} confirmed=${pinResult.lockConfirmed}`);
     return jsonResponse({
       success: true,
       bookingId,
       pin: pinResult.pin,
       pinType: pinResult.pinType,
       pinId: pinResult.pinId,
-      message: `PIN generated via ${pinResult.pinType}`
+      lockConfirmed: !!pinResult.lockConfirmed,
+      message: pinResult.lockConfirmed
+        ? `PIN generated via ${pinResult.pinType}`
+        : `PIN queued via ${pinResult.pinType} — waiting for bridge confirmation`,
     });
   } catch (error) {
     console.error("[generate-pin] Unhandled exception:", error);

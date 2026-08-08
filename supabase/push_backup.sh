@@ -67,6 +67,20 @@ if [[ ! -d "$BACKUP_DIR" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Guard: detect old nested structure and bail out with a clear message
+# ---------------------------------------------------------------------------
+if [[ -d "$BACKUP_DIR/supabase" ]]; then
+  error "This backup has the old nested structure (supabase/functions/ subdirectory)."
+  echo ""
+  echo "To fix it, run:"
+  echo "  mv \"$BACKUP_DIR/supabase/functions/\"* \"$BACKUP_DIR/\""
+  echo "  rm -rf \"$BACKUP_DIR/supabase\""
+  echo ""
+  echo "Then re-run this script."
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Determine which functions to deploy
 # ---------------------------------------------------------------------------
 if [[ $# -gt 0 ]]; then

@@ -6,10 +6,25 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { Star, MessageSquare, Ticket, Send, Paperclip, Loader2, CheckCircle, Clock, Info, AlertCircle, Bot } from 'lucide-react';
+import { Star, MessageSquare, Ticket, Send, Paperclip, Loader2, CheckCircle, Clock, Info, AlertCircle, Bot, Smile, Upload, Video, X } from 'lucide-react';
+import {
+    uploadReviewImage,
+    uploadReviewVideo,
+    formatReviewUploadError,
+    resolveReviewVideoMime,
+    MAX_REVIEW_IMAGES,
+    REVIEW_IMAGE_TYPES,
+    REVIEW_VIDEO_TYPES,
+} from '@/utils/reviewMediaHelper';
+import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
+import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import EmojiPicker from 'emoji-picker-react';
 import { format, parseISO } from 'date-fns';
 import { useRealTimeChat } from '@/hooks/useRealTimeChat';
+import { useTypingIndicator } from '@/hooks/useTypingIndicator';
 import { MessageBubble } from '@/components/chat/MessageBubble';
+import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { AIAssistantTab } from './AIAssistantTab';
 
@@ -21,14 +36,14 @@ export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefre
                 <p className="text-sm text-blue-200">Chat with support, get AI assistance, submit tickets, or leave reviews.</p>
             </div>
 
-            <Tabs defaultValue="ai-assistant" className="w-full">
+            <Tabs defaultValue="chat" className="w-full">
                 <TabsList className="grid w-full grid-cols-4 bg-black/20 text-white">
+                    <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
+                    <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>
+                    <TabsTrigger value="tickets"><Ticket className="w-4 h-4 mr-2 hidden sm:block"/> Support Tickets</TabsTrigger>
                     <TabsTrigger value="ai-assistant" className="data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300">
                         <Bot className="w-4 h-4 mr-2 hidden sm:block"/> AI Assistant
                     </TabsTrigger>
-                    <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
-                    <TabsTrigger value="tickets"><Ticket className="w-4 h-4 mr-2 hidden sm:block"/> Support Tickets</TabsTrigger>
-                    <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="ai-assistant" className="mt-4">
@@ -58,12 +73,13 @@ const ChatInterface = ({ customer }) => {
     const fileInputRef = useRef(null);
 
     const { messages, sendMessage, markAsRead, isLoading, connectionStatus, reconnect } = useRealTimeChat(customer.id);
+    const { isOtherUserTyping, setIsTyping, clearTyping, typingIndicatorText } = useTypingIndicator(customer.id, 'customer');
 
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
-    }, [messages]);
+    }, [messages, isOtherUserTyping]);
 
     // Mark incoming admin messages as read
     useEffect(() => {
@@ -78,9 +94,15 @@ const ChatInterface = ({ customer }) => {
         try {
             await sendMessage(input.trim(), 'customer', attachment);
             setInput('');
+            clearTyping();
         } catch (error) {
             toast({ title: 'Send Failed', description: error.message, variant: 'destructive' });
         }
+    };
+
+    const onEmojiClick = (emojiObject) => {
+        setInput((prev) => prev + emojiObject.emoji);
+        setIsTyping();
     };
 
     const handleFileUpload = async (e) => {
@@ -94,8 +116,7 @@ const ChatInterface = ({ customer }) => {
             const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
             if (uploadError) throw uploadError;
 
-            const { data } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-            await handleSend({ url: data.publicUrl, name: file.name });
+            await handleSend({ path: filePath, name: file.name });
         } catch (error) {
             toast({ title: "Attachment Failed", description: error.message, variant: "destructive" });
         } finally {
@@ -136,6 +157,7 @@ const ChatInterface = ({ customer }) => {
                                 senderName={msg.sender_type === 'admin' ? "Support Team" : "You"} 
                             />
                         ))}
+                        <TypingIndicator isTyping={isOtherUserTyping} text={typingIndicatorText} />
                     </>
                 )}
             </CardContent>
@@ -143,16 +165,26 @@ const ChatInterface = ({ customer }) => {
                 <div className="relative flex items-center">
                     <Textarea 
                         value={input} 
-                        onChange={(e) => setInput(e.target.value)}
+                        onChange={(e) => { setInput(e.target.value); setIsTyping(); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                         placeholder="Type your message... (Shift+Enter for new line)" 
-                        className="bg-gray-800 border-gray-700 pr-24 resize-none h-[50px] min-h-[50px] max-h-[120px] text-white focus-visible:ring-blue-500"
+                        className="bg-gray-800 border-gray-700 pr-28 resize-none h-[50px] min-h-[50px] max-h-[120px] text-white focus-visible:ring-blue-500"
                         onInput={(e) => {
                             e.target.style.height = 'auto';
                             e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
                         }}
                     />
                     <div className="absolute right-2 flex items-center gap-1 bg-gray-800 px-1 rounded">
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button size="icon" variant="ghost" className="text-gray-400 hover:text-white h-8 w-8">
+                                    <Smile className="h-4 w-4" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 border-0 bg-transparent mb-2 mr-2">
+                                <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" />
+                            </PopoverContent>
+                        </Popover>
                         <Button size="icon" variant="ghost" onClick={() => fileInputRef.current?.click()} className="text-gray-400 hover:text-white h-8 w-8" disabled={isUploading}>
                             {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
                         </Button>
@@ -251,7 +283,11 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
     const [rating, setRating] = useState(5);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
+    const [images, setImages] = useState([]);
+    const [video, setVideo] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const imageInputRef = useRef(null);
+    const videoInputRef = useRef(null);
 
     const fetchReviews = async () => {
         setLoading(true);
@@ -280,32 +316,106 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
     const reviewedBookingIds = reviews.map(r => r.booking_id);
     const unreviewedBookings = completedBookings.filter(b => !reviewedBookingIds.includes(b.id));
 
+    const resetReviewForm = () => {
+        setRating(5);
+        setTitle('');
+        setContent('');
+        setImages([]);
+        setVideo(null);
+        setSelectedBooking(null);
+        if (imageInputRef.current) imageInputRef.current.value = '';
+        if (videoInputRef.current) videoInputRef.current.value = '';
+    };
+
+    const onReviewEmojiClick = (emojiObject, field) => {
+        if (field === 'title') {
+            setTitle((prev) => prev + emojiObject.emoji);
+        } else {
+            setContent((prev) => prev + emojiObject.emoji);
+        }
+    };
+
+    const handleImageSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+
+        const combined = [...images, ...files];
+        if (combined.length > MAX_REVIEW_IMAGES) {
+            toast({
+                title: 'Too many photos',
+                description: `You can upload up to ${MAX_REVIEW_IMAGES} photos per review.`,
+                variant: 'destructive',
+            });
+            e.target.value = '';
+            return;
+        }
+
+        for (const file of files) {
+            if (!REVIEW_IMAGE_TYPES.includes(file.type)) {
+                toast({ title: 'Invalid image', description: 'Photos must be JPEG, PNG, or WebP.', variant: 'destructive' });
+                e.target.value = '';
+                return;
+            }
+        }
+
+        setImages(combined);
+        e.target.value = '';
+    };
+
+    const handleVideoSelect = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!REVIEW_VIDEO_TYPES.includes(resolveReviewVideoMime(file))) {
+            toast({ title: 'Invalid video', description: 'Video must be MP4, WebM, or MOV.', variant: 'destructive' });
+            e.target.value = '';
+            return;
+        }
+
+        setVideo(file);
+        e.target.value = '';
+    };
+
     const handleSubmitReview = async (e) => {
         e.preventDefault();
         if (!selectedBooking) return;
         setIsSubmitting(true);
 
         try {
+            const uploadedImagePaths = [];
+            for (const file of images) {
+                const path = await uploadReviewImage(customer.id, selectedBooking.id, file);
+                uploadedImagePaths.push(path);
+            }
+
+            let uploadedVideoPath = null;
+            if (video) {
+                uploadedVideoPath = await uploadReviewVideo(customer.id, selectedBooking.id, video);
+            }
+
             const { error } = await supabase.from('reviews').insert({
                 booking_id: selectedBooking.id,
                 customer_id: customer.id,
                 rating,
                 title,
                 content,
-                is_public: false
+                image_urls: uploadedImagePaths.length ? uploadedImagePaths : null,
+                video_url: uploadedVideoPath,
+                is_public: false,
             });
 
             if (error) throw error;
 
-            toast({ title: 'Review submitted', description: 'Review submitted and pending admin approval. Thank you for your feedback!' });
-            setRating(5);
-            setTitle('');
-            setContent('');
-            setSelectedBooking(null);
+            toast({ title: 'Review submitted', description: 'Review submitted and pending customer service approval. Thank you for your feedback!' });
+            resetReviewForm();
             fetchReviews();
             if (onRefreshData) onRefreshData();
         } catch (err) {
-            toast({ title: 'Failed to submit review', description: err.message, variant: 'destructive' });
+            toast({
+                title: 'Failed to submit review',
+                description: formatReviewUploadError(err),
+                variant: 'destructive',
+            });
         } finally {
             setIsSubmitting(false);
         }
@@ -378,11 +488,97 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                             </div>
                             <div>
                                 <label className="text-sm font-medium mb-1 block text-gray-300">Title</label>
-                                <Input value={title} onChange={(e) => setTitle(e.target.value)} required className="bg-black/30 border-white/20 text-white" placeholder="Summary of your experience" />
+                                <div className="relative">
+                                    <Input value={title} onChange={(e) => setTitle(e.target.value)} required className="bg-black/30 border-white/20 text-white pr-10" placeholder="Summary of your experience" />
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" size="icon" variant="ghost" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-gray-400 hover:text-white">
+                                                <Smile className="h-4 w-4" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0 border-0 bg-transparent">
+                                            <EmojiPicker onEmojiClick={(emoji) => onReviewEmojiClick(emoji, 'title')} theme="dark" />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
                             </div>
                             <div>
                                 <label className="text-sm font-medium mb-1 block text-gray-300">Review</label>
-                                <Textarea value={content} onChange={(e) => setContent(e.target.value)} required className="bg-black/30 border-white/20 h-32 text-white" placeholder="Tell us what you thought..." />
+                                <div className="relative">
+                                    <Textarea value={content} onChange={(e) => setContent(e.target.value)} required className="bg-black/30 border-white/20 h-32 text-white pr-10" placeholder="Tell us what you thought..." />
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <Button type="button" size="icon" variant="ghost" className="absolute right-1 top-2 h-8 w-8 text-gray-400 hover:text-white">
+                                                <Smile className="h-4 w-4" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0 border-0 bg-transparent">
+                                            <EmojiPicker onEmojiClick={(emoji) => onReviewEmojiClick(emoji, 'content')} theme="dark" />
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium mb-2 block text-gray-300">Photos & Video (optional)</label>
+                                <div className="flex flex-wrap gap-2">
+                                    <Button type="button" variant="outline" onClick={() => imageInputRef.current?.click()} className="border-white/20 text-white hover:bg-white/10">
+                                        <Upload className="mr-2 h-4 w-4" /> Upload Photos
+                                    </Button>
+                                    <Button type="button" variant="outline" onClick={() => videoInputRef.current?.click()} className="border-white/20 text-white hover:bg-white/10">
+                                        <Video className="mr-2 h-4 w-4" /> Add Video
+                                    </Button>
+                                </div>
+                                <input
+                                    type="file"
+                                    ref={imageInputRef}
+                                    multiple
+                                    accept={REVIEW_IMAGE_TYPES.join(',')}
+                                    className="hidden"
+                                    onChange={handleImageSelect}
+                                />
+                                <input
+                                    type="file"
+                                    ref={videoInputRef}
+                                    accept={REVIEW_VIDEO_TYPES.join(',')}
+                                    className="hidden"
+                                    onChange={handleVideoSelect}
+                                />
+                                {images.length > 0 && (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {images.map((file, index) => (
+                                            <div key={`${file.name}-${index}`} className="relative">
+                                                <img src={URL.createObjectURL(file)} alt="Review preview" className="h-16 w-16 rounded object-cover border border-white/10" />
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="destructive"
+                                                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full"
+                                                    onClick={() => setImages(images.filter((_, i) => i !== index))}
+                                                >
+                                                    <X className="h-3 w-3" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {video && (
+                                    <div className="mt-3 relative max-w-xs">
+                                        <video src={URL.createObjectURL(video)} controls className="w-full rounded border border-white/10 max-h-40" preload="metadata" />
+                                        <Button
+                                            type="button"
+                                            size="icon"
+                                            variant="destructive"
+                                            className="absolute -top-2 -right-2 h-5 w-5 rounded-full"
+                                            onClick={() => {
+                                                setVideo(null);
+                                                if (videoInputRef.current) videoInputRef.current.value = '';
+                                            }}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                )}
+                                <p className="text-xs text-gray-500 mt-2">Up to {MAX_REVIEW_IMAGES} photos (10MB each) and 1 video (50MB).</p>
                             </div>
                             <Button type="submit" disabled={isSubmitting || !title || !content} className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold">
                                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Star className="w-4 w-4 mr-2" />} Submit Review
@@ -414,6 +610,12 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                                 </div>
                                 <h4 className="font-bold text-sm mb-1 text-white">{review.title}</h4>
                                 <p className="text-sm whitespace-pre-wrap mt-2 text-gray-300">{review.content}</p>
+                                <ReviewMediaDisplay
+                                    imageUrls={review.image_urls}
+                                    videoUrl={review.video_url}
+                                    className="mt-3"
+                                />
+                                <ReviewAdminResponse review={review} />
                                 <p className="text-xs text-gray-500 mt-3">{format(parseISO(review.created_at), 'PPP')}</p>
                             </CardContent>
                         </Card>

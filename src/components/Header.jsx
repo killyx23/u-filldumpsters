@@ -3,17 +3,17 @@ import React, { useState } from 'react';
 import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoyaltyBadge';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const bookingFlow = useBookingFlowOptional();
+  const { user, isAdmin, signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
-  const isAdmin = user?.user_metadata?.is_admin;
   const isCustomer = user && !isAdmin;
   const pastBookingsCount = user?.user_metadata?.past_bookings_count || 0;
 
@@ -29,6 +29,17 @@ export const Header = ({ onReorderSelect }) => {
   };
 
   const closeMenu = () => setIsOpen(false);
+
+  const handleHomeNavigation = (e) => {
+    if (bookingFlow?.isInBookingFlow) {
+      e?.preventDefault();
+      closeMenu();
+      bookingFlow.requestLeaveBooking();
+      return;
+    }
+    closeMenu();
+    navigate('/');
+  };
 
   const AuthButtons = ({ mobile = false }) => {
     const btnClass = mobile ? "w-full justify-start tap-target" : "tap-target";
@@ -85,7 +96,12 @@ export const Header = ({ onReorderSelect }) => {
             </div>
 
             <div className="flex-shrink-0 z-10 flex justify-center items-center h-full">
-               <Link to="/" className="flex items-center group">
+               <button
+                  type="button"
+                  onClick={handleHomeNavigation}
+                  className="flex items-center group border-0 bg-transparent p-0 cursor-pointer"
+                  aria-label="U-Fill Dumpsters home"
+                >
                   <div className="relative p-0 transition-transform duration-300 group-hover:scale-105 bg-white rounded-xl">
                     <img 
                       src="https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/6e46b28934e98900a7bb6e2e2a49851c.png" 
@@ -93,26 +109,15 @@ export const Header = ({ onReorderSelect }) => {
                       className="h-[120px] md:h-[160px] lg:h-[180px] w-auto object-contain"
                     />
                   </div>
-              </Link>
+              </button>
             </div>
 
-            <div className="flex flex-1 items-center justify-end pl-4 xl:pl-8 h-full relative gap-4">
-              {isCustomer && <ReturningCustomerLoyaltyBadge pastBookingsCount={pastBookingsCount} />}
-              
-              <div className="hidden lg:flex items-center h-full mr-4">
-                <div className="flex flex-col items-end gap-2">
-                  <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase max-w-[400px] block ${textEffectClass}`}>
-                    You fill it, we dump it.<br/>
-                    Where we bring the convenience to you.
-                  </span>
-                  <button
-                    onClick={() => setIsReturningCustomerModalOpen(true)}
-                    className="text-xs text-blue-600 hover:text-blue-800 underline flex items-center gap-1 transition-colors"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    Returning Customer?
-                  </button>
-                </div>
+            <div className="flex flex-1 items-center justify-end pl-4 xl:pl-8 h-full relative">
+              <div className="hidden lg:flex items-center h-full mr-8">
+                <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase max-w-[400px] block ${textEffectClass}`}>
+                  You fill it, we dump it.<br/>
+                  Where we bring the convenience to you.
+                </span>
               </div>
               
               <div className="flex items-center h-full">
@@ -125,9 +130,13 @@ export const Header = ({ onReorderSelect }) => {
                   </SheetTrigger>
                   <SheetContent side="right" className="bg-blue-950 border-white/10 text-white w-[300px] sm:w-[400px]">
                     <div className="flex flex-col space-y-6 mt-8">
-                      <Link to="/" onClick={closeMenu} className="text-xl font-bold text-white hover:text-yellow-300 flex items-center gap-2 tap-target">
+                      <button
+                        type="button"
+                        onClick={handleHomeNavigation}
+                        className="text-xl font-bold text-white hover:text-yellow-300 flex items-center gap-2 tap-target text-left"
+                      >
                         Home
-                      </Link>
+                      </button>
                       <button
                         onClick={() => {
                           closeMenu();
@@ -162,7 +171,31 @@ export const Header = ({ onReorderSelect }) => {
       <ReturningCustomerVerificationModal
         isOpen={isReturningCustomerModalOpen}
         onClose={() => setIsReturningCustomerModalOpen(false)}
-        onReorderSelect={onReorderSelect}
+        onReorderSelect={(booking) => {
+          onReorderSelect?.(booking);
+          navigate('/');
+        }}
+        onCustomerVerified={(customerData) => {
+          navigate('/', {
+            state: {
+              returningCustomerProfile: {
+                customer: {
+                  id: customerData?.contactAddress?.customerId || null,
+                  first_name: customerData?.firstName || '',
+                  last_name: customerData?.lastName || '',
+                  email: customerData?.email || '',
+                  phone: customerData?.phone || '',
+                  street: customerData?.contactAddress?.street || '',
+                  city: customerData?.contactAddress?.city || '',
+                  state: customerData?.contactAddress?.state || '',
+                  zip: customerData?.contactAddress?.zip || '',
+                },
+                email: customerData?.email || '',
+              },
+            },
+          });
+          setIsReturningCustomerModalOpen(false);
+        }}
       />
     </>
   );

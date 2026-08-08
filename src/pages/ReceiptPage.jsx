@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Helmet } from 'react-helmet';
 import { getDumpFeeForService } from '@/utils/getDumpFeeForService';
 import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { getTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
@@ -31,14 +33,18 @@ export const ReceiptPage = () => {
         const fetchDetailsAndCalculate = async () => {
             try {
                 // Fetch complete booking data with all fields
-                const { data: booking, error: bError } = await supabase
-                    .from('bookings')
-                    .select('*, customers(*)')
-                    .eq('id', bookingId)
-                    .single();
+                const { data: payload, error: bError } = await supabase.rpc('get_booking_for_post_checkout', {
+                    p_booking_id: Number.parseInt(String(bookingId), 10),
+                    p_payment_intent: searchParams.get('payment_intent'),
+                });
 
                 if (bError) throw new Error('Could not fetch booking details.');
-                if (!booking) throw new Error('Booking not found.');
+                if (!payload?.booking) throw new Error('Booking not found.');
+
+                const booking = {
+                    ...payload.booking,
+                    customers: payload.customers,
+                };
 
                 setBookingData(booking);
 
@@ -213,10 +219,20 @@ export const ReceiptPage = () => {
                 }
                 setCalculatingMileage(false);
 
-                // Calculate totals
+                // Calculate totals — prefer stored booking tax; else admin tax rate on subtotal
                 const subtotal = basePrice + deliveryFee + mileageCharge + addonsTotal;
-                const tax = subtotal * 0.07;
-                const total = subtotal + tax;
+                const storedTax = Number(booking.tax_amount);
+                let tax;
+                if (Number.isFinite(storedTax) && storedTax >= 0 && booking.tax_amount != null) {
+                    tax = storedTax;
+                } else {
+                    const rateConfig = await getTaxRate();
+                    const rate = Number(booking.tax_rate_used || rateConfig?.tax_rate) || 7.45;
+                    tax = calculateTaxAmount(subtotal, rate);
+                }
+                const total = Number(booking.total_price) > 0
+                    ? Number(booking.total_price)
+                    : subtotal + tax;
 
                 setReceiptDetails({
                     bookingId: booking.id,

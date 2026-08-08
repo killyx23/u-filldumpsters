@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
 export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
@@ -58,14 +59,24 @@ export const CustomerPortalDashboard = () => {
         return;
       }
 
-      // Fetch booking data
-      const { data: bookingData, error: bookingError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('id', targetOrderId)
-        .single();
+      const sessionPhone =
+        localStorage.getItem('customerPortalPhone') ||
+        (sessionStr ? JSON.parse(sessionStr).phone : null);
 
-      if (bookingError || !bookingData) {
+      if (!sessionPhone) {
+        navigate('/customer-portal-login');
+        return;
+      }
+
+      const bookingData = await supabase.rpc('verify_portal_booking_access', {
+        p_booking_id: targetOrderId,
+        p_phone: sessionPhone,
+      }).then(({ data, error }) => {
+        if (error) throw error;
+        return data;
+      });
+
+      if (!bookingData?.id) {
         throw new Error('Booking not found. Please check your Order ID.');
       }
 
@@ -129,7 +140,8 @@ export const CustomerPortalDashboard = () => {
     try {
       const date = parseISO(dateStr);
       const dateFormatted = format(date, 'MMM dd, yyyy');
-      return `${dateFormatted}${timeSlot ? ` at ${timeSlot}` : ''}`;
+      const timeLabel = timeSlot ? convertTo12Hour(timeSlot) || timeSlot : '';
+      return `${dateFormatted}${timeLabel ? ` at ${timeLabel}` : ''}`;
     } catch (e) {
       return dateStr;
     }

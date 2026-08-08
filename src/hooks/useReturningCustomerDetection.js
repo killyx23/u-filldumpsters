@@ -7,6 +7,7 @@ export const useReturningCustomerDetection = (email) => {
   const [loading, setLoading] = useState(false);
   const [pastBookingsCount, setPastBookingsCount] = useState(0);
   const [lastOrderDate, setLastOrderDate] = useState(null);
+  const [detectionError, setDetectionError] = useState(null);
 
   const checkReturningCustomer = useCallback(async (emailToCheck) => {
     if (!emailToCheck || !emailToCheck.includes('@')) {
@@ -14,67 +15,51 @@ export const useReturningCustomerDetection = (email) => {
       setIsReturning(false);
       setPastBookingsCount(0);
       setLastOrderDate(null);
+      setDetectionError(null);
       return;
     }
 
     const normalizedEmail = emailToCheck.toLowerCase().trim();
-    console.log('[useReturningCustomerDetection] Checking email:', normalizedEmail);
     setLoading(true);
+    setDetectionError(null);
 
     try {
-      // Check if customer exists
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', normalizedEmail)
-        .maybeSingle();
+      const { data, error } = await supabase.functions.invoke('check-returning-customer', {
+        body: { email: normalizedEmail },
+      });
 
-      if (customerError) {
-        console.error('[useReturningCustomerDetection] Error fetching customer:', customerError);
-        setCustomerData(null);
-        setIsReturning(false);
-        return;
-      }
-
-      if (customer) {
-        console.log('[useReturningCustomerDetection] ✓ Returning customer found:', customer.id);
-        
-        // Fetch booking history
-        const { data: bookings, error: bookingsError } = await supabase
-          .from('bookings')
-          .select('id, created_at, status')
-          .eq('customer_id', customer.id)
-          .order('created_at', { ascending: false });
-
-        if (bookingsError) {
-          console.error('[useReturningCustomerDetection] Error fetching bookings:', bookingsError);
-        }
-
-        const completedBookings = bookings?.filter(b => 
-          b.status && !['cancelled', 'pending_payment'].includes(b.status.toLowerCase())
-        ) || [];
-
-        setCustomerData(customer);
-        setIsReturning(true);
-        setPastBookingsCount(completedBookings.length);
-        setLastOrderDate(bookings && bookings.length > 0 ? bookings[0].created_at : null);
-
-        console.log('[useReturningCustomerDetection] Customer stats:', {
-          totalBookings: bookings?.length,
-          completedBookings: completedBookings.length,
-          lastOrder: bookings?.[0]?.created_at
-        });
-      } else {
-        console.log('[useReturningCustomerDetection] New customer detected');
+      if (error) {
+        console.error('[useReturningCustomerDetection] edge function error:', error);
         setCustomerData(null);
         setIsReturning(false);
         setPastBookingsCount(0);
         setLastOrderDate(null);
+        setDetectionError('Could not check account history. You can continue booking.');
+        return;
       }
+
+      if (!data?.success) {
+        console.error('[useReturningCustomerDetection] check failed:', data?.error);
+        setCustomerData(null);
+        setIsReturning(false);
+        setPastBookingsCount(0);
+        setLastOrderDate(null);
+        setDetectionError('Could not check account history. You can continue booking.');
+        return;
+      }
+
+      setIsReturning(Boolean(data.isReturning));
+      setPastBookingsCount(data.pastBookingsCount ?? 0);
+      setCustomerData(data.customer ?? null);
+      setLastOrderDate(null);
+      setDetectionError(null);
     } catch (error) {
       console.error('[useReturningCustomerDetection] Unexpected error:', error);
       setCustomerData(null);
       setIsReturning(false);
+      setPastBookingsCount(0);
+      setLastOrderDate(null);
+      setDetectionError('Could not check account history. You can continue booking.');
     } finally {
       setLoading(false);
     }
@@ -96,6 +81,7 @@ export const useReturningCustomerDetection = (email) => {
     loading,
     pastBookingsCount,
     lastOrderDate,
-    recheckCustomer: checkReturningCustomer
+    detectionError,
+    recheckCustomer: checkReturningCustomer,
   };
 };

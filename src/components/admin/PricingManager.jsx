@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
+import { clearProtectionPlansCache } from '@/utils/protectionPlans';
 
 const ServicePricingCard = ({ service, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
@@ -164,20 +165,24 @@ const DumpFeeCard = ({ service, dumpFeeData, onSave }) => {
     );
 };
 
-const InsuranceItemCard = ({ item, onEdit, onDelete, isPremium }) => {
+const InsuranceItemCard = ({ item, onEdit, onDelete, isPrimaryPlan }) => {
+    const typeLabel = item.plan_type === 'driveway_protection' ? 'Driveway Protection' : 'Rental Insurance';
     return (
         <div className={`bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border transition-colors ${
-            isPremium ? 'border-purple-500/40 bg-purple-900/10' : 'border-purple-500/20 hover:border-purple-500/40'
+            isPrimaryPlan ? 'border-purple-500/40 bg-purple-900/10' : 'border-purple-500/20 hover:border-purple-500/40'
         }`}>
             <div className="flex items-center gap-3 w-full md:w-1/4">
-                <div className={`p-2 rounded-lg ${isPremium ? 'bg-purple-500/30' : 'bg-purple-500/20'}`}>
+                <div className={`p-2 rounded-lg ${isPrimaryPlan ? 'bg-purple-500/30' : 'bg-purple-500/20'}`}>
                     <Shield className="h-5 w-5 text-purple-400" />
                 </div>
                 <div>
                     <p className="text-lg font-bold text-white">{item.name}</p>
-                    {isPremium && (
-                        <span className="text-xs text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded-full">Primary Insurance</span>
-                    )}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        <span className="text-xs text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded-full">{typeLabel}</span>
+                        {isPrimaryPlan && (
+                            <span className="text-xs text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded-full">Primary</span>
+                        )}
+                    </div>
                 </div>
             </div>
             <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
@@ -185,6 +190,12 @@ const InsuranceItemCard = ({ item, onEdit, onDelete, isPremium }) => {
                     <p className="text-gray-400">Base Price</p>
                     <p className="text-white font-semibold">${Number(item.price || 0).toFixed(2)}</p>
                 </div>
+                {item.serviceIds?.length > 0 && (
+                    <div className="text-sm max-w-xs">
+                        <p className="text-gray-400">Applicable Services</p>
+                        <p className="text-white text-xs">{item.serviceIds.length} service(s)</p>
+                    </div>
+                )}
                 {item.description && (
                     <div className="text-sm max-w-xs">
                         <p className="text-gray-400">Description</p>
@@ -200,7 +211,7 @@ const InsuranceItemCard = ({ item, onEdit, onDelete, isPremium }) => {
                     >
                         <Edit className="h-4 w-4" />
                     </Button>
-                    {!isPremium && (
+                    {!isPrimaryPlan && (
                         <Button
                             onClick={() => onDelete(item.id)}
                             size="icon"
@@ -216,29 +227,63 @@ const InsuranceItemCard = ({ item, onEdit, onDelete, isPremium }) => {
     );
 };
 
-const InsuranceItemForm = ({ formData, setFormData, onSave, onCancel, isEditing, isPremium }) => {
+const InsuranceItemForm = ({
+    formData,
+    setFormData,
+    onSave,
+    onCancel,
+    isEditing,
+    isPrimaryPlan,
+    rentableServices = [],
+}) => {
+    const handleServiceToggle = (serviceId) => {
+        const current = formData.selectedServices || [];
+        setFormData({
+            ...formData,
+            selectedServices: current.includes(serviceId)
+                ? current.filter((id) => id !== serviceId)
+                : [...current, serviceId],
+        });
+    };
+
     return (
         <div className={`bg-gradient-to-br from-purple-900/30 to-purple-800/20 p-5 rounded-lg border-2 shadow-xl ${
-            isPremium ? 'border-purple-500/50' : 'border-purple-500/30'
+            isPrimaryPlan ? 'border-purple-500/50' : 'border-purple-500/30'
         }`}>
-            {isPremium && (
+            {isPrimaryPlan && (
                 <div className="mb-3 bg-purple-900/40 border border-purple-500/40 rounded p-2">
                     <p className="text-purple-200 text-sm flex items-center gap-2">
                         <Shield className="h-4 w-4" />
-                        <span className="font-semibold">Premium Insurance</span> - This is the primary insurance option shown to customers
+                        <span className="font-semibold">Primary protection plan</span> — shown to customers for applicable services
                     </p>
                 </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                    <Label className="text-white mb-2">Insurance Name</Label>
+                    <Label className="text-white mb-2">Plan Name</Label>
                     <Input
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="e.g., Premium Insurance Service"
+                        placeholder="e.g., Premium Insurance"
                         className="bg-gray-800 border-gray-600 text-white"
-                        disabled={isPremium}
+                        disabled={isPrimaryPlan}
                     />
+                </div>
+                <div>
+                    <Label className="text-white mb-2">Plan Type</Label>
+                    <Select
+                        value={formData.plan_type}
+                        onValueChange={(value) => setFormData({ ...formData, plan_type: value })}
+                        disabled={isPrimaryPlan}
+                    >
+                        <SelectTrigger className="bg-gray-800 border-gray-600 text-white">
+                            <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="rental_insurance">Rental Insurance</SelectItem>
+                            <SelectItem value="driveway_protection">Driveway Protection</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
                 <div>
                     <Label className="text-white mb-2">Price ($)</Label>
@@ -247,7 +292,16 @@ const InsuranceItemForm = ({ formData, setFormData, onSave, onCancel, isEditing,
                         step="0.01"
                         value={formData.price}
                         onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                        placeholder="20.00"
+                        placeholder="25.00"
+                        className="bg-gray-800 border-gray-600 text-white"
+                    />
+                </div>
+                <div>
+                    <Label className="text-white mb-2">Price Unit</Label>
+                    <Input
+                        value={formData.price_unit}
+                        onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
+                        placeholder="/rental"
                         className="bg-gray-800 border-gray-600 text-white"
                     />
                 </div>
@@ -260,6 +314,24 @@ const InsuranceItemForm = ({ formData, setFormData, onSave, onCancel, isEditing,
                     placeholder="Protection plan details..."
                     className="bg-gray-800 border-gray-600 text-white"
                 />
+            </div>
+            <div className="mt-4">
+                <Label className="text-white mb-2">Applicable Services</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3 bg-black/20 rounded-md border border-white/10">
+                    {rentableServices.map((service) => (
+                        <div key={service.id} className="flex items-center space-x-2">
+                            <Checkbox
+                                id={`plan-service-${service.id}`}
+                                checked={(formData.selectedServices || []).includes(service.id)}
+                                onCheckedChange={() => handleServiceToggle(service.id)}
+                                className="border-white/30 data-[state=checked]:bg-purple-500"
+                            />
+                            <Label htmlFor={`plan-service-${service.id}`} className="text-white cursor-pointer text-sm">
+                                {service.name}
+                            </Label>
+                        </div>
+                    ))}
+                </div>
             </div>
             <div className="flex gap-2 mt-4">
                 <Button onClick={onSave} className="bg-purple-600 hover:bg-purple-700">
@@ -282,6 +354,17 @@ const TaxConfigurationCard = () => {
     const [taxCounty, setTaxCounty] = useState('2.0');
     const [taxCity, setTaxCity] = useState('0.6');
     const [effectiveDate, setEffectiveDate] = useState('2026-04-23');
+    // Checked = exempt (non-taxable). Unchecked = taxable.
+    const [exemptInsurance, setExemptInsurance] = useState(false);
+    const [exemptDriveway, setExemptDriveway] = useState(false);
+    const [exemptDeliveryFee, setExemptDeliveryFee] = useState(false);
+    const [exemptMileage, setExemptMileage] = useState(false);
+    const [exemptBaseByService, setExemptBaseByService] = useState({});
+    const [exemptEquipment, setExemptEquipment] = useState({});
+    const [servicesList, setServicesList] = useState([]);
+    const [equipmentList, setEquipmentList] = useState([]);
+    const [insurancePlanIds, setInsurancePlanIds] = useState([]);
+    const [drivewayPlanIds, setDrivewayPlanIds] = useState([]);
 
     useEffect(() => {
         loadTaxConfig();
@@ -294,6 +377,75 @@ const TaxConfigurationCard = () => {
             setTaxCounty(config.tax_county.toString());
             setTaxCity(config.tax_city.toString());
             setEffectiveDate(config.tax_effective_date);
+
+            const [plansRes, servicesRes, equipmentRes, equipmentNamesRes] = await Promise.all([
+                supabase
+                    .from('protection_plans')
+                    .select('id, plan_type, plan_key, name, is_taxable, is_active')
+                    .eq('is_active', true),
+                supabase
+                    .from('services')
+                    .select('id, name, is_taxable, delivery_fee_is_taxable, mileage_is_taxable, is_rentable')
+                    .order('id'),
+                supabase
+                    .from('equipment_pricing')
+                    .select('equipment_id, is_taxable')
+                    .in('equipment_id', [1, 2, 3, 4, 5, 6])
+                    .order('equipment_id'),
+                supabase
+                    .from('equipment')
+                    .select('id, name')
+                    .in('id', [1, 2, 3, 4, 5, 6]),
+            ]);
+
+            if (plansRes.error) throw plansRes.error;
+            if (servicesRes.error) throw servicesRes.error;
+            if (equipmentRes.error) throw equipmentRes.error;
+
+            const plans = plansRes.data || [];
+            const insurancePlans = plans.filter(
+                (p) => p.plan_type === 'rental_insurance' || p.plan_key === 'premium_insurance'
+            );
+            const drivewayPlans = plans.filter((p) => p.plan_type === 'driveway_protection');
+            setInsurancePlanIds(insurancePlans.map((p) => p.id));
+            setDrivewayPlanIds(drivewayPlans.map((p) => p.id));
+            // checked = exempt = !is_taxable
+            setExemptInsurance(insurancePlans.some((p) => p.is_taxable === false));
+            setExemptDriveway(drivewayPlans.some((p) => p.is_taxable === false));
+
+            const rentable = (servicesRes.data || []).filter(
+                (s) => s.is_rentable !== false && Number(s.id) !== 7
+            );
+            setServicesList(rentable);
+            setExemptDeliveryFee(rentable.some((s) => s.delivery_fee_is_taxable === false));
+            setExemptMileage(rentable.some((s) => s.mileage_is_taxable === false));
+            const baseMap = {};
+            rentable.forEach((s) => {
+                baseMap[s.id] = s.is_taxable === false;
+            });
+            setExemptBaseByService(baseMap);
+
+            const nameById = Object.fromEntries(
+                (equipmentNamesRes.data || []).map((row) => [row.id, row.name])
+            );
+            const FALLBACK_NAMES = {
+                1: 'Wheelbarrow',
+                2: 'Hand Truck',
+                3: 'Working Gloves (Pair)',
+                4: 'Mattress Disposal',
+                5: 'TV Disposal',
+                6: 'Appliance Disposal',
+            };
+            const equipment = (equipmentRes.data || []).map((row) => ({
+                ...row,
+                name: nameById[row.equipment_id] || FALLBACK_NAMES[row.equipment_id] || `Equipment ${row.equipment_id}`,
+            }));
+            setEquipmentList(equipment);
+            const equipMap = {};
+            equipment.forEach((row) => {
+                equipMap[row.equipment_id] = row.is_taxable === false;
+            });
+            setExemptEquipment(equipMap);
         } catch (error) {
             console.error('[TaxConfigurationCard] Error loading tax config:', error);
             toast({
@@ -327,11 +479,58 @@ const TaxConfigurationCard = () => {
 
             if (error) throw error;
 
+            // Persist exemptions: checked = non-taxable (is_taxable false)
+            if (insurancePlanIds.length > 0) {
+                const { error: insErr } = await supabase
+                    .from('protection_plans')
+                    .update({ is_taxable: !exemptInsurance })
+                    .in('id', insurancePlanIds);
+                if (insErr) throw insErr;
+            }
+            if (drivewayPlanIds.length > 0) {
+                const { error: drvErr } = await supabase
+                    .from('protection_plans')
+                    .update({ is_taxable: !exemptDriveway })
+                    .in('id', drivewayPlanIds);
+                if (drvErr) throw drvErr;
+            }
+
+            const serviceIds = servicesList.map((s) => s.id);
+            if (serviceIds.length > 0) {
+                const { error: feeErr } = await supabase
+                    .from('services')
+                    .update({
+                        delivery_fee_is_taxable: !exemptDeliveryFee,
+                        mileage_is_taxable: !exemptMileage,
+                    })
+                    .in('id', serviceIds);
+                if (feeErr) throw feeErr;
+
+                await Promise.all(
+                    servicesList.map((s) =>
+                        supabase
+                            .from('services')
+                            .update({ is_taxable: !exemptBaseByService[s.id] })
+                            .eq('id', s.id)
+                    )
+                );
+            }
+
+            await Promise.all(
+                equipmentList.map((row) =>
+                    supabase
+                        .from('equipment_pricing')
+                        .update({ is_taxable: !exemptEquipment[row.equipment_id] })
+                        .eq('equipment_id', row.equipment_id)
+                )
+            );
+
             invalidateTaxRateCache();
+            clearProtectionPlansCache();
 
             toast({
                 title: 'Tax Configuration Updated',
-                description: `New total tax rate: ${totalRate.toFixed(2)}%`
+                description: `New total tax rate: ${totalRate.toFixed(2)}%. Exemptions saved.`
             });
         } catch (error) {
             console.error('[TaxConfigurationCard] Error saving tax config:', error);
@@ -354,6 +553,24 @@ const TaxConfigurationCard = () => {
     }
 
     const totalRate = (parseFloat(taxState) || 0) + (parseFloat(taxCounty) || 0) + (parseFloat(taxCity) || 0);
+
+    const ExemptionCheckbox = ({ id, checked, onCheckedChange, label, hint }) => (
+        <div className="flex items-start space-x-2 py-1.5">
+            <Checkbox
+                id={id}
+                checked={checked}
+                onCheckedChange={(v) => onCheckedChange(v === true)}
+                className="mt-0.5 border-white/30 data-[state=checked]:bg-amber-500"
+                disabled={isSaving}
+            />
+            <div>
+                <Label htmlFor={id} className="text-white cursor-pointer text-sm font-medium">
+                    {label}
+                </Label>
+                {hint ? <p className="text-xs text-gray-400 mt-0.5">{hint}</p> : null}
+            </div>
+        </div>
+    );
 
     return (
         <div className="bg-white/5 p-6 rounded-lg border border-white/10 space-y-4">
@@ -440,6 +657,84 @@ const TaxConfigurationCard = () => {
                         <span className="font-mono text-green-400">{totalRate.toFixed(2)}%</span>
                     </div>
                 </div>
+            </div>
+
+            <div className="bg-amber-900/20 border border-amber-500/30 rounded-lg p-4 space-y-3">
+                <div>
+                    <h4 className="text-sm font-semibold text-amber-300 mb-1">Tax Exemptions</h4>
+                    <p className="text-xs text-gray-400">
+                        Checked items are non-taxable. Unchecked items are taxed at the rate above on the full subtotal.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                    <ExemptionCheckbox
+                        id="exempt-insurance"
+                        checked={exemptInsurance}
+                        onCheckedChange={setExemptInsurance}
+                        label="Rental Insurance (damage waiver)"
+                        hint="Leave unchecked to tax insurance with the rest of the order"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-driveway"
+                        checked={exemptDriveway}
+                        onCheckedChange={setExemptDriveway}
+                        label="Driveway Protection"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-delivery-fee"
+                        checked={exemptDeliveryFee}
+                        onCheckedChange={setExemptDeliveryFee}
+                        label="Delivery Fee"
+                    />
+                    <ExemptionCheckbox
+                        id="exempt-mileage"
+                        checked={exemptMileage}
+                        onCheckedChange={setExemptMileage}
+                        label="Trip Mileage"
+                    />
+                </div>
+
+                {servicesList.length > 0 && (
+                    <div className="pt-2 border-t border-amber-500/20">
+                        <p className="text-xs font-semibold text-amber-200/90 mb-2">Base Rental by Service</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                            {servicesList.map((s) => (
+                                <ExemptionCheckbox
+                                    key={s.id}
+                                    id={`exempt-base-${s.id}`}
+                                    checked={Boolean(exemptBaseByService[s.id])}
+                                    onCheckedChange={(v) =>
+                                        setExemptBaseByService((prev) => ({ ...prev, [s.id]: v }))
+                                    }
+                                    label={s.name || `Service ${s.id}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {equipmentList.length > 0 && (
+                    <div className="pt-2 border-t border-amber-500/20">
+                        <p className="text-xs font-semibold text-amber-200/90 mb-2">Equipment &amp; Purchase Items</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                            {equipmentList.map((row) => (
+                                <ExemptionCheckbox
+                                    key={row.equipment_id}
+                                    id={`exempt-equip-${row.equipment_id}`}
+                                    checked={Boolean(exemptEquipment[row.equipment_id])}
+                                    onCheckedChange={(v) =>
+                                        setExemptEquipment((prev) => ({
+                                            ...prev,
+                                            [row.equipment_id]: v,
+                                        }))
+                                    }
+                                    label={row.name || `Equipment ${row.equipment_id}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             <Button
@@ -557,8 +852,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
 
 export const PricingManager = () => {
     const [services, setServices] = useState([]);
-    const [insuranceItems, setInsuranceItems] = useState([]);
-    const [premiumInsurance, setPremiumInsurance] = useState(null);
+    const [protectionPlans, setProtectionPlans] = useState([]);
     const [coupons, setCoupons] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isCouponFormOpen, setIsCouponFormOpen] = useState(false);
@@ -568,29 +862,56 @@ export const PricingManager = () => {
     const [insuranceFormData, setInsuranceFormData] = useState({
         name: '',
         price: '',
-        description: ''
+        description: '',
+        plan_type: 'rental_insurance',
+        price_unit: '/rental',
+        is_taxable: true,
+        selectedServices: [],
     });
 
-    const { dumpFees, updateDumpFee } = useDumpFees();
+    const { dumpFees, updateDumpFee } = useDumpFees({ showErrorToast: true });
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [servicesRes, couponsRes, insuranceRes] = await Promise.all([
-                supabase.from('services').select('*').in('id', [1, 2, 3, 4, 7]).order('id'),
+            let servicesRes = await supabase
+                .from('services')
+                .select('*')
+                .order('display_order', { ascending: true })
+                .order('id');
+
+            const isDisplayOrderMissing =
+                servicesRes.error &&
+                (servicesRes.error.code === '42703' ||
+                    servicesRes.error.message?.toLowerCase().includes('display_order'));
+
+            if (isDisplayOrderMissing) {
+                console.warn(
+                    '[PricingManager] services.display_order missing, falling back to id ordering.',
+                    servicesRes.error
+                );
+                servicesRes = await supabase
+                    .from('services')
+                    .select('*')
+                    .order('id');
+            }
+
+            const [couponsRes, plansRes] = await Promise.all([
                 supabase.from('coupons').select('*').order('created_at', { ascending: false }),
-                supabase.from('equipment').select('*').eq('type', 'insurance').order('name')
+                supabase
+                    .from('protection_plans')
+                    .select('*, protection_plan_services(service_id)')
+                    .order('display_order', { ascending: true }),
             ]);
 
             if (servicesRes.error) throw servicesRes.error;
             if (couponsRes.error) throw couponsRes.error;
-            if (insuranceRes.error) throw insuranceRes.error;
+            if (plansRes.error) throw plansRes.error;
 
             const serviceData = servicesRes.data || [];
-            
-            // Separate Premium Insurance (ID 7) from regular services
-            const premiumInsuranceService = serviceData.find(s => s.id === 7);
-            const regularServices = serviceData.filter(s => s.id !== 7);
+            const regularServices = serviceData.filter(
+                (s) => s.is_rentable !== false && Number(s.id) !== 7
+            );
             
             // Ensure service ID 4 exists
             const hasDeliveryService = regularServices.some(s => s.id === 4);
@@ -603,27 +924,24 @@ export const PricingManager = () => {
             }
             
             setServices(regularServices);
-            
-            // Set Premium Insurance separately
-            if (premiumInsuranceService) {
-                setPremiumInsurance({
-                    id: 7,
-                    name: premiumInsuranceService.name || 'Premium Insurance',
-                    price: Number(premiumInsuranceService.base_price || 20),
-                    description: premiumInsuranceService.description || 'Complete protection coverage for your rental'
-                });
-            } else {
-                // Create default if doesn't exist
-                setPremiumInsurance({
-                    id: 7,
-                    name: 'Premium Insurance',
-                    price: 20.00,
-                    description: 'Complete protection coverage for your rental'
-                });
-            }
-            
+
+            const mappedPlans = (plansRes.data || [])
+                .filter((plan) => plan.is_active !== false)
+                .map((plan) => ({
+                    id: plan.id,
+                    plan_key: plan.plan_key,
+                    plan_type: plan.plan_type,
+                    name: plan.name,
+                    price: Number(plan.price || 0),
+                    description: plan.description || '',
+                    price_unit: plan.price_unit || '/rental',
+                    is_taxable: plan.is_taxable !== false,
+                    is_primary: plan.is_primary === true,
+                    serviceIds: (plan.protection_plan_services || []).map((row) => row.service_id),
+                }));
+
+            setProtectionPlans(mappedPlans);
             setCoupons(couponsRes.data || []);
-            setInsuranceItems(insuranceRes.data || []);
         } catch (error) {
             console.error("Failed to fetch data:", error);
             toast({ title: "Failed to load data", variant: "destructive", description: error.message });
@@ -650,62 +968,89 @@ export const PricingManager = () => {
 
     const handleSaveInsurance = async () => {
         try {
-            const isPremiumInsurance = editingInsurance?.id === 7 || 
-                                      (editingInsurance && editingInsurance.name?.toLowerCase().includes('premium insurance'));
-            
-            if (isPremiumInsurance) {
-                // Save Premium Insurance to services table (ID 7)
-                console.log('[PricingManager] Saving Premium Insurance to services table (ID 7)');
-                
-                const { error } = await supabase
-                    .from('services')
-                    .update({
-                        base_price: parseFloat(insuranceFormData.price),
-                        description: insuranceFormData.description,
-                        name: insuranceFormData.name
-                    })
-                    .eq('id', 7);
+            const isPrimaryPlan = ['premium_insurance', 'driveway_protection'].includes(
+                editingInsurance?.plan_key
+            );
 
-                if (error) throw error;
-                toast({ title: 'Premium Insurance updated successfully' });
-            } else {
-                // Save other insurance items to equipment table
-                const dataToSave = {
-                    name: insuranceFormData.name,
-                    type: 'insurance',
-                    price: parseFloat(insuranceFormData.price),
-                    description: insuranceFormData.description,
-                    total_quantity: 9999
-                };
-
-                if (editingInsurance) {
-                    const { error } = await supabase
-                        .from('equipment')
-                        .update(dataToSave)
-                        .eq('id', editingInsurance.id);
-
-                    if (error) throw error;
-                    toast({ title: 'Insurance item updated successfully' });
-                } else {
-                    const { error } = await supabase
-                        .from('equipment')
-                        .insert([dataToSave]);
-
-                    if (error) throw error;
-                    toast({ title: 'Insurance item created successfully' });
-                }
+            const payload = {
+                name: insuranceFormData.name,
+                description: insuranceFormData.description,
+                price: parseFloat(insuranceFormData.price),
+                price_unit: insuranceFormData.price_unit || '/rental',
+                plan_type: insuranceFormData.plan_type || 'rental_insurance',
+                updated_at: new Date().toISOString(),
+            };
+            // is_taxable is managed under Tax Calculations → Tax Exemptions only
+            if (!editingInsurance) {
+                payload.is_taxable = true;
             }
+
+            let planId = editingInsurance?.id;
+
+            if (editingInsurance) {
+                const { error } = await supabase
+                    .from('protection_plans')
+                    .update(payload)
+                    .eq('id', planId);
+                if (error) throw error;
+            } else {
+                const planKey = `custom_${insuranceFormData.plan_type}_${Date.now()}`;
+                const { data: inserted, error } = await supabase
+                    .from('protection_plans')
+                    .insert([{
+                        ...payload,
+                        plan_key: planKey,
+                        is_primary: false,
+                        is_active: true,
+                        display_order: 50,
+                    }])
+                    .select('id')
+                    .single();
+                if (error) throw error;
+                planId = inserted.id;
+            }
+
+            await supabase
+                .from('protection_plan_services')
+                .delete()
+                .eq('protection_plan_id', planId);
+
+            const selectedServices = insuranceFormData.selectedServices || [];
+            if (selectedServices.length > 0) {
+                const { error: linkError } = await supabase
+                    .from('protection_plan_services')
+                    .insert(
+                        selectedServices.map((serviceId) => ({
+                            protection_plan_id: planId,
+                            service_id: serviceId,
+                        }))
+                    );
+                if (linkError) throw linkError;
+            }
+
+            clearProtectionPlansCache();
+            toast({
+                title: isPrimaryPlan ? 'Protection plan updated successfully' : 'Insurance item saved successfully',
+            });
 
             setAddingInsurance(false);
             setEditingInsurance(null);
-            setInsuranceFormData({ name: '', price: '', description: '' });
+            setInsuranceFormData({
+                name: '',
+                price: '',
+                description: '',
+                plan_type: 'rental_insurance',
+                price_unit: '/rental',
+                is_taxable: true,
+                selectedServices: [],
+            });
             fetchData();
         } catch (error) {
-            console.error('Error saving insurance item:', error);
+            console.error('Error saving protection plan:', error);
             toast({
-                title: 'Failed to save insurance item',
+                title: 'Failed to save protection plan',
                 description: error.message,
-                variant: 'destructive'
+                variant: 'destructive',
             });
         }
     };
@@ -715,29 +1060,34 @@ export const PricingManager = () => {
         setInsuranceFormData({
             name: item.name,
             price: item.price || '',
-            description: item.description || ''
+            description: item.description || '',
+            plan_type: item.plan_type || 'rental_insurance',
+            price_unit: item.price_unit || '/rental',
+            is_taxable: item.is_taxable !== false,
+            selectedServices: item.serviceIds || [],
         });
         setAddingInsurance(true);
     };
 
     const handleDeleteInsurance = async (id) => {
-        if (!confirm('Are you sure you want to delete this insurance item?')) return;
+        if (!confirm('Are you sure you want to delete this protection plan?')) return;
 
         try {
             const { error } = await supabase
-                .from('equipment')
-                .delete()
+                .from('protection_plans')
+                .update({ is_active: false, updated_at: new Date().toISOString() })
                 .eq('id', id);
 
             if (error) throw error;
-            toast({ title: 'Insurance item deleted successfully' });
+            clearProtectionPlansCache();
+            toast({ title: 'Protection plan removed successfully' });
             fetchData();
         } catch (error) {
-            console.error('Error deleting insurance item:', error);
+            console.error('Error deleting protection plan:', error);
             toast({
-                title: 'Failed to delete insurance item',
+                title: 'Failed to delete protection plan',
                 description: error.message,
-                variant: 'destructive'
+                variant: 'destructive',
             });
         }
     };
@@ -745,7 +1095,15 @@ export const PricingManager = () => {
     const handleCancelInsurance = () => {
         setAddingInsurance(false);
         setEditingInsurance(null);
-        setInsuranceFormData({ name: '', price: '', description: '' });
+        setInsuranceFormData({
+            name: '',
+            price: '',
+            description: '',
+            plan_type: 'rental_insurance',
+            price_unit: '/rental',
+            is_taxable: true,
+            selectedServices: [],
+        });
     };
 
     const handleSaveCoupon = async (couponData) => {
@@ -777,7 +1135,10 @@ export const PricingManager = () => {
     }
 
     const dumpFeeServices = services.filter(s => [1, 4].includes(s.id));
-    const isPremiumInsuranceEditing = editingInsurance?.id === 7;
+    const isPrimaryPlanEditing = ['premium_insurance', 'driveway_protection'].includes(
+        editingInsurance?.plan_key
+    );
+    const rentableServices = services.filter((s) => s.is_rentable !== false && Number(s.id) !== 7);
 
     return (
         <div className="space-y-8">
@@ -800,12 +1161,24 @@ export const PricingManager = () => {
                         <p className="text-sm text-gray-400 mt-1">Manage insurance and protection plan pricing</p>
                     </div>
                     <Button 
-                        onClick={() => setAddingInsurance(true)} 
+                        onClick={() => {
+                            setEditingInsurance(null);
+                            setInsuranceFormData({
+                                name: '',
+                                price: '',
+                                description: '',
+                                plan_type: 'rental_insurance',
+                                price_unit: '/rental',
+                                is_taxable: true,
+                                selectedServices: [],
+                            });
+                            setAddingInsurance(true);
+                        }} 
                         className="bg-purple-600 hover:bg-purple-700 text-white"
                         disabled={addingInsurance}
                     >
                         <Plus className="h-4 w-4 mr-2" />
-                        Add Insurance Item
+                        Add Protection Plan
                     </Button>
                 </div>
                 <div className="space-y-4">
@@ -816,35 +1189,25 @@ export const PricingManager = () => {
                             onSave={handleSaveInsurance}
                             onCancel={handleCancelInsurance}
                             isEditing={!!editingInsurance}
-                            isPremium={isPremiumInsuranceEditing}
+                            isPrimaryPlan={isPrimaryPlanEditing}
+                            rentableServices={rentableServices}
                         />
                     )}
-                    
-                    {/* Premium Insurance (from services table) */}
-                    {premiumInsurance && (
-                        <InsuranceItemCard
-                            item={premiumInsurance}
-                            onEdit={handleEditInsurance}
-                            onDelete={() => {}}
-                            isPremium={true}
-                        />
-                    )}
-                    
-                    {/* Other insurance items (from equipment table) */}
-                    {insuranceItems.length === 0 && !premiumInsurance && !addingInsurance ? (
+
+                    {protectionPlans.length === 0 && !addingInsurance ? (
                         <div className="text-center py-8 text-gray-400 bg-gray-900/30 rounded-lg border border-gray-700 border-dashed">
                             <Shield className="h-12 w-12 mx-auto mb-3 opacity-50 text-purple-400" />
-                            <p>No insurance items yet</p>
-                            <p className="text-xs mt-1">Click "Add Insurance Item" to create one</p>
+                            <p>No protection plans yet</p>
+                            <p className="text-xs mt-1">Run the latest database migration or add a plan</p>
                         </div>
                     ) : (
-                        insuranceItems.map(item => (
+                        protectionPlans.map((item) => (
                             <InsuranceItemCard
                                 key={item.id}
                                 item={item}
                                 onEdit={handleEditInsurance}
                                 onDelete={handleDeleteInsurance}
-                                isPremium={false}
+                                isPrimaryPlan={['premium_insurance', 'driveway_protection'].includes(item.plan_key)}
                             />
                         ))
                     )}

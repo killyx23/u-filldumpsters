@@ -1,6 +1,6 @@
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
-import { createLogger, defineConfig } from 'vite';
+import { createLogger, defineConfig, loadEnv } from 'vite';
 import inlineEditPlugin from './plugins/visual-editor/vite-plugin-react-inline-editor.js';
 import editModeDevPlugin from './plugins/visual-editor/vite-plugin-edit-mode.js';
 import iframeRouteRestorationPlugin from './plugins/vite-plugin-iframe-route-restoration.js';
@@ -277,7 +277,12 @@ logger.error = (msg, options) => {
 	loggerError(msg, options);
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+	const env = loadEnv(mode, process.cwd(), '');
+	const localSupabaseUrl =
+		(env.VITE_SUPABASE_URL || 'http://127.0.0.1:55421').replace(/\/+$/, '').replace(/\/rest\/v1$/i, '');
+
+	return {
 	customLogger: logger,
 	plugins: [
 		...(isDev ? [inlineEditPlugin(), editModeDevPlugin(), iframeRouteRestorationPlugin(), selectionModePlugin()] : []),
@@ -286,13 +291,33 @@ export default defineConfig({
 	],
 	server: {
 		cors: true,
-		headers: {
-			'Cross-Origin-Embedder-Policy': 'credentialless',
+		// Do not set Cross-Origin-Embedder-Policy here — it blocks Stripe Payment Element
+		// iframes from js.stripe.com (elements-inner-loader-ui, etc.) in local dev.
+		// Allow LAN/tunnel hostnames during local debugging from phones.
+		allowedHosts: true,
+		proxy: {
+			'/rest/v1': {
+				target: localSupabaseUrl,
+				changeOrigin: true,
+			},
+			'/functions/v1': {
+				target: localSupabaseUrl,
+				changeOrigin: true,
+			},
+			'/auth/v1': {
+				target: localSupabaseUrl,
+				changeOrigin: true,
+			},
+			'/realtime/v1': {
+				target: localSupabaseUrl,
+				changeOrigin: true,
+				ws: true,
+			},
+			'/storage/v1': {
+				target: localSupabaseUrl,
+				changeOrigin: true,
+			},
 		},
-		allowedHosts: [
-			'.app-preview.com',
-			'.app-preview.io',
-		],
 	},
 	resolve: {
 		extensions: ['.jsx', '.js', '.tsx', '.ts', '.json', ],
@@ -310,4 +335,5 @@ export default defineConfig({
 			]
 		}
 	}
+	};
 });

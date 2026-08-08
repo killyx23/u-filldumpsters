@@ -12,12 +12,13 @@
  * Response: { rate: number, source: "taxjar"|"cache"|"fallback", jurisdiction?: string }
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 
 const CACHE_TTL_DAYS = 30;
 const FALLBACK_RATE  = 7.45; // Saratoga Springs, UT combined rate
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }

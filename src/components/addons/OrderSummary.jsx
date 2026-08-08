@@ -8,11 +8,13 @@ import { toast } from '@/components/ui/use-toast';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
-import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 
 export const OrderSummary = ({
     plan,
@@ -31,28 +33,11 @@ export const OrderSummary = ({
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(false);
     
-    const { insurancePrice } = useInsurancePricing();
-    const { drivewayPrice } = useDrivewayProtectionPrice();
+    const { insurancePrice, taxOptions, drivewayPrice } = useBookingTaxOptions(plan?.id);
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
     const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
-
-    // Detect if this is a dump loader service
-    const isDumpLoaderService = plan?.name && 
-                                (plan.name.toLowerCase().includes('dump loader') ||
-                                 plan.name.toLowerCase().includes('dump trailer') ||
-                                 plan.name.toLowerCase().includes('loader trailer')) &&
-                                !plan.name.toLowerCase().includes('16 yard') &&
-                                !plan.name.toLowerCase().includes('dumpster');
-
-    // Service-specific Protection Options info text
-    const getProtectionOptionsInfoText = () => {
-        if (isDumpLoaderService) {
-            return "Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.";
-        }
-        return "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
-    };
 
     // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {
@@ -144,6 +129,7 @@ export const OrderSummary = ({
             if (data.isValid) {
                 const couponData = {
                     isValid: true,
+                    id: data.id,
                     code: data.code,
                     discountType: data.discountType,
                     discountValue: parseFloat(data.discountValue)
@@ -263,27 +249,38 @@ export const OrderSummary = ({
             }
         }
 
-        // Calculate subtotal before discount
-        let subtotalBeforeDiscount = baseRental + deliveryFeeAmount + mileageCharge + insuranceCost + drivewayProtectionCost + equipmentCost + purchaseItemsCost + disposalCost;
+        const addonsWithDelivery = {
+            ...addons,
+            deliveryFee: deliveryFeeAmount,
+            mileageCharge,
+            deliveryDistance: addons?.deliveryDistance,
+            coupon: appliedCoupon,
+        };
 
-        // Apply coupon discount
-        let discount = 0;
+        const taxBreakdown = calculateBookingTaxBreakdown({
+            plan,
+            addonsData: addonsWithDelivery,
+            equipmentPrices,
+            taxRate,
+            deliveryService: deliveryService ?? false,
+            insurancePrice,
+            drivewayPrice,
+            ...taxOptions,
+        });
+
+        let couponDiscount = 0;
+        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (appliedCoupon?.isValid) {
             if (appliedCoupon.discountType === 'fixed') {
-                discount = Number(appliedCoupon.discountValue);
+                couponDiscount = Number(appliedCoupon.discountValue);
             } else if (appliedCoupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
             }
         }
 
-        // Subtotal after discount (before tax)
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        
-        // Tax: use dynamic tax rate from database
-        const tax = calculateTaxAmount(subtotal, taxRate);
-        
-        // Total: subtotal + tax
-        const total = subtotal + tax;
+        const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
+        const referralDiscount = Number(addons?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             baseRental,
@@ -295,12 +292,17 @@ export const OrderSummary = ({
             purchaseItemsCost,
             disposalCost,
             discount,
-            subtotal,
-            tax,
-            taxRate,
-            total
+            couponDiscount,
+            loyaltyDiscount,
+            referralDiscount,
+            subtotal: taxBreakdown.subtotalBeforeTax,
+            taxableSubtotal: taxBreakdown.taxableSubtotal,
+            nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
+            tax: taxBreakdown.tax,
+            taxRate: taxBreakdown.taxRate,
+            total: taxBreakdown.total,
         };
-    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate]);
+    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions]);
 
     const handleProceedClick = () => {
         if (!isDeliveryRequired) {
@@ -420,10 +422,24 @@ export const OrderSummary = ({
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({ 
             label: `Coupon (${appliedCoupon.code})`, 
-            amount: -calculatedTotals.discount, 
+            amount: -calculatedTotals.couponDiscount, 
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true 
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addons?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true 
         });
     }
@@ -451,8 +467,7 @@ export const OrderSummary = ({
                     items={protectionItems}
                     showInfoButton={true}
                     infoTitle="Protection Options"
-                    infoDescription={getProtectionOptionsInfoText()}
-                    serviceName={plan?.name}
+                    infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
                 />
 
                 {/* 3. Rent Equipment */}
@@ -579,6 +594,11 @@ export const OrderSummary = ({
                     </>
                 )}
             </Button>
+            <UiControlGuide
+                stepTitle="Add-ons"
+                entries={getBookingGuideEntries('addons')}
+                className="mt-3 flex justify-end"
+            />
         </motion.div>
     );
 };

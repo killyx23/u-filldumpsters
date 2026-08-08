@@ -42,7 +42,7 @@ export const CustomerPortalResourceDetailPage = () => {
     return (
       <div className="text-center py-20 bg-black/20 rounded-xl border border-white/10">
         <h3 className="text-2xl font-bold text-white mb-4">Resource Not Found</h3>
-        <Button onClick={() => navigate('/portal?tab=resources')} variant="secondary">Back to Resources</Button>
+        <Button onClick={() => navigate('/portal?tab=resources')} variant="secondary">Back to How-To Guides & Documents</Button>
       </div>
     );
   }
@@ -56,7 +56,7 @@ export const CustomerPortalResourceDetailPage = () => {
         onClick={() => navigate('/portal?tab=resources')} 
         className="text-gray-300 hover:text-white hover:bg-white/10 -ml-4"
       >
-        <ArrowLeft className="w-4 h-4 mr-2" /> Back to Resources
+        <ArrowLeft className="w-4 h-4 mr-2" /> Back to How-To Guides & Documents
       </Button>
 
       <div className="bg-black/20 border border-white/10 rounded-xl overflow-hidden shadow-2xl">

@@ -2,7 +2,11 @@ import React from 'react';
     import { format, parseISO } from 'date-fns';
     import { Button } from '@/components/ui/button';
     import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-    import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag } from 'lucide-react';
+    import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag, Repeat, MapPin } from 'lucide-react';
+    import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+    import { convertTo12Hour } from '@/utils/timeFormatConverter';
+    import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
+    import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -20,21 +24,22 @@ import React from 'react';
       { id: 'gloves', label: 'Working Gloves (Pair)', price: 5 },
     ];
 
-    const addonPrices = {
-      insurance: 25,
-      drivewayProtection: 20,
-    };
-
     export const ReceiptDetailDialog = ({ booking, equipment, isOpen, onOpenChange }) => {
         if (!booking) return null;
 
         const { customers, plan, drop_off_date, pickup_date, total_price, drop_off_time_slot, pickup_time_slot, addons, notes, return_issues, fees, stripe_payment_info } = booking;
+        const addonPrices = {
+            insurance: Number(addons?.insurancePriceApplied || 0),
+            drivewayProtection: Number(addons?.drivewayPriceApplied || 0),
+        };
         const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
         const coupon = addons?.coupon;
         const isDelivery = addons?.isDelivery;
 
         const formatTime = (timeString) => {
             if (!timeString) return 'N/A';
+            const converted = convertTo12Hour(timeString);
+            if (converted) return converted;
             try {
                 const date = new Date(`1970-01-01T${timeString}`);
                 return format(date, 'h:mm a');
@@ -42,6 +47,8 @@ import React from 'react';
                 return 'N/A';
             }
         };
+
+        const rescheduleApproval = getLatestRescheduleApproval(booking);
 
         let subtotal = plan.price || 0;
         if (addons.insurance === 'accept') subtotal += addonPrices.insurance;
@@ -89,16 +96,32 @@ import React from 'react';
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Rental Details</h4>
                             <DetailRow icon={<Info />} label="Service" value={plan.name} />
+                            <DetailRow icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(resolveOneWayMiles(booking, customers))} />
                             <DetailRow icon={<Clock />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} />
                             <DetailRow icon={<Clock />} label={plan.id === 2 ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} />
                             {booking.rented_out_at && <DetailRow icon={<Clock />} label="Actual Rented Out" value={format(parseISO(booking.rented_out_at), 'Pp')} />}
                             {booking.returned_at && <DetailRow icon={<Clock />} label="Actual Returned" value={format(parseISO(booking.returned_at), 'Pp')} />}
                         </section>
 
+                        {rescheduleApproval && (
+                            <section>
+                                <h4 className="font-bold text-lg text-emerald-400 mt-4 mb-2 flex items-center gap-2"><Repeat className="h-5 w-5" /> Reschedule Confirmation</h4>
+                                <DetailRow icon={<Clock />} label="Approved" value={rescheduleApproval.at ? format(parseISO(rescheduleApproval.at), 'PPp') : 'N/A'} />
+                                <DetailRow icon={<Clock />} label="Previous schedule" value={`${formatFriendlyDateTime(rescheduleApproval.original_drop_off_date, rescheduleApproval.original_drop_off_time) || 'N/A'} → ${formatFriendlyDateTime(rescheduleApproval.original_pickup_date, rescheduleApproval.original_pickup_time) || 'N/A'}`} />
+                                <DetailRow icon={<Clock />} label="Approved schedule" value={`${formatFriendlyDateTime(rescheduleApproval.new_drop_off_date, rescheduleApproval.new_drop_off_time) || 'N/A'} → ${formatFriendlyDateTime(rescheduleApproval.new_pickup_date, rescheduleApproval.new_pickup_time) || 'N/A'}`} />
+                                <DetailRow icon={<DollarSign />} label="Original total" value={`$${Number(rescheduleApproval.original_total || 0).toFixed(2)}`} />
+                                <DetailRow icon={<DollarSign />} label="New total" value={`$${Number(rescheduleApproval.new_total || 0).toFixed(2)}`} />
+                                <DetailRow icon={<DollarSign />} label="Stripe" value={formatRescheduleStripeLine(rescheduleApproval)} />
+                                {rescheduleApproval.stripe_transaction_id && (
+                                    <DetailRow icon={<Hash />} label="Stripe reference" value={rescheduleApproval.stripe_transaction_id} />
+                                )}
+                            </section>
+                        )}
+
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
-                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? 'Accepted' : 'Declined'} />
-                            {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? 'Accepted' : 'Declined'} />}
+                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? `Accepted ($${addonPrices.insurance.toFixed(2)})` : 'Declined'} />
+                            {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
                             {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                             
                             {addons.equipment && addons.equipment.length > 0 && (

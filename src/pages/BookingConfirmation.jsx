@@ -2,17 +2,19 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   CheckCircle, Home, AlertTriangle, Calendar, MapPin,
-  Mail, Loader2, RefreshCw, Key, Printer, Copy, ExternalLink, Sparkles
+  Mail, Loader2, RefreshCw, Key, Printer, Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
-import { useCustomerLoyaltyPoints } from '@/hooks/useCustomerLoyaltyPoints';
+import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
+import { buildAccessCodesQrUrl } from '@/utils/buildPortalQrUrls';
 
 export const BookingConfirmation = () => {
   const [searchParams] = useSearchParams();
@@ -34,7 +36,10 @@ export const BookingConfirmation = () => {
 
   const [errorMsg, setErrorMsg] = useState(null);
   const [pointsAwarded, setPointsAwarded] = useState(0);
+  const [referralPendingAward, setReferralPendingAward] = useState(0);
+  const [isPortalNavigating, setIsPortalNavigating] = useState(false);
 
+  const navigate = useNavigate();
   const receiptRef = useRef();
 
   // Loyalty points hook (only if we have booking details)
@@ -46,9 +51,9 @@ export const BookingConfirmation = () => {
     removeAfterPrint: true,
   });
 
-  const generateMagicLink = async (customerId, customerPhone) => {
+  const generateMagicLink = async (customerId, customerPhone, portalNumber) => {
     const timestamp = new Date().toISOString();
-    
+
     console.log(`[${timestamp}] [BookingConfirmation] Generating magic link token for customer:`, {
       customer_id: customerId,
       phone: customerPhone
@@ -58,11 +63,12 @@ export const BookingConfirmation = () => {
 
     try {
       console.log(`[${timestamp}] [BookingConfirmation] Calling generate-magic-link-token edge function...`);
-      
+
       const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
         body: {
           customer_id: customerId,
-          phone: customerPhone
+          phone: customerPhone,
+          order_id: bookingId,
         }
       });
 
@@ -78,35 +84,75 @@ export const BookingConfirmation = () => {
       }
 
       if (data?.token) {
-        const baseUrl = window.location.origin;
-        const url = `${baseUrl}/customer-portal?token=${data.token}&order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
-        
+        const url = buildAccessCodesQrUrl({
+          token: data.token,
+          portalNumber,
+          phone: customerPhone,
+          orderId: bookingId,
+        });
+
         console.log(`[${timestamp}] [BookingConfirmation] Magic link created:`, url);
-        
         setMagicLinkUrl(url);
       }
-
     } catch (err) {
       console.error(`[${timestamp}] [BookingConfirmation] Failed to generate magic link:`, {
         error: err.message,
         stack: err.stack
       });
-      
-      const fallbackUrl = `${window.location.origin}/customer-portal?order_id=${bookingId}&phone=${encodeURIComponent(customerPhone)}`;
+
+      const fallbackUrl = buildAccessCodesQrUrl({
+        portalNumber,
+        phone: customerPhone,
+        orderId: bookingId,
+      });
       console.log(`[${timestamp}] [BookingConfirmation] Using fallback URL:`, fallbackUrl);
       setMagicLinkUrl(fallbackUrl);
-      
     } finally {
       setGeneratingMagicLink(false);
     }
   };
 
-  const copyMagicLink = () => {
-    navigator.clipboard.writeText(magicLinkUrl);
-    toast({
-      title: 'Link Copied',
-      description: 'Access code link copied to clipboard'
-    });
+  const resendConfirmationEmail = async () => {
+    if (!bookingId) return false;
+
+    setIsRefinalizing(true);
+    setFinalizeError('');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('resend-confirmation-email', {
+        body: {
+          booking_id: bookingId,
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+        },
+      });
+
+      if (error) {
+        const errContext = await error.context?.json().catch(() => null);
+        throw new Error(errContext?.error || error.message);
+      }
+      if (!data?.success) {
+        throw new Error(data?.error || data?.details || 'Failed to resend confirmation email.');
+      }
+
+      setFinalizeStatus('done');
+      toast({
+        title: 'Email Sent',
+        description: 'A confirmation email has been sent to your inbox.',
+      });
+      return true;
+    } catch (err) {
+      console.error('[BookingConfirmation] Resend confirmation email error:', err);
+      setFinalizeStatus('email_failed');
+      setFinalizeError(err.message || 'Could not send confirmation email.');
+      toast({
+        title: 'Email Failed',
+        description: err.message || 'Could not send confirmation email.',
+        variant: 'destructive',
+      });
+      return false;
+    } finally {
+      setIsRefinalizing(false);
+    }
   };
 
   const finalizeBooking = async ({ isRetry = false } = {}) => {
@@ -135,6 +181,7 @@ export const BookingConfirmation = () => {
         body: {
           bookingId,
           paymentIntentId,
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
         },
       });
 
@@ -160,14 +207,24 @@ export const BookingConfirmation = () => {
         bookingUpdated: data?.bookingUpdated
       });
 
-      if (data?.bookingData) {
+      if (data?.booking) {
+        setBookingDetails((prev) => ({
+          ...prev,
+          ...data.booking,
+          customers: data.booking.customers ?? prev?.customers,
+        }));
+      }
+
+      const bookingForTax = data?.booking ?? data?.bookingData;
+      if (bookingForTax) {
         console.log(`[${timestamp}] [BookingConfirmation] Creating tax record...`);
         
         const taxResult = await createTaxRecord(
           bookingId,
-          data.bookingData.tax_amount,
-          data.bookingData.tax_rate_used,
-          data.bookingData.subtotal_before_tax
+          Number(bookingForTax.tax_amount || 0),
+          Number(bookingForTax.tax_rate_used || 0),
+          Number(bookingForTax.subtotal_before_tax || 0),
+          bookingForTax
         );
 
         if (taxResult.success) {
@@ -177,16 +234,30 @@ export const BookingConfirmation = () => {
         }
       }
 
-      setFinalizeStatus('done');
-
       if (data?.emailSent) {
+        setFinalizeStatus('done');
         console.log(`[${timestamp}] [BookingConfirmation] ✓ Confirmation email sent successfully`);
         toast({
           title: 'Email Sent',
           description: 'A confirmation email has been sent to your inbox.',
         });
       } else {
+        setFinalizeStatus('email_failed');
+        setFinalizeError(data?.emailError || 'Confirmation email could not be sent.');
         console.warn(`[${timestamp}] [BookingConfirmation] ⚠ Email was not sent`, data);
+      }
+
+      const awardedFromFinalize = Number(data?.loyalty?.pointsAwarded || 0);
+      if (awardedFromFinalize > 0) {
+        setPointsAwarded(awardedFromFinalize);
+        toast({
+          title: 'Loyalty Points Earned!',
+          description: `You earned ${awardedFromFinalize} points with this booking!`,
+        });
+      }
+      const pendingReferralFromFinalize = Number(data?.booking?.addons?.referralDollarsPending || 0);
+      if (pendingReferralFromFinalize > 0) {
+        setReferralPendingAward(pendingReferralFromFinalize);
       }
 
     } catch (err) {
@@ -209,38 +280,6 @@ export const BookingConfirmation = () => {
       }
     } finally {
       if (isRetry) setIsRefinalizing(false);
-    }
-  };
-
-  // Award loyalty points after successful booking
-  const awardLoyaltyPoints = async (customerId, totalAmount) => {
-    if (!customerId || !totalAmount) return;
-
-    const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [BookingConfirmation] Awarding loyalty points for booking ${bookingId}`);
-
-    try {
-      const points = calculatePointsEarned(totalAmount);
-      if (points <= 0) {
-        console.log(`[${timestamp}] [BookingConfirmation] No points to award for amount ${totalAmount}`);
-        return;
-      }
-
-      const result = await awardPoints(points, bookingId);
-      
-      if (result.success) {
-        console.log(`[${timestamp}] [BookingConfirmation] ✓ Awarded ${points} loyalty points`);
-        setPointsAwarded(points);
-        
-        toast({
-          title: 'Loyalty Points Earned! 🎉',
-          description: `You earned ${points} points with this booking!`,
-        });
-      } else {
-        console.error(`[${timestamp}] [BookingConfirmation] Failed to award points:`, result.error);
-      }
-    } catch (err) {
-      console.error(`[${timestamp}] [BookingConfirmation] Exception awarding points:`, err);
     }
   };
 
@@ -284,26 +323,20 @@ export const BookingConfirmation = () => {
       try {
         console.log(`[${timestamp}] [BookingConfirmation] Fetching booking data for ID: ${bookingId}`);
 
-        const { data: booking, error: fetchError } = await supabase
-          .from('bookings')
-          .select('*, customers(*)')
-          .eq('id', bookingId)
-          .single();
-
-        console.log(`[${timestamp}] [BookingConfirmation] Booking fetch result:`, {
-          hasData: !!booking,
-          hasError: !!fetchError,
-          error: fetchError,
-          bookingStatus: booking?.status,
-          customerId: booking?.customer_id,
-          customerData: booking?.customers,
-          hasTaxData: !!(booking?.tax_amount && booking?.tax_rate_used)
+        const { data: payload, error: fetchError } = await supabase.rpc('get_booking_for_post_checkout', {
+          p_booking_id: Number.parseInt(String(bookingId), 10),
+          p_payment_intent: paymentIntentId || null,
         });
 
-        if (fetchError || !booking) {
+        if (fetchError || !payload?.booking) {
           console.error(`[${timestamp}] [BookingConfirmation] Booking fetch failed:`, fetchError);
           throw new Error(fetchError?.message ?? 'Could not find the requested booking.');
         }
+
+        const booking = {
+          ...payload.booking,
+          customers: payload.customers,
+        };
 
         if (!isMounted) return;
         
@@ -341,14 +374,18 @@ export const BookingConfirmation = () => {
         }
 
         const serviceName = booking.plan?.name || '';
-        const isDumpLoaderRental = 
+        const isDumpLoaderRental =
           serviceName.toLowerCase().includes('dump loader') ||
           serviceName.toLowerCase().includes('trailer') ||
           parseInt(booking.plan?.id) === 2;
 
         if (isDumpLoaderRental && booking.customers?.id && booking.customers?.phone) {
           console.log(`[${timestamp}] [BookingConfirmation] This is Dump Loader Trailer - generating magic link`);
-          await generateMagicLink(booking.customers.id, booking.customers.phone);
+          await generateMagicLink(
+            booking.customers.id,
+            booking.customers.phone,
+            booking.customers.customer_id_text
+          );
         }
 
         setLoading(false);
@@ -356,11 +393,6 @@ export const BookingConfirmation = () => {
 
         console.log(`[${timestamp}] [BookingConfirmation] Triggering finalization process...`);
         await finalizeBooking();
-
-        // Award loyalty points after finalization
-        if (booking.customer_id && booking.total_price) {
-          await awardLoyaltyPoints(booking.customer_id, booking.total_price);
-        }
 
       } catch (err) {
         const errorTimestamp = new Date().toISOString();
@@ -388,82 +420,121 @@ export const BookingConfirmation = () => {
 
   const handleGoToPortal = async () => {
     const timestamp = new Date().toISOString();
-    const portalId = bookingDetails?.customers?.customer_id_text ?? '';
-    const phone    = bookingDetails?.customers?.phone ?? bookingDetails?.phone ?? '';
 
-    console.log(`[${timestamp}] [BookingConfirmation] Portal access initiated`, {
-      portalId,
-      phone,
-      hasCustomerData: !!bookingDetails?.customers,
-      customerId: bookingDetails?.customer_id
-    });
+    const resolvePortalCredentials = async () => {
+      let portalId = bookingDetails?.customers?.customer_id_text ?? '';
+      let phone = bookingDetails?.customers?.phone ?? bookingDetails?.phone ?? '';
 
-    if (!portalId || !phone) {
-      console.error(`[${timestamp}] [BookingConfirmation] ⚠ Missing portal credentials`, {
-        portalId,
-        phone
-      });
-      
-      toast({
-        title: 'Portal Access Error',
-        description: 'Missing portal credentials. Please contact support.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    console.log(`[${timestamp}] [BookingConfirmation] Waiting 500ms for data commit...`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    try {
-      console.log(`[${timestamp}] [BookingConfirmation] Verifying customer exists in database...`);
-      
-      const { data: customer, error } = await supabase
-        .from('customers')
-        .select('id, customer_id_text, phone, email')
-        .eq('customer_id_text', portalId)
-        .single();
-
-      console.log(`[${timestamp}] [BookingConfirmation] Customer verification result:`, {
-        found: !!customer,
-        error,
-        customerId: customer?.id,
-        portalId: customer?.customer_id_text
-      });
-
-      if (error || !customer) {
-        console.error(`[${timestamp}] [BookingConfirmation] ⚠ Customer not found, adding retry delay...`);
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const { data: retryCustomer, error: retryError } = await supabase
-          .from('customers')
-          .select('id, customer_id_text, phone, email')
-          .eq('customer_id_text', portalId)
-          .single();
-
-        console.log(`[${timestamp}] [BookingConfirmation] Retry verification result:`, {
-          found: !!retryCustomer,
-          error: retryError
-        });
-
-        if (retryError || !retryCustomer) {
-          throw new Error('Customer record not ready. Please wait a moment and try again.');
-        }
+      if (portalId && phone) {
+        return { portalId, phone };
       }
 
-      console.log(`[${timestamp}] [BookingConfirmation] ✓ Customer verified, navigating to portal...`);
-      
-      window.location.href = `/portal?portal_id=${encodeURIComponent(portalId)}&phone=${encodeURIComponent(phone)}`;
-      
+      const parsedBookingId = Number.parseInt(String(bookingId), 10);
+      if (!Number.isFinite(parsedBookingId)) {
+        return { portalId: '', phone: '' };
+      }
+
+      const fetchViaRpc = async () => {
+        const { data: payload, error } = await supabase.rpc('get_booking_for_post_checkout', {
+          p_booking_id: parsedBookingId,
+          p_payment_intent: paymentIntentId || null,
+        });
+
+        if (error || !payload?.customers) {
+          return null;
+        }
+
+        return {
+          portalId: payload.customers.customer_id_text ?? '',
+          phone: payload.customers.phone ?? payload.booking?.phone ?? '',
+        };
+      };
+
+      console.log(`[${timestamp}] [BookingConfirmation] Customer data missing, retrying via secure RPC...`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      let result = await fetchViaRpc();
+      if (!result?.portalId || !result?.phone) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        result = await fetchViaRpc();
+      }
+
+      return result ?? { portalId: '', phone: '' };
+    };
+
+    try {
+      const { portalId, phone } = await resolvePortalCredentials();
+
+      console.log(`[${timestamp}] [BookingConfirmation] Portal access initiated`, {
+        portalId,
+        phone,
+        hasCustomerData: !!bookingDetails?.customers,
+        customerId: bookingDetails?.customer_id,
+      });
+
+      if (!portalId || !phone) {
+        console.error(`[${timestamp}] [BookingConfirmation] Missing portal credentials after RPC retry`);
+        toast({
+          title: 'Portal Access Error',
+          description: 'Missing portal credentials. Please contact support.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const rawPhone = String(phone).replace(/\D/g, '');
+      if (rawPhone.length !== 10) {
+        toast({
+          title: 'Portal Access Error',
+          description: 'Invalid phone number on this booking. Please contact support.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setIsPortalNavigating(true);
+
+      console.log(`[${timestamp}] [BookingConfirmation] Clearing stale session and logging into portal...`);
+      await supabase.auth.signOut({ scope: 'local' });
+
+      const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
+        body: {
+          portal_number: portalId,
+          phone: rawPhone,
+        },
+      });
+
+      if (loginError) {
+        throw new Error(loginError.message);
+      }
+      if (loginData?.error) {
+        throw new Error(loginData.error);
+      }
+      if (!loginData?.session) {
+        throw new Error('Could not create a portal session. Please try again.');
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession(loginData.session);
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      console.log(`[${timestamp}] [BookingConfirmation] Portal login successful, navigating...`);
+      toast({
+        title: 'Welcome to your portal',
+        description: 'Loading your account...',
+      });
+      navigate('/customer-portal?tab=dashboard');
     } catch (err) {
       console.error(`[${timestamp}] [BookingConfirmation] Portal navigation error:`, err);
-      
+
       toast({
-        title: 'Portal Access Delayed',
-        description: 'Your account is being set up. Please wait 10 seconds and try again.',
-        variant: 'destructive'
+        title: 'Portal Access Error',
+        description: err.message || 'Your account is being set up. Please wait a moment and try again.',
+        variant: 'destructive',
       });
+    } finally {
+      setIsPortalNavigating(false);
     }
   };
 
@@ -520,12 +591,16 @@ export const BookingConfirmation = () => {
   const taxRateUsed = bookingDetails.tax_rate_used || 7.45;
   const taxAmount = bookingDetails.tax_amount || 0;
   const subtotalBeforeTax = bookingDetails.subtotal_before_tax || 0;
-  const totalPaid = bookingDetails.total_price || 0;
+  const totalPaid = resolveBookingGrandTotal(bookingDetails);
+
+  const bookingFinalized = finalizeStatus === 'done' || finalizeStatus === 'email_failed';
 
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
       finalizeStatus === 'done'
         ? 'bg-green-950/40 border border-green-500/40'
+        : finalizeStatus === 'email_failed'
+        ? 'bg-amber-950/40 border border-amber-500/40'
         : finalizeStatus === 'failed'
         ? 'bg-red-950/40 border border-red-500/40'
         : 'bg-blue-950/40 border border-blue-500/40'
@@ -534,18 +609,23 @@ export const BookingConfirmation = () => {
         <Loader2 className="h-6 w-6 mr-4 flex-shrink-0 mt-0.5 text-blue-400 animate-spin" />
       ) : (
         <Mail className={`h-6 w-6 mr-4 flex-shrink-0 mt-0.5 ${
-          finalizeStatus === 'done' ? 'text-green-400' : 'text-red-400'
+          finalizeStatus === 'done' ? 'text-green-400'
+          : finalizeStatus === 'email_failed' ? 'text-amber-400'
+          : 'text-red-400'
         }`} />
       )}
 
       <div className="flex-1">
         <p className={`font-bold mb-1 ${
           finalizeStatus === 'done' ? 'text-green-300'
+          : finalizeStatus === 'email_failed' ? 'text-amber-300'
           : finalizeStatus === 'failed' ? 'text-red-300'
           : 'text-blue-300'
         }`}>
           {finalizeStatus === 'done'
             ? '✓ Booking Confirmed & Email Sent'
+            : finalizeStatus === 'email_failed'
+            ? '✓ Booking Confirmed — Email Not Sent'
             : finalizeStatus === 'failed'
             ? '⚠ Confirmation Issue'
             : 'Sending confirmation email...'}
@@ -553,23 +633,30 @@ export const BookingConfirmation = () => {
 
         <p className={`text-sm mb-3 ${
           finalizeStatus === 'done' ? 'text-green-100/80'
+          : finalizeStatus === 'email_failed' ? 'text-amber-100/80'
           : finalizeStatus === 'failed' ? 'text-red-100/80'
           : 'text-blue-100/80'
         }`}>
           {finalizeStatus === 'done'
             ? `A confirmation email has been sent to ${bookingDetails.email}. Your booking is secured.`
+            : finalizeStatus === 'email_failed'
+            ? `Your booking is secured, but we could not send the confirmation email${finalizeError ? `: ${finalizeError}` : ''}. You can retry below or use your receipt on this page.`
             : finalizeStatus === 'failed'
-            ? `We encountered an issue sending your confirmation email: ${finalizeError}. Your payment was successful and booking is confirmed. You can access your receipt in the portal.`
+            ? `We encountered an issue finalizing your booking: ${finalizeError}. If payment succeeded, check your portal or contact support.`
             : 'Recording your payment and sending your confirmation email. This only takes a moment.'}
         </p>
 
-        {finalizeStatus === 'failed' && (
+        {(finalizeStatus === 'email_failed' || finalizeStatus === 'failed') && (
           <Button
-            onClick={() => finalizeBooking({ isRetry: true })}
+            onClick={() => finalizeStatus === 'failed' ? finalizeBooking({ isRetry: true }) : resendConfirmationEmail()}
             disabled={isRefinalizing}
             size="sm"
             variant="outline"
-            className="bg-red-950/50 text-red-200 border-red-500/30 hover:bg-red-900 hover:text-white"
+            className={
+              finalizeStatus === 'email_failed'
+                ? 'bg-amber-950/50 text-amber-200 border-amber-500/30 hover:bg-amber-900 hover:text-white'
+                : 'bg-red-950/50 text-red-200 border-red-500/30 hover:bg-red-900 hover:text-white'
+            }
           >
             {isRefinalizing
               ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Retrying...</>
@@ -614,46 +701,35 @@ export const BookingConfirmation = () => {
             </div>
           )}
 
-          {isDumpLoaderRental && magicLinkUrl && (
-            <div className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 border border-blue-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
-              <h3 className="text-xl font-bold text-blue-400 mb-3 flex items-center">
-                <Key className="mr-2 h-5 w-5" /> View Your Access Code
-              </h3>
-              <p className="text-blue-100/80 text-sm mb-4">
-                Click the link below to view your trailer access code. You can also access it anytime from your customer portal.
+          {referralPendingAward > 0 && (
+            <div className="bg-gradient-to-br from-amber-900/40 to-yellow-800/20 border border-amber-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
+              <div className="flex items-center gap-3 mb-2">
+                <Sparkles className="h-6 w-6 text-amber-300" />
+                <h3 className="text-xl font-bold text-amber-300">You Helped Someone Earn a Reward</h3>
+              </div>
+              <p className="text-amber-100/80 text-sm">
+                Because you were referred, you just helped a friend or family member earn a referral reward!
+                Visit your Customer Portal anytime to track your balances, where you can also invite friends and family
+                to try our services and start earning rewards yourself.
               </p>
-              
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button
-                  asChild
-                  className="bg-blue-600 hover:bg-blue-700 text-white flex-1"
-                >
-                  <a href={magicLinkUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View Access Code
-                  </a>
-                </Button>
-                
-                <Button
-                  onClick={copyMagicLink}
-                  variant="outline"
-                  className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white"
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy Link
-                </Button>
-              </div>
-              
-              <div className="mt-4 p-3 bg-black/30 rounded border border-blue-700/30">
-                <p className="text-xs text-blue-300 break-all font-mono">{magicLinkUrl}</p>
-              </div>
             </div>
           )}
 
-          {isDumpLoaderRental && generatingMagicLink && (
-            <div className="bg-blue-950/40 border border-blue-500/30 p-4 rounded-xl mb-8 flex items-center">
-              <Loader2 className="h-5 w-5 text-blue-400 animate-spin mr-3" />
-              <p className="text-blue-200 text-sm">Generating your access code link...</p>
+          {isDumpLoaderRental && (
+            <div
+              className="bg-gradient-to-br from-blue-900/40 to-indigo-800/20 border border-blue-500/30 p-4 rounded-xl mb-8 text-left shadow-lg"
+              data-magic-link-ready={Boolean(magicLinkUrl)}
+              data-magic-link-loading={generatingMagicLink}
+            >
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="text-xl font-bold text-blue-400 flex items-center">
+                  <Key className="mr-2 h-5 w-5" /> View Your Access Code
+                </h3>
+                <PickupLocationInfoButton />
+              </div>
+              <p className="text-blue-100/80 text-sm">
+                To view your access code, see the customer portal below or refer to your receipt.
+              </p>
             </div>
           )}
 
@@ -721,6 +797,23 @@ export const BookingConfirmation = () => {
             </div>
           </div>
 
+          {(bookingDetails.was_verification_skipped ||
+            bookingDetails.status === 'pending_verification' ||
+            bookingDetails.addons?.wasVerificationSkipped) && (
+            <div className="bg-orange-900/40 border border-orange-500/50 p-5 rounded-xl mb-6 text-left shadow-lg">
+              <h3 className="text-lg font-bold text-orange-300 mb-2 flex items-center">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Action Required — Finish Your Booking
+              </h3>
+              <p className="text-orange-100/90 text-sm leading-relaxed">
+                Your payment was received, but your booking is not complete until you add your towing vehicle license plate,
+                driver’s license (front and back), and auto insurance information in the Customer Portal.
+                Please complete verification as soon as possible — documents are required at least 12 hours before your pickup time.
+                Log in below to open Identity Verification and submit your information.
+              </p>
+            </div>
+          )}
+
           <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-800/20 border border-yellow-500/30 p-6 rounded-xl mb-8 text-left shadow-lg">
             <h3 className="text-xl font-bold text-yellow-400 mb-2 flex items-center">
               <Key className="mr-2 h-5 w-5" /> Secure Customer Portal
@@ -747,14 +840,21 @@ export const BookingConfirmation = () => {
           <div className="flex flex-col sm:flex-row gap-4 w-full mt-10">
             <Button
               onClick={handleGoToPortal}
+              disabled={isPortalNavigating}
               className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-6 flex-1 text-lg border-none"
             >
-              <Key className="mr-2 h-5 w-5" /> Access Portal
+              {isPortalNavigating ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <Key className="mr-2 h-5 w-5" />
+              )}
+              Access Portal
             </Button>
             <Button
               onClick={handlePrint}
+              disabled={!bookingFinalized}
               variant="outline"
-              className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white hover:border-blue-500 font-semibold py-6 flex-1 text-lg transition-colors"
+              className="bg-white/5 border-blue-400/50 text-blue-100 hover:bg-blue-500 hover:text-white hover:border-blue-500 font-semibold py-6 flex-1 text-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Printer className="mr-2 h-5 w-5" /> Save / Print Receipt
             </Button>

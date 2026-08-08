@@ -8,6 +8,11 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import QRCode from 'qrcode.react';
+import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
+import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
@@ -222,7 +227,8 @@ export const AccessCodesPage = ({ customerData }) => {
       const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
         body: {
           customer_id: customerData.id,
-          phone: customerData.phone
+          phone: customerData.phone,
+          order_id: booking?.id,
         }
       });
 
@@ -239,8 +245,12 @@ export const AccessCodesPage = ({ customerData }) => {
       setMagicLinkToken(data.token);
 
       // Create magic link URL
-      const siteUrl = window.location.origin;
-      const magicLinkUrl = `${siteUrl}/customer-portal?token=${data.token}&order_id=${booking?.id}&phone=${customerData.phone}`;
+      const magicLinkUrl = buildAccessCodesQrUrl({
+        token: data.token,
+        portalNumber: customerData.customer_id_text,
+        phone: customerData.phone,
+        orderId: booking?.id,
+      });
       
       console.log(`[${context}] QR code URL: ${magicLinkUrl}`);
 
@@ -290,6 +300,26 @@ export const AccessCodesPage = ({ customerData }) => {
       return;
     }
 
+    if (isBookingEnded(booking)) {
+      toast({
+        title: 'Rental Ended',
+        description: 'This rental period has ended. Access codes are no longer available.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (!isWithinPinGenerationWindow(booking)) {
+      toast({
+        title: 'Not Available Yet',
+        description: 'Access codes are issued 12 hours before your scheduled pickup.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setRetryCount(0);
+
     try {
       setGeneratingPin(true);
 
@@ -300,7 +330,9 @@ export const AccessCodesPage = ({ customerData }) => {
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
       if (data?.success === false || !data?.pin) {
         throw new Error(data?.error || 'Failed to generate access PIN');
       }
@@ -337,13 +369,15 @@ export const AccessCodesPage = ({ customerData }) => {
     try {
       const date = parseISO(dateStr);
       const dateFormatted = format(date, 'MMM dd, yyyy');
-      return `${dateFormatted}${timeSlot ? ` at ${timeSlot}` : ''}`;
+      const timeLabel = timeSlot ? convertTo12Hour(timeSlot) || timeSlot : '';
+      return `${dateFormatted}${timeLabel ? ` at ${timeLabel}` : ''}`;
     } catch (e) {
       return dateStr;
     }
   };
 
   const isRentalExpired = () => {
+    if (booking && isBookingEnded(booking)) return true;
     if (!accessCode?.end_time) return false;
     try {
       return isPast(parseISO(accessCode.end_time));
@@ -351,6 +385,19 @@ export const AccessCodesPage = ({ customerData }) => {
       return false;
     }
   };
+
+  const pinWindowOpen = booking ? isWithinPinGenerationWindow(booking) : false;
+  const bookingEnded = booking ? isBookingEnded(booking) : false;
+  const pinEligibleFrom = booking ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
+  // Customer-visible window uses appointment times (no hidden grace hour on end_time).
+  const visibleStartLabel = booking
+    ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
+    : accessCode?.start_time
+      ? formatDateTime(accessCode.start_time, null)
+      : 'N/A';
+  const visibleEndLabel = booking
+    ? formatDateTime(booking.pickup_date, booking.pickup_time_slot)
+    : 'N/A';
 
   if (loading) {
     return (
@@ -383,11 +430,20 @@ export const AccessCodesPage = ({ customerData }) => {
     );
   }
 
-  const siteUrl = window.location.origin;
-  const magicLinkUrl = magicLinkToken 
-    ? `${siteUrl}/customer-portal?token=${magicLinkToken}&order_id=${booking?.id}&phone=${customerData.phone}`
+  const magicLinkUrl = magicLinkToken
+    ? buildAccessCodesQrUrl({
+      token: magicLinkToken,
+      portalNumber: customerData?.customer_id_text,
+      phone: customerData?.phone,
+      orderId: booking?.id,
+    })
     : '';
-  const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
+  const safetyVideoUrl = buildHowToGuidesQrUrl({
+    token: magicLinkToken,
+    portalNumber: customerData?.customer_id_text,
+    phone: customerData?.phone,
+    orderId: booking?.id,
+  });
 
   return (
     <>
@@ -414,10 +470,13 @@ export const AccessCodesPage = ({ customerData }) => {
         >
           <Card className="bg-white/10 backdrop-blur-lg border-white/20">
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <Calendar className="h-5 w-5 text-yellow-400" />
-                Rental Details
-              </CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-yellow-400" />
+                  Rental Details
+                </CardTitle>
+                <PickupLocationInfoButton />
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-white">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -500,16 +559,16 @@ export const AccessCodesPage = ({ customerData }) => {
                       </p>
                     </div>
 
-                    {accessCode.start_time && accessCode.end_time && (
+                    {(booking?.drop_off_date || accessCode.start_time) && (
                       <div className="border-t border-white/10 pt-6">
                         <p className="text-white font-medium">
                           Valid from:{' '}
                           <span className="text-yellow-400">
-                            {formatDateTime(accessCode.start_time, null)}
+                            {visibleStartLabel}
                           </span>
                           {' '}to{' '}
                           <span className="text-yellow-400">
-                            {formatDateTime(accessCode.end_time, null)}
+                            {visibleEndLabel}
                           </span>
                         </p>
                       </div>
@@ -536,8 +595,8 @@ export const AccessCodesPage = ({ customerData }) => {
                         <h3 className="font-semibold text-blue-900 mb-2 text-lg">Important Information</h3>
                         <p className="text-blue-800 text-base leading-relaxed">
                           ⏰ This access code is valid <strong>ONLY</strong> during your scheduled rental period from{' '}
-                          <strong>{formatDateTime(accessCode.start_time, null)}</strong> to{' '}
-                          <strong>{formatDateTime(accessCode.end_time, null)}</strong>. 
+                          <strong>{visibleStartLabel}</strong> to{' '}
+                          <strong>{visibleEndLabel}</strong>. 
                           The code will not work before or after these times. Please ensure you access the trailer within your rental window.
                         </p>
                       </div>
@@ -546,6 +605,32 @@ export const AccessCodesPage = ({ customerData }) => {
                 </Card>
               </motion.div>
             </>
+          ) : bookingEnded ? (
+            <Card className="bg-red-900/30 backdrop-blur-lg border-red-500/50">
+              <CardContent className="p-8 text-center">
+                <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Rental Period Ended</h2>
+                <p className="text-red-200 text-lg">
+                  This rental period has ended. Access codes are no longer available.
+                </p>
+              </CardContent>
+            </Card>
+          ) : !pinWindowOpen ? (
+            <Card className="bg-blue-50/90 backdrop-blur-sm border-blue-200">
+              <CardContent className="p-8 text-center">
+                <Clock className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-blue-900 mb-2">Access Code Not Yet Available</h2>
+                <p className="text-blue-800 text-lg mb-4">
+                  Your access code will be available 12 hours before your scheduled pickup
+                  {pinEligibleFrom ? (
+                    <> on <strong>{format(pinEligibleFrom, 'MMM dd, yyyy')} at {format(pinEligibleFrom, 'h:mm a')}</strong></>
+                  ) : null}.
+                </p>
+                <p className="text-sm text-blue-700">
+                  Scheduled pickup: {formatDateTime(booking?.drop_off_date, booking?.drop_off_time_slot)}
+                </p>
+              </CardContent>
+            </Card>
           ) : (
             <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">
               <CardContent className="p-8 text-center">
@@ -577,7 +662,7 @@ export const AccessCodesPage = ({ customerData }) => {
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
                   <Button 
                     onClick={handleGeneratePin}
-                    disabled={generatingPin}
+                    disabled={generatingPin || !pinWindowOpen}
                     className="bg-yellow-600 hover:bg-yellow-700 text-white"
                   >
                     {generatingPin ? (

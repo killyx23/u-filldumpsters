@@ -6,9 +6,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RadioGroup } from '@/components/ui/radio-group';
+import { RadioCard } from '@/components/addons/RadioCard';
+import { HardwareProtectionInfoDialog } from '@/components/addons/HardwareProtectionInfoDialog';
+import { DeclineWarningDialog } from '@/components/addons/DeclineWarningDialog';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useProtectionPlans } from '@/hooks/useProtectionPlans';
 import { toast } from '@/components/ui/use-toast';
 import { checkInventoryAvailability } from '@/utils/equipmentInventoryManager';
+import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
+import {
+  filterAvailableAddonsForService,
+  mergeOriginalAddonsForService,
+  serviceSupportsDriveway,
+} from '@/utils/rescheduleAddons';
 
 const getIconForEquipment = (name) => {
   const nameLower = name?.toLowerCase() || '';
@@ -33,14 +44,24 @@ export const RescheduleAddonsSection = ({
   originalBooking,
   selectedAddonsList = [], 
   setSelectedAddonsList,
-  bookingId 
+  bookingId,
+  selectedService = null,
 }) => {
   const [availableEquipment, setAvailableEquipment] = useState([]);
   const [loading, setLoading] = useState(true);
   const [inventoryWarnings, setInventoryWarnings] = useState({});
   const [originalAddonsMap, setOriginalAddonsMap] = useState(new Map());
-  const [initialized, setInitialized] = useState(false);
-  const { insurancePrice } = useInsurancePricing();
+  const [showInsuranceInfo, setShowInsuranceInfo] = useState(false);
+  const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
+  const [insuranceChoiceLocked, setInsuranceChoiceLocked] = useState(false);
+  const serviceId = selectedService?.id ?? originalBooking?.plan?.id ?? null;
+  const { insurancePrice, rentalInsurance } = useInsurancePricing(serviceId);
+  const { drivewayProtection } = useProtectionPlans(serviceId);
+  const drivewayPrice = drivewayProtection?.price ?? 0;
+  const planName = selectedService?.name || originalBooking?.plan?.name || '';
+  const isDumpLoaderWithDelivery =
+    planName.toLowerCase().includes('dump loader') &&
+    planName.toLowerCase().includes('delivery');
 
   const currencyInfo = { code: 'USD', symbol: '$' };
 
@@ -88,33 +109,30 @@ export const RescheduleAddonsSection = ({
           }
         });
         
-        // Check for insurance in addons JSON (use hook price, not equipment table)
-        if (originalBooking.addons && typeof originalBooking.addons === 'object') {
-          Object.entries(originalBooking.addons).forEach(([key, val]) => {
-            if (key.toLowerCase().includes('insurance')) {
-              // Use insurancePrice from hook (services table)
-              console.log('[RescheduleAddons] Original insurance found, using services table price:', insurancePrice);
-              originalMap.set('insurance', {
-                id: 'insurance',
-                name: 'Premium Insurance',
-                price: insurancePrice,
-                quantity: 1,
-                type: 'service'
-              });
-            }
+        if (bookingHadInsurance(originalBooking.addons)) {
+          const applied = Number(originalBooking.addons.insurancePriceApplied);
+          const price = applied > 0 ? applied : insurancePrice;
+          originalMap.set('insurance', {
+            id: 'insurance',
+            name: rentalInsurance?.name || 'Premium Insurance',
+            price,
+            quantity: 1,
+            type: 'insurance',
           });
         }
-        
-        console.log('[RescheduleAddons] Total original items (excluding equipment ID 7):', originalMap.size);
-        setOriginalAddonsMap(originalMap);
-        
-        // ONLY pre-check items that were on original booking
-        if (!initialized && (!selectedAddonsList || selectedAddonsList.length === 0)) {
-          const originalList = Array.from(originalMap.values());
-          console.log('[RescheduleAddons] Initializing with original items:', originalList);
-          setSelectedAddonsList(originalList);
-          setInitialized(true);
+
+        if (originalBooking.addons?.drivewayProtection === 'accept') {
+          const applied = Number(originalBooking.addons.drivewayPriceApplied);
+          originalMap.set('driveway', {
+            id: 'driveway',
+            name: drivewayProtection?.name || 'Driveway Protection',
+            price: applied > 0 ? applied : drivewayPrice,
+            quantity: 1,
+            type: 'driveway',
+          });
         }
+
+        setOriginalAddonsMap(originalMap);
         
       } catch (err) {
         console.error('[RescheduleAddons] Error fetching original add-ons:', err);
@@ -127,7 +145,45 @@ export const RescheduleAddonsSection = ({
     };
     
     fetchOriginalAddons();
-  }, [bookingId, originalBooking, initialized, insurancePrice]);
+  }, [bookingId, originalBooking, insurancePrice, rentalInsurance, drivewayProtection, drivewayPrice]);
+
+  useEffect(() => {
+    if (!serviceId || originalAddonsMap.size === 0) return;
+    const originalList = Array.from(originalAddonsMap.values());
+    setSelectedAddonsList((prev) => {
+      const merged = mergeOriginalAddonsForService(originalList, prev, serviceId);
+      if (!insuranceChoiceLocked) return merged;
+
+      const withoutInsurance = merged.filter(
+        (a) => a.id !== 'insurance' && a.type !== 'insurance'
+      );
+      const hadInsurance = prev.some(
+        (a) => a.id === 'insurance' || a.type === 'insurance'
+      );
+      if (!hadInsurance) return withoutInsurance;
+
+      const existing = prev.find(
+        (a) => a.id === 'insurance' || a.type === 'insurance'
+      );
+      return [
+        ...withoutInsurance,
+        existing || {
+          id: 'insurance',
+          name: rentalInsurance?.name || 'Premium Insurance',
+          price: insurancePrice,
+          quantity: 1,
+          type: 'insurance',
+        },
+      ];
+    });
+  }, [
+    serviceId,
+    originalAddonsMap,
+    setSelectedAddonsList,
+    insuranceChoiceLocked,
+    rentalInsurance?.name,
+    insurancePrice,
+  ]);
 
   // Fetch available equipment (excluding ID 7)
   useEffect(() => {
@@ -162,21 +218,23 @@ export const RescheduleAddonsSection = ({
           isQuantityControlled: eq.type !== 'service' || isDisposalService(eq.name)
         }));
 
-        // Add Premium Insurance manually (from services table via hook)
+        // Insurance is rendered as Accept/Decline above the grid (not as a card)
         const allAddons = [
-          {
-            id: 'insurance',
-            name: 'Premium Insurance',
-            price: insurancePrice,
-            description: 'Complete protection coverage for your rental',
-            icon: <Shield className="h-6 w-6" />,
-            type: 'service',
-            isQuantityControlled: false
-          },
-          ...equipmentWithIcons
+          ...(drivewayProtection && serviceSupportsDriveway(serviceId)
+            ? [{
+                id: 'driveway',
+                name: drivewayProtection.name || 'Driveway Protection',
+                price: drivewayPrice,
+                description: drivewayProtection.description || 'Protect your driveway during delivery',
+                icon: <Shield className="h-6 w-6" />,
+                type: 'driveway',
+                isQuantityControlled: false,
+              }]
+            : []),
+          ...equipmentWithIcons,
         ];
 
-        console.log('[RescheduleAddons] Total available add-ons (including Premium Insurance from services):', allAddons.length);
+        console.log('[RescheduleAddons] Total available add-ons (insurance handled separately):', allAddons.length);
         setAvailableEquipment(allAddons);
       } catch (err) {
         console.error("[RescheduleAddons] Failed to load addons:", err);
@@ -191,7 +249,44 @@ export const RescheduleAddonsSection = ({
     };
 
     fetchEquipment();
-  }, [insurancePrice]);
+  }, [insurancePrice, rentalInsurance, serviceId, drivewayProtection, drivewayPrice]);
+
+  const visibleAddons = filterAvailableAddonsForService(availableEquipment, serviceId, {
+    hasDrivewayPlan: Boolean(drivewayProtection),
+  }).filter((addon) => addon.id !== 'insurance' && addon.type !== 'insurance');
+
+  const insuranceAddon = {
+    id: 'insurance',
+    name: rentalInsurance?.name || 'Premium Insurance',
+    price: insurancePrice,
+    quantity: 1,
+    type: 'insurance',
+  };
+
+  const insuranceAccepted = selectedAddonsList.some(
+    (a) => a.id === 'insurance' || a.type === 'insurance'
+  );
+  const originallyHadInsurance = originalAddonsMap.has('insurance');
+
+  const handleInsuranceChange = (value) => {
+    if (value === 'decline') {
+      setShowInsuranceDeclineWarning(true);
+      return;
+    }
+    setInsuranceChoiceLocked(true);
+    setSelectedAddonsList((prev) => {
+      const without = prev.filter((a) => a.id !== 'insurance' && a.type !== 'insurance');
+      return [...without, { ...insuranceAddon }];
+    });
+  };
+
+  const confirmDeclineInsurance = () => {
+    setInsuranceChoiceLocked(true);
+    setSelectedAddonsList((prev) =>
+      prev.filter((a) => a.id !== 'insurance' && a.type !== 'insurance')
+    );
+    setShowInsuranceDeclineWarning(false);
+  };
 
   const handleToggle = async (addon) => {
     const isCurrentlySelected = selectedAddonsList.some(a => 
@@ -394,8 +489,74 @@ export const RescheduleAddonsSection = ({
         </p>
       </div>
 
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-lg font-semibold text-white">
+            {rentalInsurance?.name || 'Rental Insurance'}
+          </h3>
+          <button
+            type="button"
+            onClick={() => setShowInsuranceInfo(true)}
+            className="text-yellow-400 hover:text-yellow-500 transition-colors"
+            title="Learn more about insurance coverage"
+          >
+            <Info className="h-4 w-4" />
+          </button>
+          <div className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-lg">
+            <CheckCircle2 className="w-3 h-3" />
+            Originally: {originallyHadInsurance ? 'Accepted' : 'Not on order'}
+          </div>
+        </div>
+        <RadioGroup
+          value={insuranceAccepted ? 'accept' : 'decline'}
+          onValueChange={handleInsuranceChange}
+          className="grid grid-cols-1 md:grid-cols-2 gap-3"
+        >
+          <RadioCard
+            id="reschedule-insurance-accept"
+            value="accept"
+            checked={insuranceAccepted}
+            onChange={() => handleInsuranceChange('accept')}
+            title="Accept Insurance"
+            price={insurancePrice}
+            description="Protect yourself from damage liability"
+            recommended
+          />
+          <RadioCard
+            id="reschedule-insurance-decline"
+            value="decline"
+            checked={!insuranceAccepted}
+            onChange={() => handleInsuranceChange('decline')}
+            title="Decline Insurance"
+            price={0}
+            description="You assume full liability"
+            warning
+          />
+        </RadioGroup>
+      </div>
+
+      <HardwareProtectionInfoDialog
+        open={showInsuranceInfo}
+        onOpenChange={setShowInsuranceInfo}
+        insurancePrice={insurancePrice}
+        isDumpLoaderWithDelivery={Boolean(isDumpLoaderWithDelivery)}
+        customInfoText={
+          isDumpLoaderWithDelivery
+            ? 'Insurance covers damage to the rental equipment while in your possession during loading. This provides peace of mind if the bin, doors, hinges, or equipment are accidentally damaged while you have it. Insurance covers the first $500 of repair costs.'
+            : null
+        }
+      />
+
+      <DeclineWarningDialog
+        open={showInsuranceDeclineWarning}
+        onOpenChange={setShowInsuranceDeclineWarning}
+        onConfirm={confirmDeclineInsurance}
+        title="Confirm Your Choice"
+        description="By declining rental insurance, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
+      />
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {availableEquipment?.map((addon, idx) => {
+        {visibleAddons?.map((addon, idx) => {
           const selected = isSelected(addon);
           const quantity = getQuantity(addon);
           const hasWarning = inventoryWarnings[addon.id];

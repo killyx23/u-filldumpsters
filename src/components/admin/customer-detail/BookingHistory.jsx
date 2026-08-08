@@ -7,8 +7,10 @@ import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPin, Clock } from 'lucide-react';
-import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
+import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -21,7 +23,9 @@ const DetailCard = ({ icon, title, children }) => (
 );
 
 const DistanceWarning = ({ booking, customer }) => {
-    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || customer?.distance_miles || null);
+    const [distance, setDistance] = useState(
+        booking.distance_miles || booking.addons?.distanceInfo?.miles || customer?.distance_miles || null
+    );
     const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes || null);
 
     useEffect(() => {
@@ -51,7 +55,7 @@ const DistanceWarning = ({ booking, customer }) => {
     );
 };
 
-const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted }) => {
+const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
     const [isSending, setIsSending] = useState(false);
     const receiptRef = useRef();
     
@@ -88,6 +92,8 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
         return 'Manual Review';
     };
     const pendingReason = getPendingReason();
+    const rescheduleApproval = getLatestRescheduleApproval(booking);
+    const oneWayMiles = resolveOneWayMiles(booking, customer);
 
     return (
         <div className="bg-white/10 p-4 rounded-md">
@@ -99,10 +105,13 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="font-bold text-lg text-white">{booking.plan?.name || 'N/A'}</p>
                     <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked: {format(parseISO(booking.created_at), 'Pp')}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
+                    <p className="text-sm text-blue-200 flex items-center mt-1">
+                        <MapPin className="mr-2 h-4 w-4"/>Distance (one-way): {formatMilesLabel(oneWayMiles)}
+                    </p>
                     <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {stripeChargeId}</p>
                 </div>
                 <div className="text-right">
-                    <StatusBadge status={booking.status} />
+                    <StatusBadge status={booking.status} booking={booking} />
                     <p className="font-bold text-lg text-green-400 mt-1">${Number(booking.total_price || 0).toFixed(2)}</p>
                 </div>
             </div>
@@ -115,24 +124,39 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     Pending Reason: <span className="font-semibold ml-1">{pendingReason}</span>
                 </div>
             )}
+            {rescheduleApproval && (
+                <div className="mt-2 p-2 bg-emerald-900/40 border border-emerald-500/40 rounded-md text-sm text-emerald-200 space-y-1">
+                    <p className="font-semibold">Reschedule approved</p>
+                    <p>Original ${Number(rescheduleApproval.original_total || 0).toFixed(2)} → New ${Number(rescheduleApproval.new_total || 0).toFixed(2)}</p>
+                    <p>{formatRescheduleStripeLine(rescheduleApproval)}</p>
+                    {rescheduleApproval.stripe_transaction_id && (
+                        <p className="text-xs break-all">Stripe: {rescheduleApproval.stripe_transaction_id}</p>
+                    )}
+                </div>
+            )}
             <div className="flex justify-end space-x-2 mt-3">
                 <Button size="sm" variant="secondary" onClick={() => onReceiptSelect({ ...booking, customers: customer })}><Eye className="mr-2 h-4 w-4" /> View Details</Button>
                 <Button size="sm" variant="outline" onClick={handlePrint}><Printer className="mr-2 h-4 w-4" /> Print</Button>
                 <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => handleResendConfirmation(booking)} disabled={isSending === booking.id}>
                     {isSending === booking.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Send className="mr-2 h-4 w-4"/>} Resend
                 </Button>
-                <SecureDeleteDialog bookingId={booking.id} onDeleted={onBookingDeleted} />
+                <BookingRemovalDialog
+                    booking={booking}
+                    adminEmail={adminEmail}
+                    onComplete={onBookingDeleted}
+                    onHardDeleted={onBookingDeleted}
+                />
             </div>
         </div>
     );
 }
 
-export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted }) => {
+export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
     return (
         <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History">
             <div className="space-y-4">
                 {bookings.length > 0 ? bookings.map(booking => (
-                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} />
+                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} adminEmail={adminEmail} />
                 )) : <p className="text-center text-blue-200 py-8">This customer has no booking history.</p>}
             </div>
         </DetailCard>

@@ -1,11 +1,63 @@
 import React, { useEffect, useState } from 'react';
-import { Truck, CheckCircle, Clock, MapPin, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Truck, CheckCircle, Clock, MapPin, AlertTriangle, RefreshCw, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { format, isFuture, parseISO, differenceInDays } from 'date-fns';
 import { StatusDetailsModal } from './StatusDetailsModal';
+import { ImportantAppointmentDetails } from './ImportantAppointmentDetails';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import {
+  bookingNeedsSkippedVerification,
+  formatVerificationDeadlineMessage,
+  getVerificationDeadlineInfo,
+} from '@/utils/verificationDeadline';
 
-export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
+const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-gray-900 border-yellow-500/50 text-white max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-yellow-400 text-2xl">Things That Need Attention</DialogTitle>
+          <DialogDescription>
+            These are important account items to complete. Click one to open the right section.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+          {items.length > 0 ? items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                onNavigateToTab?.(item.targetTab);
+                onOpenChange(false);
+              }}
+              className={`w-full text-left p-4 rounded-lg border transition-colors hover:bg-white/10 ${
+                item.severity === 'urgent'
+                  ? 'border-red-500/40 bg-red-900/20'
+                  : item.severity === 'warning'
+                    ? 'border-yellow-500/40 bg-yellow-900/20'
+                    : 'border-blue-500/40 bg-blue-900/20'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">{item.title}</p>
+                  <p className="text-sm text-gray-200 mt-1">{item.description}</p>
+                  <p className="text-xs text-gray-300 mt-2">{item.nextStep}</p>
+                </div>
+                <ChevronRight className="h-5 w-5 text-gray-300" />
+              </div>
+            </button>
+          )) : (
+            <p className="text-sm text-blue-200 py-6 text-center">No attention items right now.</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateToTab }) => {
   const [stats, setStats] = useState({
     activeCount: 0,
     pendingAddressCount: 0,
@@ -15,6 +67,8 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
   });
   
   const [selectedStatusType, setSelectedStatusType] = useState(null);
+  const [attentionDialogOpen, setAttentionDialogOpen] = useState(false);
+  const [attentionItems, setAttentionItems] = useState([]);
 
   useEffect(() => {
     if (!bookings) return;
@@ -29,12 +83,84 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
     const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
 
     const urgent = [];
+    const attention = [];
     if (pendingAddress.length > 0) {
       urgent.push({ type: 'address', text: `${pendingAddress.length} booking(s) require address verification immediately.` });
+      attention.push({
+        id: 'pending-address',
+        severity: 'warning',
+        title: `Address verification required (${pendingAddress.length})`,
+        description: 'One or more bookings are waiting for address verification.',
+        nextStep: 'Open Verification and complete the required address checks.',
+        targetTab: 'verification',
+      });
     }
-    const verySoon = upcoming.filter(b => differenceInDays(parseISO(b.drop_off_date), new Date()) <= 2);
-    if (verySoon.length > 0) {
-      urgent.push({ type: 'delivery', text: `You have ${verySoon.length} delivery coming up within 48 hours.` });
+    const hasPaymentDelta = (b) => {
+      const details = b.payment_delta_details;
+      return details && (Number(details.amount_due) > 0 || details.state === 'pending');
+    };
+    const pendingPayment = bookings.filter((b) => b.status === 'pending_payment' && hasPaymentDelta(b));
+    if (pendingPayment.length > 0) {
+      attention.push({
+        id: 'pending-payment',
+        severity: 'urgent',
+        title: `Payment adjustment pending (${pendingPayment.length})`,
+        description: 'A payment difference still needs to be completed.',
+        nextStep: 'Open Bookings and review payment updates.',
+        targetTab: 'bookings',
+      });
+    }
+    const pendingVerification = bookings.filter((b) => ['pending_review', 'pending_verification'].includes(b.status));
+    const skippedLicenseBookings = bookings.filter((b) => bookingNeedsSkippedVerification(b));
+
+    if (skippedLicenseBookings.length > 0) {
+      const primary = skippedLicenseBookings[0];
+      const deadlineInfo = getVerificationDeadlineInfo(primary);
+      const deadlineMsg = formatVerificationDeadlineMessage(primary);
+      if (deadlineMsg) {
+        urgent.push({ type: 'license-verification', text: deadlineMsg });
+      }
+      attention.push({
+        id: 'license-verification-deadline',
+        severity: deadlineInfo.isPastDeadline ? 'urgent' : 'warning',
+        title: deadlineInfo.isPastDeadline
+          ? 'License verification overdue'
+          : `License verification due in ${deadlineInfo.hoursRemaining ?? 0} hour${
+              deadlineInfo.hoursRemaining === 1 ? '' : 's'
+            }`,
+        description: deadlineMsg || 'Complete license plate, driver’s license, and insurance documents.',
+        nextStep: 'Open Verification and submit your documents before the 12-hour deadline.',
+        targetTab: 'verification',
+      });
+    } else if (pendingVerification.length > 0) {
+      attention.push({
+        id: 'pending-verification',
+        severity: 'warning',
+        title: `Verification review pending (${pendingVerification.length})`,
+        description: 'Some bookings require verification before they can continue.',
+        nextStep: 'Open Verification and follow the required next steps.',
+        targetTab: 'verification',
+      });
+    }
+    const cancellationPending = bookings.filter((b) => b.status === 'cancellation_pending');
+    if (cancellationPending.length > 0) {
+      attention.push({
+        id: 'cancellation-pending',
+        severity: 'urgent',
+        title: `Cancellation request pending (${cancellationPending.length})`,
+        description: 'A cancellation request is waiting for final action.',
+        nextStep: 'Open Messages for support instructions.',
+        targetTab: 'messages',
+      });
+    }
+
+    // Generic 48h notice only when not already covered by license verification countdown
+    const verySoon = upcoming.filter((b) => differenceInDays(parseISO(b.drop_off_date), new Date()) <= 2);
+    if (verySoon.length > 0 && skippedLicenseBookings.length === 0) {
+      urgent.push({
+        type: 'delivery',
+        text: `You have ${verySoon.length} delivery coming up within 48 hours.`,
+      });
     }
 
     setStats({
@@ -44,6 +170,7 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
       completedCount: completed.length,
       urgentItems: urgent
     });
+    setAttentionItems(attention);
   }, [bookings]);
 
   const customerId = bookings?.[0]?.customer_id;
@@ -65,11 +192,28 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
         </div>
       </div>
 
-      {stats.urgentItems.length > 0 && (
+      {(stats.urgentItems.length > 0 || attentionItems.length > 0) && (
         <div className="bg-orange-900/30 border border-orange-500/50 rounded-xl p-4 mb-6 shadow-lg shadow-orange-900/20">
-          <h3 className="text-orange-400 font-bold flex items-center mb-2">
-            <AlertTriangle className="mr-2 h-5 w-5" /> Attention Required
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-orange-400 font-bold flex items-center mb-2">
+              <AlertTriangle className="mr-2 h-5 w-5" /> Attention Required
+            </h3>
+            {attentionItems.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAttentionDialogOpen(true)}
+                className="border-yellow-400/40 text-yellow-300 hover:bg-yellow-400/10"
+              >
+                View {attentionItems.length} item(s)
+              </Button>
+            )}
+          </div>
+          {attentionItems.length > 0 && (
+            <p className="text-xs text-yellow-200 mb-2">
+              You have {attentionItems.length} important item(s) to review.
+            </p>
+          )}
           <ul className="space-y-2">
             {stats.urgentItems.map((item, idx) => (
               <li key={idx} className="text-sm text-orange-200 flex items-start">
@@ -79,6 +223,18 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh }) => {
           </ul>
         </div>
       )}
+
+      <AttentionRequiredDialog
+        open={attentionDialogOpen}
+        onOpenChange={setAttentionDialogOpen}
+        items={attentionItems}
+        onNavigateToTab={onNavigateToTab}
+      />
+
+      <ImportantAppointmentDetails
+        bookings={bookings}
+        onNavigateToTab={onNavigateToTab}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card 

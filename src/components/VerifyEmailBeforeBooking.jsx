@@ -8,23 +8,54 @@ import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid } from 'date-fns';
-import { retrievePendingBooking } from '@/utils/bookingDataPersistence';
+import { retrievePendingBooking, hydratePlanFromPending, mapPendingToBookingState, isDriverVerificationComplete } from '@/utils/bookingDataPersistence';
+import { attachCheckoutVerificationDocuments } from '@/utils/verificationImageHelper';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
-import { calculateTotalWithTax } from '@/utils/calculateTaxAmount';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
+
+function buildVerificationAttachPayload(addons, email, pendingToken, customerId = null) {
+    if (!email || addons?.wasVerificationSkipped) return null;
+
+    const urls = addons.licenseImageUrls;
+    const front = Array.isArray(urls) ? urls[0] : urls?.front;
+    const back = Array.isArray(urls) ? urls[1] : urls?.back;
+    const insurance = addons.insuranceImageUrl;
+
+    const hasDocs = Boolean(
+      front?.url || front?.path || back?.url || back?.path || insurance?.url || insurance?.path
+    );
+    if (!hasDocs) return null;
+
+    return {
+        customerId,
+        email,
+        pendingToken,
+        licensePlate: addons.licensePlate || null,
+        licenseFrontUrl: front?.url || null,
+        licenseFrontPath: front?.path || null,
+        licenseBackUrl: back?.url || null,
+        licenseBackPath: back?.path || null,
+        insuranceUrl: insurance?.url || null,
+        insurancePath: insurance?.path || null,
+    };
+}
 
 export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const token = searchParams.get('token');
+    const codeFromUrl = searchParams.get('code');
     const loadingTimeoutRef = useRef(null);
     const verificationTimeoutRef = useRef(null);
 
@@ -33,6 +64,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [bookingData, setBookingData] = useState(null);
     const [plan, setPlan] = useState(null);
     const [addonsData, setAddonsData] = useState(null);
+    const [pendingRecord, setPendingRecord] = useState(null);
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(true);
     const [availabilityTimes, setAvailabilityTimes] = useState({
@@ -44,7 +76,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
-    const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+    const { insurancePrice, taxOptions, drivewayPrice, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
     // Cleanup timeouts on unmount
     useEffect(() => {
@@ -114,13 +146,15 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 };
 
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Reconstructed booking data:`, reconstructedBookingData);
-                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Plan data:`, pending.plan_data);
+                const hydratedPlan = await hydratePlanFromPending(pending);
+                console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Service id:`, pending.service_id);
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Addons data:`, pending.addons_data);
 
                 setBookingData(reconstructedBookingData);
-                setPlan(pending.plan_data);
+                setPlan(hydratedPlan);
                 setAddonsData(pending.addons_data || {});
-                
+                setPendingRecord(pending);
+
                 clearTimeout(loadingTimeoutRef.current);
                 setStatus('idle');
                 console.log(`[${resultTs}] [VerifyEmailBeforeBooking] Status set to 'idle', ready for verification`);
@@ -135,7 +169,15 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         };
 
         loadPendingBooking();
-    }, [token, retryCount]);
+    }, [token, retryCount, navigate]);
+
+    useEffect(() => {
+        if (status !== 'idle') return;
+        const prefetchedCode = String(codeFromUrl || '').trim();
+        if (!/^\d{6}$/.test(prefetchedCode)) return;
+        setCode(prefetchedCode);
+        setStatus('sent');
+    }, [status, codeFromUrl]);
 
     // Load equipment prices with error handling
     useEffect(() => {
@@ -211,7 +253,10 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         const tripMileageCost = addonsData?.mileageCharge || 0;
 
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
-        const drivewayProtectionCost = (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept' ? 15 : 0;
+        const drivewayProtectionCost =
+            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+                ? Number(drivewayPrice)
+                : 0;
 
         let rentEquipmentCost = 0;
         let purchaseItemsCost = 0;
@@ -244,21 +289,30 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             disposalCost += Number(equipmentPrices[6] || 35) * addonsData.applianceDisposal;
         }
 
-        const subtotalBeforeDiscount = basePriceAmount + deliveryFeeFlat + tripMileageCost +
-            insuranceCost + drivewayProtectionCost +
-            rentEquipmentCost + purchaseItemsCost + disposalCost;
+        const taxBreakdown = calculateBookingTaxBreakdown({
+            plan,
+            addonsData,
+            equipmentPrices,
+            taxRate,
+            deliveryService: addonsData?.deliveryService ?? isDelivery,
+            insurancePrice,
+            drivewayPrice,
+            ...taxOptions,
+        });
 
-        let discount = 0;
+        let couponDiscount = 0;
+        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
         if (addonsData?.coupon?.isValid) {
             if (addonsData.coupon.discountType === 'fixed') {
-                discount = Number(addonsData.coupon.discountValue || 0);
+                couponDiscount = Number(addonsData.coupon.discountValue || 0);
             } else if (addonsData.coupon.discountType === 'percentage') {
-                discount = (subtotalBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
+                couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
             }
         }
 
-        const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-        const taxCalc = calculateTotalWithTax(subtotal, taxRate);
+        const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
+        const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
 
         return {
             basePriceAmount,
@@ -270,12 +324,17 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             purchaseItemsCost,
             disposalCost,
             discount,
-            subtotal: taxCalc.subtotal,
-            tax: taxCalc.tax,
-            taxRate: taxRate,
-            total: taxCalc.total
+            couponDiscount,
+            loyaltyDiscount,
+            referralDiscount,
+            subtotal: taxBreakdown.subtotalBeforeTax,
+            taxableSubtotal: taxBreakdown.taxableSubtotal,
+            nonTaxableSubtotal: taxBreakdown.nonTaxableSubtotal,
+            tax: taxBreakdown.tax,
+            taxRate: taxBreakdown.taxRate,
+            total: taxBreakdown.total,
         };
-    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice]);
+    }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, taxOptions]);
 
     const handleSendCode = async () => {
         const timestamp = new Date().toISOString();
@@ -290,7 +349,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 body: {
                     email: bookingData.email,
                     name: `${bookingData.firstName} ${bookingData.lastName}`.trim(),
-                    pending_customer_id: token
+                    pending_customer_id: token,
+                    site_url: typeof window !== 'undefined' ? window.location.origin : undefined
                 }
             });
 
@@ -368,17 +428,51 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Email verified successfully!`);
+            if (typeof window !== 'undefined') {
+                window.sessionStorage.setItem(`verified_email_${String(bookingData.email || '').toLowerCase()}`, String(Date.now()));
+            }
             setStatus('verified');
+
+            const hydratedPlan = plan || (pendingRecord ? await hydratePlanFromPending(pendingRecord) : null);
+            const mapped = pendingRecord
+                ? mapPendingToBookingState(pendingRecord, hydratedPlan)
+                : null;
+            const addons = pendingRecord?.addons_data || addonsData || {};
+            const needsDriverStep =
+                mapped?.requiresDriverVerification && !isDriverVerificationComplete(addons);
+
+            if (!needsDriverStep) {
+                const attachPayload = buildVerificationAttachPayload(
+                    addons,
+                    bookingData.email,
+                    token,
+                    data.customer?.id ?? null,
+                );
+                if (attachPayload) {
+                    try {
+                        await attachCheckoutVerificationDocuments(attachPayload);
+                        console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Attached pending verification documents`);
+                    } catch (attachError) {
+                        console.error(`[${responseTs}] [VerifyEmailBeforeBooking] Failed to attach verification documents:`, attachError);
+                    }
+                }
+            }
 
             toast({
                 title: 'Email Verified!',
-                description: 'Redirecting to payment...'
+                description: needsDriverStep
+                    ? 'Returning to driver verification...'
+                    : 'Redirecting to payment...',
             });
 
-            // Redirect to payment page with token
             setTimeout(() => {
-                console.log(`[${new Date().toISOString()}] [VerifyEmailBeforeBooking] Navigating to payment page with bookingId:`, token);
-                navigate(`/payment?bookingId=${token}`);
+                if (needsDriverStep) {
+                    console.log(`[${new Date().toISOString()}] [VerifyEmailBeforeBooking] Resuming booking at driver step with token:`, token);
+                    navigate('/', { state: { resumeStep: 8, token } });
+                } else {
+                    console.log(`[${new Date().toISOString()}] [VerifyEmailBeforeBooking] Navigating to payment page with bookingId:`, token);
+                    navigate(`/payment?bookingId=${token}`);
+                }
             }, 1500);
 
         } catch (err) {
@@ -498,10 +592,24 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     }
 
     const discountItems = [];
-    if (calculatedTotals.discount > 0) {
+    if (calculatedTotals.couponDiscount > 0) {
         discountItems.push({
             label: `Coupon (${addonsData.coupon?.code || 'Applied'})`,
-            amount: -calculatedTotals.discount,
+            amount: -calculatedTotals.couponDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.loyaltyDiscount > 0) {
+        discountItems.push({
+            label: `Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`,
+            amount: -calculatedTotals.loyaltyDiscount,
+            highlight: true
+        });
+    }
+    if (calculatedTotals.referralDiscount > 0) {
+        discountItems.push({
+            label: `Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`,
+            amount: -calculatedTotals.referralDiscount,
             highlight: true
         });
     }
@@ -526,7 +634,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     };
 
     // Loading state with proper spinner
-    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingInsurancePrice) {
+    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingTaxOptions) {
         return (
             <div className="container mx-auto py-16 px-4">
                 <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
@@ -835,7 +943,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                         disabled={code.length < 5}
                                         className="w-full py-6 text-lg font-bold bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        Verify & Continue to Payment
+                                        Verify & Continue
                                     </Button>
 
                                     <div className="text-center mt-2">
@@ -861,13 +969,18 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                     <h3 className="text-xl font-bold text-white mb-2">Email Verified!</h3>
                                     <p className="text-gray-300 text-center flex items-center">
                                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                                        Redirecting to payment...
+                                        Continuing...
                                     </p>
                                 </motion.div>
                             )}
                         </AnimatePresence>
                     </div>
                 </div>
+                <UiControlGuide
+                    stepTitle="Verify Email"
+                    entries={getBookingGuideEntries('email')}
+                    className="mt-6 flex justify-end"
+                />
             </div>
         </motion.div>
     );

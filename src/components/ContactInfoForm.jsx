@@ -1,13 +1,25 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, User, Mail, Phone, Contact, MapPin, CheckCircle2, Sparkles } from 'lucide-react';
+import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from '@/components/ui/use-toast';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 
-export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack }) => {
+export const ContactInfoForm = ({
+    bookingData,
+    setBookingData,
+    onSubmit,
+    onBack,
+    usedReturningCustomerLink = false,
+}) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
+    const { isReturning, pastBookingsCount, loading: detectingReturning, detectionError } = useReturningCustomerDetection(
+        bookingData.email
+    );
 
     const handleInputChange = e => {
         const { name, value } = e.target;
@@ -99,7 +111,50 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                             </div>
                             <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
                             <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
+
+                            {detectingReturning && bookingData.email?.includes('@') && (
+                                <p className="text-sm text-blue-300/80 italic">Checking account…</p>
+                            )}
+
+                            {detectionError && !detectingReturning && bookingData.email?.includes('@') && (
+                                <p className="text-sm text-amber-300/90">{detectionError}</p>
+                            )}
                         </div>
+
+                        {isReturning && !detectingReturning && usedReturningCustomerLink && (
+                            <div className="flex items-start gap-3 bg-blue-900/30 border border-blue-500/40 rounded-xl p-5">
+                                <Sparkles className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-white font-semibold text-lg">Thank you for being a returning customer. We appreciate your business.</p>
+                                    <p className="text-sm text-blue-200 mt-2">
+                                        We found {pastBookingsCount} previous{' '}
+                                        {pastBookingsCount === 1 ? 'rental' : 'rentals'} on this account. You can continue from here.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
+                        {isReturning && !detectingReturning && !usedReturningCustomerLink && (
+                            <div className="flex items-start gap-3 bg-blue-900/30 border border-blue-500/40 rounded-xl p-5">
+                                <Sparkles className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-white font-semibold text-lg">Thank you for being a returning customer!</p>
+                                    <p className="text-sm text-blue-200 mt-2">
+                                        We found {pastBookingsCount} previous{' '}
+                                        {pastBookingsCount === 1 ? 'rental' : 'rentals'} on this account. You can continue from here — no need to go back.
+                                    </p>
+                                    <p className="text-sm text-blue-200/90 mt-3">
+                                        <strong>Next time, save time:</strong> use the <strong>Returning Customer</strong> link in the
+                                        top-right menu of the website, or the <strong>Returning Customer?</strong> option at the start of any service booking.
+                                        After a quick email verification there, your information will auto-fill for a faster checkout.
+                                    </p>
+                                    <p className="text-sm text-blue-200/80 mt-2">
+                                        If you have not verified through those links yet, you will confirm your email in the journey
+                                        before driver and vehicle documents are shown.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="bg-black/20 p-6 rounded-xl border border-white/10 space-y-4">
                             <div className="flex items-center justify-between mb-2">
@@ -143,6 +198,11 @@ export const ContactInfoForm = ({ bookingData, setBookingData, onSubmit, onBack 
                             <Button type="submit" className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50">
                                 Continue to Terms & Conditions <ArrowRight className="ml-2 h-5 w-5" />
                             </Button>
+                            <UiControlGuide
+                                stepTitle="Contact Info"
+                                entries={getBookingGuideEntries('contact')}
+                                className="mt-3 flex justify-end"
+                            />
                         </div>
                     </form>
                 </div>

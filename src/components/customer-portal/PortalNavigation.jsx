@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  Award,
   LayoutDashboard, 
   List, 
   Map, 
@@ -17,13 +18,14 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, hasPendingVerifications }) => {
   const navItems = [
+    { id: 'welcome', label: 'Welcome', icon: Award },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'access-codes', label: 'Access Codes', icon: Key },
     { id: 'bookings', label: 'Bookings', icon: List },
     { id: 'tracking', label: 'Tracking', icon: Map },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
-    { id: 'documents', label: 'Documents', icon: FileText },
-    { id: 'resources', label: 'How-To & Guides', icon: BookOpen },
+    { id: 'documents', label: 'Your Receipts', icon: FileText },
+    { id: 'resources', label: 'How-To Guides & Documents', icon: BookOpen },
     { id: 'profile', label: 'Profile', icon: User },
     { 
       id: 'verification', 
@@ -76,7 +78,9 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
     <>
       {/* Mobile Navigation */}
       <div className="lg:hidden flex items-center justify-between bg-black/40 p-4 border-b border-white/10 mb-4 rounded-xl">
-        <h2 className="text-lg font-bold text-white capitalize">{activeTab.replace('-', ' ')}</h2>
+        <h2 className="text-lg font-bold text-white">
+          {navItems.find((item) => item.id === activeTab)?.label ?? activeTab.replace(/-/g, ' ')}
+        </h2>
         <Sheet>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">

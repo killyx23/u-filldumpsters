@@ -3,6 +3,9 @@ import { Info } from 'lucide-react';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { getTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 /**
  * Reusable Price Breakdown Component
@@ -18,6 +21,7 @@ export const PriceBreakdown = ({
 }) => {
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
+  const [taxRate, setTaxRate] = useState(7.45);
 
   // Load equipment prices from database
   useEffect(() => {
@@ -26,6 +30,9 @@ export const PriceBreakdown = ({
       const prices = {};
 
       try {
+        const rateConfig = await getTaxRate();
+        setTaxRate(Number(rateConfig?.tax_rate) || 7.45);
+
         // Load equipment/rental items (IDs 1-3)
         const equipmentIds = [1, 2, 3];
         for (const id of equipmentIds) {
@@ -64,8 +71,14 @@ export const PriceBreakdown = ({
     const mileageCharge = Number(addons?.mileageCharge || 0);
 
     // Protection costs
-    const insuranceCost = addons?.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
-    const drivewayProtectionCost = addons?.drivewayProtection === 'accept' ? 15 : 0;
+    const DEFAULT_INSURANCE_PRICE = 25;
+    const insuranceCost = addons?.insurance === 'accept'
+      ? Number(addons?.insurancePriceApplied || addons?.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
+      : 0;
+    const drivewayProtectionCost =
+      addons?.drivewayProtection === 'accept'
+        ? Number(addons?.drivewayPriceApplied || addons?.driveway_price || 0)
+        : 0;
 
     // Equipment costs
     let rentEquipmentCost = 0;
@@ -117,7 +130,11 @@ export const PriceBreakdown = ({
     }
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discount);
-    const tax = subtotal * 0.07; // 7% tax
+    const storedTax = Number(booking?.tax_amount);
+    const rateUsed = Number(booking?.tax_rate_used) || taxRate;
+    const tax = Number.isFinite(storedTax) && storedTax >= 0
+      ? storedTax
+      : calculateTaxAmount(subtotal, rateUsed);
     const total = subtotal + tax;
 
     return {
@@ -249,7 +266,7 @@ export const PriceBreakdown = ({
           items={protectionItems}
           showInfoButton={true}
           infoTitle="Protection Options"
-          infoDescription="Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery."
+          infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
         />
 
         {/* 3. Rent Equipment */}

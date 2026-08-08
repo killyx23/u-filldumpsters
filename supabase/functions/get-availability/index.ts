@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { corsHeaders } from './cors.ts';
+import { getCorsHeaders } from "./cors.ts";
 import { addDays, format, parseISO, isBefore, parse, set, addMinutes, isSameDay, startOfDay } from 'npm:date-fns@2.30.0';
 // import { addDays, format, parseISO, isBefore, parse, set, addMinutes, isSameDay, startOfDay } from 'https://esm.sh/date-fns@2';
 // Safe JSON parser — handles strings, objects, and nulls without throwing
@@ -66,13 +66,14 @@ const bookingOccupiesDate = (occupancyModel, date, bookingDropOffDate, bookingPi
   }
 };
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
       headers: corsHeaders
     });
   }
   try {
-    const { serviceId, startDate, endDate, isDelivery } = await req.json();
+    const { serviceId, startDate, endDate, isDelivery, excludeBookingId } = await req.json();
     if (!serviceId || !startDate || !endDate) {
       throw new Error('Service ID, start date, and end date are required.');
     }
@@ -84,6 +85,9 @@ Deno.serve(async (req)=>{
       dateRange.push(format(d, 'yyyy-MM-dd'));
     }
     const serviceIdForAvail = isDelivery && Number(serviceId) === 2 ? 4 : Number(serviceId);
+    const excludeId = excludeBookingId != null && excludeBookingId !== ''
+      ? Number(excludeBookingId)
+      : null;
     // ─────────────────────────────────────────────
     // DEBUG: Log resolved input parameters
     // ─────────────────────────────────────────────
@@ -91,6 +95,7 @@ Deno.serve(async (req)=>{
     console.log(`[get-availability] REQUEST START`);
     console.log(`[get-availability] serviceId=${serviceId}, isDelivery=${isDelivery}, serviceIdForAvail=${serviceIdForAvail}`);
     console.log(`[get-availability] dateRange: ${startDate} → ${endDate} (${dateRange.length} days)`);
+    console.log(`[get-availability] excludeBookingId=${excludeId ?? 'none'}`);
     console.log(`${'='.repeat(80)}`);
     // ─────────────────────────────────────────────
     // EXPANDED STATUS FILTER
@@ -106,14 +111,24 @@ Deno.serve(async (req)=>{
       'delivered',
       'waiting_to_be_returned',
       'pending_review',
+      'pending_verification',
       'pending_payment',
       'pending',
       'flagged'
     ];
+    let bookingsQuery = supabaseAdmin
+      .from('bookings')
+      .select('id, plan, drop_off_date, pickup_date, addons, status')
+      .lte('drop_off_date', endDate)
+      .gte('pickup_date', startDate)
+      .in('status', activeStatuses);
+    if (Number.isFinite(excludeId)) {
+      bookingsQuery = bookingsQuery.neq('id', excludeId);
+    }
     const [{ data: weeklyRules, error: weeklyError }, { data: dateSpecificRules, error: specificError }, { data: bookings, error: bookingsError }, { data: inventoryRules, error: inventoryRulesError }, { data: services, error: servicesError }] = await Promise.all([
       supabaseAdmin.from('service_availability').select('*').eq('service_id', serviceIdForAvail),
       supabaseAdmin.from('date_specific_availability').select('*').eq('service_id', serviceIdForAvail).in('date', dateRange),
-      supabaseAdmin.from('bookings').select('id, plan, drop_off_date, pickup_date, addons, status').lte('drop_off_date', endDate).gte('pickup_date', startDate).in('status', activeStatuses),
+      bookingsQuery,
       supabaseAdmin.from('inventory_rules').select('service_id, inventory_item_id, quantity_required, inventory_items(id, total_quantity, name)'),
       supabaseAdmin.from('services').select('id, occupancy_model')
     ]);
@@ -194,6 +209,7 @@ Deno.serve(async (req)=>{
           }
           // Count bookings that use this inventory item on this date
           const bookingsUsingItem = (bookings ?? []).filter((b)=>{
+            if (Number.isFinite(excludeId) && Number(b.id) === excludeId) return false;
             const plan = safeParse(b.plan);
             const addons = safeParse(b.addons);
             const bookingServiceId = addons?.isDelivery && plan?.id === 2 ? 4 : plan?.id;

@@ -2,19 +2,21 @@
 import React from 'react';
 import { VerifyEmailBeforeBooking } from '@/components/VerifyEmailBeforeBooking';
 import { StepIndicator } from '@/components/StepIndicator';
-import { useNavigate } from 'react-router-dom';
+import { useBookingStepperNavigation } from '@/hooks/useBookingStepperNavigation';
 
 export const VerifyEmailPage = () => {
-  const navigate = useNavigate();
-
-  const handleBack = () => {
-    navigate('/');
-  };
+  const { highestStep, requiresDriverVerification, handleStepClick, goBackOneStep } =
+    useBookingStepperNavigation(7);
 
   return (
     <div className="min-h-screen">
-      <StepIndicator currentStep={8} />
-      <VerifyEmailBeforeBooking onBack={handleBack} />
+      <StepIndicator
+        currentStep={7}
+        highestStep={highestStep}
+        onStepClick={handleStepClick}
+        requiresDriverVerification={requiresDriverVerification}
+      />
+      <VerifyEmailBeforeBooking onBack={goBackOneStep} />
     </div>
   );
 };

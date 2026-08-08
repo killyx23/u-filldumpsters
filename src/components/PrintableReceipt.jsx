@@ -3,26 +3,46 @@ import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
+import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
+import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
+import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 
-const AgreementText = ({ booking }) => {
+const LIABILITY_EQUIPMENT_DEFAULT =
+    'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
+
+const LIABILITY_EQUIPMENT_WITH_INSURANCE =
+    'Customer purchased optional Rental Insurance applicable to rented Equipment during the Rental Period. Subject to the terms, limitations, and exclusions of the Rental Agreement, purchased protection may apply a credit toward qualifying accidental damage to covered rental hardware as described in the agreement (including applicable per-incident limits). Customer remains fully responsible for any damage, loss, or theft not covered by the purchased protection and authorizes U-Fill Dumpsters LLC to charge the payment method on file for repair or replacement costs exceeding applicable coverage.';
+
+const AgreementText = ({ booking, hasInsurance }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
         ? `${booking.first_name} ${booking.last_name}` 
         : booking?.name;
+    const signedBy = booking?.addons?.agreementSignature || displayName;
+    const signedDate = booking?.addons?.agreementSignatureDate || null;
 
     return (
         <div className="text-xs text-gray-600 border-t mt-8 pt-4 space-y-2">
             <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
             <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
+            {hasInsurance && (
+                <p><strong>Rental Insurance Purchased:</strong> Customer elected and paid for optional Rental Insurance on this booking as part of the Rental Agreement.</p>
+            )}
             
             <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
-                <p><strong>Liability for Equipment:</strong> Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.</p>
+                <p><strong>Liability for Equipment:</strong> {hasInsurance ? LIABILITY_EQUIPMENT_WITH_INSURANCE : LIABILITY_EQUIPMENT_DEFAULT}</p>
                 <p className="mt-1"><strong>Prohibited Materials:</strong> Customer agrees not to place any hazardous materials (including paints, chemicals, oils, tires, batteries) in the equipment. Fees and penalties apply for violations.</p>
                 <p className="mt-1"><strong>Property Damage:</strong> Customer assumes all risk of damage to their property (driveways, lawns, etc.) from equipment placement. U-Fill Dumpsters LLC is not liable for such damages.</p>
+                {hasInsurance && (
+                    <p className="mt-1 text-gray-600">For complete insurance coverage details, limitations, and exclusions, refer to your customer portal or contact support.</p>
+                )}
             </div>
 
             <div className="flex items-center justify-between text-sm mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -30,12 +50,18 @@ const AgreementText = ({ booking }) => {
                     <ShieldCheck className="h-6 w-6 text-green-600 mr-3" />
                     <div>
                         <p className="font-bold text-green-800">Electronically Signed & Agreed</p>
-                        <p className="text-xs text-green-700">by {displayName}</p>
+                        <p className="text-xs text-green-700">by {signedBy}</p>
                     </div>
                 </div>
                 <div className="text-right">
-                    <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
-                    <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
+                    {signedDate ? (
+                        <p className="font-semibold text-green-800">{signedDate}</p>
+                    ) : (
+                        <>
+                            <p className="font-semibold text-green-800">{format(parseISO(booking.created_at), 'PPP')}</p>
+                            <p className="text-xs text-green-700">{format(parseISO(booking.created_at), 'p')}</p>
+                        </>
+                    )}
                 </div>
             </div>
         </div>
@@ -80,7 +106,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
                     body: {
                         customer_id: booking.customers.id,
-                        phone: booking.customers.phone
+                        phone: booking.customers.phone,
+                        order_id: booking.id,
                     }
                 });
 
@@ -104,10 +131,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return <div className="p-8">Loading receipt...</div>;
     }
 
-    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues } = booking;
+    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues, payment_delta_details, receipt_original_snapshot, receipt_status_history } = booking;
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
     const isDelivery = addons?.deliveryService || addons?.isDelivery;
     const coupon = addons?.coupon;
+    const hasInsurance = bookingHadInsurance(addons);
     
     const currentPlan = addons?.plan || plan;
     const serviceName = currentPlan.name;
@@ -127,6 +155,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         serviceType: currentPlan?.service_type
     };
 
+    const formatPlainBookingTime = (timeSlot) => {
+        const date = parseBookingTimeToDate(timeSlot);
+        return date && isValid(date) ? format(date, 'h:mm a') : 'Time not specified';
+    };
+    const pickupStartTime = formatPlainBookingTime(drop_off_time_slot);
+    const returnByTime = formatPlainBookingTime(pickup_time_slot);
+
     const displayName = (first_name && last_name) ? `${first_name} ${last_name}` : name;
     const fullAddress = street && city ? `${street}, ${city}, ${state} ${zip}` : "N/A";
 
@@ -141,27 +176,45 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return 'Pending Manual Review';
     };
     const pendingReason = getPendingReason();
+    const paymentDeltaAmount = Number(payment_delta_details?.amount_due || 0);
+    const paymentDeltaReason = payment_delta_details?.reason || '';
+    const hasPaymentDelta = Boolean(
+        payment_delta_details &&
+        (paymentDeltaAmount > 0 || payment_delta_details.state === 'pending')
+    );
+    const isPendingPaymentAdjustment = bookingStatus === 'pending_payment' && hasPaymentDelta;
     
     const dropOff = parseISO(drop_off_date);
     const pickup = parseISO(pickup_date);
     const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
 
-    // Calculate base service price
-    let baseServicePrice = currentPlan.base_price || 0;
-    if (currentPlan.id === 1 && duration === 7) {
-        baseServicePrice = 500;
-    } else if (currentPlan.id === 1) {
-        baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
-    } else if (currentPlan.id === 2 || currentPlan.id === 4) {
-        baseServicePrice = (currentPlan.base_price || 0) * duration;
+    // Prefer audit quote (plan.price) when present; otherwise recompute from daily rate × days
+    const quotedBasePrice = Number(currentPlan.price);
+    let baseServicePrice = Number.isFinite(quotedBasePrice) && quotedBasePrice > 0
+        ? quotedBasePrice
+        : (currentPlan.base_price || 0);
+    if (!(Number.isFinite(quotedBasePrice) && quotedBasePrice > 0)) {
+        if (currentPlan.id === 1 && duration === 7) {
+            baseServicePrice = 500;
+        } else if (currentPlan.id === 1) {
+            baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
+        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+            baseServicePrice = (currentPlan.base_price || 0) * duration;
+        }
     }
 
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
 
-    // Protection costs
-    const insuranceCost = addons.insurance === 'accept' ? Number(equipmentPrices[7] || 20) : 0;
-    const drivewayProtectionCost = ((currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') ? 15 : 0;
+    const DEFAULT_INSURANCE_PRICE = 25;
+    // Protection costs — prefer snapshotted price from checkout
+    const insuranceCost = addons.insurance === 'accept'
+      ? Number(addons.insurancePriceApplied || addons.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
+      : 0;
+    const drivewayProtectionCost =
+      (currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept'
+        ? Number(addons.drivewayPriceApplied || addons.driveway_price || 0)
+        : 0;
 
     // Equipment costs
     let rentEquipmentCost = 0;
@@ -215,21 +268,27 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     rentEquipmentCost + purchaseItemsCost + disposalCost;
 
     // Discount
-    let discountAmount = 0;
+    let couponDiscountAmount = 0;
     if (coupon && coupon.isValid) {
         if (coupon.discountType === 'fixed') {
-            discountAmount = Number(coupon.discountValue || 0);
+            couponDiscountAmount = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'percentage') {
-            discountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
+            couponDiscountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
         }
     }
+    const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount || 0);
+    const referralDiscountAmount = Number(addons?.referralDiscountAmount || 0);
+    const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);
+    const referralPending = Number(addons?.referralDollarsPending || 0);
+    const referralActivated = Number(addons?.referralDollarsActivated || 0);
+    const discountAmount = couponDiscountAmount + loyaltyDiscountAmount + referralDiscountAmount;
 
     const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
     
     // Use tax rate from booking record if available, otherwise calculate
     const taxRateUsed = booking.tax_rate_used || 7.45;
     const taxAmount = booking.tax_amount || calculateTaxAmount(subtotal, taxRateUsed);
-    const calculatedTotal = subtotal + taxAmount;
+    const calculatedTotal = resolveBookingGrandTotal(booking) || subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
     const freeMiles = currentPlan.id === 1 ? 30 : 0;
@@ -237,12 +296,20 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
 
     // QR Code URLs
-    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ufilldumpsters.com';
-    const magicLinkUrl = magicLinkToken 
-        ? `${siteUrl}/portal/access-codes?token=${magicLinkToken}`
+    const magicLinkUrl = magicLinkToken
+        ? buildAccessCodesQrUrl({
+            token: magicLinkToken,
+            portalNumber: customer_id_text,
+            phone,
+            orderId: booking.id
+        })
         : '';
-    const safetyVideoUrl = `${siteUrl}/customer-portal/resources`;
-
+    const safetyVideoUrl = buildHowToGuidesQrUrl({
+        token: magicLinkToken,
+        portalNumber: customer_id_text,
+        phone,
+        orderId: booking.id,
+    });
     return (
         <div ref={ref} className="p-8 font-sans text-gray-800 bg-white" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ flexGrow: 1 }}>
@@ -269,9 +336,64 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <p><span className="font-bold">Payment Date:</span> {format(parseISO(booking.created_at), 'PPP')}</p>
                         {isCancelledAndRefunded && <p className="text-red-600"><span className="font-bold">Refund Date:</span> {format(parseISO(refund_details.created_at), 'PPP')}</p>}
                         {isPendingReview && <p className="font-bold text-orange-600">Status: {pendingReason}</p>}
+                        {isPendingPaymentAdjustment && (
+                            <p className="font-bold text-red-600">
+                                Status: Pending Payment Adjustment
+                                {paymentDeltaAmount > 0 ? ` ($${paymentDeltaAmount.toFixed(2)})` : ''}
+                            </p>
+                        )}
                         {isRescheduled && <p className="font-bold text-blue-600 flex items-center justify-end"><Repeat className="mr-2 h-4 w-4"/> Status: Rescheduled</p>}
                     </div>
                 </section>
+
+                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0) || getLatestRescheduleApproval(booking)) && (
+                    <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
+                        <h3 className="font-bold text-lg mb-2 text-blue-800">Receipt History</h3>
+                        {receipt_original_snapshot && (
+                            <p className="text-sm text-blue-900">
+                                {receipt_original_snapshot.status === 'pending_review' || getLatestRescheduleApproval(booking)
+                                    ? 'Reschedule requested on '
+                                    : 'Original receipt snapshot stored on '}
+                                {receipt_original_snapshot.captured_at
+                                    ? format(parseISO(receipt_original_snapshot.captured_at), 'PPP p')
+                                    : 'N/A'}
+                                {receipt_original_snapshot.status ? ` (status: ${receipt_original_snapshot.status})` : ''}.
+                            </p>
+                        )}
+                        {(() => {
+                            const approval = getLatestRescheduleApproval(booking);
+                            if (!approval) return null;
+                            return (
+                                <div className="mt-3 p-3 bg-white border border-blue-200 rounded-md text-sm text-blue-950 space-y-1">
+                                    <p className="font-bold text-blue-800">Reschedule Confirmation</p>
+                                    <p>Approved {approval.at ? format(parseISO(approval.at), 'PPP p') : ''}</p>
+                                    <p>Previous schedule: {formatFriendlyDateTime(approval.original_drop_off_date, approval.original_drop_off_time) || 'N/A'} → {formatFriendlyDateTime(approval.original_pickup_date, approval.original_pickup_time) || 'N/A'}</p>
+                                    <p>Approved schedule: {formatFriendlyDateTime(approval.new_drop_off_date, approval.new_drop_off_time) || 'N/A'} → {formatFriendlyDateTime(approval.new_pickup_date, approval.new_pickup_time) || 'N/A'}</p>
+                                    {(approval.original_service_name || approval.new_service_name) && (
+                                        <p>Service: {approval.original_service_name || 'N/A'} → {approval.new_service_name || 'N/A'}</p>
+                                    )}
+                                    {approval.address_changed && (
+                                        <p>Address: {approval.original_address || 'N/A'} → {approval.new_address || 'N/A'}</p>
+                                    )}
+                                    <p>Original total: ${Number(approval.original_total || 0).toFixed(2)}</p>
+                                    <p>New total: ${Number(approval.new_total || 0).toFixed(2)}</p>
+                                    <p>{formatRescheduleStripeLine(approval)}</p>
+                                </div>
+                            );
+                        })()}
+                        {Array.isArray(receipt_status_history) && receipt_status_history.length > 0 && (
+                            <div className="mt-2 space-y-1 text-xs text-blue-900">
+                                {receipt_status_history.slice(-5).reverse().map((entry, idx) => (
+                                    <p key={idx}>
+                                        • {entry.at ? format(parseISO(entry.at), 'PPP p') : 'Timeline update'} — {entry.action || entry.type || 'status_update'}
+                                        {entry.status ? ` (${entry.status})` : ''}
+                                        {entry.amount ? ` $${Number(entry.amount).toFixed(2)}` : ''}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+                    </section>
+                )}
                 
                 {/* QR Codes Section - For Dump Loader Trailer Rentals Only */}
                 {isDumpLoaderRental && !isCancelledAndRefunded && magicLinkUrl && (
@@ -322,6 +444,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     <p className="font-bold text-red-900 mb-1">⚠️ PRIVATE INFORMATION</p>
                                     <p className="text-sm text-red-800 leading-relaxed">
                                         These QR codes contain your personal rental information. Keep this receipt secure and do not share with others. 
+                                        These QR codes are time-sensitive for your privacy and are only active during your booking timeframe.
                                         The first QR code provides quick access to your PIN at the trailer. The second links to safety instructions.
                                     </p>
                                 </div>
@@ -330,23 +453,27 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     </section>
                 )}
                 
-                <section className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
-                    <h3 className="font-bold text-lg mb-2 text-yellow-800 flex items-center"><Key className="mr-2 h-5 w-5"/> Customer Portal Login Information</h3>
-                    <p className="text-sm">Use the following credentials to access the Customer Portal to view your booking status, add notes, or upload files.</p>
-                    <p className="mt-2"><strong>Customer ID:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{customer_id_text}</span></p>
-                    <p><strong>Phone Number:</strong> <span className="font-mono bg-gray-200 p-1 rounded">{phone}</span></p>
-                </section>
-
                 {isSelfService && !isCancelledAndRefunded && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
-                        <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Loader Trailer Rental Instructions</h3>
+                        <h3 className="font-bold text-lg mb-2 text-blue-800">Dump Trailer Rental Instructions</h3>
                         {isPendingReview ? (
                             <p className="font-semibold text-orange-700">Your booking is currently under review. Pickup location and instructions will be provided once your booking is confirmed. Please check your Customer Portal for updates.</p>
+                    ) : isPendingPaymentAdjustment ? (
+                        <p className="font-semibold text-red-700">
+                            Your booking is pending a payment adjustment{paymentDeltaAmount > 0 ? ` of $${paymentDeltaAmount.toFixed(2)}` : ''}.
+                            {paymentDeltaReason ? ` Reason: ${paymentDeltaReason}` : ''} Please check your Customer Portal messages for next steps.
+                        </p>
                         ) : (
                             <div className="text-sm text-gray-700 space-y-2">
-                                <p><strong>Pickup Location:</strong> Your rental trailer is scheduled for pickup at <span className="font-semibold">227 W. Casi Way, Saratoga Springs, UT 84045.</span></p>
-                                <p><strong>Pickup & Return Times:</strong> The rental is available for pickup starting at <span className="font-semibold">8:00 a.m.</span> on your scheduled pickup date. The trailer must be returned to the same location no later than <span className="font-semibold">10:00 p.m.</span> on the designated return date.</p>
-                                <p><strong>Cleaning Requirement:</strong> To ensure a smooth process for all our customers, the trailer must be returned clean and free of debris. Failure to do so may result in the assessment of cleaning fines. Thank you for your cooperation and your rental.</p>
+                                <p><strong>Pickup Location:</strong> Your rental trailer is scheduled for pickup on the south side of Saratoga Springs, UT 84045. The exact address and unlock code will be sent via text and email at least 12 hours before your scheduled pickup time. Please check our Customer Portal for additional details.</p>
+                                <div>
+                                    <p><strong>Pickup & Return Times</strong></p>
+                                    <p className="mt-1">Pickup: Available starting at <span className="font-semibold">{pickupStartTime}</span> on your scheduled pickup date.</p>
+                                    <p>Return: The trailer must be returned to the same location no later than <span className="font-semibold">{returnByTime}</span> on your designated return date.</p>
+                                    <p className="mt-1"><strong>Note:</strong> Please ensure the trailer is locked securely upon return to avoid late fees.</p>
+                                </div>
+                                <p><strong>Cleaning Requirement:</strong> To ensure a smooth process for all customers, the trailer must be returned clean and free of debris. Failure to do so will result in a cleaning fine.</p>
+                                <p>Thank you for your business and cooperation!</p>
                             </div>
                         )}
                     </section>
@@ -358,6 +485,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     {/* Service Details */}
                     <div className="mb-4 p-3 bg-gray-50 rounded">
                         <p className="font-semibold text-lg">{serviceName}</p>
+                        <p className="text-sm text-gray-600 mt-1">
+                            Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}
+                        </p>
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
@@ -365,8 +495,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p>Pickup: {formatBookingDateOnly(reschedule_history[0].from_pickup_date)} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
                             </div>
                         )}
-                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, timeOptions)}`}</p>
-                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, timeOptions)}`}</p>}
+                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, { ...timeOptions, isReturnBy: false })}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, { ...timeOptions, isReturnBy: isSelfService })}`}</p>}
                     </div>
 
                     {/* 8-Category Breakdown */}
@@ -489,10 +619,37 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     <tr className="bg-green-50">
                                         <td colSpan="2" className="py-2 px-3 font-bold text-green-700">🏷️ Discounts</td>
                                     </tr>
-                                    <tr className="border-b">
-                                        <td className="py-1 px-6 text-green-700">Coupon ({coupon.code})</td>
-                                        <td className="text-right py-1 pr-3 text-green-700 font-semibold">-${discountAmount.toFixed(2)}</td>
-                                    </tr>
+                                    {couponDiscountAmount > 0 && coupon?.code && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">Coupon ({coupon.code})</td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">-${couponDiscountAmount.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {loyaltyDiscountAmount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">
+                                                Loyalty Points ({Number(addons?.loyaltyPointsToRedeem || 0)} pts)
+                                            </td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">
+                                                -${loyaltyDiscountAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {referralDiscountAmount > 0 && (
+                                        <tr className="border-b">
+                                            <td className="py-1 px-6 text-green-700">Referral Wallet</td>
+                                            <td className="text-right py-1 pr-3 text-green-700 font-semibold">
+                                                -${referralDiscountAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    )}
+                                    {(loyaltyDiscountAmount > 0 || referralDiscountAmount > 0) && (
+                                        <tr>
+                                            <td colSpan="2" className="py-2 px-6 text-xs text-green-800 italic">
+                                                Thank you for your loyalty. We appreciate your continued business.
+                                            </td>
+                                        </tr>
+                                    )}
                                 </>
                             )}
 
@@ -510,18 +667,67 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <td className="text-right py-2 pr-3 font-bold text-lg text-green-600">${calculatedTotal.toFixed(2)}</td>
                             </tr>
 
-                            {isCancelledAndRefunded && (
-                                <>
-                                    <tr className="border-t">
-                                        <td className="py-1 px-3">Cancellation Fee</td>
-                                        <td className="text-right py-1 pr-3 text-red-600">-${(calculatedTotal - (refund_details.amount || 0)).toFixed(2)}</td>
-                                    </tr>
-                                    <tr className="bg-green-50">
-                                        <td className="py-2 px-3 font-bold">Amount Refunded</td>
-                                        <td className="text-right py-2 pr-3 font-bold text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
-                                    </tr>
-                                </>
-                            )}
+                            {isCancelledAndRefunded && (() => {
+                                const cd = booking.cancellation_details;
+                                const hours = cd?.hours_before_appointment != null
+                                    ? Math.max(0, Math.round(Number(cd.hours_before_appointment)))
+                                    : null;
+                                const isLate = cd?.fee_type === 'late' || (hours != null && hours <= 24);
+                                const feeLabel = isLate
+                                    ? 'Last-minute exception cancellation fee'
+                                    : 'Standard cancellation fee';
+                                const feeAmount = cd?.fee_amount != null
+                                    ? Number(cd.fee_amount)
+                                    : (calculatedTotal - (refund_details.amount || 0));
+                                return (
+                                    <>
+                                        <tr className="border-t bg-red-50">
+                                            <td colSpan={2} className="py-2 px-3 font-bold text-red-800 text-sm">Cancellation Details</td>
+                                        </tr>
+                                        {hours != null && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Hours before appointment</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{hours} hours</td>
+                                            </tr>
+                                        )}
+                                        <tr>
+                                            <td className="py-1 px-3 text-xs text-gray-600">Fee type</td>
+                                            <td className="text-right py-1 pr-3 text-xs">
+                                                {feeLabel}
+                                                {cd?.fee_percentage != null ? ` — up to ${cd.fee_percentage}%` : ''}
+                                            </td>
+                                        </tr>
+                                        {cd?.reason && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Reason</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{cd.reason}</td>
+                                            </tr>
+                                        )}
+                                        {cd?.requested_at && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Requested</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{new Date(cd.requested_at).toLocaleString()}</td>
+                                            </tr>
+                                        )}
+                                        {cd?.approved_at && (
+                                            <tr>
+                                                <td className="py-1 px-3 text-xs text-gray-600">Approved</td>
+                                                <td className="text-right py-1 pr-3 text-xs">{new Date(cd.approved_at).toLocaleString()}</td>
+                                            </tr>
+                                        )}
+                                        <tr className="border-t">
+                                            <td className="py-1 px-3">{feeLabel}</td>
+                                            <td className="text-right py-1 pr-3 text-red-600">
+                                                -${feeAmount.toFixed(2)}
+                                            </td>
+                                        </tr>
+                                        <tr className="bg-green-50">
+                                            <td className="py-2 px-3 font-bold">Amount Refunded</td>
+                                            <td className="text-right py-2 pr-3 font-bold text-green-600">${(refund_details.amount || 0).toFixed(2)}</td>
+                                        </tr>
+                                    </>
+                                );
+                            })()}
                         </tbody>
                     </table>
 
@@ -530,6 +736,36 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
                             <p className="font-bold text-sm">🏗️ Landfill/Disposal Fees (TBD)</p>
                             <p className="text-xs text-gray-700 mt-1">Pending dump fees will be calculated based on actual waste processed and charged separately.</p>
+                        </div>
+                    )}
+
+                    {isCancelledAndRefunded ? (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                            <p className="font-bold text-sm text-blue-800">Cancellation update</p>
+                            <p className="text-xs text-blue-900 mt-1">
+                                {`We're sorry to see you go. Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${
+                                    (() => {
+                                        const feeAmt = booking.cancellation_details?.fee_amount != null
+                                            ? Number(booking.cancellation_details.fee_amount)
+                                            : Math.max(0, calculatedTotal - Number(refund_details?.amount || 0));
+                                        return feeAmt > 0 ? ` (cancellation fee: $${feeAmt.toFixed(2)})` : '';
+                                    })()
+                                }. Per our rental agreement, refunds are typically processed within 1–2 business days and usually appear on your original payment method within 5–10 business days (rarely up to 30). We hope that in the future you'll be able to provide the proper verification information so we can welcome you back.`}
+                            </p>
+                        </div>
+                    ) : (pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (
+                        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded">
+                            <p className="font-bold text-sm text-green-800">Rewards update</p>
+                            <p className="text-xs text-green-900 mt-1">
+                                {pointsEarned > 0 ? `You earned ${pointsEarned} loyalty points from this booking. ` : ''}
+                                {referralPending > 0
+                                  ? 'Because you were referred, you just helped a friend or family member earn a referral reward! '
+                                  : ''}
+                                {referralActivated > 0 && referralPending <= 0
+                                  ? 'Your completed booking unlocked a referral reward for the friend or family member who referred you. '
+                                  : ''}
+                                Visit your Customer Portal anytime to track your balances, where you can also invite friends and family to try our services and start earning rewards yourself.
+                            </p>
                         </div>
                     )}
 
@@ -553,11 +789,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             
             <footer className="text-xs text-gray-500 pt-4 mt-6" style={{ pageBreakInside: 'avoid' }}>
                 <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
-                {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver's license and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
-                {addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
+                {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver&apos;s license, auto insurance document, and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
+                {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
+                {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
                 {addons.addressVerificationSkipped && <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>}
-                <AgreementText booking={booking} />
+                <AgreementText booking={booking} hasInsurance={hasInsurance} />
                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
             </footer>
         </div>

@@ -21,21 +21,61 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format, parseISO } from 'date-fns';
 import { BookingDetails } from './BookingDetails';
 import { BookingEditForm } from './BookingEditForm';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { BookingRemovalDialog } from './BookingRemovalDialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { expireActiveRentalAccessCodesForOrder, shouldDeletePinForStatus } from '@/utils/bookingPinReinstate';
 
-export const BookingsManager = ({ initialBookings }) => {
+export const BookingsManager = ({ initialBookings, adminEmail, onBookingsChange }) => {
     const [bookings, setBookings] = useState(initialBookings);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [selectedBooking, setSelectedBooking] = useState(null);
+    const [editedBooking, setEditedBooking] = useState(null);
     const [isEditMode, setIsEditMode] = useState(false);
-    const [isDeleteDialogOpen, setIsDeleteDialogOpne] = useState(false);
-    const [bookingToDelete, setBookingToDelete] = useState(null);
+    const [bookingForRemoval, setBookingForRemoval] = useState(null);
 
     React.useEffect(() => {
         setBookings(initialBookings);
     }, [initialBookings]);
+
+    const bookingToEditForm = (booking) => ({
+        name: booking.name ?? '',
+        email: booking.email ?? '',
+        phone: booking.phone ?? '',
+        dropOffDate: booking.drop_off_date,
+        pickupDate: booking.pickup_date,
+        notes: booking.notes || '',
+    });
+
+    const openEditMode = (booking) => {
+        setSelectedBooking(booking);
+        setEditedBooking(bookingToEditForm(booking));
+        setIsEditMode(true);
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setEditedBooking((prev) => (prev ? { ...prev, [name]: value } : prev));
+    };
+
+    const handleDateChange = (date, field) => {
+        if (!date) return;
+        setEditedBooking((prev) =>
+            prev ? { ...prev, [field]: format(date, 'yyyy-MM-dd') } : prev
+        );
+    };
+
+    const handleSaveEdit = () => {
+        if (!editedBooking) return;
+        handleUpdateBooking({
+            name: editedBooking.name,
+            email: editedBooking.email,
+            phone: editedBooking.phone,
+            drop_off_date: editedBooking.dropOffDate,
+            pickup_date: editedBooking.pickupDate,
+            notes: editedBooking.notes,
+        });
+    };
 
     const handleUpdateBooking = async (updatedData) => {
         try {
@@ -52,6 +92,7 @@ export const BookingsManager = ({ initialBookings }) => {
             setBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updatedData } : b));
             toast({ title: 'Success', description: 'Booking updated successfully' });
             setIsEditMode(false);
+            setEditedBooking(null);
             setSelectedBooking(null);
         } catch (error) {
             toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -60,29 +101,19 @@ export const BookingsManager = ({ initialBookings }) => {
 
     const handleDeleteClick = (booking, e) => {
         e.stopPropagation();
-        setBookingToDelete(booking);
-        setIsDeleteDialogOpne(true);
+        setBookingForRemoval(booking);
     };
 
-    const confirmDelete = async () => {
-        if (!bookingToDelete) return;
-
-        try {
-            const { error } = await supabase
-                .from('bookings')
-                .delete()
-                .eq('id', bookingToDelete.id);
-
-            if (error) throw error;
-
-            setBookings(prev => prev.filter(b => b.id !== bookingToDelete.id));
-            toast({ title: 'Success', description: 'Booking deleted successfully' });
-        } catch (error) {
-            toast({ title: 'Error', description: error.message, variant: 'destructive' });
-        } finally {
-            setIsDeleteDialogOpne(false);
-            setBookingToDelete(null);
+    const handleRemovalComplete = (result) => {
+        if (result?.action === 'deleted') {
+            setBookings(prev => prev.filter(b => b.id !== result.bookingId));
+        } else if (result?.action === 'cancelled' || result?.action === 'rescheduled') {
+            setBookings(prev => prev.map(b =>
+                b.id === result.bookingId ? { ...b, status: result.action === 'cancelled' ? 'Cancelled' : 'Rescheduled' } : b
+            ));
         }
+        setBookingForRemoval(null);
+        onBookingsChange?.(false);
     };
 
     const filteredBookings = useMemo(() => {
@@ -143,6 +174,9 @@ export const BookingsManager = ({ initialBookings }) => {
         if (booking.status === 'Cancelled') {
             return <span className="text-red-400 bg-red-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Cancelled</span>;
         }
+        if (booking.status === 'Rescheduled') {
+            return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">Rescheduled</span>;
+        }
         return <span className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">{booking.status}</span>;
     };
 
@@ -173,6 +207,8 @@ export const BookingsManager = ({ initialBookings }) => {
                             <SelectItem value="Delivered">Active (Delivered)</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
                             <SelectItem value="Cancelled">Cancelled</SelectItem>
+                            <SelectItem value="cancellation_pending">Cancellation Pending</SelectItem>
+                            <SelectItem value="Rescheduled">Rescheduled</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -238,7 +274,7 @@ export const BookingsManager = ({ initialBookings }) => {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => { setSelectedBooking(booking); setIsEditMode(true); }}
+                                                onClick={() => openEditMode(booking)}
                                                 className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/20"
                                             >
                                                 <Edit className="h-4 w-4" />
@@ -267,7 +303,13 @@ export const BookingsManager = ({ initialBookings }) => {
                 </Table>
             </div>
 
-            <Dialog open={!!selectedBooking} onOpenChange={(open) => !open && setSelectedBooking(null)}>
+            <Dialog open={!!selectedBooking} onOpenChange={(open) => {
+                if (!open) {
+                    setSelectedBooking(null);
+                    setIsEditMode(false);
+                    setEditedBooking(null);
+                }
+            }}>
                 <DialogContent className="max-w-4xl bg-gray-900 border-gray-700 text-white max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle className="text-2xl text-yellow-400">
@@ -276,39 +318,43 @@ export const BookingsManager = ({ initialBookings }) => {
                     </DialogHeader>
 
                     {selectedBooking && (
-                        isEditMode ? (
+                        isEditMode && editedBooking ? (
                             <BookingEditForm
-                                booking={selectedBooking}
-                                onSave={handleUpdateBooking}
-                                onCancel={() => setIsEditMode(false)}
+                                editedBooking={editedBooking}
+                                onInputChange={handleInputChange}
+                                onDateChange={handleDateChange}
+                                onSave={handleSaveEdit}
+                                onCancel={() => {
+                                    setIsEditMode(false);
+                                    setEditedBooking(null);
+                                }}
                             />
                         ) : (
                             <BookingDetails
                                 booking={selectedBooking}
-                                onEdit={() => setIsEditMode(true)}
+                                onEdit={() => openEditMode(selectedBooking)}
                             />
                         )
                     )}
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpne}>
-                <DialogContent className="bg-gray-900 border-red-500 text-white">
-                    <DialogHeader>
-                        <DialogTitle className="text-red-500 flex items-center">
-                            <AlertTriangle className="mr-2 h-5 w-5" />
-                            Confirm Deletion
-                        </DialogTitle>
-                        <DialogDescription className="text-gray-300">
-                            Are you sure you want to permanently delete Booking #{bookingToDelete?.id}? This action cannot be undone and will remove all associated records including payment history and customer notes tied specifically to this booking.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="ghost" onClick={() => setIsDeleteDialogOpne(false)}>Cancel</Button>
-                        <Button variant="destructive" onClick={confirmDelete}>Yes, Delete Booking</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            {bookingForRemoval && (
+                <BookingRemovalDialog
+                    booking={bookingForRemoval}
+                    adminEmail={adminEmail}
+                    open={true}
+                    onOpenChange={(isOpen) => { if (!isOpen) setBookingForRemoval(null); }}
+                    onComplete={(result) => {
+                        handleRemovalComplete(result);
+                        setBookingForRemoval(null);
+                    }}
+                    onHardDeleted={(id) => {
+                        handleRemovalComplete({ action: 'deleted', bookingId: id });
+                        setBookingForRemoval(null);
+                    }}
+                />
+            )}
         </div>
     );
 };

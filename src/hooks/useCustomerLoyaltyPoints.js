@@ -5,8 +5,9 @@ import { supabase } from '@/lib/customSupabaseClient';
  * Hook for managing customer loyalty points
  * Provides methods to fetch, calculate, and redeem loyalty points
  */
-export const useCustomerLoyaltyPoints = (customerId) => {
+export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
   const [pointsBalance, setPointsBalance] = useState(0);
+  const [referralWallet, setReferralWallet] = useState({ pendingBalance: 0, availableBalance: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -17,6 +18,7 @@ export const useCustomerLoyaltyPoints = (customerId) => {
   const [conversionRates, setConversionRates] = useState({
     pointsPerDollar: DEFAULT_POINTS_PER_DOLLAR,
     pointsToDollar: DEFAULT_POINTS_TO_DOLLAR,
+    referralBonusDollars: 25,
   });
 
   // Fetch conversion rates from settings
@@ -25,12 +27,13 @@ export const useCustomerLoyaltyPoints = (customerId) => {
       const { data, error } = await supabase
         .from('loyalty_settings')
         .select('points_per_dollar, points_to_dollar')
-        .single();
+        .maybeSingle();
 
       if (!error && data) {
         setConversionRates({
           pointsPerDollar: data.points_per_dollar || DEFAULT_POINTS_PER_DOLLAR,
           pointsToDollar: data.points_to_dollar || DEFAULT_POINTS_TO_DOLLAR,
+          referralBonusDollars: Number(data.referral_bonus_dollars || 25),
         });
       }
     } catch (err) {
@@ -40,22 +43,62 @@ export const useCustomerLoyaltyPoints = (customerId) => {
 
   // Fetch customer's loyalty points balance
   const getPointsBalance = useCallback(async () => {
-    if (!customerId) return 0;
+    if (!customerId && !verifiedEmail) return 0;
 
     setLoading(true);
     setError(null);
 
     try {
+      const loadVerifiedRewards = async () => {
+        if (!verifiedEmail) return null;
+        const { data, error } = await supabase.functions.invoke('get-returning-customer-rewards', {
+          body: { email: verifiedEmail },
+        });
+        if (error || !data?.success) return null;
+        if (data?.conversionRates) {
+          setConversionRates({
+            pointsPerDollar: Number(data.conversionRates.pointsPerDollar || DEFAULT_POINTS_PER_DOLLAR),
+            pointsToDollar: Number(data.conversionRates.pointsToDollar || DEFAULT_POINTS_TO_DOLLAR),
+            referralBonusDollars: Number(data.conversionRates.referralBonusDollars || 25),
+          });
+        }
+        if (data?.referralWallet) {
+          setReferralWallet({
+            pendingBalance: Number(data.referralWallet.pendingBalance || 0),
+            availableBalance: Number(data.referralWallet.availableBalance || 0),
+          });
+        }
+        return Number(data?.pointsBalance || 0);
+      };
+
       const { data, error } = await supabase
         .from('loyalty_points')
         .select('points_balance')
         .eq('customer_id', customerId)
         .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        const fallbackBalance = await loadVerifiedRewards();
+        if (fallbackBalance !== null) {
+          setPointsBalance(fallbackBalance);
+          return fallbackBalance;
+        }
+        throw error;
+      }
 
-      const balance = data?.points_balance || 0;
+      const balance = data?.points_balance ?? (await loadVerifiedRewards()) ?? 0;
       setPointsBalance(balance);
+      if (customerId) {
+        const { data: walletData } = await supabase
+          .from('customer_referral_wallets')
+          .select('pending_balance, available_balance')
+          .eq('customer_id', customerId)
+          .maybeSingle();
+        setReferralWallet({
+          pendingBalance: Number(walletData?.pending_balance || 0),
+          availableBalance: Number(walletData?.available_balance || 0),
+        });
+      }
       return balance;
     } catch (err) {
       console.error('[useCustomerLoyaltyPoints] Error fetching points:', err);
@@ -64,7 +107,7 @@ export const useCustomerLoyaltyPoints = (customerId) => {
     } finally {
       setLoading(false);
     }
-  }, [customerId]);
+  }, [customerId, verifiedEmail]);
 
   // Calculate points earned from booking amount
   const calculatePointsEarned = useCallback((amount) => {
@@ -83,56 +126,27 @@ export const useCustomerLoyaltyPoints = (customerId) => {
     if (!customerId || !points || points <= 0) return { success: false, error: 'Invalid parameters' };
 
     try {
-      // Check if loyalty record exists
-      const { data: existingRecord } = await supabase
-        .from('loyalty_points')
-        .select('id, points_balance, total_points_earned')
-        .eq('customer_id', customerId)
-        .maybeSingle();
-
-      let result;
-      if (existingRecord) {
-        // Update existing record
-        const { data, error } = await supabase
-          .from('loyalty_points')
-          .update({
-            points_balance: existingRecord.points_balance + points,
-            total_points_earned: existingRecord.total_points_earned + points,
-            last_updated: new Date().toISOString(),
-          })
-          .eq('customer_id', customerId)
-          .select()
-          .single();
-
-        if (error) throw error;
-        result = data;
-      } else {
-        // Create new record
-        const { data, error } = await supabase
-          .from('loyalty_points')
-          .insert({
-            customer_id: customerId,
-            points_balance: points,
-            total_points_earned: points,
-            total_points_redeemed: 0,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-        result = data;
-      }
-
-      // Log transaction
-      await supabase.from('loyalty_transactions').insert({
-        customer_id: customerId,
-        transaction_type: 'earned',
-        points_amount: points,
-        booking_id: bookingId,
+      const { data, error } = await supabase.functions.invoke('loyalty-points', {
+        body: {
+          action: 'award',
+          customerId,
+          points,
+          bookingId,
+        },
       });
 
-      setPointsBalance(result.points_balance);
-      return { success: true, newBalance: result.points_balance };
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (data?.newBalance !== undefined) {
+        setPointsBalance(data.newBalance);
+      }
+
+      return {
+        success: true,
+        newBalance: data?.newBalance,
+        alreadyAwarded: data?.alreadyAwarded,
+      };
     } catch (err) {
       console.error('[useCustomerLoyaltyPoints] Error awarding points:', err);
       return { success: false, error: err.message };
@@ -146,49 +160,26 @@ export const useCustomerLoyaltyPoints = (customerId) => {
     }
 
     try {
-      const { data: loyaltyRecord } = await supabase
-        .from('loyalty_points')
-        .select('points_balance, total_points_redeemed')
-        .eq('customer_id', customerId)
-        .single();
-
-      if (!loyaltyRecord) {
-        return { success: false, error: 'No loyalty account found' };
-      }
-
-      if (loyaltyRecord.points_balance < points) {
-        return { success: false, error: 'Insufficient points' };
-      }
-
-      // Update points balance
-      const { data, error } = await supabase
-        .from('loyalty_points')
-        .update({
-          points_balance: loyaltyRecord.points_balance - points,
-          total_points_redeemed: loyaltyRecord.total_points_redeemed + points,
-          last_updated: new Date().toISOString(),
-        })
-        .eq('customer_id', customerId)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Log transaction
-      await supabase.from('loyalty_transactions').insert({
-        customer_id: customerId,
-        transaction_type: 'redeemed',
-        points_amount: points,
-        booking_id: bookingId,
+      const { data, error } = await supabase.functions.invoke('loyalty-points', {
+        body: {
+          action: 'redeem',
+          customerId,
+          points,
+          bookingId,
+        },
       });
 
-      const discountAmount = calculateDiscountFromPoints(points);
-      setPointsBalance(data.points_balance);
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (data?.newBalance !== undefined) {
+        setPointsBalance(data.newBalance);
+      }
 
       return {
         success: true,
-        newBalance: data.points_balance,
-        discountAmount,
+        newBalance: data?.newBalance,
+        discountAmount: data?.discountAmount ?? calculateDiscountFromPoints(points),
       };
     } catch (err) {
       console.error('[useCustomerLoyaltyPoints] Error redeeming points:', err);
@@ -203,13 +194,14 @@ export const useCustomerLoyaltyPoints = (customerId) => {
 
   // Fetch points balance when customerId changes
   useEffect(() => {
-    if (customerId) {
+    if (customerId || verifiedEmail) {
       getPointsBalance();
     }
-  }, [customerId, getPointsBalance]);
+  }, [customerId, verifiedEmail, getPointsBalance]);
 
   return {
     pointsBalance,
+    referralWallet,
     loading,
     error,
     conversionRates,

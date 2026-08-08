@@ -2,14 +2,14 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { User, Mail, Phone, MapPin, Save, Loader2, Key } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Save, Loader2, Key, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
 
-export const ProfileManagement = ({ customer, onUpdate }) => {
+export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
   const [isSaving, setIsSaving] = useState(false);
   const displayFirstName = customer?.first_name || (customer?.name ? customer.name.split(' ')[0] : '');
   const displayLastName = customer?.last_name || (customer?.name ? customer.name.substring(customer.name.indexOf(' ') + 1) : '');
@@ -70,6 +70,23 @@ export const ProfileManagement = ({ customer, onUpdate }) => {
       <div>
         <h2 className="text-2xl font-bold text-white mb-1">Profile Management</h2>
         <p className="text-sm text-blue-200">Update your contact information and default delivery address.</p>
+      </div>
+
+      <div className="bg-orange-900/30 border border-orange-500/50 rounded-xl p-4 shadow-lg shadow-orange-900/20">
+        <h3 className="text-orange-400 font-bold flex items-center mb-2">
+          <AlertTriangle className="mr-2 h-5 w-5" /> Important
+        </h3>
+        <p className="text-orange-200 text-sm leading-relaxed">
+          Changes you make here only apply to <span className="font-semibold">future orders</span>. They do not update orders you have already placed. If you need contact or address changes applied to an existing order, reach out through the{' '}
+          <button
+            type="button"
+            onClick={() => onNavigateToTab?.('messages')}
+            className="font-semibold text-orange-300 underline underline-offset-2 hover:text-orange-100 transition-colors"
+          >
+            Communication Hub
+          </button>
+          {' '}→ <span className="font-semibold">Direct Chat</span> to submit a support request so customer service can update and approve it for that order.
+        </p>
       </div>
 
       <Card className="bg-white/5 border-white/10 text-white">

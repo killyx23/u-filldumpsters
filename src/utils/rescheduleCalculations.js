@@ -1,7 +1,120 @@
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
-import { getPriceForEquipment, getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
+import { getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
+import { isValidEquipmentId } from './equipmentIdValidator';
+import { getTaxRate } from './getTaxRate';
+import { supabase } from '@/lib/customSupabaseClient';
 
+const INSURANCE_SERVICE_EQUIPMENT_ID = 7;
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
+
+/** Premium Insurance was purchased (not merely present as "decline" on the addons JSON). */
+export function bookingHadInsurance(addons) {
+    if (!addons || typeof addons !== 'object') return false;
+    if (addons.insurance === 'accept') return true;
+    if (Number(addons.insurancePriceApplied) > 0) return true;
+    return false;
+}
+
+export function isInsuranceAddon(addon) {
+    if (!addon) return false;
+    if (addon.id === 'insurance' || addon.type === 'insurance') return true;
+    const name = (addon.name || '').toLowerCase();
+    return name.includes('premium insurance');
+}
+
+/** Numeric equipment id 1–6 only (excludes insurance service id 7 and string slugs). */
+export function resolveNumericEquipmentId(addon) {
+    const raw = addon?.equipment_id ?? addon?.dbId ?? addon?.id;
+    const numericId = Number(raw);
+    if (!isValidEquipmentId(numericId) || numericId === INSURANCE_SERVICE_EQUIPMENT_ID) {
+        return null;
+    }
+    return numericId;
+}
+
+function addonMapKey(addon) {
+    if (isInsuranceAddon(addon)) return 'insurance';
+    const numericId = resolveNumericEquipmentId(addon);
+    if (numericId != null) return numericId;
+    return addon?.id ?? addon?.equipment_id ?? addon?.name ?? 'unknown';
+}
+
+export async function resolveAddonUnitPrice(addon, priceSnapshot = null) {
+    if (isInsuranceAddon(addon)) {
+        return Number(addon?.price || 0);
+    }
+    const equipmentId = resolveNumericEquipmentId(addon);
+    if (equipmentId) {
+        return await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
+    }
+    return Number(addon?.price || 0);
+}
+
+/** Build original add-on list from booking_equipment rows and addons JSON fallback. */
+export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment = [], insuranceFallbackPrice = 25) {
+    const list = [];
+    const seenIds = new Set();
+
+    for (const be of bookingEquip || []) {
+        const equipId = be.equipment_id ?? be.equipment?.id;
+        if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
+        seenIds.add(equipId);
+        list.push({
+            id: equipId,
+            equipment_id: equipId,
+            name: be.equipment?.name || 'Unknown Equipment',
+            quantity: be.quantity || 1,
+            price: Number(be.equipment?.price || 0),
+            description: be.equipment?.description || be.equipment?.type || 'Equipment',
+            type: be.equipment?.type || 'equipment',
+        });
+    }
+
+    if (list.length === 0 && Array.isArray(booking?.addons?.equipment) && booking.addons.equipment.length > 0) {
+        const equipmentMap = new Map(
+            (allEquipment || []).map((e) => [e.name.toLowerCase().replace(/ /g, ''), e])
+        );
+        for (const item of booking.addons.equipment) {
+            const slug = (item.id || '').toLowerCase().replace(/ /g, '');
+            const matched = item.dbId ? allEquipment.find((e) => e.id === item.dbId) : equipmentMap.get(slug);
+            const equipId = item.dbId || matched?.id;
+            if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
+            seenIds.add(equipId);
+            list.push({
+                id: equipId,
+                equipment_id: equipId,
+                name: matched?.name || item.name || 'Equipment',
+                quantity: item.quantity || 1,
+                price: Number(matched?.price || item.price || 0),
+                type: matched?.type || 'equipment',
+            });
+        }
+    }
+
+    if (bookingHadInsurance(booking?.addons)) {
+        const applied = Number(booking.addons.insurancePriceApplied);
+        list.push({
+            id: 'insurance',
+            name: 'Premium Insurance',
+            quantity: 1,
+            price: applied > 0 ? applied : insuranceFallbackPrice,
+            type: 'insurance',
+        });
+    }
+
+    if (booking?.addons?.drivewayProtection === 'accept') {
+        const applied = Number(booking.addons.drivewayPriceApplied);
+        list.push({
+            id: 'driveway',
+            name: 'Driveway Protection',
+            quantity: 1,
+            price: applied > 0 ? applied : 0,
+            type: 'driveway',
+        });
+    }
+
+    return list;
+}
 
 export const calculateDays = (dropOff, pickup) => {
     if (!dropOff || !pickup) return 1;
@@ -14,73 +127,73 @@ export const calculateDays = (dropOff, pickup) => {
     return Math.max(1, days);
 };
 
-export const calculateBookingCosts = async (service, days, addonsList, distanceMiles = 0, priceSnapshot = null) => {
+export const calculateBookingCosts = async (
+    service,
+    days,
+    addonsList,
+    distanceMiles = 0,
+    priceSnapshot = null,
+    taxOptions = null
+) => {
     if (!service) {
         return { serviceCost: 0, addonsCost: 0, subtotal: 0, tax: 0, total: 0 };
     }
 
-    const basePrice = Number(service.base_price) || 0;
-    const deliveryFee = Number(service.delivery_fee) || 0;
-    const mileageRate = Number(service.mileage_rate) || 0.85;
-    
-    // Calculate service cost
-    let serviceCost = 0;
-    if (service.id === 1) {
-        serviceCost = days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
-    } else if (service.id === 2 || service.id === 4) {
-        serviceCost = basePrice * days;
-    } else if (service.id === 3) {
-        serviceCost = basePrice;
-    }
+    const miles = Number(service.id) === 1 || Number(service.id) === 3 || Number(service.id) === 4
+        ? distanceMiles
+        : 0;
+    let taxRate = 7.45;
+    let resolvedTaxOptions = taxOptions;
 
-    // Add delivery fee
-    const isDeliveryService = service.id === 1 || service.id === 4 || service.id === 3;
-    if (isDeliveryService) {
-        serviceCost += deliveryFee;
-    }
-
-    // Add mileage charge
-    let mileageCharge = 0;
-    if (isDeliveryService && distanceMiles > 0) {
-        mileageCharge = distanceMiles * 2 * mileageRate;
-        serviceCost += mileageCharge;
-    }
-
-    // Calculate add-ons cost using equipment_pricing
-    let addonsCost = 0;
-    if (Array.isArray(addonsList)) {
-        for (const addon of addonsList) {
-            const equipmentId = addon.equipment_id || addon.dbId || addon.id;
-            if (equipmentId) {
-                const price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
-                const qty = Number(addon?.quantity || 1);
-                addonsCost += price * qty;
-            } else {
-                // Fallback to addon.price if no equipment_id
-                const price = Number(addon?.price || 0);
-                const qty = Number(addon?.quantity || 1);
-                addonsCost += price * qty;
-            }
-        }
-    } else if (addonsList && typeof addonsList === 'object') {
-        for (const [key, val] of Object.entries(addonsList)) {
-            const p = Number(val?.price || val) || 0;
-            const q = Number(val?.quantity || 1);
-            addonsCost += p * q;
+    if (!resolvedTaxOptions) {
+        try {
+            const rateData = await getTaxRate();
+            taxRate = rateData?.tax_rate ?? taxRate;
+            const { data: serviceRow } = await supabase
+                .from('services')
+                .select('is_taxable, delivery_fee_is_taxable, mileage_is_taxable')
+                .eq('id', service.id)
+                .maybeSingle();
+            resolvedTaxOptions = {
+                serviceTaxFlags: serviceRow || {},
+                equipmentTaxFlags: {},
+                insuranceIsTaxable: true,
+                drivewayIsTaxable: true,
+                drivewayPrice: 0,
+            };
+        } catch {
+            resolvedTaxOptions = {
+                serviceTaxFlags: {},
+                equipmentTaxFlags: {},
+                insuranceIsTaxable: true,
+                drivewayIsTaxable: true,
+                drivewayPrice: 0,
+            };
         }
     }
 
-    const subtotal = serviceCost + addonsCost;
-    const tax = subtotal * 0.07;
-    const total = subtotal + tax;
+    const { calculateRescheduleCosts } = await import('./rescheduleTaxCalculator');
+    const costs = await calculateRescheduleCosts({
+        service,
+        days,
+        addonsList,
+        distanceMiles: miles,
+        taxRate,
+        taxOptions: resolvedTaxOptions,
+        insurancePrice: 0,
+        priceSnapshot,
+    });
+
+    const serviceCost = costs.baseRentalCost + costs.deliveryFee + costs.mileageCharge;
 
     return {
         serviceCost: round2(serviceCost),
-        addonsCost: round2(addonsCost),
-        mileageCharge: round2(mileageCharge),
-        subtotal: round2(subtotal),
-        tax: round2(tax),
-        total: round2(total)
+        addonsCost: costs.addonsCost,
+        mileageCharge: costs.mileageCharge,
+        subtotal: costs.subtotal,
+        tax: costs.tax,
+        total: costs.total,
+        taxRate: costs.taxRate,
     };
 };
 
@@ -95,7 +208,12 @@ export const calculateRescheduleDifference = (originalCosts, newCosts) => {
     };
 };
 
-export const calculateRescheduleFee = (originalTotal, originalApptTime, requestTime) => {
+export const calculateRescheduleFee = (
+    originalTotal,
+    originalApptTime,
+    requestTime,
+    lateReschedulePercentage = 5,
+) => {
     const baseTotal = Number(originalTotal) || 0;
     if (!baseTotal || !originalApptTime || !requestTime) {
         return { feeApplies: false, feeAmount: 0, newTotal: baseTotal, timeDifferenceHours: 999 };
@@ -110,14 +228,17 @@ export const calculateRescheduleFee = (originalTotal, originalApptTime, requestT
 
     const timeDifferenceHours = differenceInHours(apptDate, reqDate);
     const feeApplies = timeDifferenceHours < 24 && timeDifferenceHours >= 0;
-    
-    const feeAmount = feeApplies ? (baseTotal * 0.05) : 0;
+    const pct = Number(lateReschedulePercentage);
+    const rate = Number.isFinite(pct) ? pct / 100 : 0.05;
+
+    const feeAmount = feeApplies ? (baseTotal * rate) : 0;
     
     return {
         feeApplies,
         feeAmount: round2(feeAmount),
         newTotal: round2(baseTotal + feeAmount),
-        timeDifferenceHours
+        timeDifferenceHours,
+        feePercentage: Number.isFinite(pct) ? pct : 5,
     };
 };
 
@@ -125,20 +246,19 @@ export const calculateAddonsDifference = async (originalAddons = [], newAddons =
     const originalMap = new Map();
     const newMap = new Map();
     
-    // Build maps with current prices
     for (const addon of originalAddons) {
-        const key = addon.id || addon.equipment_id;
-        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
+        const key = addonMapKey(addon);
+        const price = await resolveAddonUnitPrice(addon, priceSnapshot);
         originalMap.set(key, {
             ...addon,
             quantity: Number(addon.quantity || 1),
             price
         });
     }
-    
+
     for (const addon of newAddons) {
-        const key = addon.id || addon.equipment_id;
-        const price = await getPriceFromSnapshotOrCurrent(key, priceSnapshot);
+        const key = addonMapKey(addon);
+        const price = await resolveAddonUnitPrice(addon, priceSnapshot);
         newMap.set(key, {
             ...addon,
             quantity: Number(addon.quantity || 1),
@@ -235,14 +355,9 @@ export async function calculateComprehensivePricing(
 
   // Calculate add-ons using equipment_pricing
   const addonsBreakdown = [];
-  for (const addon of selectedAddons.filter(a => a.quantity > 0)) {
-    const equipmentId = addon.equipment_id || addon.dbId || addon.id;
-    let price = Number(addon.price || 0);
-    
-    if (equipmentId) {
-      price = await getPriceFromSnapshotOrCurrent(equipmentId, priceSnapshot);
-    }
-    
+  for (const addon of selectedAddons.filter(a => (a.quantity ?? 0) > 0)) {
+    const price = await resolveAddonUnitPrice(addon, priceSnapshot);
+
     addonsBreakdown.push({
       name: addon.name,
       price,
@@ -253,7 +368,14 @@ export async function calculateComprehensivePricing(
 
   const addonsTotal = addonsBreakdown.reduce((sum, addon) => sum + addon.total, 0);
   const subtotal = baseRentalCost + deliveryFee + mileageCharge + addonsTotal + insurancePrice;
-  const tax = subtotal * 0.07;
+  let taxRatePercent = 7.45;
+  try {
+    const rateData = await getTaxRate();
+    taxRatePercent = rateData?.tax_rate ?? taxRatePercent;
+  } catch {
+    // use default
+  }
+  const tax = subtotal * (taxRatePercent / 100);
   const estimatedTotal = subtotal + tax;
 
   return {

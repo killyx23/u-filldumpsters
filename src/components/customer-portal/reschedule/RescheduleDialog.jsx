@@ -1,19 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, CheckCircle2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { RescheduleServiceSelectionSection } from './RescheduleServiceSelectionSection';
-import { RescheduleDateTimeSelector } from './RescheduleDateTimeSelector';
+import { RescheduleDateTimeSelector, verifyRescheduleDatesAvailable } from './RescheduleDateTimeSelector';
 import { RescheduleAddonsSection } from './RescheduleAddonsSection';
 import { RescheduleAddressVerification } from './RescheduleAddressVerification';
+import { RescheduleContactAddressSection } from './RescheduleContactAddressSection';
 import { RescheduleAgreementsSection } from './RescheduleAgreementsSection';
 import { ReschedulePricingBreakdown } from './ReschedulePricingBreakdown';
 import { RescheduleRequestReview } from './RescheduleRequestReview';
 import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { calculateAddonsDifference } from '@/utils/rescheduleCalculations';
+import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import { filterAddonsForService } from '@/utils/rescheduleAddons';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
+import {
+  buildRescheduleReason,
+  extractEdgeFunctionError,
+} from '@/utils/rescheduleRequestFormatter';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
+import { normalizeAddress, addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
 
 const STEPS = {
   SERVICE: 1,
@@ -35,7 +44,15 @@ const STEP_TITLES = {
   [STEPS.REVIEW]: 'Review & Submit'
 };
 
-export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
+export const RescheduleDialog = ({
+  open,
+  onClose,
+  bookingId,
+  onSuccess,
+  adminMode = false,
+  initiatedBy = 'admin',
+  adminEmail = null,
+}) => {
   const { data, loading, error } = useRescheduleDataLoader(bookingId);
   const [currentStep, setCurrentStep] = useState(STEPS.SERVICE);
   const [submitting, setSubmitting] = useState(false);
@@ -49,6 +66,9 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
   const [selectedAddonsList, setSelectedAddonsList] = useState([]);
   const [originalAddonsList, setOriginalAddonsList] = useState([]);
   const [verifiedAddress, setVerifiedAddress] = useState(null);
+  const [deliveryAddressObj, setDeliveryAddressObj] = useState(null);
+  const [contactAddress, setContactAddress] = useState(null);
+  const [pendingAddressVerification, setPendingAddressVerification] = useState(false);
   const [distanceMiles, setDistanceMiles] = useState(0);
   const [isManualAddress, setIsManualAddress] = useState(false);
   const [addressVerificationError, setAddressVerificationError] = useState(false);
@@ -67,25 +87,44 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       setSelectedService(data.originalService);
       setOriginalAddonsList(data.originalAddonsList || []);
       setSelectedAddonsList(data.originalAddonsList || []);
-      
-      // Initialize address with original booking address
+
       const originalAddress = data.originalBooking?.delivery_address || data.originalBooking?.contact_address;
       if (originalAddress) {
-        setVerifiedAddress(originalAddress.formatted_address || `${originalAddress.street}, ${originalAddress.city}, ${originalAddress.state} ${originalAddress.zip}`);
+        const normalized = normalizeAddress({
+          street: originalAddress.street || data.originalBooking?.street || '',
+          city: originalAddress.city || data.originalBooking?.city || '',
+          state: originalAddress.state || data.originalBooking?.state || '',
+          zip: originalAddress.zip || data.originalBooking?.zip || '',
+          formatted_address: originalAddress.formatted_address,
+          isVerified: originalAddress.isVerified !== false,
+        });
+        setVerifiedAddress(formatAddressDisplay(normalized));
+        setDeliveryAddressObj(normalized);
+        setContactAddress({
+          street: normalized.street,
+          city: normalized.city,
+          state: normalized.state,
+          zip: normalized.zip,
+          formatted_address: normalized.formatted_address,
+          isVerified: originalAddress.isVerified !== false,
+          unverifiedAccepted: Boolean(originalAddress.unverifiedAccepted),
+          pending_address_verification: false,
+        });
         setDistanceMiles(data.originalBooking?.customers?.distance_miles || 0);
       }
     }
   }, [data]);
 
-  // Callback to handle service selection
+  // Callback to handle service selection (null clears when a service becomes unavailable)
   const handleServiceSelect = useCallback((service) => {
     if (!service) {
-      console.warn('RescheduleDialog: handleServiceSelect called with no service data');
+      setSelectedService(null);
       return;
     }
-    
+
     setSelectedService(service);
-    
+    setSelectedAddonsList((prev) => filterAddonsForService(prev, service.id));
+
     toast({
       title: "Service Selected",
       description: `You've selected ${service.name}. Continue to the next step.`,
@@ -96,20 +135,42 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
   const handleAddressUpdated = useCallback((addressString, verificationData) => {
     if (!addressString || !verificationData) {
       setVerifiedAddress(null);
+      setDeliveryAddressObj(null);
       setDistanceMiles(0);
       setAddressVerificationError(true);
       setIsManualAddress(false);
       return;
     }
 
-    // Update state with verified address data
     setVerifiedAddress(addressString);
+    setDeliveryAddressObj(
+      normalizeAddress(verificationData.addressObj) || normalizeAddress(addressString)
+    );
     setDistanceMiles(verificationData.distance || 0);
     setIsManualAddress(verificationData.isManualEntry || false);
     setAddressVerificationError(verificationData.error || false);
+    setPendingAddressVerification(false);
   }, []);
 
-  const handleNext = () => {
+  const handleContactAddressUpdated = useCallback((addressData) => {
+    if (!addressData || addressData.error) {
+      setContactAddress(null);
+      setVerifiedAddress(null);
+      setDeliveryAddressObj(null);
+      setAddressVerificationError(true);
+      setPendingAddressVerification(false);
+      return;
+    }
+
+    setContactAddress(addressData);
+    setVerifiedAddress(addressData.formatted_address || null);
+    setDeliveryAddressObj(null);
+    setAddressVerificationError(false);
+    setIsManualAddress(addressData.isManualEntry || false);
+    setPendingAddressVerification(Boolean(addressData.pending_address_verification));
+  }, []);
+
+  const handleNext = async () => {
     // Validate current step before proceeding
     if (currentStep === STEPS.SERVICE && !selectedService) {
       toast({ title: "Service Required", description: "Please select a service plan.", variant: "destructive" });
@@ -125,24 +186,45 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
         toast({ title: "End Date/Time Required", description: "Please select end date and time.", variant: "destructive" });
         return;
       }
+
+      const verification = await verifyRescheduleDatesAvailable({
+        serviceId: selectedService?.id,
+        bookingId,
+        dropOffDate: newDropOffDate,
+        pickupDate: selectedService?.id === 3 ? null : newPickupDate,
+      });
+      if (!verification.ok) {
+        toast({
+          title: "Dates Unavailable",
+          description: verification.message,
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     if (currentStep === STEPS.ADDRESS) {
+      const isDumpLoaderPickup = selectedService?.id === 2;
       const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-      
-      if (requiresDelivery) {
-        if (!verifiedAddress || addressVerificationError) {
-          toast({ 
-            title: "Address Verification Required", 
-            description: "Please verify your delivery address before continuing.", 
-            variant: "destructive" 
+
+      if (isDumpLoaderPickup) {
+        if (!contactAddress || addressVerificationError) {
+          toast({
+            title: "Address Required",
+            description: "Please confirm or verify your contact address before continuing.",
+            variant: "destructive",
           });
           return;
         }
-      } else {
-        // Skip to agreements if delivery not required
-        setCurrentStep(STEPS.AGREEMENTS);
-        return;
+      } else if (requiresDelivery) {
+        if (!verifiedAddress || addressVerificationError) {
+          toast({
+            title: "Address Verification Required",
+            description: "Please verify your delivery address before continuing.",
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
 
@@ -164,14 +246,15 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
   };
 
   const handleBack = () => {
+    const isDumpLoaderPickup = selectedService?.id === 2;
     const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-    
-    // Skip address step when going back if not delivery service
-    if (currentStep === STEPS.AGREEMENTS && !requiresDelivery) {
+    const showAddressStep = isDumpLoaderPickup || requiresDelivery;
+
+    if (currentStep === STEPS.AGREEMENTS && !showAddressStep) {
       setCurrentStep(STEPS.ADDONS);
       return;
     }
-    
+
     setCurrentStep(prev => prev - 1);
   };
 
@@ -193,18 +276,53 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
       console.log('Original add-ons:', originalAddonsList);
       console.log('New add-ons:', selectedAddonsList);
 
-      // Calculate inventory differences
-      const { toReturn, toAllocate, unchanged } = calculateAddonsDifference(
+      const inventoryChanges = await calculateAddonsDifference(
         originalAddonsList,
         selectedAddonsList
       );
 
-      console.log('Inventory changes:', { toReturn, toAllocate, unchanged });
+      console.log('Inventory changes:', inventoryChanges);
 
-      // Format reschedule request data
+      const isDumpLoaderPickup = selectedService?.id === 2;
+      const originalBooking = data?.originalBooking;
+      const originalAddressSource =
+        originalBooking?.delivery_address ||
+        originalBooking?.contact_address ||
+        {
+          street: originalBooking?.street,
+          city: originalBooking?.city,
+          state: originalBooking?.state,
+          zip: originalBooking?.zip,
+        };
+      const structuredDelivery = isDumpLoaderPickup
+        ? null
+        : normalizeAddress(deliveryAddressObj) || normalizeAddress(verifiedAddress);
+      const structuredContact = isDumpLoaderPickup ? normalizeAddress(contactAddress) : null;
+      const addressChanged = isDumpLoaderPickup
+        ? Boolean(structuredContact && !addressesAreEqual(structuredContact, originalAddressSource))
+        : Boolean(structuredDelivery && !addressesAreEqual(structuredDelivery, originalAddressSource));
+
+      const originalAddressDisplay = formatAddressDisplay(originalAddressSource);
+      const newAddressDisplay =
+        formatAddressDisplay(isDumpLoaderPickup ? structuredContact : structuredDelivery) ||
+        (isDumpLoaderPickup ? null : verifiedAddress) ||
+        '';
+
+      const days = calculateDays(newDropOffDate, newPickupDate);
+      const newCosts = await calculateBookingCosts(
+        selectedService,
+        days,
+        selectedAddonsList,
+        selectedService?.id === 2 ? 0 : distanceMiles
+      );
+      const originalTotal = Number(data?.originalCosts?.total ?? originalBooking?.total_price ?? 0);
+      const newTotal = Number(newCosts?.total ?? originalTotal);
+
       const rescheduleData = {
         booking_id: bookingId,
         new_service_id: selectedService?.id,
+        new_service_name: selectedService?.name || null,
+        original_service_name: data?.originalService?.name || originalBooking?.plan?.name || null,
         new_drop_off_date: newDropOffDate,
         new_pickup_date: newPickupDate,
         new_drop_off_time: newDropOffTime,
@@ -212,44 +330,126 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
         original_addons: originalAddonsList,
         new_addons: selectedAddonsList,
         inventory_changes: {
-          to_return: toReturn,
-          to_allocate: toAllocate,
-          unchanged: unchanged
+          to_return: inventoryChanges.toReturn,
+          to_allocate: inventoryChanges.toAllocate,
+          unchanged: inventoryChanges.unchanged,
         },
-        new_delivery_address: verifiedAddress,
-        distance_miles: distanceMiles,
+        new_delivery_address: isDumpLoaderPickup ? null : verifiedAddress,
+        new_delivery_address_obj: isDumpLoaderPickup ? null : structuredDelivery,
+        new_contact_address: isDumpLoaderPickup ? contactAddress : null,
+        original_address_display: originalAddressDisplay,
+        new_address_display: newAddressDisplay,
+        address_changed: addressChanged,
+        pending_address_verification: pendingAddressVerification,
+        unverified_address: contactAddress?.unverified_address || null,
+        pending_verification_reason: contactAddress?.pending_verification_reason || null,
+        distance_miles: isDumpLoaderPickup ? 0 : distanceMiles,
         is_manual_address: isManualAddress,
         customer_comments: comments,
         agreements_accepted: agreementsAccepted,
-        request_timestamp: new Date().toISOString()
+        request_timestamp: new Date().toISOString(),
+        original_total: originalTotal,
+        new_total: newTotal,
+        original_total_price: originalTotal,
+        new_total_price: newTotal,
+        pricing: {
+          serviceCost: newCosts.serviceCost,
+          addonsCost: newCosts.addonsCost,
+          mileageCharge: newCosts.mileageCharge,
+          subtotal: newCosts.subtotal,
+          tax: newCosts.tax,
+          taxRate: newCosts.taxRate,
+          total: newTotal,
+        },
       };
 
-      console.log('Submitting reschedule data:', rescheduleData);
-
-      // Submit reschedule request (backend will handle inventory changes)
-      const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
-        body: rescheduleData
+      const reason = buildRescheduleReason({
+        bookingId,
+        originalBooking: data?.originalBooking,
+        originalService: data?.originalService,
+        newService: selectedService,
+        newDropOffDate,
+        newPickupDate,
+        newDropOffTime,
+        newPickupTime,
+        originalAddonsList,
+        selectedAddonsList,
+        verifiedAddress,
+        distanceMiles,
+        isManualAddress,
+        comments,
+        inventoryChanges: rescheduleData.inventory_changes,
       });
 
-      if (requestError) throw requestError;
+      console.log('Submitting reschedule request:', { bookingId, reasonLength: reason.length, adminMode });
 
-      console.log('Reschedule request successful:', requestData);
-      expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
+      if (adminMode) {
+        const { data: adminData, error: adminError } = await supabase.functions.invoke('admin-complete-reschedule', {
+          body: {
+            bookingId: Number(bookingId),
+            initiatedBy,
+            adminEmail,
+            newTotalPrice: newTotal,
+            rescheduleDetails: rescheduleData,
+          },
+        });
 
-      toast({
-        title: "Reschedule Request Submitted!",
-        description: "Your request has been submitted for admin review. Inventory changes will be processed upon approval.",
-      });
+        if (adminError) {
+          const message = await extractEdgeFunctionError(adminError, adminData);
+          throw new Error(message);
+        }
+        if (adminData?.error) {
+          throw new Error(adminData.error);
+        }
 
-      onSuccess?.();
-      onClose();
+        expireActiveRentalAccessCodesForOrder(bookingId, 'admin');
+
+        toast({
+          title: 'Reschedule Complete',
+          description: `Booking #${bookingId} rescheduled. New booking #${adminData.newBookingId} created.`,
+        });
+
+        onSuccess?.({ newBookingId: adminData.newBookingId, newBooking: adminData.newBooking });
+        onClose();
+      } else {
+        const { data: requestData, error: requestError } = await supabase.functions.invoke('request-booking-change', {
+          body: {
+            bookingId: Number(bookingId),
+            reason,
+            rescheduleDetails: rescheduleData,
+          },
+        });
+
+        if (requestError) {
+          const message = await extractEdgeFunctionError(requestError, requestData);
+          throw new Error(message);
+        }
+        if (requestData?.error) {
+          throw new Error(requestData.error);
+        }
+
+        console.log('Reschedule request successful:', requestData);
+        expireActiveRentalAccessCodesForOrder(bookingId, 'customer');
+
+        toast({
+          title: 'Reschedule Request Submitted!',
+          description: 'Your request has been submitted for scheduling department review. Inventory changes will be processed upon approval.',
+        });
+
+        onSuccess?.();
+        onClose();
+      }
       
     } catch (err) {
       console.error('Error submitting reschedule:', err);
+      const description =
+        err instanceof Error
+          ? err.message
+          : await extractEdgeFunctionError(err, null);
       toast({
         title: "Submission Failed",
-        description: err.message || "Could not submit reschedule request. Please try again.",
-        variant: "destructive"
+        description,
+        variant: "destructive",
       });
     } finally {
       setSubmitting(false);
@@ -260,6 +460,10 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
     return (
       <Dialog open={open} onOpenChange={onClose}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-gray-950 text-white border-gray-800">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Reschedule Booking</DialogTitle>
+            <DialogDescription>Loading booking details for reschedule</DialogDescription>
+          </DialogHeader>
           <div className="flex flex-col items-center justify-center py-20">
             <Loader2 className="w-12 h-12 animate-spin text-gold mb-4" />
             <p className="text-gray-400">Loading booking details...</p>
@@ -283,18 +487,24 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
     );
   }
 
+  const isDumpLoaderPickup = selectedService?.id === 2;
   const requiresDelivery = selectedService?.id === 1 || selectedService?.id === 4 || selectedService?.id === 3;
-  const showAddressStep = requiresDelivery;
+  const showAddressStep = isDumpLoaderPickup || requiresDelivery;
+
+  const currentStepTitle =
+    currentStep === STEPS.ADDRESS && isDumpLoaderPickup
+      ? 'Contact Address'
+      : STEP_TITLES[currentStep];
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto bg-gray-950 text-white border-gray-800">
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-gold flex items-center">
-            <span className="mr-3">Reschedule Booking #{bookingId}</span>
+            <span className="mr-3">{adminMode ? 'Admin Reschedule' : 'Reschedule'} Booking #{bookingId}</span>
             {currentStep < STEPS.REVIEW && (
               <span className="text-sm text-gray-400 font-normal">
-                Step {currentStep} of 7: {STEP_TITLES[currentStep]}
+                Step {currentStep} of 7: {currentStepTitle}
               </span>
             )}
           </DialogTitle>
@@ -307,13 +517,14 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
               selectedService={selectedService}
               onSelectService={handleServiceSelect}
               currentServiceId={data.originalService?.id}
+              referenceDate={newDropOffDate || data?.originalBooking?.drop_off_date}
             />
           )}
 
           {currentStep === STEPS.DATETIME && (
             <RescheduleDateTimeSelector
               booking={data.originalBooking}
-              availableDates={data.availableDates}
+              bookingId={bookingId}
               newDropOffDate={newDropOffDate}
               setNewDropOffDate={setNewDropOffDate}
               newPickupDate={newPickupDate}
@@ -332,10 +543,18 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
               selectedAddonsList={selectedAddonsList}
               setSelectedAddonsList={setSelectedAddonsList}
               bookingId={bookingId}
+              selectedService={selectedService}
             />
           )}
 
-          {currentStep === STEPS.ADDRESS && showAddressStep && (
+          {currentStep === STEPS.ADDRESS && showAddressStep && isDumpLoaderPickup && (
+            <RescheduleContactAddressSection
+              booking={data.originalBooking}
+              onAddressUpdated={handleContactAddressUpdated}
+            />
+          )}
+
+          {currentStep === STEPS.ADDRESS && showAddressStep && requiresDelivery && (
             <RescheduleAddressVerification
               booking={data.originalBooking}
               newService={selectedService}
@@ -363,16 +582,18 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
               newAddonsList={selectedAddonsList}
               newDropOffDate={newDropOffDate}
               newPickupDate={newPickupDate}
-              distanceMiles={distanceMiles}
+              distanceMiles={isDumpLoaderPickup ? 0 : distanceMiles}
               isManualAddress={isManualAddress}
+              verifiedAddress={verifiedAddress}
+              contactAddress={contactAddress}
             />
           )}
 
           {currentStep === STEPS.REVIEW && (
             <RescheduleRequestReview
-              bookingId={bookingId}
               originalBooking={data.originalBooking}
               originalService={data.originalService}
+              originalAddonsList={originalAddonsList}
               newService={selectedService}
               newDropOffDate={newDropOffDate}
               newPickupDate={newPickupDate}
@@ -384,6 +605,13 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
             />
           )}
         </div>
+
+        <UiControlGuide
+          variant="compact"
+          stepTitle="Reschedule"
+          entries={getRescheduleGuideEntries()}
+          className="mt-2 flex justify-end"
+        />
 
         {/* Navigation buttons */}
         <div className="flex justify-between items-center pt-6 border-t border-gray-800">
@@ -404,7 +632,7 @@ export const RescheduleDialog = ({ open, onClose, bookingId, onSuccess }) => {
               {submitting ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</>
               ) : (
-                <><CheckCircle2 className="mr-2 h-4 w-4" /> Submit Request</>
+                <><CheckCircle2 className="mr-2 h-4 w-4" /> {adminMode ? 'Complete Reschedule' : 'Submit Request'}</>
               )}
             </Button>
           )}

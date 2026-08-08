@@ -1,21 +1,73 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, Info, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ShieldCheck, UploadCloud, X, AlertTriangle, Loader2, CheckCircle2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/use-toast';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { uploadVerificationImage, saveVerificationDocumentToDb, updateVerificationStatus, getVerificationDocumentsByCustomerId } from '@/utils/verificationImageHelper';
+import { uploadVerificationImage, saveCheckoutVerificationDocuments, getCheckoutVerificationDocuments, isVerificationPdf } from '@/utils/verificationImageHelper';
+import { isCheckoutEmailVerifiedSync } from '@/utils/checkoutEmailVerification';
+import { VerificationInfoTooltip } from '@/components/VerificationInfoTooltip';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 
-const FilePreview = ({ file, url, onRemove }) => {
-    if (!file && !url) return null;
-    const displayUrl = file ? URL.createObjectURL(file) : url;
+const FilePreview = ({ file, url, storagePath, onRemove, onPreviewFailed }) => {
+    const [previewFailed, setPreviewFailed] = useState(false);
+    const [objectUrl, setObjectUrl] = useState(null);
+    const isPdf = file?.type === 'application/pdf' || isVerificationPdf(storagePath || url);
+    const hasFilePreview = Boolean(file && !isPdf);
+    const hasUrlPreview = Boolean(url && !isPdf && !previewFailed);
+    const showPreview = hasFilePreview || hasUrlPreview;
+
+    useEffect(() => {
+        setPreviewFailed(false);
+        onPreviewFailed?.(false);
+    }, [url, file, onPreviewFailed]);
+
+    useEffect(() => {
+        if (!hasFilePreview) {
+            setObjectUrl(null);
+            return undefined;
+        }
+
+        const nextUrl = URL.createObjectURL(file);
+        setObjectUrl(nextUrl);
+        return () => URL.revokeObjectURL(nextUrl);
+    }, [file, hasFilePreview]);
+
+    if (!file && !url && !storagePath) return null;
+
+    const previewUrl = objectUrl || url;
+
     return (
         <div className="relative group w-full h-32 rounded-lg overflow-hidden border border-white/20 bg-black/40">
-            <img src={displayUrl} alt="Preview" className="w-full h-full object-contain" />
+            {isPdf ? (
+                <div className="w-full h-full flex flex-col items-center justify-center text-blue-200 px-4 text-center">
+                    <FileText className="h-8 w-8 mb-2 text-yellow-400" />
+                    <p className="text-sm">{file?.name || 'Insurance document uploaded'}</p>
+                </div>
+            ) : showPreview ? (
+                <img
+                    src={previewUrl}
+                    alt="Preview"
+                    className="w-full h-full object-contain"
+                    onError={() => {
+                        setPreviewFailed(true);
+                        onPreviewFailed?.(true);
+                    }}
+                />
+            ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-blue-200 px-4 text-center">
+                    <FileText className="h-8 w-8 mb-2 text-yellow-400" />
+                    <p className="text-sm">Preview unavailable — upload a new photo to continue</p>
+                </div>
+            )}
             <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="destructive" size="icon" className="h-8 w-8" onClick={onRemove}>
                     <X className="h-5 w-5" />
@@ -24,22 +76,6 @@ const FilePreview = ({ file, url, onRemove }) => {
         </div>
     );
 };
-
-const PlateInfoTooltip = () => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button type="button" className="ml-2 text-blue-300 hover:text-yellow-400 transition-colors">
-        <Info className="h-5 w-5"/>
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="top" className="bg-gray-900 border-blue-400 text-white max-w-sm p-4">
-      <h4 className="font-bold text-yellow-300 mb-2">Why do we need this information?</h4>
-      <p className="text-sm text-blue-200">
-        To ensure the security and proper use of our rental equipment, we require the license plate number of the vehicle that will be towing the trailer. This information is crucial for liability & accountability, legal compliance, and asset protection.
-      </p>
-    </TooltipContent>
-  </Tooltip>
-);
 
 const IncompleteInfoPopover = () => (
     <Popover>
@@ -58,73 +94,155 @@ const IncompleteInfoPopover = () => (
     </Popover>
 );
 
-export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId, customerEmail }) => {
+function slotHasWorkingPreview({ file, url, path, previewFailed }) {
+    if (file) return true;
+    if (isVerificationPdf(path || url) && (path || url)) return true;
+    return Boolean(url && !previewFailed);
+}
+
+export const DriverVehicleVerification = ({
+    onVerifiedSubmit,
+    onBack,
+    customerId: customerIdProp,
+    customerEmail,
+    bookingData,
+}) => {
+    const [resolvedCustomerId, setResolvedCustomerId] = useState(customerIdProp || bookingData?.contactAddress?.customerId || null);
+    const { isReturning: isTrueReturning, customerData, loading: detectingReturning } = useReturningCustomerDetection(customerEmail);
+
     const [licensePlate, setLicensePlate] = useState('');
     const [plateError, setPlateError] = useState('');
     
     const [licenseFrontFile, setLicenseFrontFile] = useState(null);
     const [licenseBackFile, setLicenseBackFile] = useState(null);
+    const [insuranceFile, setInsuranceFile] = useState(null);
     
     // Track existing URLs if customer already has documents
     const [existingFrontUrl, setExistingFrontUrl] = useState(null);
     const [existingBackUrl, setExistingBackUrl] = useState(null);
+    const [existingInsuranceUrl, setExistingInsuranceUrl] = useState(null);
     const [existingFrontPath, setExistingFrontPath] = useState(null);
     const [existingBackPath, setExistingBackPath] = useState(null);
+    const [existingInsurancePath, setExistingInsurancePath] = useState(null);
+    const [frontPreviewFailed, setFrontPreviewFailed] = useState(false);
+    const [backPreviewFailed, setBackPreviewFailed] = useState(false);
+    const [insurancePreviewFailed, setInsurancePreviewFailed] = useState(false);
 
     const [isUploading, setIsUploading] = useState(false);
     const [isLoadingInitial, setIsLoadingInitial] = useState(true);
     const [verificationNotes, setVerificationNotes] = useState('');
     
-    // New state to track if email is already registered
     const [isEmailRegistered, setIsEmailRegistered] = useState(false);
+    const [initialPlateLoaded, setInitialPlateLoaded] = useState(false);
+    const [showAttestationDialog, setShowAttestationDialog] = useState(false);
+    const [attestationAccepted, setAttestationAccepted] = useState(false);
+
+    const effectiveCustomerId = resolvedCustomerId || customerIdProp || bookingData?.contactAddress?.customerId;
+
+    const isReturningCustomer =
+        isTrueReturning || Boolean(bookingData?.returningCustomerVerified);
 
     const fileInputFrontRef = useRef(null);
     const fileInputBackRef = useRef(null);
+    const fileInputInsuranceRef = useRef(null);
+
+    useEffect(() => {
+        setResolvedCustomerId(customerIdProp || bookingData?.contactAddress?.customerId || customerData?.id || null);
+    }, [customerIdProp, bookingData?.contactAddress?.customerId, customerData?.id]);
 
     useEffect(() => {
         const fetchExistingDocs = async () => {
-            if (!customerId) {
+            setIsLoadingInitial(true);
+            if (!effectiveCustomerId) {
                 setIsLoadingInitial(false);
                 return;
             }
             try {
-                // Returns null gracefully if no record exists due to maybeSingle()
-                const doc = await getVerificationDocumentsByCustomerId(customerId);
+                const doc = customerEmail
+                    ? await getCheckoutVerificationDocuments(effectiveCustomerId, customerEmail, {
+                        pendingToken: bookingData?.pendingToken || null,
+                    })
+                    : null;
+
+                if (doc?.license_plate && !initialPlateLoaded) {
+                    setLicensePlate(String(doc.license_plate).toUpperCase());
+                    setInitialPlateLoaded(true);
+                }
+
                 if (doc) {
                     setExistingFrontUrl(doc.license_front_url || null);
                     setExistingBackUrl(doc.license_back_url || null);
+                    setExistingInsuranceUrl(doc.insurance_url || null);
                     setExistingFrontPath(doc.license_front_storage_path || null);
                     setExistingBackPath(doc.license_back_storage_path || null);
-                    
-                    // If customer already has documents, they're a returning customer
-                    setIsEmailRegistered(true);
+                    setExistingInsurancePath(doc.insurance_storage_path || null);
+                    setFrontPreviewFailed(false);
+                    setBackPreviewFailed(false);
+                    setInsurancePreviewFailed(false);
+                    setIsEmailRegistered(isTrueReturning);
                 } else {
-                    // Explicitly reset to empty state if no record is found
                     setExistingFrontUrl(null);
                     setExistingBackUrl(null);
+                    setExistingInsuranceUrl(null);
                     setExistingFrontPath(null);
                     setExistingBackPath(null);
-                    setIsEmailRegistered(false);
+                    setExistingInsurancePath(null);
+                    setFrontPreviewFailed(false);
+                    setBackPreviewFailed(false);
+                    setInsurancePreviewFailed(false);
+                    setIsEmailRegistered(Boolean(isTrueReturning && customerData));
                 }
             } catch (err) {
-                console.error("Error fetching existing documents:", err);
-                // If there's an error but we have a customerId, assume they're registered
-                if (customerId) {
-                    setIsEmailRegistered(true);
-                }
+                console.error('Error fetching existing documents:', err);
+                if (effectiveCustomerId) setIsEmailRegistered(isTrueReturning);
             } finally {
                 setIsLoadingInitial(false);
             }
         };
         fetchExistingDocs();
-    }, [customerId]);
+    }, [effectiveCustomerId, customerEmail, isTrueReturning, customerData, initialPlateLoaded, bookingData?.pendingToken]);
+
+    const handleAttestationConfirm = (e) => {
+        if (!attestationAccepted) return;
+        setShowAttestationDialog(false);
+        setAttestationAccepted(false);
+        handleSubmit(e, false);
+    };
+
+    const handleContinueWithAttestation = (e) => {
+        e.preventDefault();
+        if (!isFormComplete || plateError) return;
+        if (isReturningCustomer) {
+            setAttestationAccepted(false);
+            setShowAttestationDialog(true);
+            return;
+        }
+        handleSubmit(e, false);
+    };
+
+    const hasWorkingFront = slotHasWorkingPreview({
+        file: licenseFrontFile,
+        url: existingFrontUrl,
+        path: existingFrontPath,
+        previewFailed: frontPreviewFailed,
+    });
+    const hasWorkingBack = slotHasWorkingPreview({
+        file: licenseBackFile,
+        url: existingBackUrl,
+        path: existingBackPath,
+        previewFailed: backPreviewFailed,
+    });
+    const hasWorkingInsurance = slotHasWorkingPreview({
+        file: insuranceFile,
+        url: existingInsuranceUrl,
+        path: existingInsurancePath,
+        previewFailed: insurancePreviewFailed,
+    });
 
     const isFormComplete = useMemo(() => {
         const plateRegex = /^[A-Z0-9]{6,7}$/;
-        const hasFront = licenseFrontFile || existingFrontUrl;
-        const hasBack = licenseBackFile || existingBackUrl;
-        return plateRegex.test(licensePlate) && hasFront && hasBack;
-    }, [licensePlate, licenseFrontFile, licenseBackFile, existingFrontUrl, existingBackUrl]);
+        return plateRegex.test(licensePlate) && hasWorkingFront && hasWorkingBack && hasWorkingInsurance;
+    }, [licensePlate, hasWorkingFront, hasWorkingBack, hasWorkingInsurance]);
 
     const handlePlateChange = (e) => {
         const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -138,12 +256,15 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
         }
     };
     
-    const handleFileChange = (setter, clearExistingUrl) => (e) => {
+    const handleFileChange = (setter, clearExistingUrl, clearExistingPath, clearPreviewFailed) => (e) => {
         const file = e.target.files[0];
         if (file) {
             setter(file);
-            if (clearExistingUrl) clearExistingUrl(null);
+            clearExistingUrl?.(null);
+            clearExistingPath?.(null);
+            clearPreviewFailed?.(false);
         }
+        e.target.value = '';
     };
 
     const handleSubmit = async (e, isSkipping) => {
@@ -159,44 +280,72 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
         }
 
         setIsUploading(true);
-        // Fallback to unassigned if customer hasn't been created yet in the flow
-        const effectiveCustomerId = customerId || `unassigned-${Date.now()}`;
-        
+        // Client fallback must use unassigned-* paths (storage RLS). Prefer edge save when verified.
+        const effectiveCustomerIdForUpload = `unassigned-${Date.now()}`;
+        const emailVerified = isCheckoutEmailVerifiedSync(customerEmail, bookingData || {});
+        const canPersistToCustomer = Boolean(
+            effectiveCustomerId &&
+            customerEmail &&
+            (emailVerified || bookingData?.returningCustomerVerified)
+        );
+
         try {
             let frontImage = { url: existingFrontUrl, path: existingFrontPath };
             let backImage = { url: existingBackUrl, path: existingBackPath };
+            let insuranceImage = { url: existingInsuranceUrl, path: existingInsurancePath };
 
-            if (licenseFrontFile) {
-                frontImage = await uploadVerificationImage(effectiveCustomerId, licenseFrontFile, 'license_front');
-            }
-            if (licenseBackFile) {
-                backImage = await uploadVerificationImage(effectiveCustomerId, licenseBackFile, 'license_back');
-            }
+            if (!isSkipping && canPersistToCustomer) {
+                const result = await saveCheckoutVerificationDocuments({
+                    customerId: effectiveCustomerId,
+                    email: customerEmail,
+                    pendingToken: bookingData?.pendingToken || null,
+                    licensePlate: licensePlate || null,
+                    licenseFrontFile,
+                    licenseBackFile,
+                    insuranceFile,
+                    existingFrontUrl,
+                    existingFrontPath,
+                    existingBackUrl,
+                    existingBackPath,
+                    existingInsuranceUrl,
+                    existingInsurancePath,
+                });
 
-            if ((licenseFrontFile && !frontImage) || (licenseBackFile && !backImage)) {
-                throw new Error("Failed to upload one or more images.");
-            }
-
-            // Save to the database document table (will gracefully handle INSERT or UPDATE depending on if a record exists)
-            if (customerId && frontImage?.url && backImage?.url) {
-                await saveVerificationDocumentToDb(
-                    customerId, 
-                    frontImage.url, 
-                    frontImage.path, 
-                    backImage.url, 
-                    backImage.path
-                );
-                // If updating existing images, set status to pending again for review
-                if (licenseFrontFile || licenseBackFile) {
-                    await updateVerificationStatus(customerId, 'pending', null);
+                const docs = result?.documents || {};
+                frontImage = {
+                    url: docs.license_front_url || frontImage.url,
+                    path: docs.license_front_storage_path || frontImage.path,
+                };
+                backImage = {
+                    url: docs.license_back_url || backImage.url,
+                    path: docs.license_back_storage_path || backImage.path,
+                };
+                insuranceImage = {
+                    url: docs.insurance_url || insuranceImage.url,
+                    path: docs.insurance_storage_path || insuranceImage.path,
+                };
+            } else {
+                if (licenseFrontFile) {
+                    frontImage = await uploadVerificationImage(effectiveCustomerIdForUpload, licenseFrontFile, 'license_front');
+                }
+                if (licenseBackFile) {
+                    backImage = await uploadVerificationImage(effectiveCustomerIdForUpload, licenseBackFile, 'license_back');
+                }
+                if (insuranceFile) {
+                    insuranceImage = await uploadVerificationImage(effectiveCustomerIdForUpload, insuranceFile, 'insurance_document');
                 }
             }
 
-            const licenseImageUrls = [frontImage, backImage].filter(img => img && img.url);
+            if ((licenseFrontFile && !frontImage?.path && !frontImage?.url) || (licenseBackFile && !backImage?.path && !backImage?.url) || (insuranceFile && !insuranceImage?.path && !insuranceImage?.url)) {
+                throw new Error("Failed to upload one or more images.");
+            }
+
+            const licenseImageUrls = [frontImage, backImage].filter(img => img && (img.url || img.path));
             
             onVerifiedSubmit({
                 licensePlate,
                 licenseImageUrls,
+                insuranceImageUrl: (insuranceImage?.url || insuranceImage?.path) ? insuranceImage : null,
                 wasVerificationSkipped: isSkipping,
                 verificationNotes: isSkipping ? verificationNotes : null
             });
@@ -225,7 +374,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
         }
     };
 
-    if (isLoadingInitial) {
+    if (isLoadingInitial || detectingReturning) {
         return (
             <div className="container mx-auto py-16 px-4 flex justify-center items-center min-h-[50vh]">
                 <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
@@ -257,7 +406,6 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                         </div>
                     </div>
 
-                    {/* Friendly informational message for registered emails */}
                     {isEmailRegistered && (
                         <motion.div 
                             initial={{ opacity: 0, y: -10 }}
@@ -268,18 +416,28 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                             <div>
                                 <h4 className="font-semibold text-blue-300 text-lg mb-1">Welcome Back!</h4>
                                 <p className="text-blue-200 text-sm">
-                                    {customerEmail ? `${customerEmail} is` : 'This email is'} already registered in our system. You can continue with the verification process. 
-                                    {existingFrontUrl && existingBackUrl ? ' Your previous documents are loaded below and can be updated if needed.' : ''}
+                                    Your saved documents are shown below. Please confirm they are still current for this rental, or update them if anything has changed.
                                 </p>
                             </div>
                         </motion.div>
+                    )}
+
+                    {isReturningCustomer && (
+                    <div className="mb-6 bg-amber-900/25 border border-amber-500/40 rounded-xl p-5">
+                        <h4 className="text-lg font-semibold text-amber-200 mb-2">Verify Your Information</h4>
+                        <p className="text-sm text-amber-100/90 leading-relaxed">
+                            Please verify that the driver&apos;s license, auto insurance, and towing vehicle license plate shown below are
+                            <strong> correct, current, and true</strong> for the person picking up this rental and the vehicle being used.
+                            Update any information before continuing. If you continue without complete or current documentation, your booking may be flagged for manual review by our team.
+                        </p>
+                    </div>
                     )}
 
                     <div className="space-y-8 bg-black/20 p-6 rounded-xl border border-white/10">
                         <div>
                             <div className="flex items-center mb-2">
                                 <Label htmlFor="licensePlate" className="text-lg font-semibold text-white">Towing Vehicle License Plate</Label>
-                                <PlateInfoTooltip />
+                                <VerificationInfoTooltip />
                             </div>
                             <Input 
                                 id="licensePlate" 
@@ -296,24 +454,99 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-white/10">
                             <div className="space-y-3">
                                 <Label className="text-lg font-semibold text-white">Driver's License (Front)</Label>
-                                <FilePreview file={licenseFrontFile} url={existingFrontUrl} onRemove={() => { setLicenseFrontFile(null); setExistingFrontUrl(null); }} />
-                                {!licenseFrontFile && !existingFrontUrl && (
+                                <FilePreview
+                                    file={licenseFrontFile}
+                                    url={existingFrontUrl}
+                                    storagePath={existingFrontPath}
+                                    onPreviewFailed={setFrontPreviewFailed}
+                                    onRemove={() => {
+                                        setLicenseFrontFile(null);
+                                        setExistingFrontUrl(null);
+                                        setExistingFrontPath(null);
+                                        setFrontPreviewFailed(false);
+                                    }}
+                                />
+                                {!hasWorkingFront && (
                                     <Button type="button" variant="outline" className="w-full h-14 bg-white/5 border-white/30 hover:bg-white/10 text-white" onClick={() => fileInputFrontRef.current?.click()} disabled={isUploading}>
-                                        <UploadCloud className="mr-2 h-5 w-5"/> Upload Front
+                                        <UploadCloud className="mr-2 h-5 w-5"/> {(existingFrontPath || existingFrontUrl) ? 'Replace Front Photo' : 'Upload Front'}
                                     </Button>
                                 )}
-                                <Input ref={fileInputFrontRef} id="licenseFront" type="file" className="hidden" onChange={handleFileChange(setLicenseFrontFile, setExistingFrontUrl)} disabled={isUploading} accept="image/*" />
+                                <Input
+                                    ref={fileInputFrontRef}
+                                    id="licenseFront"
+                                    type="file"
+                                    className="hidden"
+                                    onChange={handleFileChange(setLicenseFrontFile, setExistingFrontUrl, setExistingFrontPath, setFrontPreviewFailed)}
+                                    disabled={isUploading}
+                                    accept="image/*"
+                                />
                             </div>
                             <div className="space-y-3">
                                 <Label className="text-lg font-semibold text-white">Driver's License (Back)</Label>
-                                <FilePreview file={licenseBackFile} url={existingBackUrl} onRemove={() => { setLicenseBackFile(null); setExistingBackUrl(null); }} />
-                                {!licenseBackFile && !existingBackUrl && (
+                                <FilePreview
+                                    file={licenseBackFile}
+                                    url={existingBackUrl}
+                                    storagePath={existingBackPath}
+                                    onPreviewFailed={setBackPreviewFailed}
+                                    onRemove={() => {
+                                        setLicenseBackFile(null);
+                                        setExistingBackUrl(null);
+                                        setExistingBackPath(null);
+                                        setBackPreviewFailed(false);
+                                    }}
+                                />
+                                {!hasWorkingBack && (
                                     <Button type="button" variant="outline" className="w-full h-14 bg-white/5 border-white/30 hover:bg-white/10 text-white" onClick={() => fileInputBackRef.current?.click()} disabled={isUploading}>
-                                        <UploadCloud className="mr-2 h-5 w-5"/> Upload Back
+                                        <UploadCloud className="mr-2 h-5 w-5"/> {(existingBackPath || existingBackUrl) ? 'Replace Back Photo' : 'Upload Back'}
                                     </Button>
                                 )}
-                                <Input ref={fileInputBackRef} id="licenseBack" type="file" className="hidden" onChange={handleFileChange(setLicenseBackFile, setExistingBackUrl)} disabled={isUploading} accept="image/*" />
+                                <Input
+                                    ref={fileInputBackRef}
+                                    id="licenseBack"
+                                    type="file"
+                                    className="hidden"
+                                    onChange={handleFileChange(setLicenseBackFile, setExistingBackUrl, setExistingBackPath, setBackPreviewFailed)}
+                                    disabled={isUploading}
+                                    accept="image/*"
+                                />
                             </div>
+                        </div>
+
+                        <div className="space-y-3 pt-4 border-t border-white/10">
+                            <Label className="text-lg font-semibold text-white">Auto Insurance (Declaration Page or Insurance Card)</Label>
+                            <FilePreview
+                                file={insuranceFile}
+                                url={existingInsuranceUrl}
+                                storagePath={existingInsurancePath}
+                                onPreviewFailed={setInsurancePreviewFailed}
+                                onRemove={() => {
+                                    setInsuranceFile(null);
+                                    setExistingInsuranceUrl(null);
+                                    setExistingInsurancePath(null);
+                                    setInsurancePreviewFailed(false);
+                                }}
+                            />
+                            {!hasWorkingInsurance && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full h-14 bg-white/5 border-white/30 hover:bg-white/10 text-white"
+                                    onClick={() => fileInputInsuranceRef.current?.click()}
+                                    disabled={isUploading}
+                                >
+                                    <UploadCloud className="mr-2 h-5 w-5" />
+                                    {(existingInsurancePath || existingInsuranceUrl) ? 'Replace Insurance Document' : 'Upload Insurance Document'}
+                                </Button>
+                            )}
+                            <Input
+                                ref={fileInputInsuranceRef}
+                                id="insuranceDocument"
+                                type="file"
+                                className="hidden"
+                                onChange={handleFileChange(setInsuranceFile, setExistingInsuranceUrl, setExistingInsurancePath, setInsurancePreviewFailed)}
+                                disabled={isUploading}
+                                accept="image/*,application/pdf"
+                            />
                         </div>
                     </div>
 
@@ -330,7 +563,7 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                                 value={verificationNotes}
                                 onChange={(e) => setVerificationNotes(e.target.value)}
                                 className="bg-white/10 border-white/30 text-white placeholder-orange-200/50"
-                                placeholder="e.g., Don't have license on hand right now."
+                                placeholder="e.g., Don't have license or insurance documents on hand right now."
                                 disabled={isUploading}
                             />
                         </div>
@@ -347,13 +580,70 @@ export const DriverVehicleVerification = ({ onVerifiedSubmit, onBack, customerId
                             Continue without Info
                         </Button>
                         <Button 
-                            onClick={(e) => handleSubmit(e, false)}
+                            onClick={handleContinueWithAttestation}
                             disabled={isUploading || !isFormComplete}
                             className="py-6 px-8 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
                         >
                             {isUploading ? <Loader2 className="mr-2 h-5 w-5 animate-spin"/> : <>Submit & Continue <ArrowRight className="ml-2 h-5 w-5"/></>}
                         </Button>
                     </div>
+
+                    <Dialog open={showAttestationDialog} onOpenChange={setShowAttestationDialog}>
+                        <DialogContent className="max-w-lg bg-gray-900 border-white/20 text-white">
+                            <DialogHeader>
+                                <DialogTitle className="text-xl text-yellow-300">Confirm Driver &amp; Vehicle Information</DialogTitle>
+                                <DialogDescription className="text-blue-200 text-sm leading-relaxed pt-2">
+                                    Before continuing, you must confirm the accuracy of the information provided for this rental.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-2">
+                                <p className="text-sm text-blue-100 leading-relaxed">
+                                    By checking the box below and continuing, you represent and affirm under penalty of applicable law that:
+                                </p>
+                                <ul className="text-sm text-blue-200/90 list-disc pl-5 space-y-2">
+                                    <li>The driver&apos;s license images, auto insurance document, and towing vehicle license plate are true, correct, and current as of today.</li>
+                                    <li>The person listed is authorized to pick up this rental and the towing vehicle identified is the vehicle that will be used.</li>
+                                    <li>You understand that false or outdated information may result in cancellation, delays, fees, or denial of service.</li>
+                                </ul>
+                                <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-white/20 bg-black/30 p-4">
+                                    <Checkbox
+                                        checked={attestationAccepted}
+                                        onCheckedChange={(checked) => setAttestationAccepted(checked === true)}
+                                        className="mt-0.5 border-white/40 data-[state=checked]:bg-yellow-500 data-[state=checked]:border-yellow-500"
+                                    />
+                                    <span className="text-sm text-white leading-relaxed">
+                                        I certify that the driver and vehicle information provided is accurate, current, and complete to the best of my knowledge.
+                                    </span>
+                                </label>
+                            </div>
+                            <DialogFooter className="flex-col sm:flex-row gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full sm:w-auto"
+                                    onClick={() => {
+                                        setShowAttestationDialog(false);
+                                        setAttestationAccepted(false);
+                                    }}
+                                >
+                                    Go Back &amp; Review
+                                </Button>
+                                <Button
+                                    type="button"
+                                    className="w-full sm:w-auto bg-green-600 hover:bg-green-700"
+                                    disabled={!attestationAccepted || isUploading}
+                                    onClick={handleAttestationConfirm}
+                                >
+                                    I Agree &amp; Continue
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+                    <UiControlGuide
+                        stepTitle="Driver & Vehicle Verification"
+                        entries={getBookingGuideEntries('verification')}
+                        className="mt-4 flex justify-end"
+                    />
                 </div>
             </motion.div>
         </TooltipProvider>

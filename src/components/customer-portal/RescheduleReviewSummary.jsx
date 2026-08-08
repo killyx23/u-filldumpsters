@@ -5,6 +5,7 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { ArrowRight, Calendar, Clock, Receipt, AlertCircle } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { formatRescheduleMessage } from '@/utils/rescheduleCalculations';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
 export const RescheduleReviewSummary = ({ 
     booking, 
@@ -19,6 +20,10 @@ export const RescheduleReviewSummary = ({
     
     const isServiceChanged = booking?.plan?.id !== selectedServiceData?.id;
     const isCredit = costBreakdown.totalChange < 0;
+    const origDropTime = convertTo12Hour(booking?.drop_off_time_slot) || booking?.drop_off_time_slot || 'N/A';
+    const origPickTime = convertTo12Hour(booking?.pickup_time_slot) || booking?.pickup_time_slot || 'N/A';
+    const newDropTimeLabel = convertTo12Hour(newDropOffTime) || newDropOffTime || 'N/A';
+    const newPickTimeLabel = convertTo12Hour(newPickupTime) || newPickupTime || 'N/A';
     
     return (
         <div className="space-y-6">
@@ -45,7 +50,7 @@ export const RescheduleReviewSummary = ({
                         <div className="flex items-start gap-2">
                             <Clock className="w-4 h-4 text-gray-400 mt-0.5" />
                             <div className="text-sm text-gray-300">
-                                {booking.drop_off_time_slot} / {booking.pickup_time_slot}
+                                {origDropTime} / {origPickTime}
                             </div>
                         </div>
                     </CardContent>
@@ -79,7 +84,7 @@ export const RescheduleReviewSummary = ({
                         <div className="flex items-start gap-2">
                             <Clock className="w-4 h-4 text-yellow-400 mt-0.5" />
                             <div className="text-sm text-white">
-                                {newDropOffTime} / {newPickupTime}
+                                {newDropTimeLabel} / {newPickTimeLabel}
                             </div>
                         </div>
                     </CardContent>

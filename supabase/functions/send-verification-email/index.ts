@@ -1,20 +1,58 @@
-import { corsHeaders } from "./cors.ts";
+import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
-const SITE_URL = "https://u-filldumpsters.com";
+const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
+const DEFAULT_SITE_URL = "https://u-filldumpsters.com";
+
+function normalizeSiteUrl(url?: string | null) {
+  const fallback = Deno.env.get("SITE_URL") || DEFAULT_SITE_URL;
+  const candidate = url && url.trim().length > 0 ? url : fallback;
+
+  try {
+    const parsed = new URL(candidate);
+    return `${parsed.origin}`.replace(/\/$/, "");
+  } catch {
+    return DEFAULT_SITE_URL;
+  }
+}
 Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: corsHeaders
     });
   }
   try {
-    const { email, name } = await req.json();
+    const { email, name, pending_customer_id, token, site_url } = await req.json();
     if (!email) {
       return new Response(JSON.stringify({
         error: "Email is required"
       }), {
         status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    if (!BREVO_API_KEY || BREVO_API_KEY.trim().length === 0) {
+      console.error("[send-verification-email] Missing BREVO_API_KEY");
+      return new Response(JSON.stringify({
+        error: "Email service is not configured. Please contact support."
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    if (!BREVO_FROM_EMAIL || BREVO_FROM_EMAIL.trim().length === 0) {
+      console.error("[send-verification-email] Missing BREVO_FROM_EMAIL");
+      return new Response(JSON.stringify({
+        error: "Sender email is not configured. Please contact support."
+      }), {
+        status: 500,
         headers: {
           ...corsHeaders,
           "Content-Type": "application/json"
@@ -28,13 +66,19 @@ Deno.serve(async (req)=>{
     // Generate 6-digit verification code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const emailLowerForStore = email.toLowerCase();
     console.log("[send-verification-email] Generating code for:", email);
-    // Store verification code in database
+    // Preserve prior verification so checkout save still works if a new code is resent
+    const { data: existingVerification } = await supabase
+      .from("email_verifications")
+      .select("is_verified")
+      .eq("email", emailLowerForStore)
+      .maybeSingle();
     const { error: dbError } = await supabase.from("email_verifications").upsert({
-      email: email.toLowerCase(),
+      email: emailLowerForStore,
       verification_code: verificationCode,
       code_expires_at: expiresAt.toISOString(),
-      is_verified: false,
+      is_verified: Boolean(existingVerification?.is_verified),
       attempts: 0,
       created_at: new Date().toISOString()
     }, {
@@ -44,11 +88,16 @@ Deno.serve(async (req)=>{
       console.error("[send-verification-email] Database error:", dbError);
       throw new Error("Failed to store verification code");
     }
-    // Generate verification link using correct domain
-    const verifyLink = `${SITE_URL}/verify?code=${encodeURIComponent(verificationCode)}`;
+    const siteUrl = normalizeSiteUrl(site_url);
+    const pendingToken = String(pending_customer_id ?? token ?? "").trim();
+    const emailLower = email.toLowerCase();
+    const verifyPath = pendingToken
+      ? `/verify-email?token=${encodeURIComponent(pendingToken)}&code=${encodeURIComponent(verificationCode)}`
+      : `/customer-login?code=${encodeURIComponent(verificationCode)}&email=${encodeURIComponent(emailLower)}&recover=1`;
+    const verifyLink = `${siteUrl}${verifyPath}`;
     console.log("[send-verification-email] Verification link:", verifyLink);
     // Send email via Brevo
-    const emailHtml = generateEmailTemplate(verificationCode, verifyLink, name || "Customer");
+    const emailHtml = generateEmailTemplate(verificationCode, verifyLink, name || "Customer", siteUrl);
     const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -58,7 +107,7 @@ Deno.serve(async (req)=>{
       body: JSON.stringify({
         sender: {
           name: "U-Fill Dumpsters",
-          email: Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com"
+          email: BREVO_FROM_EMAIL
         },
         to: [
           {
@@ -100,7 +149,7 @@ Deno.serve(async (req)=>{
     });
   }
 });
-function generateEmailTemplate(code, verifyLink, name) {
+function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_URL) {
   const currentYear = new Date().getFullYear();
   return `
     <!DOCTYPE html>
@@ -256,7 +305,7 @@ function generateEmailTemplate(code, verifyLink, name) {
         <div class="footer">
           <p>&copy; ${currentYear} U-Fill Dumpsters LLC. All rights reserved.</p>
           <p>If you did not request this verification, you can safely ignore this email.</p>
-          <p><a href="https://u-filldumpsters.com/contact">Contact Support</a> | <a href="https://u-filldumpsters.com/faq">FAQ</a></p>
+          <p><a href="${siteUrl}/contact">Contact Support</a> | <a href="${siteUrl}/faqs">FAQ</a></p>
         </div>
       </div>
     </body>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,11 +8,17 @@ import { toast } from '@/components/ui/use-toast';
 import { ProtectionSection } from './addons/ProtectionSection';
 import { EquipmentSection } from './addons/EquipmentSection';
 import { OrderSummary } from './addons/OrderSummary';
+import { DeclineWarningDialog } from './addons/DeclineWarningDialog';
 import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
+import { buildProtectionPlanIdsPayload } from '@/utils/protectionPlans';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
+import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
+import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { useTaxRate } from '@/utils/getTaxRate';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 
 // Equipment metadata (IDs 1-6 only - ID 7 is Premium Insurance service, not equipment)
 const equipmentMeta = [
@@ -27,7 +33,8 @@ const disposalMeta = [
   { id: 'applianceDisposal', dbId: 6, label: 'Appliance Disposal', price: 0, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
 ];
 
-export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress }) => {
+export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress, customerEmail }) => {
+  const [customerId, setCustomerId] = useState(null);
   const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
   const [showDrivewayDeclineWarning, setShowDrivewayDeclineWarning] = useState(false);
   const [showDisposalInfo, setShowDisposalInfo] = useState(false);
@@ -39,10 +46,41 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
 
   // Load insurance and driveway protection prices from hooks
-  const { insurancePrice, loading: insuranceLoading } = useInsurancePricing();
-  const { drivewayPrice, loading: drivewayLoading } = useDrivewayProtectionPrice();
+  const { insurancePrice, loading: insuranceLoading, rentalInsurance } = useInsurancePricing(plan?.id);
+  const { drivewayPrice, loading: drivewayLoading, drivewayProtection } = useDrivewayProtectionPrice(plan?.id);
+  const { taxRate, loading: loadingTaxRate } = useTaxRate();
+  const { taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
+
+  useEffect(() => {
+    if (contactAddress?.customerId) {
+      setCustomerId(contactAddress.customerId);
+      return;
+    }
+
+    const lookupCustomer = async () => {
+      if (!customerEmail?.includes('@')) {
+        setCustomerId(null);
+        return;
+      }
+      const { data } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('email', customerEmail.toLowerCase().trim())
+        .maybeSingle();
+      setCustomerId(data?.id ?? null);
+    };
+    lookupCustomer();
+  }, [customerEmail, contactAddress?.customerId]);
+
+  const handlePointsRedemption = (points, discountAmount) => {
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: points,
+      loyaltyDiscountAmount: discountAmount,
+    }));
+  };
 
   console.log('[AddonsForm] Insurance price from hook:', insurancePrice);
   console.log('[AddonsForm] Driveway protection price from hook:', drivewayPrice);
@@ -188,55 +226,23 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
     }
 
-    let finalTotal = basePrice || 0;
-    
-    if (isDeliveryRequired) {
-        finalTotal += appliedDeliveryFeeFlat || 0;
-    }
-
-    // Dynamic insurance price from database (via hook - services table ID 7)
-    if (addonsData?.insurance === 'accept') {
-      finalTotal += insurancePrice;
-      console.log('[AddonsForm] Adding insurance cost (from services table):', insurancePrice);
-    }
-    
-    // Dynamic driveway protection price from database (via hook)
-    if (addonsData?.drivewayProtection === 'accept' && isDeliveryRequired) {
-      finalTotal += drivewayPrice;
-      console.log('[AddonsForm] Adding driveway protection cost:', drivewayPrice);
-    }
-    
-    // Equipment prices from database (IDs 1-6 only)
-    if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
-        addonsData.equipment.forEach(item => {
-          const meta = equipmentMetaWithPrices.find(e => e.id === item.id);
-          if (meta) {
-            finalTotal += meta.price * item.quantity;
-            console.log('[AddonsForm] Adding equipment cost:', meta.label, meta.price * item.quantity);
-          }
-        });
-    }
-
     let totalDisposalFee = 0;
     let disposalItemsList = [];
-    
+
     // Do not process disposal items for Dump Loader Trailer (ID 2)
     if (plan?.id !== 2) {
       if (addonsData?.mattressDisposal > 0) {
           const mattressPrice = disposalMetaWithPrices.find(d => d.id === 'mattressDisposal')?.price || 25;
-          finalTotal += mattressPrice * addonsData.mattressDisposal;
           totalDisposalFee += mattressPrice * addonsData.mattressDisposal;
           disposalItemsList.push(`${addonsData.mattressDisposal}x Mattress Disposal`);
       }
       if (addonsData?.tvDisposal > 0) {
           const tvPrice = disposalMetaWithPrices.find(d => d.id === 'tvDisposal')?.price || 15;
-          finalTotal += tvPrice * addonsData.tvDisposal;
           totalDisposalFee += tvPrice * addonsData.tvDisposal;
           disposalItemsList.push(`${addonsData.tvDisposal}x TV Disposal`);
       }
       if (addonsData?.applianceDisposal > 0) {
           const appliancePrice = disposalMetaWithPrices.find(d => d.id === 'applianceDisposal')?.price || 35;
-          finalTotal += appliancePrice * addonsData.applianceDisposal;
           totalDisposalFee += appliancePrice * addonsData.applianceDisposal;
           disposalItemsList.push(`${addonsData.applianceDisposal}x Appliance Disposal`);
       }
@@ -245,25 +251,14 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate);
     const resolvedMileageCharge = calculatedMileageCharge !== undefined ? calculatedMileageCharge : (feeResult.trip_mileage_cost || 0);
 
-    if (resolvedMileageCharge > 0 && isDeliveryRequired) {
-      finalTotal += resolvedMileageCharge;
-    }
-
-    if (addonsData?.coupon && addonsData.coupon.isValid) {
-      if (addonsData.coupon.discountType === 'fixed') {
-        finalTotal = Math.max(0, finalTotal - (addonsData.coupon.discountValue || 0));
-      } else if (addonsData.coupon.discountType === 'percentage') {
-        finalTotal = finalTotal - (finalTotal * ((addonsData.coupon.discountValue || 0) / 100));
-      }
-    }
-    
-    const updatedAddons = { 
-        ...addonsData, 
+    const updatedAddons = {
+        ...addonsData,
         deliveryFee: isDeliveryRequired ? appliedDeliveryFeeFlat : 0,
-        mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0, 
+        mileageCharge: isDeliveryRequired ? resolvedMileageCharge : 0,
         distanceFeeDisplay: feeResult.displayText,
         insurancePriceApplied: addonsData?.insurance === 'accept' ? insurancePrice : 0,
-        drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0
+        drivewayPriceApplied: addonsData?.drivewayProtection === 'accept' ? drivewayPrice : 0,
+        protectionPlanIds: buildProtectionPlanIdsPayload(rentalInsurance, drivewayProtection),
     };
 
     if (disposalItemsList.length > 0) {
@@ -272,7 +267,26 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         updatedAddons.disposalNotes = null;
     }
 
-    console.log('[AddonsForm] Final total calculated:', finalTotal);
+    const equipmentPrices = {};
+    equipmentMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+    disposalMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+
+    const calcResult = calculateBookingTotal(
+      plan,
+      updatedAddons,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+    const finalTotal = calcResult.total;
+
+    console.log('[AddonsForm] Final total calculated (tax-inclusive):', finalTotal);
     console.log('[AddonsForm] Updated addons:', updatedAddons);
 
     onSubmit(finalTotal, null, updatedAddons);
@@ -281,6 +295,38 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const handleCouponApply = (coupon) => {
     setAddonsData(prev => ({ ...prev, coupon }));
   };
+
+  const loyaltyPreviewTotal = useMemo(() => {
+    const equipmentPrices = {};
+    equipmentMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+    disposalMetaWithPrices.forEach((item) => {
+      equipmentPrices[item.dbId] = item.price;
+    });
+
+    const estimate = calculateBookingTotal(
+      plan,
+      addonsData,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+
+    return Number(estimate?.total || basePrice || 0);
+  }, [
+    addonsData,
+    basePrice,
+    deliveryService,
+    disposalMetaWithPrices,
+    equipmentMetaWithPrices,
+    insurancePrice,
+    plan,
+    taxOptions,
+    taxRate,
+  ]);
 
   if (!addonsData || !plan) {
     return null;
@@ -333,6 +379,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   plan={plan}
                   addonPrices={{ insurance: insurancePrice, drivewayProtection: drivewayPrice }}
                   isDelivery={deliveryService && plan.id === 2}
+                  hasDrivewayPlan={Boolean(drivewayProtection)}
+                  rentalInsurancePlan={rentalInsurance}
+                  drivewayProtectionPlan={drivewayProtection}
                 />
                 <EquipmentSection 
                   addonsData={addonsData}
@@ -410,7 +459,15 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
               </div>
             </div>
 
-            <div className="lg:col-span-1 z-0 relative">
+            <div className="lg:col-span-1 z-0 relative space-y-4">
+              {customerId && (
+                <LoyaltyPointsRedemption
+                  customerId={customerId}
+                  verifiedEmail={customerEmail?.toLowerCase().trim()}
+                  onPointsRedemption={handlePointsRedemption}
+                  currentTotal={loyaltyPreviewTotal}
+                />
+              )}
               <OrderSummary
                   plan={{...plan, price: basePrice}}
                   addons={addonsData}
@@ -468,23 +525,3 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     </>
   );
 };
-
-const DeclineWarningDialog = ({ open, onOpenChange, onConfirm, title, description }) => (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="bg-gray-900 border-yellow-400 text-white z-[9999]">
-            <DialogHeader>
-                <DialogTitle className="flex items-center text-yellow-400 text-2xl">
-                    <ArrowLeft className="mr-3 h-8 w-8" />
-                    {typeof title === 'string' ? title : 'Confirm'}
-                </DialogTitle>
-            </DialogHeader>
-            <DialogDescription className="my-4 text-base">
-                {typeof description === 'string' ? description : 'Please confirm your choice.'}
-            </DialogDescription>
-            <DialogFooter className="gap-2 sm:justify-center">
-                <Button onClick={() => onOpenChange(false)} variant="outline" className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black interactive-hover">Go Back & Accept</Button>
-                <Button onClick={onConfirm} variant="destructive" className="interactive-hover">I Understand & Decline</Button>
-            </DialogFooter>
-        </DialogContent>
-    </Dialog>
-);

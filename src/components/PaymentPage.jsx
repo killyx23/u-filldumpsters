@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, CreditCard, Lock, Loader2, AlertTriangle, Gift } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -12,14 +12,21 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/customSupabaseClient';
 import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
-import { useInsurancePricing } from '@/hooks/useInsurancePricing';
+import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { formatTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { UiControlGuide } from '@/components/UiControlGuide';
+import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
+import { buildPlanSnapshot } from '@/utils/servicePlan';
+import { ensureBookingMileage } from '@/utils/bookingMileage';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -29,6 +36,21 @@ const stripePromise =
 
 const formatMoney = (amount) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount ?? 0);
+
+const formatPaymentSetupError = (message) => {
+  if (!message) {
+    return 'Payment processing is temporarily unavailable. Please try again later.';
+  }
+
+  if (/STRIPE_SECRET_KEY|Stripe is not configured|did not provide an API key/i.test(message)) {
+    if (import.meta.env.DEV) {
+      return 'Stripe secret key is missing. Add STRIPE_SECRET_KEY to .env.local, run npm run supabase:sync-local-env, then restart Supabase functions.';
+    }
+    return 'Payment processing is not configured yet. Please contact support.';
+  }
+
+  return message;
+};
 
 const ConfirmationLine = ({ label, value }) => (
   <div className="flex justify-between items-start py-1.5 border-b border-white/5 last:border-0">
@@ -74,6 +96,24 @@ const CheckoutForm = ({
   const [delivery_location_verified, setDeliveryLocation_Verified] = useState(false);
   const [formError, setFormError] = useState(null);
   const [isPaymentElementReady, setIsPaymentElementReady] = useState(false);
+  const [paymentElementError, setPaymentElementError] = useState(null);
+
+  // PaymentElement only becomes interactive after Stripe.js and Elements finish loading.
+  useEffect(() => {
+    if (!stripe || !elements) {
+      setIsPaymentElementReady(false);
+    }
+  }, [stripe, elements]);
+
+  useEffect(() => {
+    if (isPaymentElementReady || paymentElementError) return undefined;
+    const timeoutId = window.setTimeout(() => {
+      setPaymentElementError(
+        'The secure card form is taking longer than expected. Try refreshing the page or disabling ad blockers for this site.'
+      );
+    }, 20000);
+    return () => window.clearTimeout(timeoutId);
+  }, [isPaymentElementReady, paymentElementError]);
   
   const isDelivery = plan?.id === 2 && deliveryService;
   const currentPlan = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : (plan || {});
@@ -132,10 +172,7 @@ const CheckoutForm = ({
     try {
       if (isDeliveryService && delivery_location_verified) {
         console.log(`[${timestamp}] [PaymentPage] Updating delivery location verification...`);
-        await supabase.from('bookings').update({ 
-          delivery_location_verified: true, 
-          delivery_location_verified_at: new Date().toISOString() 
-        }).eq('id', bookingId);
+        await supabase.rpc('mark_booking_delivery_verified', { p_booking_id: bookingId });
       }
 
       console.log(`[${timestamp}] [PaymentPage] Confirming payment with Stripe...`);
@@ -199,6 +236,7 @@ const CheckoutForm = ({
 
   // Service-specific labels
   const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+  const isCustomerPickup = isCustomerPickupService(plan, { ...addonsData, deliveryService });
   const dropoffLabel = getServiceSpecificDateLabel(plan, isDelivery, 'dropoff');
   const pickupLabel = getServiceSpecificDateLabel(plan, isDelivery, 'pickup');
 
@@ -210,7 +248,16 @@ const CheckoutForm = ({
 
   const getDisplayTime = (timeSlot, isDropOff) => {
     if (plan?.id === 2 && !deliveryService) {
-      return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
+      const fromAvailability = isDropOff
+        ? availabilityTimes.pickupStartTime
+        : availabilityTimes.returnByTime;
+      if (fromAvailability && fromAvailability !== 'Time not specified') {
+        return fromAvailability;
+      }
+      return formatTimeWindow(timeSlot, {
+        ...timeOptions,
+        isReturnBy: !isDropOff,
+      });
     }
     return formatTimeWindow(timeSlot, timeOptions);
   };
@@ -218,12 +265,14 @@ const CheckoutForm = ({
   const formatConfirmationValue = (date, timeSlot, isDropOff, label) => {
     const formattedDate = formatDate(date);
     const time = getDisplayTime(timeSlot, isDropOff);
-    
+    const yardLocation =
+      isCustomerPickup && isDropOff ? '\nOn the South Side of Saratoga Springs' : '';
+
     if (isSelfService) {
       const timeLabel = isDropOff ? 'Pickup Start Time' : 'Return by Time';
-      return `${formattedDate}\n${timeLabel}: ${time}`;
+      return `${formattedDate}\n${timeLabel}: ${time}${yardLocation}`;
     } else {
-      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}`;
+      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}${yardLocation}`;
     }
   };
 
@@ -323,10 +372,24 @@ const CheckoutForm = ({
           {pricingBreakdown.discount > 0 && (
             <>
               <CategoryHeader icon="🏷️" title="Discounts" />
-              <BreakdownLine 
-                label={`Coupon (${addonsData?.coupon?.code || 'Applied'})`} 
-                value={-pricingBreakdown.discount} 
-              />
+              {pricingBreakdown.couponDiscount > 0 && (
+                <BreakdownLine
+                  label={`Coupon (${addonsData?.coupon?.code || 'Applied'})`}
+                  value={-pricingBreakdown.couponDiscount}
+                />
+              )}
+              {pricingBreakdown.loyaltyDiscount > 0 && (
+                <BreakdownLine
+                  label={`Loyalty Points (${Number(addonsData?.loyaltyPointsToRedeem || 0)} pts)`}
+                  value={-pricingBreakdown.loyaltyDiscount}
+                />
+              )}
+              {pricingBreakdown.referralDiscount > 0 && (
+                <BreakdownLine
+                  label={`Referral Wallet ($${Number(addonsData?.referralDollarsToRedeem || 0).toFixed(2)})`}
+                  value={-pricingBreakdown.referralDiscount}
+                />
+              )}
             </>
           )}
           
@@ -356,22 +419,50 @@ const CheckoutForm = ({
       </div>
 
       <form onSubmit={handlePayment}>
-        <div className="mb-6">
-          <PaymentElement 
-            onReady={() => setIsPaymentElementReady(true)} 
-            options={{ 
-              layout: 'tabs', 
-              fields: { 
-                billingDetails: { 
-                  name: 'never', 
-                  email: 'never', 
-                  phone: 'never', 
-                  address: 'never' 
+        <div className="mb-6 min-h-[120px]">
+          {stripe && elements ? (
+            <PaymentElement 
+              onReady={() => {
+                setPaymentElementError(null);
+                setIsPaymentElementReady(true);
+              }}
+              onLoadError={(event) => {
+                console.error('[PaymentPage] PaymentElement load error:', event);
+                setIsPaymentElementReady(false);
+                setPaymentElementError(event?.error?.message || 'Failed to load payment form. Please refresh the page.');
+              }}
+              options={{ 
+                layout: 'accordion',
+                fields: { 
+                  billingDetails: { 
+                    name: 'never', 
+                    email: 'never', 
+                    phone: 'never', 
+                    address: 'never' 
+                  } 
                 } 
-              } 
-            }} 
-          />
+              }} 
+            />
+          ) : (
+            <p className="text-sm text-blue-200/70 flex items-center">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Connecting to secure payment...
+            </p>
+          )}
+          {stripe && elements && !isPaymentElementReady && !paymentElementError && (
+            <p className="text-sm text-blue-200/70 mt-2 flex items-center">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading secure card form...
+            </p>
+          )}
         </div>
+        
+        {paymentElementError && (
+          <div className="mb-6 flex items-start text-red-400 text-sm bg-red-950/40 p-3 rounded border border-red-500/30">
+            <span className="mr-2 flex-shrink-0">⚠</span>
+            <p>{paymentElementError}</p>
+          </div>
+        )}
         
         {formError && (
           <div className="mb-6 flex items-start text-red-400 text-sm bg-red-950/40 p-3 rounded border border-red-500/30">
@@ -384,7 +475,7 @@ const CheckoutForm = ({
           <Checkbox 
             id="confirm-details" 
             checked={isConfirmed} 
-            onCheckedChange={setIsConfirmed} 
+            onCheckedChange={(checked) => setIsConfirmed(checked === true)} 
             disabled={isProcessing} 
             className="border-white/50 data-[state=checked]:bg-green-500 data-[state=checked]:border-green-500" 
           />
@@ -428,6 +519,11 @@ const CheckoutForm = ({
           <Lock className="h-3 w-3 mr-1.5 text-blue-400" /> 
           Secure 256-bit SSL Encrypted Payment
         </p>
+        <UiControlGuide
+          stepTitle="Payment"
+          entries={getBookingGuideEntries('payment', { isDeliveryService })}
+          className="mt-3 flex justify-end"
+        />
       </form>
     </div>
   );
@@ -446,6 +542,7 @@ export const PaymentPage = ({ onBack }) => {
   const [clientSecret, setClientSecret] = useState(null);
   const [bookingId, setBookingId] = useState(null);
   const [bookingCreated, setBookingCreated] = useState(false);
+  const paymentIntentInitRef = useRef(false);
   
   // Retrieved booking data from pending_customers
   const [pendingCustomerData, setPendingCustomerData] = useState(null);
@@ -455,11 +552,18 @@ export const PaymentPage = ({ onBack }) => {
   const [deliveryService, setDeliveryService] = useState(false);
   const [loadingBookingData, setLoadingBookingData] = useState(true);
   const [dataError, setDataError] = useState(null);
-  
+  const [dataErrorTitle, setDataErrorTitle] = useState('Booking Creation Failed');
+
   const [validatedTotal, setValidatedTotal] = useState(0);
+  const [rewardsOffer, setRewardsOffer] = useState(null);
+  const [rewardsChoiceResolved, setRewardsChoiceResolved] = useState(false);
+  const [rewardsDraft, setRewardsDraft] = useState({
+    pointsToRedeem: 0,
+    referralDollarsToRedeem: 0,
+  });
 
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
-  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+  const { insurancePrice, taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
   // Load equipment prices
   useEffect(() => {
@@ -498,6 +602,7 @@ export const PaymentPage = ({ onBack }) => {
       const pendingId = searchParams.get('bookingId');
       
       if (!pendingId) {
+        setDataErrorTitle('Booking Creation Failed');
         setDataError('Missing booking ID. Cannot retrieve your booking data.');
         setLoadingBookingData(false);
         return;
@@ -507,51 +612,63 @@ export const PaymentPage = ({ onBack }) => {
       console.log(`[${timestamp}] [PaymentPage] Retrieving booking data for ID: ${pendingId}`);
 
       try {
-        const { data, error } = await supabase
-          .from('pending_customers')
-          .select('*')
-          .eq('id', pendingId)
-          .single();
+        const { data, error } = await supabase.rpc('get_pending_customer_by_id', { p_id: pendingId });
 
         if (error) {
           console.error(`[${timestamp}] [PaymentPage] Error fetching pending customer:`, error);
           throw new Error('Could not find your booking. Please restart the booking process.');
         }
 
-        if (!data) {
+        const pendingRecord = Array.isArray(data) ? data[0] : data;
+
+        if (!pendingRecord) {
           throw new Error('Booking not found. Please restart the booking process.');
         }
 
-        console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, data);
+        if (!pendingRecord.is_verified) {
+          toast({
+            title: 'Verification required',
+            description: 'Please complete email verification before payment.',
+            variant: 'destructive',
+          });
+          navigate(`/verify-email?token=${pendingId}`);
+          setLoadingBookingData(false);
+          return;
+        }
+
+        console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, pendingRecord);
 
         // Reconstruct booking data from pending_customers
         const retrievedBookingData = {
-          firstName: data.first_name || '',
-          lastName: data.last_name || '',
-          email: data.email || '',
-          phone: data.phone || '',
-          contactAddress: data.contact_address || { 
-            street: data.street, 
-            city: data.city, 
-            state: data.state, 
-            zip: data.zip 
+          firstName: pendingRecord.first_name || '',
+          lastName: pendingRecord.last_name || '',
+          email: pendingRecord.email || '',
+          phone: pendingRecord.phone || '',
+          contactAddress: pendingRecord.contact_address || {
+            street: pendingRecord.street,
+            city: pendingRecord.city,
+            state: pendingRecord.state,
+            zip: pendingRecord.zip
           },
-          dropOffDate: data.drop_off_date,
-          pickupDate: data.pickup_date,
-          dropOffTimeSlot: data.drop_off_time_slot || '',
-          pickupTimeSlot: data.pickup_time_slot || '',
-          notes: data.notes || '',
-          ...data.booking_data
+          dropOffDate: pendingRecord.drop_off_date,
+          pickupDate: pendingRecord.pickup_date,
+          dropOffTimeSlot: pendingRecord.drop_off_time_slot || '',
+          pickupTimeSlot: pendingRecord.pickup_time_slot || '',
+          notes: pendingRecord.notes || '',
+          ...pendingRecord.booking_data
         };
 
-        setPendingCustomerData(data);
+        const hydratedPlan = await hydratePlanFromPending(pendingRecord);
+
+        setPendingCustomerData(pendingRecord);
         setBookingData(retrievedBookingData);
-        setPlan(data.plan_data);
-        setAddonsData(data.addons_data || {});
-        setDeliveryService(data.delivery_service || false);
+        setPlan(hydratedPlan);
+        setAddonsData(pendingRecord.addons_data || {});
+        setDeliveryService(pendingRecord.delivery_service || false);
 
       } catch (error) {
         console.error(`[${timestamp}] [PaymentPage] Failed to retrieve booking:`, error);
+        setDataErrorTitle('Booking Creation Failed');
         setDataError(error.message);
       } finally {
         setLoadingBookingData(false);
@@ -559,11 +676,11 @@ export const PaymentPage = ({ onBack }) => {
     };
 
     retrieveBookingData();
-  }, [searchParams]);
+  }, [searchParams, navigate]);
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
-    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingInsurancePrice || bookingCreated) return;
+    if (loadingBookingData || loadingPrices || loadingTaxRate || loadingTaxOptions || bookingCreated || !rewardsChoiceResolved) return;
     if (!pendingCustomerData) return;
 
     const createActualBooking = async (retrievedBookingData, pendingData, validatedTotalAmount, calcResult) => {
@@ -571,9 +688,26 @@ export const PaymentPage = ({ onBack }) => {
       console.log(`[${timestamp}] [PaymentPage] Creating actual booking from pending customer data with total $${validatedTotalAmount}...`);
 
       try {
+        const referralCodeFromStorage =
+          typeof window !== 'undefined' ? window.localStorage.getItem('referral_code') : null;
+        const normalizedReferralCode = String(
+          pendingData.addons_data?.referralCode ||
+          pendingData.addons_data?.referral_code ||
+          referralCodeFromStorage ||
+          ''
+        ).trim();
         const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
-        const isUnverifiedDelivery = pendingData.delivery_address && 
+        const driverVerificationSkipped = Boolean(pendingData.addons_data?.wasVerificationSkipped);
+        const isUnverifiedDelivery = pendingData.delivery_address &&
                                      !pendingData.delivery_address.isVerified;
+
+        const liveService = await hydratePlanFromPending(pendingData);
+        const quotedPrice = Number(pendingData.base_price ?? 0);
+        const auditPlan = buildPlanSnapshot(liveService, {
+          price: quotedPrice,
+          mileage_rate: liveService?.mileage_rate,
+          delivery_fee: liveService?.delivery_fee,
+        });
 
         const bookingPayload = {
           name: fullName,
@@ -592,17 +726,33 @@ export const PaymentPage = ({ onBack }) => {
           pickup_date: pendingData.pickup_date,
           drop_off_time_slot: pendingData.drop_off_time_slot,
           pickup_time_slot: pendingData.pickup_time_slot,
-          plan: pendingData.plan_data,
+          plan: auditPlan,
           total_price: validatedTotalAmount,
           subtotal_before_tax: calcResult.subtotal,
           tax_amount: calcResult.tax,
           tax_rate_used: calcResult.taxRate,
           status: 'pending_payment',
-          was_verification_skipped: isUnverifiedDelivery,
+          was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
+          distance_miles: Number(
+            pendingData.addons_data?.oneWayDistanceMiles ||
+              pendingData.distance_miles ||
+              0
+          ) || 0,
           addons: {
             ...pendingData.addons_data,
+            verificationSkipped: driverVerificationSkipped,
             isDelivery: pendingData.delivery_service,
+            referralCode: normalizedReferralCode || null,
+            taxableSubtotal: calcResult.taxableSubtotal,
+            nonTaxableSubtotal: calcResult.nonTaxableSubtotal,
+            taxLineItemsSnapshot: (calcResult.lineItems || []).map((line) => ({
+              key: line.key,
+              label: line.label,
+              amount: line.amount,
+              is_taxable: line.is_taxable,
+              amountAfterDiscount: line.amountAfterDiscount,
+            })),
           },
         };
 
@@ -624,17 +774,54 @@ export const PaymentPage = ({ onBack }) => {
 
         console.log(`[${timestamp}] [PaymentPage] ✓ Booking created with ID: ${data.id}`);
         setBookingId(data.id);
+        if (normalizedReferralCode && typeof window !== 'undefined') {
+          window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
+        }
 
-        // Handle license images if present
-        if (pendingData.addons_data?.licenseImageUrls?.length > 0) {
-          console.log(`[${timestamp}] [PaymentPage] Updating customer with license info...`);
-          await supabase
-            .from('customers')
-            .update({
-              license_plate: pendingData.addons_data.licensePlate,
-              license_image_urls: pendingData.addons_data.licenseImageUrls,
-            })
-            .eq('id', data.customer_id);
+        try {
+          await ensureBookingMileage(
+            {
+              id: data.id,
+              customer_id: data.customer_id,
+              plan: auditPlan,
+              addons: bookingPayload.addons,
+              delivery_address: bookingPayload.delivery_address,
+              street: bookingPayload.street,
+              city: bookingPayload.city,
+              state: bookingPayload.state,
+              zip: bookingPayload.zip,
+              distance_miles: bookingPayload.distance_miles,
+            },
+            {
+              oneWayMilesOverride: bookingPayload.distance_miles || null,
+              source: 'booking_create',
+              recalculateIfMissing: !bookingPayload.distance_miles,
+            }
+          );
+        } catch (mileageErr) {
+          console.warn(`[${timestamp}] [PaymentPage] Mileage log sync failed:`, mileageErr);
+        }
+
+        // Persist license + insurance into customers + driver_verification_documents
+        // via SECURITY DEFINER RPC (anon upserts are blocked by RLS).
+        const licenseImageUrls = pendingData.addons_data?.licenseImageUrls || [];
+        const insuranceImageUrl = pendingData.addons_data?.insuranceImageUrl || null;
+        const hasLicenseImages = Array.isArray(licenseImageUrls) && licenseImageUrls.length > 0;
+        const hasInsuranceImage = Boolean(insuranceImageUrl?.url || insuranceImageUrl?.path);
+        if (hasLicenseImages || hasInsuranceImage || pendingData.addons_data?.licensePlate) {
+          console.log(`[${timestamp}] [PaymentPage] Updating customer with verification docs...`);
+          const { error: licenseSyncError } = await supabase.rpc('update_customer_license_from_checkout', {
+            p_booking_id: data.id,
+            p_license_plate: pendingData.addons_data.licensePlate || null,
+            p_license_image_urls: hasLicenseImages ? licenseImageUrls : null,
+            p_insurance_image: hasInsuranceImage ? insuranceImageUrl : null,
+          });
+          if (licenseSyncError) {
+            console.error(
+              `[${timestamp}] [PaymentPage] Verification docs sync failed after booking creation:`,
+              licenseSyncError,
+            );
+          }
         }
 
         // Decrement equipment quantities if needed
@@ -658,15 +845,29 @@ export const PaymentPage = ({ onBack }) => {
     const createBooking = async () => {
       const timestamp = new Date().toISOString();
       try {
+        if (!pendingCustomerData?.is_verified) {
+          throw new Error('Verification is required before creating a booking. Please complete verification first.');
+        }
+
         console.log(`[${timestamp}] [PaymentPage] Validating pricing before booking creation...`);
         
         // Calculate expected total with all up-to-date prices
-        const calcResult = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
-        
-        // Prefer stored total if it exists and is valid
-        let finalTotal = parseFloat(pendingCustomerData.total_price);
-        if (!Number.isFinite(finalTotal) || finalTotal <= 0) {
-          finalTotal = calcResult.total;
+        const calcResult = calculateBookingTotal(
+          plan,
+          addonsData,
+          equipmentPrices,
+          taxRate,
+          deliveryService,
+          insurancePrice,
+          taxOptions
+        );
+
+        const finalTotal = calcResult.total;
+        const pendingTotal = parseFloat(pendingCustomerData.total_price);
+        if (Number.isFinite(pendingTotal) && pendingTotal > 0 && Math.abs(pendingTotal - finalTotal) > 0.02) {
+          console.warn(
+            `[${timestamp}] [PaymentPage] Pending total ($${pendingTotal}) differs from calculated total ($${finalTotal}); using calculated total.`
+          );
         }
 
         // Final validation
@@ -680,12 +881,139 @@ export const PaymentPage = ({ onBack }) => {
         setBookingCreated(true);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Pricing validation/booking creation failed:`, err);
+        setDataErrorTitle('Booking Creation Failed');
         setDataError(err.message);
       }
     };
     
     createBooking();
-  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingInsurancePrice, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, bookingData]);
+  }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingTaxOptions, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingData, rewardsChoiceResolved]);
+
+  const [equipmentPrices, setEquipmentPrices] = useState({});
+  const [loadingPrices, setLoadingPrices] = useState(true);
+  const [availabilityTimes, setAvailabilityTimes] = useState({
+    pickupStartTime: 'Time not specified',
+    returnByTime: 'Time not specified'
+  });
+  const [clientSecret, setClientSecret] = useState(null);
+  const [bookingId, setBookingId] = useState(null);
+  const [bookingCreated, setBookingCreated] = useState(false);
+  
+  // Retrieved booking data from pending_customers
+  const [pendingCustomerData, setPendingCustomerData] = useState(null);
+  const [bookingData, setBookingData] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [addonsData, setAddonsData] = useState(null);
+  const [deliveryService, setDeliveryService] = useState(false);
+  const [loadingBookingData, setLoadingBookingData] = useState(true);
+  const [dataError, setDataError] = useState(null);
+  
+  const [validatedTotal, setValidatedTotal] = useState(0);
+
+  const { taxRate, loading: loadingTaxRate } = useTaxRate();
+  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
+
+  // Load equipment prices
+  useEffect(() => {
+    const initializeRewardsOffer = async () => {
+      if (loadingBookingData || !bookingData || !addonsData) return;
+
+      if (bookingData?.usedReturningCustomerLink) {
+        setRewardsChoiceResolved(true);
+        return;
+      }
+
+      if (Number(addonsData?.loyaltyPointsToRedeem || 0) > 0 || Number(addonsData?.referralDollarsToRedeem || 0) > 0) {
+        setRewardsChoiceResolved(true);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.functions.invoke('get-returning-customer-rewards', {
+          body: { email: bookingData.email },
+        });
+
+        const pointsBalance = Number(data?.pointsBalance || 0);
+        const referralAvailable = Number(data?.referralWallet?.availableBalance || 0);
+        const referralPending = Number(data?.referralWallet?.pendingBalance || 0);
+        if (!error && data?.success && (pointsBalance > 0 || referralAvailable > 0 || referralPending > 0)) {
+          setRewardsOffer({
+            pointsBalance,
+            pointsToDollar: Number(data.conversionRates?.pointsToDollar || 100),
+            referralAvailable,
+            referralPending,
+          });
+          setRewardsDraft({
+            pointsToRedeem: pointsBalance,
+            referralDollarsToRedeem: referralAvailable,
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('[PaymentPage] Rewards lookup failed:', err);
+      }
+
+      setRewardsChoiceResolved(true);
+    };
+
+    initializeRewardsOffer();
+  }, [loadingBookingData, bookingData, addonsData]);
+
+  const handleApplyRewards = () => {
+    if (!rewardsOffer) {
+      setRewardsChoiceResolved(true);
+      return;
+    }
+
+    const pointsToDollar = Number(rewardsOffer.pointsToDollar || 100);
+    const currentTotal = Number(pendingCustomerData?.total_price || 0);
+    const requestedPoints = Math.max(0, Number(rewardsDraft.pointsToRedeem || 0));
+    const requestedReferral = Math.max(0, Number(rewardsDraft.referralDollarsToRedeem || 0));
+    const maxPointsByBalance = Number(rewardsOffer.pointsBalance || 0);
+    const maxReferralByBalance = Number(rewardsOffer.referralAvailable || 0);
+    const pointsToRedeem = Math.min(requestedPoints, maxPointsByBalance, Math.floor(currentTotal * pointsToDollar));
+    const loyaltyDiscountAmount = Number((pointsToRedeem / pointsToDollar).toFixed(2));
+    const remainingAfterPoints = Math.max(0, currentTotal - loyaltyDiscountAmount);
+    const referralDollarsToRedeem = Math.min(requestedReferral, maxReferralByBalance, remainingAfterPoints);
+    const referralDiscountAmount = Number(referralDollarsToRedeem.toFixed(2));
+
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: pointsToRedeem,
+      loyaltyDiscountAmount,
+      referralDollarsToRedeem,
+      referralDiscountAmount,
+    }));
+    setPendingCustomerData((prev) => ({
+      ...prev,
+      addons_data: {
+        ...(prev?.addons_data || {}),
+        loyaltyPointsToRedeem: pointsToRedeem,
+        loyaltyDiscountAmount,
+        referralDollarsToRedeem,
+        referralDiscountAmount,
+      },
+    }));
+    toast({
+      title: 'Rewards Applied',
+      description: `${pointsToRedeem} points and $${referralDiscountAmount.toFixed(2)} referral wallet applied.`,
+    });
+
+    setRewardsOffer(null);
+    setRewardsChoiceResolved(true);
+  };
+
+  const handleSkipRewards = () => {
+    setAddonsData((prev) => ({
+      ...prev,
+      loyaltyPointsToRedeem: 0,
+      loyaltyDiscountAmount: 0,
+      referralDollarsToRedeem: 0,
+      referralDiscountAmount: 0,
+    }));
+    setRewardsOffer(null);
+    setRewardsChoiceResolved(true);
+  };
 
   // Load availability times for self-service
   useEffect(() => {
@@ -712,7 +1040,8 @@ export const PaymentPage = ({ onBack }) => {
 
   // Initialize payment intent once booking is created
   useEffect(() => {
-    if (!bookingId || !bookingCreated) return;
+    if (!bookingId || !bookingCreated || clientSecret || paymentIntentInitRef.current) return;
+    paymentIntentInitRef.current = true;
 
     const initPaymentIntent = async () => {
       const timestamp = new Date().toISOString();
@@ -736,11 +1065,11 @@ export const PaymentPage = ({ onBack }) => {
         setClientSecret(secret);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Payment intent error:`, err);
-        let errorMessage = 'Failed to initialize payment gateway. Please try again later.';
-        if (err.message && !err.message.includes('Failed to fetch')) {
-          errorMessage = `Payment Setup Error: ${err.message}`;
-        }
+        const parsedMessage = await parseEdgeFunctionError(err, null);
+        const errorMessage = `Payment Setup Error: ${formatPaymentSetupError(parsedMessage)}`;
+        setDataErrorTitle('Payment Setup Failed');
         setDataError(errorMessage);
+        paymentIntentInitRef.current = false;
         toast({ 
           title: 'Payment Error', 
           description: errorMessage, 
@@ -750,7 +1079,51 @@ export const PaymentPage = ({ onBack }) => {
     };
 
     initPaymentIntent();
-  }, [bookingId, bookingCreated]);
+  }, [bookingId, bookingCreated, clientSecret]);
+
+  const pricingBreakdown = useMemo(() => {
+    if (!plan || !addonsData || !bookingCreated) return null;
+    return calculateBookingTotal(
+      plan,
+      addonsData,
+      equipmentPrices,
+      taxRate,
+      deliveryService,
+      insurancePrice,
+      taxOptions
+    );
+  }, [plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingCreated]);
+
+  const elementsOptions = useMemo(() => {
+    if (!clientSecret) return null;
+    return {
+      clientSecret,
+      appearance: {
+        theme: 'night',
+        variables: { 
+          colorPrimary: '#facc15', 
+          colorBackground: '#1e293b', 
+          colorText: '#f1f5f9', 
+          colorDanger: '#ef4444', 
+          fontFamily: '"Inter", system-ui, sans-serif', 
+          borderRadius: '8px' 
+        },
+        rules: { 
+          '.Input': { 
+            backgroundColor: '#0f172a', 
+            border: '1px solid rgba(255,255,255,0.15)' 
+          }, 
+          '.Input:focus': { 
+            border: '1px solid #facc15', 
+            boxShadow: '0 0 0 2px rgba(250,204,21,0.2)' 
+          }, 
+          '.Label': { 
+            color: '#94a3b8' 
+          } 
+        }
+      }
+    };
+  }, [clientSecret]);
 
   if (!stripePromise) {
     return (
@@ -770,7 +1143,7 @@ export const PaymentPage = ({ onBack }) => {
         <div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-8 rounded-lg shadow-lg">
           <div className="flex items-center text-red-200 font-bold text-2xl mb-6">
             <AlertTriangle className="h-10 w-10 mr-3 text-red-400" />
-            Booking Creation Failed
+            {dataErrorTitle}
           </div>
           <p className="text-red-100 mb-8 text-lg">
             {dataError}
@@ -795,8 +1168,104 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  // Loading states
-  if (loadingBookingData || loadingPrices || loadingTaxRate || loadingInsurancePrice || !bookingData || !bookingCreated) {
+  // Initial load only — once we have a clientSecret, keep Stripe Elements mounted
+  const isBootstrapping =
+    loadingBookingData ||
+    loadingPrices ||
+    loadingTaxRate ||
+    loadingTaxOptions ||
+    !bookingData ||
+    !bookingCreated;
+
+  if (!rewardsChoiceResolved && !rewardsOffer) {
+    return (
+      <div className="flex flex-col justify-center items-center h-96 text-white">
+        <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
+        <span className="text-xl font-medium">Checking available rewards...</span>
+      </div>
+    );
+  }
+
+  if (rewardsOffer && !bookingCreated) {
+    const pointsToDollar = Number(rewardsOffer.pointsToDollar || 100);
+    const pointsDiscountPreview = Number((Number(rewardsDraft.pointsToRedeem || 0) / pointsToDollar).toFixed(2));
+    const referralPreview = Number(rewardsDraft.referralDollarsToRedeem || 0);
+    const totalPreview = Number((pointsDiscountPreview + referralPreview).toFixed(2));
+    const totalCap = Number(pendingCustomerData?.total_price || 0);
+    return (
+      <motion.div
+        initial={false}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -100 }}
+        transition={{ duration: 0.5 }}
+        className="container mx-auto py-16 px-4"
+      >
+        <div className="max-w-4xl mx-auto bg-gradient-to-br from-slate-900/80 via-purple-900/20 to-yellow-900/20 border border-yellow-500/30 rounded-2xl p-6 md:p-8 shadow-2xl">
+          <div className="flex items-start gap-4">
+            <Gift className="h-8 w-8 text-yellow-300 mt-1" />
+            <div className="flex-1 space-y-4">
+              <p className="text-xl text-yellow-100 font-bold">
+                Thank you for being a rewards member.
+              </p>
+              <p className="text-sm text-blue-100">
+                You can apply rewards now or save them for a larger discount later.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-black/30 border border-purple-500/30 rounded-xl p-4">
+                  <p className="text-sm text-purple-200">Points from previous purchases</p>
+                  <p className="text-3xl font-bold text-purple-300 mt-1">{rewardsOffer.pointsBalance}</p>
+                  <p className="text-xs text-purple-100 mt-1">{pointsToDollar} points = $1 off</p>
+                  <label className="block text-xs text-purple-100 mt-3 mb-1">Points to apply now</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={rewardsOffer.pointsBalance}
+                    value={rewardsDraft.pointsToRedeem}
+                    onChange={(e) => setRewardsDraft((prev) => ({ ...prev, pointsToRedeem: Number(e.target.value || 0) }))}
+                    className="w-full bg-slate-900 border border-purple-400/40 rounded px-3 py-2 text-white"
+                  />
+                </div>
+
+                <div className="bg-gradient-to-br from-yellow-200/20 via-amber-300/15 to-yellow-600/20 border border-yellow-400/40 rounded-xl p-4 relative overflow-hidden">
+                  <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-yellow-300/10 blur-xl" />
+                  <p className="text-sm text-yellow-100">Referral rewards wallet</p>
+                  <p className="text-3xl font-bold text-yellow-300 mt-1">${Number(rewardsOffer.referralAvailable || 0).toFixed(2)}</p>
+                  <p className="text-xs text-yellow-100 mt-1">Pending: ${Number(rewardsOffer.referralPending || 0).toFixed(2)} (activates after referred booking is completed)</p>
+                  <label className="block text-xs text-yellow-100 mt-3 mb-1">Referral dollars to apply now</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={Number(rewardsOffer.referralAvailable || 0)}
+                    step="0.01"
+                    value={rewardsDraft.referralDollarsToRedeem}
+                    onChange={(e) => setRewardsDraft((prev) => ({ ...prev, referralDollarsToRedeem: Number(e.target.value || 0) }))}
+                    className="w-full bg-slate-900 border border-yellow-400/40 rounded px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-black/30 border border-white/10 rounded-lg p-3 text-sm text-blue-100">
+                <p>Preview discount: <span className="font-semibold text-white">${totalPreview.toFixed(2)}</span></p>
+                <p className="text-xs text-blue-200 mt-1">Order cap: ${totalCap.toFixed(2)} (discounts never exceed subtotal/total).</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleApplyRewards} className="bg-purple-600 hover:bg-purple-700">
+                  Apply Rewards To This Order
+                </Button>
+                <Button onClick={handleSkipRewards} variant="outline">
+                  Save Rewards For Later
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  if (isBootstrapping && !clientSecret) {
     return (
       <div className="flex flex-col justify-center items-center h-96 text-white">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -805,7 +1274,7 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  if (!clientSecret) {
+  if (!clientSecret || !elementsOptions || !pricingBreakdown) {
     return (
       <div className="flex flex-col justify-center items-center h-96 text-white">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -815,45 +1284,19 @@ export const PaymentPage = ({ onBack }) => {
     );
   }
 
-  const elementsOptions = {
-    clientSecret,
-    appearance: {
-      theme: 'night',
-      variables: { 
-        colorPrimary: '#facc15', 
-        colorBackground: '#1e293b', 
-        colorText: '#f1f5f9', 
-        colorDanger: '#ef4444', 
-        fontFamily: '"Inter", system-ui, sans-serif', 
-        borderRadius: '8px' 
-      },
-      rules: { 
-        '.Input': { 
-          backgroundColor: '#0f172a', 
-          border: '1px solid rgba(255,255,255,0.15)' 
-        }, 
-        '.Input:focus': { 
-          border: '1px solid #facc15', 
-          boxShadow: '0 0 0 2px rgba(250,204,21,0.2)' 
-        }, 
-        '.Label': { 
-          color: '#94a3b8' 
-        } 
-      }
-    }
-  };
+  const displayTotal = validatedTotal > 0 ? validatedTotal : pricingBreakdown.total;
 
   const pricingBreakdown = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
 
   return (
     <motion.div 
-      initial={{ opacity: 0, x: 100 }} 
+      initial={false}
       animate={{ opacity: 1, x: 0 }} 
       exit={{ opacity: 0, x: -100 }} 
       transition={{ duration: 0.5 }} 
       className="container mx-auto py-16 px-4"
     >
-      <Elements stripe={stripePromise} options={elementsOptions}>
+      <Elements stripe={stripePromise} options={elementsOptions} key={clientSecret}>
         <CheckoutForm 
           onBack={onBack}
           bookingId={bookingId}
@@ -861,7 +1304,7 @@ export const PaymentPage = ({ onBack }) => {
           plan={plan}
           addonsData={addonsData}
           deliveryService={deliveryService}
-          validatedTotal={validatedTotal}
+          validatedTotal={displayTotal}
           pricingBreakdown={pricingBreakdown}
           availabilityTimes={availabilityTimes}
         />

@@ -14,6 +14,10 @@ import { Label } from '@/components/ui/label';
 import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -26,7 +30,9 @@ const DetailItem = ({ icon, label, value, className = '' }) => (
 );
 
 const DistanceWarning = ({ booking, customer }) => {
-    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || customer?.distance_miles || null);
+    const [distance, setDistance] = useState(
+        booking.distance_miles || booking.addons?.distanceInfo?.miles || customer?.distance_miles || null
+    );
     const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes || null);
 
     useEffect(() => {
@@ -137,7 +143,7 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
     );
 };
 
-const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
+const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) => {
     const returnableEquipment = equipment.filter(item => item.equipment?.name === 'Wheelbarrow' || item.equipment?.name === 'Hand Truck');
     
     const [checklist, setChecklist] = useState(() => {
@@ -218,7 +224,18 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
 
         const { error } = await supabase.from('bookings').update({ status: finalStatus, return_issues: returnIssues, damage_photos: damagePhotos }).eq('id', booking.id);
         if (error) toast({ title: "Error finalizing checklist", description: error.message, variant: "destructive" });
-        else { toast({ title: "Checklist finalized and status updated!" }); onUpdate(); }
+        else {
+            try {
+                await ensureBookingMileage(
+                    { ...booking, status: finalStatus },
+                    { customer, source: 'booking_complete', recalculateIfMissing: true }
+                );
+            } catch (mileageErr) {
+                console.warn('[ActiveRentals] mileage log on finalize failed:', mileageErr);
+            }
+            toast({ title: "Checklist finalized and status updated!" });
+            onUpdate();
+        }
     };
     
     const handlePhotoUpload = async (e) => {
@@ -324,6 +341,32 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate }) => {
 };
 
 export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, customer = {} }) => {
+    const [pinStatusByOrder, setPinStatusByOrder] = useState({});
+
+    useEffect(() => {
+        const pickupIds = (bookings || [])
+            .filter((b) => isCustomerPickupService(b.plan, b.addons || {}))
+            .map((b) => b.id);
+        if (!pickupIds.length) {
+            setPinStatusByOrder({});
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const { data } = await supabase
+                .from('rental_access_codes')
+                .select('order_id, status, lock_confirmed_at, pin_type, access_pin')
+                .in('order_id', pickupIds)
+                .eq('status', 'active');
+            if (cancelled) return;
+            const map = {};
+            for (const row of data || []) {
+                map[row.order_id] = row;
+            }
+            setPinStatusByOrder(map);
+        })();
+        return () => { cancelled = true; };
+    }, [bookings]);
     if (bookings.length === 0) {
         return (
             <div className="text-center py-12 bg-white/5 rounded-lg">
@@ -334,12 +377,32 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
         );
     }
 
+    const syncMileageAfterStatus = async (bookingId, source = 'booking_complete') => {
+        const booking = bookings.find((b) => b.id === bookingId);
+        if (!booking) return;
+        try {
+            await ensureBookingMileage(booking, {
+                customer,
+                source,
+                recalculateIfMissing: true,
+            });
+        } catch (mileageErr) {
+            console.warn('[ActiveRentals] mileage log on status update failed:', mileageErr);
+        }
+    };
+
     const handleStatusUpdate = async (bookingId, newStatus, timestampField) => {
         let updates = { status: newStatus };
         if (timestampField) updates[timestampField] = new Date().toISOString();
         const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
         if (error) toast({ title: `Failed to mark as ${newStatus}`, variant: 'destructive' });
-        else { toast({ title: `Booking marked as ${newStatus}!` }); onUpdate(); }
+        else {
+            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+                await syncMileageAfterStatus(bookingId, 'booking_complete');
+            }
+            toast({ title: `Booking marked as ${newStatus}!` });
+            onUpdate();
+        }
     };
     
     const handleManualStatusChange = async (bookingId, newStatus) => {
@@ -352,12 +415,12 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             case 'Delivered':
                  updates = { ...updates, picked_up_at: null, returned_at: null };
                  const booking = bookings.find(b => b.id === bookingId);
-                 const timestampField = booking?.plan?.id === 2 ? 'rented_out_at' : 'delivered_at';
+                 const timestampField = isCustomerPickupService(booking?.plan, booking?.addons || {}) ? 'rented_out_at' : 'delivered_at';
                  if (!booking?.[timestampField]) updates[timestampField] = new Date().toISOString();
                 break;
             case 'pending_checklist':
                  const bookingToComplete = bookings.find(b => b.id === bookingId);
-                 const completionTimestampField = bookingToComplete?.plan?.id === 2 ? 'returned_at' : 'picked_up_at';
+                 const completionTimestampField = isCustomerPickupService(bookingToComplete?.plan, bookingToComplete?.addons || {}) ? 'returned_at' : 'picked_up_at';
                  if(!bookingToComplete?.[completionTimestampField]) updates[completionTimestampField] = new Date().toISOString();
                 break;
             default: break;
@@ -372,6 +435,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
         else {
             if (newStatus === 'Confirmed' && previousStatus === 'pending_review') {
                 await expireActiveRentalAccessCodesForOrder(bookingId);
+            }
+            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+                await syncMileageAfterStatus(bookingId, 'booking_complete');
             }
             toast({ title: 'Booking status updated successfully!' });
             onUpdate();
@@ -389,6 +455,16 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
                 
                 const totalPrice = booking.total_price && typeof booking.total_price === 'number' ? booking.total_price.toFixed(2) : '0.00';
+                const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
+                const loyaltyPointsReversed = Number(booking.addons?.loyaltyPointsReversedOnCancel || 0);
+                const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
+                const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
+                const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
+                const rescheduleApproval = getLatestRescheduleApproval(booking);
+                const dropOffTimeLabel = convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A';
+                const pickupTimeLabel = convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A';
+                const oneWayMiles = resolveOneWayMiles(booking, customer);
+                const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
 
                 return (
                     <motion.div
@@ -403,8 +479,21 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 <h3 className="text-2xl font-bold text-white">Active Rental Details</h3>
                                 <p className="text-blue-200">Booking ID: {booking.id}</p>
                             </div>
-                            <StatusBadge status={booking.status} />
+                            <StatusBadge status={booking.status} booking={booking} />
                         </div>
+
+                        {isPickup && booking.pin_generated_at && pinStatusByOrder[booking.id] && !pinStatusByOrder[booking.id].lock_confirmed_at && (
+                            <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+                                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                <span>
+                                    PIN not confirmed on lock
+                                    {pinStatusByOrder[booking.id].access_pin
+                                        ? ` (${pinStatusByOrder[booking.id].access_pin})`
+                                        : ''}
+                                    — bridge delivery pending. Watchdog will retry; AlgoPIN fallback in the final hour.
+                                </span>
+                            </div>
+                        )}
 
                         <DistanceWarning booking={booking} customer={customer} />
 
@@ -412,27 +501,77 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Package />} label="Service" value={booking.plan?.name} />
                             <DetailItem icon={<DollarSign />} label="Total Price" value={`$${totalPrice}`} />
                             <DetailItem icon={<Calendar />} label="Booked On" value={booking.created_at ? format(parseISO(booking.created_at), 'Pp') : 'N/A'} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${booking.drop_off_time_slot || 'N/A'}`} />
-                            <DetailItem icon={<Clock />} label={booking.plan?.id === 2 ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${booking.pickup_time_slot || 'N/A'}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
+                            <DetailItem icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(oneWayMiles)} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
+                        </div>
+
+                        {rescheduleApproval && (
+                            <div className="mt-4 bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-4">
+                                <p className="text-sm font-semibold text-emerald-300 mb-2">Reschedule Approval</p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-200">
+                                    <p>Original total: <span className="font-semibold text-white">${Number(rescheduleApproval.original_total || 0).toFixed(2)}</span></p>
+                                    <p>New total: <span className="font-semibold text-white">${Number(rescheduleApproval.new_total || 0).toFixed(2)}</span></p>
+                                    <p>Stripe: <span className="font-semibold text-emerald-200">{formatRescheduleStripeLine(rescheduleApproval)}</span></p>
+                                    {rescheduleApproval.stripe_transaction_id && (
+                                        <p>Stripe ref: <span className="font-semibold text-white break-all">{rescheduleApproval.stripe_transaction_id}</span></p>
+                                    )}
+                                    {rescheduleApproval.at && (
+                                        <p>Approved: <span className="font-semibold text-white">{format(parseISO(rescheduleApproval.at), 'PPp')}</span></p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-4">
+                            <p className="text-sm font-semibold text-yellow-400 mb-2">Rewards & Referrals for this booking</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 text-xs text-gray-200">
+                                {booking.status === 'Cancelled' || loyaltyPointsReversed > 0 ? (
+                                    <p>Points reversed (cancelled): <span className="font-semibold text-red-300">-{loyaltyPointsReversed || loyaltyPointsEarned}</span></p>
+                                ) : (
+                                    <p>Points earned: <span className="font-semibold text-white">{loyaltyPointsEarned}</span></p>
+                                )}
+                                <p>Points redeemed: <span className="font-semibold text-white">{loyaltyPointsRedeemed}</span></p>
+                                <p>Referral pending: <span className="font-semibold text-orange-300">${referralDollarsPending.toFixed(2)}</span></p>
+                                <p>Referral redeemed: <span className="font-semibold text-green-300">${referralDollarsRedeemed.toFixed(2)}</span></p>
+                            </div>
                         </div>
 
                         <div className="mt-6 border-t border-white/20 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="space-y-2">
                                 {booking.delivered_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Delivered On" value={format(parseISO(booking.delivered_at), 'Pp')} />}
                                 {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
-                                {booking.rented_out_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Rented Out On" value={format(parseISO(booking.rented_out_at), 'Pp')} />}
-                                {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                                {booking.rented_out_at && (
+                                  <DetailItem
+                                    icon={<CheckCircle className="text-green-400" />}
+                                    label={booking.rental_started_notified_at ? 'Rented Out On (lock detected)' : 'Rented Out On'}
+                                    value={format(parseISO(booking.rented_out_at), 'Pp')}
+                                  />
+                                )}
+                                {booking.returned_at && (
+                                  <DetailItem
+                                    icon={<CheckCircle className="text-green-400" />}
+                                    label={booking.return_notified_at ? 'Returned On (lock detected)' : 'Returned On'}
+                                    value={format(parseISO(booking.returned_at), 'Pp')}
+                                  />
+                                )}
+                                {isPickup && !booking.rented_out_at && (
+                                  <p className="text-xs text-blue-200/80 italic">Waiting for first unlock via Wi-Fi bridge — or mark rented manually.</p>
+                                )}
+                                {isPickup && booking.rented_out_at && !booking.returned_at && (
+                                  <p className="text-xs text-blue-200/80 italic">Rental in progress. Final lock at/after return time will mark Returned automatically.</p>
+                                )}
                             </div>
                            
                             <div className="flex flex-wrap items-center gap-2">
-                            {booking.plan?.id !== 2 && (
+                            {!isPickup && (
                                 <>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'Delivered', 'delivered_at')} disabled={!!booking.delivered_at}><Truck className="mr-2 h-4 w-4" /> Mark Delivered</Button>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'pending_checklist', 'picked_up_at')} disabled={!booking.delivered_at || !!booking.picked_up_at}><CheckCircle className="mr-2 h-4 w-4" /> Mark Picked Up</Button>
                                 </>
                             )}
-                            {booking.plan?.id === 2 && (
+                            {isPickup && (
                                 <>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'Delivered', 'rented_out_at')} disabled={!!booking.rented_out_at}>Mark as Rented</Button>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'pending_checklist', 'returned_at')} disabled={!booking.rented_out_at || !!booking.returned_at}>Mark as Returned</Button>
@@ -452,7 +591,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                         </div>
                         </div>
 
-                        <PostRentalChecklist booking={booking} equipment={relevantEquipment} onUpdate={onUpdate} />
+                        <PostRentalChecklist booking={booking} equipment={relevantEquipment} onUpdate={onUpdate} customer={customer} />
                     </motion.div>
                 );
             })}

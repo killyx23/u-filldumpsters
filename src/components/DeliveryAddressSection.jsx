@@ -7,6 +7,9 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/comp
 import { useLoadScript } from '@react-google-maps/api';
 import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
 import { DeliveryServiceInfo } from './DeliveryServiceInfo';
+import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
+
+const libraries = ['places'];
 
 const libraries = ['places'];
 
@@ -43,9 +46,10 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
             ...prev,
             deliveryAddress: { ...address, unverifiedAccepted: true },
             deliveryDistance: 0,
+            oneWayDistanceMiles: 0,
             mileageCharge: 0,
             deliveryFee: 0,
-            distanceFeeDisplay: 'Pending Admin Verification'
+            distanceFeeDisplay: 'Pending customer service verification'
         }));
         return;
     }
@@ -61,7 +65,10 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
     try {
       const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
       
-      const result = await fetchDistanceAndCalculateFee(fullAddress, plan?.id, mileageRate);
+      const [result, oneWayMiles] = await Promise.all([
+        fetchDistanceAndCalculateFee(fullAddress, plan?.id, mileageRate),
+        calculateOneWayMilesForAddress(fullAddress).catch(() => null),
+      ]);
 
       if (result.error) {
         setError(result.error);
@@ -69,6 +76,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
           ...prev,
           deliveryAddress: address,
           deliveryDistance: 0,
+          oneWayDistanceMiles: 0,
           mileageCharge: 0,
           deliveryFee: 0,
           distanceFeeDisplay: ''
@@ -78,6 +86,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
           ...prev,
           deliveryAddress: address,
           deliveryDistance: result.distance,
+          oneWayDistanceMiles: oneWayMiles || 0,
           mileageCharge: result.totalFee,
           deliveryFee: result.totalFee,
           distanceFeeDisplay: result.distanceFeeDisplay
@@ -92,6 +101,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
         ...prev,
         deliveryAddress: address,
         deliveryDistance: 0,
+        oneWayDistanceMiles: 0,
         mileageCharge: 0,
         deliveryFee: 0,
         distanceFeeDisplay: ''

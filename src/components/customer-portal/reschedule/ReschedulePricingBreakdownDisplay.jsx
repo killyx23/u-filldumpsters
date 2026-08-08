@@ -4,6 +4,9 @@ import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle } from 'lucide-react';
 import { differenceInDays } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
+import { getTaxRate } from '@/utils/getTaxRate';
+import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
 export const ReschedulePricingBreakdownDisplay = ({ 
     bookingId,
@@ -20,6 +23,7 @@ export const ReschedulePricingBreakdownDisplay = ({
     const [newCosts, setNewCosts] = useState(null);
     const [loading, setLoading] = useState(true);
     const [allOriginalAddons, setAllOriginalAddons] = useState([]);
+    const [taxRate, setTaxRate] = useState(7.45);
 
     const currencyInfo = { code: 'USD', symbol: '$' };
 
@@ -29,6 +33,9 @@ export const ReschedulePricingBreakdownDisplay = ({
             if (!bookingId) return;
             
             try {
+                const rateConfig = await getTaxRate();
+                setTaxRate(Number(rateConfig?.tax_rate) || 7.45);
+
                 const { data: bookingEquip, error } = await supabase
                     .from('booking_equipment')
                     .select('*, equipment(*)')
@@ -126,7 +133,7 @@ export const ReschedulePricingBreakdownDisplay = ({
 
                 const addonsCost = addons.reduce((sum, addon) => sum + addon.total, 0);
                 const subtotal = baseRentalCost + deliveryFeeApplied + mileageCharge + addonsCost;
-                const tax = subtotal * 0.07;
+                const tax = calculateTaxAmount(subtotal, taxRate);
                 const total = subtotal + tax;
 
                 return {
@@ -149,7 +156,7 @@ export const ReschedulePricingBreakdownDisplay = ({
         }, 600);
         
         return () => clearTimeout(timer);
-    }, [newService, newAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress]);
+    }, [newService, newAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, taxRate]);
 
     if (loading || !newCosts || !originalCosts) {
         return (
@@ -178,7 +185,7 @@ export const ReschedulePricingBreakdownDisplay = ({
 
     // Recalculate CORRECT original totals
     const correctOriginalSubtotal = originalBaseRental + originalDeliveryFee + originalMileageCharge + originalAddonsTotal;
-    const correctOriginalTax = correctOriginalSubtotal * 0.07;
+    const correctOriginalTax = calculateTaxAmount(correctOriginalSubtotal, taxRate);
     const correctOriginalTotal = correctOriginalSubtotal + correctOriginalTax;
 
     const difference = newCosts.total - correctOriginalTotal;
@@ -351,8 +358,11 @@ export const ReschedulePricingBreakdownDisplay = ({
                         : 'bg-gray-900 border-gray-800'
             }`}>
                 <div className="text-center md:text-left">
-                    <h3 className="text-xl font-extrabold text-white mb-2">Final Amount Due / (Credit)</h3>
-                    <p className="text-sm text-gray-400 max-w-md">The price difference to be charged or credited after admin approval. Rescheduling fees (if applicable) are assessed at final approval.</p>
+                    <h3 className="text-xl font-extrabold text-white mb-2 inline-flex items-center justify-center md:justify-start gap-1.5">
+                        Final Amount Due / (Credit)
+                        <RescheduleFeeInfoPopover />
+                    </h3>
+                    <p className="text-sm text-gray-400 max-w-md">The price difference to be charged or credited after scheduling department approval. Rescheduling fees (if applicable) are assessed at final approval.</p>
                 </div>
                 <div className="flex items-center gap-4 bg-gray-950 px-6 py-4 rounded-xl border border-gray-800">
                     <div className="hidden sm:flex flex-col items-end mr-2">

@@ -8,6 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoyaltyBadge';
 import { format } from 'date-fns';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onStartNewOrder }) => {
   const [status, setStatus] = useState('idle'); // idle, sending, sent, verifying, authenticated
@@ -70,10 +71,11 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [ReturningCustomerSignIn] Verifying code:`, code);
 
-    if (!code || code.length < 5) {
+    const trimmedCode = code.trim();
+    if (!trimmedCode || trimmedCode.length !== 6) {
       toast({
         title: 'Invalid Code',
-        description: 'Please enter the complete verification code.',
+        description: 'Please enter the complete 6-digit verification code.',
         variant: 'destructive'
       });
       return;
@@ -82,48 +84,25 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
     setStatus('verifying');
 
     try {
-      // Verify email code
+      const normalizedEmail = email.toLowerCase().trim();
       const { data, error } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: email.toLowerCase().trim(), code }
+        body: { email: normalizedEmail, code: trimmedCode }
       });
 
       const responseTs = new Date().toISOString();
       console.log(`[${responseTs}] [ReturningCustomerSignIn] verify-email-code response:`, { data, error });
 
-      if (error || !data?.success) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error || data?.error);
+      if (error) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, error);
+        throw new Error(await parseEdgeFunctionError(error, data));
+      }
+      if (!data?.success) {
+        console.error(`[${responseTs}] [ReturningCustomerSignIn] Verification failed:`, data?.error);
         throw new Error(data?.error || 'Invalid verification code');
       }
 
-      // Fetch customer data
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .maybeSingle();
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Customer data:`, customer);
-
-      if (customerError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Customer fetch error:`, customerError);
-      }
-
-      // Fetch past bookings
-      const { data: bookings, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      console.log(`[${responseTs}] [ReturningCustomerSignIn] Past bookings:`, bookings);
-
-      if (bookingsError) {
-        console.error(`[${responseTs}] [ReturningCustomerSignIn] Bookings fetch error:`, bookingsError);
-      }
-
-      setCustomerData(customer || { name: email.split('@')[0], email });
-      setPastBookings(bookings || []);
+      setCustomerData(data.customer || { name: email.split('@')[0], email });
+      setPastBookings(data.bookings || []);
       setStatus('authenticated');
 
       toast({
@@ -339,6 +318,7 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
                 className="space-y-6"
               >
                 <ReturningCustomerLoyaltyBadge
+                  embedded
                   customerName={customerData.first_name || customerData.name || 'Valued Customer'}
                   bookingCount={pastBookings.length}
                 />

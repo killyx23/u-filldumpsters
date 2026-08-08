@@ -7,7 +7,7 @@ import { initializeEquipmentPricing } from '@/utils/initializeEquipmentPricing';
  * Only runs for authenticated admin users
  */
 export function useEquipmentPricingInit() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, isAdmin, loading: authLoading } = useAuth();
   const [initialized, setInitialized] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -17,8 +17,6 @@ export function useEquipmentPricingInit() {
       // Wait for auth to complete
       if (authLoading) return;
 
-      // Only initialize for admin users
-      const isAdmin = user?.user_metadata?.is_admin === true;
       if (!isAdmin) {
         setInitialized(true);
         return;
@@ -50,7 +48,7 @@ export function useEquipmentPricingInit() {
     };
 
     initialize();
-  }, [user, authLoading, initialized]);
+  }, [user, isAdmin, authLoading, initialized]);
 
   return {
     initialized,
