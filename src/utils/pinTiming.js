@@ -1,4 +1,8 @@
 export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
+/** Extra hour the padlock PIN stays valid after the scheduled booking end. */
+export const RETURN_GRACE_MS = 60 * 60 * 1000;
+/** Activate the PIN this many ms before drop-off so it works the instant they arrive. */
+export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
 
 /**
  * Parse a time slot like "6:00 AM" and convert MST -> UTC.
@@ -29,6 +33,12 @@ export function buildBookingDateUTC(date, timeSlot, fallbackHourUTC) {
   return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
 }
 
+/** Add RETURN_GRACE_MS to an ISO date string and return a new ISO (+00:00) string. */
+export function addGraceHour(isoDate) {
+  const ms = new Date(isoDate).getTime() + RETURN_GRACE_MS;
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+}
+
 export function getBookingWindow(booking) {
   const startIso = buildBookingDateUTC(
     booking.drop_off_date ?? '',
@@ -43,25 +53,38 @@ export function getBookingWindow(booking) {
 
   const startMs = new Date(startIso).getTime();
   const endMs = new Date(endIso).getTime();
+  const graceEndMs = endMs + RETURN_GRACE_MS;
+  const graceEndIso = new Date(graceEndMs).toISOString().replace(/\.\d{3}Z$/, '+00:00');
+  const activationMs = startMs - PIN_EARLY_ACTIVATION_MS;
+  const activationIso = new Date(activationMs).toISOString().replace(/\.\d{3}Z$/, '+00:00');
 
   return {
     startMs,
     endMs,
+    graceEndMs,
     pinEligibleFromMs: startMs - PIN_LEAD_TIME_MS,
+    activationMs,
+    activationIso,
     startIso,
     endIso,
+    graceEndIso,
   };
+}
+
+/** Scheduled return time with no grace — for all customer-facing copy. */
+export function getCustomerVisibleEndIso(booking) {
+  return getBookingWindow(booking).endIso;
 }
 
 export function isWithinPinGenerationWindow(booking, now = new Date()) {
   if (!booking?.drop_off_date || !booking?.pickup_date) return false;
-  const { pinEligibleFromMs, endMs } = getBookingWindow(booking);
+  const { pinEligibleFromMs, graceEndMs } = getBookingWindow(booking);
   const nowMs = now.getTime();
-  return nowMs >= pinEligibleFromMs && nowMs < endMs;
+  return nowMs >= pinEligibleFromMs && nowMs < graceEndMs;
 }
 
 export function isBookingEnded(booking, now = new Date()) {
   if (!booking?.pickup_date) return false;
-  const { endMs } = getBookingWindow(booking);
-  return now.getTime() >= endMs;
+  const { graceEndMs } = getBookingWindow(booking);
+  return now.getTime() >= graceEndMs;
 }

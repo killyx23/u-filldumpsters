@@ -187,7 +187,8 @@ export const ManualPINOverride = ({ booking, onUpdate }) => {
             </DialogHeader>
 
             <p className="py-4 text-sm text-gray-300">
-              If an active PIN already exists, generation will be blocked by the PIN service.
+              If an active PIN already exists, generation will clear it from the lock
+              (verified) and issue a new confirmed PIN.
             </p>
 
             <DialogFooter>

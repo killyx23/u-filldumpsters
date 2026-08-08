@@ -1,8 +1,18 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
-const IGLOOHOME_API_KEY = 'lbaznyxkupyz1uy5ais4p0rk07s9vvg1hxptbo9vc48cxblhoyw';
-const LOCK_ID = 'EB1X095c23a6';
+// Legacy client-side helper — production PIN/lock flows use edge functions + secrets.
+// Do not hardcode credentials here; set VITE_IGLOOHOME_* only for local debug if needed.
+const IGLOOHOME_API_KEY = import.meta.env.VITE_IGLOOHOME_API_KEY || '';
+const LOCK_ID = import.meta.env.VITE_IGLOOHOME_LOCK_ID || '';
 const IGLOOHOME_API_BASE = 'https://api.igloohome.co/v2';
+
+function requireIgloohomeConfig() {
+  if (!IGLOOHOME_API_KEY || !LOCK_ID) {
+    throw new Error(
+      '[IgloohomeService] Missing VITE_IGLOOHOME_API_KEY or VITE_IGLOOHOME_LOCK_ID. Prefer edge functions for production.',
+    );
+  }
+}
 
 // Exponential backoff retry logic
 const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
@@ -21,6 +31,7 @@ const retryWithBackoff = async (fn, maxRetries = 3, baseDelay = 1000) => {
 
 // Generate Duration-based algoPIN
 export const generateDurationPIN = async (startTime, endTime, customerEmail, customerPhone, orderId, customerName = null) => {
+  requireIgloohomeConfig();
   const timestamp = new Date().toISOString();
   
   console.log(`[${timestamp}] [IgloohomeService] generateDurationPIN called with:`, {
@@ -148,6 +159,7 @@ export const generateDurationPIN = async (startTime, endTime, customerEmail, cus
 
 // Check lock history for unlock/lock events
 export const checkLockHistory = async (lastSyncTime, orderId = null) => {
+  requireIgloohomeConfig();
   const timestamp = new Date().toISOString();
   
   console.log(`[${timestamp}] [IgloohomeService] Checking lock history for order:`, orderId);
@@ -317,6 +329,7 @@ export const validatePIN = async (pin, currentTime = new Date()) => {
 
 // Delete PIN from Igloohome system
 export const deletePIN = async (algoPinId, orderId = null) => {
+  requireIgloohomeConfig();
   const timestamp = new Date().toISOString();
   
   console.log(`[${timestamp}] [IgloohomeService] Deleting PIN:`, {

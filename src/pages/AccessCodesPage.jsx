@@ -389,6 +389,15 @@ export const AccessCodesPage = ({ customerData }) => {
   const pinWindowOpen = booking ? isWithinPinGenerationWindow(booking) : false;
   const bookingEnded = booking ? isBookingEnded(booking) : false;
   const pinEligibleFrom = booking ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
+  // Customer-visible window uses appointment times (no hidden grace hour on end_time).
+  const visibleStartLabel = booking
+    ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
+    : accessCode?.start_time
+      ? formatDateTime(accessCode.start_time, null)
+      : 'N/A';
+  const visibleEndLabel = booking
+    ? formatDateTime(booking.pickup_date, booking.pickup_time_slot)
+    : 'N/A';
 
   if (loading) {
     return (
@@ -550,16 +559,16 @@ export const AccessCodesPage = ({ customerData }) => {
                       </p>
                     </div>
 
-                    {accessCode.start_time && accessCode.end_time && (
+                    {(booking?.drop_off_date || accessCode.start_time) && (
                       <div className="border-t border-white/10 pt-6">
                         <p className="text-white font-medium">
                           Valid from:{' '}
                           <span className="text-yellow-400">
-                            {formatDateTime(accessCode.start_time, null)}
+                            {visibleStartLabel}
                           </span>
                           {' '}to{' '}
                           <span className="text-yellow-400">
-                            {formatDateTime(accessCode.end_time, null)}
+                            {visibleEndLabel}
                           </span>
                         </p>
                       </div>
@@ -586,8 +595,8 @@ export const AccessCodesPage = ({ customerData }) => {
                         <h3 className="font-semibold text-blue-900 mb-2 text-lg">Important Information</h3>
                         <p className="text-blue-800 text-base leading-relaxed">
                           ⏰ This access code is valid <strong>ONLY</strong> during your scheduled rental period from{' '}
-                          <strong>{formatDateTime(accessCode.start_time, null)}</strong> to{' '}
-                          <strong>{formatDateTime(accessCode.end_time, null)}</strong>. 
+                          <strong>{visibleStartLabel}</strong> to{' '}
+                          <strong>{visibleEndLabel}</strong>. 
                           The code will not work before or after these times. Please ensure you access the trailer within your rental window.
                         </p>
                       </div>

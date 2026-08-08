@@ -1178,7 +1178,7 @@ Deno.serve(async (req)=>{
     }
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
       email: email,
-      password: "ChangeMeNow8d",
+      password: "REDACTED_PASSWORD",
       email_confirm: true,
       user_metadata: {
         is_admin: true,
@@ -5439,8 +5439,8 @@ export const corsHeaders = {
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.30.0';
 import { corsHeaders } from './cors.ts';
-const IGLOOHOME_API_KEY = Deno.env.get('IGLOOHOME_API_KEY') || 'lbaznyxkupyz1uy5ais4p0rk07s9vvg1hxptbo9vc48cxblhoyw';
-const LOCK_ID = Deno.env.get('IGLOOHOME_LOCK_ID') || 'EB1X095c23a6';
+const IGLOOHOME_API_KEY = Deno.env.get('IGLOOHOME_API_KEY') || 'REDACTED_IGLOOHOME_SECRET';
+const LOCK_ID = Deno.env.get('IGLOOHOME_LOCK_ID') || 'REDACTED_LOCK_ID';
 const IGLOOHOME_API_BASE = 'https://connect.igloohome.co/v2';
 const BREVO_API_KEY = Deno.env.get('BREVO_API_KEY');
 const BREVO_FROM_EMAIL = Deno.env.get('BREVO_FROM_EMAIL');

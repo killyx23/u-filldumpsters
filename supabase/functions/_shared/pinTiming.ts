@@ -1,4 +1,8 @@
 export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
+/** Extra hour the padlock PIN stays valid after the scheduled booking end. */
+export const RETURN_GRACE_MS = 60 * 60 * 1000;
+/** Activate the PIN this many ms before drop-off so it works the instant they arrive. */
+export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
 
 export type BookingWindowFields = {
   drop_off_date?: string | null;
@@ -40,6 +44,23 @@ export function buildBookingDateUTC(
   return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
 }
 
+/** Add RETURN_GRACE_MS to an ISO date string and return a new ISO (+00:00) string. */
+export function addGraceHour(isoDate: string): string {
+  const ms = new Date(isoDate).getTime() + RETURN_GRACE_MS;
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+/**
+ * Igloohome rejects a duration PIN whose startDate falls before the current hour.
+ * Raises a past start up to the top of the current hour; leaves future starts alone.
+ */
+export function clampIgloohomeStart(isoDate: string, now: Date = new Date()): string {
+  const hourFloor = new Date(now.getTime());
+  hourFloor.setUTCMinutes(0, 0, 0);
+  const ms = Math.max(new Date(isoDate).getTime(), hourFloor.getTime());
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
 export function getBookingWindow(booking: BookingWindowFields) {
   const startIso = buildBookingDateUTC(
     booking.drop_off_date ?? "",
@@ -54,14 +75,39 @@ export function getBookingWindow(booking: BookingWindowFields) {
 
   const startMs = new Date(startIso).getTime();
   const endMs = new Date(endIso).getTime();
+  const graceEndMs = endMs + RETURN_GRACE_MS;
+  const graceEndIso = new Date(graceEndMs).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const activationMs = startMs - PIN_EARLY_ACTIVATION_MS;
+  const activationIso = new Date(activationMs).toISOString().replace(/\.\d{3}Z$/, "+00:00");
 
   return {
     startMs,
     endMs,
+    graceEndMs,
     pinEligibleFromMs: startMs - PIN_LEAD_TIME_MS,
+    activationMs,
+    activationIso,
     startIso,
     endIso,
+    graceEndIso,
   };
+}
+
+/**
+ * PIN start sent to Igloohome: booking drop-off minus 5 minutes, clamped to the
+ * current hour so Igloohome accepts it. Customers still see the appointment time.
+ */
+export function getPinActivationStart(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): string {
+  const { activationIso } = getBookingWindow(booking);
+  return clampIgloohomeStart(activationIso, now);
+}
+
+/** Scheduled return time with no grace — for all customer-facing copy. */
+export function getCustomerVisibleEndIso(booking: BookingWindowFields): string {
+  return getBookingWindow(booking).endIso;
 }
 
 export function isWithinPinGenerationWindow(
@@ -69,9 +115,9 @@ export function isWithinPinGenerationWindow(
   now: Date = new Date(),
 ): boolean {
   if (!booking.drop_off_date || !booking.pickup_date) return false;
-  const { pinEligibleFromMs, endMs } = getBookingWindow(booking);
+  const { pinEligibleFromMs, graceEndMs } = getBookingWindow(booking);
   const nowMs = now.getTime();
-  return nowMs >= pinEligibleFromMs && nowMs < endMs;
+  return nowMs >= pinEligibleFromMs && nowMs < graceEndMs;
 }
 
 export function isBookingEnded(
@@ -79,8 +125,8 @@ export function isBookingEnded(
   now: Date = new Date(),
 ): boolean {
   if (!booking.pickup_date) return false;
-  const { endMs } = getBookingWindow(booking);
-  return now.getTime() >= endMs;
+  const { graceEndMs } = getBookingWindow(booking);
+  return now.getTime() >= graceEndMs;
 }
 
 export function getPinWindowSkipReason(
@@ -88,9 +134,9 @@ export function getPinWindowSkipReason(
   now: Date = new Date(),
 ): "too_early" | "ended" | null {
   if (!booking.drop_off_date || !booking.pickup_date) return "too_early";
-  const { pinEligibleFromMs, endMs } = getBookingWindow(booking);
+  const { pinEligibleFromMs, graceEndMs } = getBookingWindow(booking);
   const nowMs = now.getTime();
   if (nowMs < pinEligibleFromMs) return "too_early";
-  if (nowMs >= endMs) return "ended";
+  if (nowMs >= graceEndMs) return "ended";
   return null;
 }
