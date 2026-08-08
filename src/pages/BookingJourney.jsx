@@ -116,13 +116,6 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     return () => unregisterResetCallback();
   }, [registerResetCallback, unregisterResetCallback, resetBookingState]);
 
-  // Handle reorder data from Header modal
-  useEffect(() => {
-    if (reorderData) {
-      handleReorderService(reorderData);
-    }
-  }, [reorderData]);
-
   useEffect(() => {
     if (currentStep > highestStep) {
       setHighestStep(currentStep);

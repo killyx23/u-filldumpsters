@@ -15,7 +15,6 @@ export const Header = ({ onReorderSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
   const isCustomer = user && !isAdmin;
-  const pastBookingsCount = user?.user_metadata?.past_bookings_count || 0;
 
   const handleAdminClick = () => {
     navigate('/admin');

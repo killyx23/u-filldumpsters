@@ -889,31 +889,6 @@ export const PaymentPage = ({ onBack }) => {
     createBooking();
   }, [loadingBookingData, loadingPrices, loadingTaxRate, loadingTaxOptions, bookingCreated, pendingCustomerData, plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingData, rewardsChoiceResolved]);
 
-  const [equipmentPrices, setEquipmentPrices] = useState({});
-  const [loadingPrices, setLoadingPrices] = useState(true);
-  const [availabilityTimes, setAvailabilityTimes] = useState({
-    pickupStartTime: 'Time not specified',
-    returnByTime: 'Time not specified'
-  });
-  const [clientSecret, setClientSecret] = useState(null);
-  const [bookingId, setBookingId] = useState(null);
-  const [bookingCreated, setBookingCreated] = useState(false);
-  
-  // Retrieved booking data from pending_customers
-  const [pendingCustomerData, setPendingCustomerData] = useState(null);
-  const [bookingData, setBookingData] = useState(null);
-  const [plan, setPlan] = useState(null);
-  const [addonsData, setAddonsData] = useState(null);
-  const [deliveryService, setDeliveryService] = useState(false);
-  const [loadingBookingData, setLoadingBookingData] = useState(true);
-  const [dataError, setDataError] = useState(null);
-  
-  const [validatedTotal, setValidatedTotal] = useState(0);
-
-  const { taxRate, loading: loadingTaxRate } = useTaxRate();
-  const { insurancePrice, loading: loadingInsurancePrice } = useInsurancePricing();
-
-  // Load equipment prices
   useEffect(() => {
     const initializeRewardsOffer = async () => {
       if (loadingBookingData || !bookingData || !addonsData) return;
@@ -1285,8 +1260,6 @@ export const PaymentPage = ({ onBack }) => {
   }
 
   const displayTotal = validatedTotal > 0 ? validatedTotal : pricingBreakdown.total;
-
-  const pricingBreakdown = calculateBookingTotal(plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice);
 
   return (
     <motion.div 

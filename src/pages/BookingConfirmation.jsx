@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle, Home, AlertTriangle, Calendar, MapPin,
   Mail, Loader2, RefreshCw, Key, Printer, Sparkles
@@ -41,9 +41,6 @@ export const BookingConfirmation = () => {
 
   const navigate = useNavigate();
   const receiptRef = useRef();
-
-  // Loyalty points hook (only if we have booking details)
-  const { calculatePointsEarned, awardPoints } = useCustomerLoyaltyPoints(bookingDetails?.customer_id);
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,

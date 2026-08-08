@@ -11,8 +11,6 @@ import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
 
 const libraries = ['places'];
 
-const libraries = ['places'];
-
 export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsData, plan, fetchedMileageRate }) => {
   const { isLoaded } = useLoadScript({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',

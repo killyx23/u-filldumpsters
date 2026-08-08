@@ -151,7 +151,7 @@ export const PriceBreakdown = ({
       tax,
       total
     };
-  }, [basePrice, plan, booking, addons, equipmentPrices]);
+  }, [basePrice, plan, booking, addons, equipmentPrices, taxRate]);
 
   if (loading) {
     return <div className="text-center text-gray-400 py-4">Loading price breakdown...</div>;
