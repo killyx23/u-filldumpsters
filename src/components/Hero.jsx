@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { fetchHomepageServices, getHeroStaticFallback } from '@/utils/servicePlan';
+import { DIY_HOMEPAGE_DISPLAY_NAME } from '@/config/diyEquipmentMachines';
 
 const ServiceCard = ({
   name,
@@ -91,7 +92,12 @@ export const Hero = () => {
           throw homepageResult.error;
         }
 
-        let data = homepageResult.data?.map((s) => ({ id: s.id, name: s.name })) || [];
+        let data =
+          homepageResult.data?.map((s) => ({
+            id: s.id,
+            // Keep DIY category label on hero even after service 5 is Mini Excavator in DB
+            name: Number(s.id) === 5 ? DIY_HOMEPAGE_DISPLAY_NAME : s.name,
+          })) || [];
 
         if (data.length === 0) {
           console.warn('[Hero] No services from DB; using static fallback');
@@ -127,7 +133,7 @@ export const Hero = () => {
         1: '16 Yard Dumpster',
         2: 'Dump Loader Trailer',
         3: 'Rock, Mulch',
-        5: 'DIY Heavy Equipment',
+        5: DIY_HOMEPAGE_DISPLAY_NAME,
       };
       const needle = searchTexts[numericId];
       const match = needle

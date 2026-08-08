@@ -1,0 +1,22 @@
+[
+  {
+    "name": "index.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp-deploys/mcp_files/generate-pin/file_0.txt",
+    "len": 16904
+  },
+  {
+    "name": "cors.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp-deploys/mcp_files/generate-pin/file_1.txt",
+    "len": 53
+  },
+  {
+    "name": "../_shared/cors.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp-deploys/mcp_files/generate-pin/file_2.txt",
+    "len": 1059
+  },
+  {
+    "name": "../_shared/pinTiming.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp-deploys/mcp_files/generate-pin/file_3.txt",
+    "len": 3947
+  }
+]

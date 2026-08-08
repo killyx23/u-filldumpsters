@@ -57,7 +57,7 @@ export function calculateBaseRentalCost(service, days) {
   if (id === 1) {
     return days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
   }
-  if (id === 2 || id === 4 || id === 5) {
+  if (id === 2 || id === 4 || id === 5 || id === 8) {
     return basePrice * days;
   }
   if (id === 3) {

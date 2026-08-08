@@ -13,7 +13,7 @@ export const AVAILABILITY_UI = {
 export function getServiceAvailabilityUiKind(serviceId) {
   const id = Number(serviceId);
   if (id === 1 || id === 4) return AVAILABILITY_UI.DELIVERY_WINDOW;
-  if (id === 2 || id === 5) return AVAILABILITY_UI.HOURLY_PICKUP;
+  if (id === 2 || id === 5 || id === 8) return AVAILABILITY_UI.HOURLY_PICKUP;
   if (id === 3) return AVAILABILITY_UI.DELIVERY_ONLY;
   return AVAILABILITY_UI.NONE;
 }
@@ -26,7 +26,7 @@ export function getServiceAvailabilityUiKind(serviceId) {
 export function isHourlySelfPickupPlan(plan, isDelivery = false) {
   if (!plan || isDelivery) return false;
   const id = Number(plan.id);
-  if (id === 2 || id === 5) return true;
+  if (id === 2 || id === 5 || id === 8) return true;
   if (plan.customer_pickup && plan.service_type === 'hourly') return true;
   return false;
 }

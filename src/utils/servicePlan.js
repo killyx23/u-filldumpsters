@@ -1,3 +1,7 @@
+import {
+  DIY_HOMEPAGE_DISPLAY_NAME,
+} from '@/config/diyEquipmentMachines';
+
 /**
  * Single source of truth: public.services for live catalog.
  * bookings.plan JSONB = immutable audit snapshot at checkout (buildPlanSnapshot).
@@ -60,6 +64,7 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
   const highlightText =
     service.homepage_highlight?.trim() || fallbackHighlights[Number(service.id)] || '';
   const isDumpsterHomepage = Number(service.id) === 1;
+  const isDiyHomepage = Number(service.id) === 5;
   return {
     ...service,
     highlight: highlightText
@@ -74,7 +79,10 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
       const { features: displayFeatures, deliveryFee } = resolvePlanCardFeatures(service);
       return { displayFeatures, displayDeliveryFee: deliveryFee };
     })(),
-    displayName: service.name?.trim() || highlightText || 'Service Plan',
+    // Service 5 books as Mini Excavator, but the homepage category card stays DIY Heavy Equipment.
+    displayName: isDiyHomepage
+      ? DIY_HOMEPAGE_DISPLAY_NAME
+      : service.name?.trim() || highlightText || 'Service Plan',
     displayDeliveryFeeLabel: isDumpsterHomepage ? 'Delivery & Pickup Fee' : undefined,
     showWeeklyRatesAvailable: isDumpsterHomepage,
   };
@@ -184,7 +192,7 @@ export function resolveBookingService(booking, liveService = null) {
 function isCustomerPickupFromAudit(auditPlan, addons) {
   if (!auditPlan?.id) return false;
   if (addons?.isDelivery || addons?.deliveryService) return false;
-  const pickupIds = [2, 5];
+  const pickupIds = [2, 5, 8];
   return pickupIds.includes(Number(auditPlan.id));
 }
 

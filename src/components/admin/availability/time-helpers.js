@@ -26,9 +26,9 @@ export const generateTimeSlotOptions = (intervalMinutes = 30) => {
 };
 
 export const getIncrementForService = (serviceId) => {
-    // 1-hour for trailer (2) and mini excavator (5)
+    // 1-hour for trailer (2), mini excavator (5), and telescoping loader (8)
     // 2-hours for dumpster (1), rock/mulch (3), delivery trailer (4)
-    return serviceId === 2 || serviceId === 5 ? 60 : 120;
+    return serviceId === 2 || serviceId === 5 || serviceId === 8 ? 60 : 120;
 };
 
 export const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate, now) => {

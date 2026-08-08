@@ -671,7 +671,7 @@ export const BookingForm = ({
         
         if (currentPlan.id === 1) {
           basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
-        } else if (currentPlan.id === 2 || currentPlan.id === 4 || currentPlan.id === 5) {
+        } else if (currentPlan.id === 2 || currentPlan.id === 4 || currentPlan.id === 5 || currentPlan.id === 8) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
         } else if (currentPlan.id === 3) {
           basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
@@ -794,6 +794,7 @@ export const BookingForm = ({
         };
       case 2:
       case 5:
+      case 8:
         return {
           date1: 'Pickup Date',
           date2: 'Return Date',

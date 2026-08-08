@@ -34,11 +34,11 @@ function isPickupBookingFromAudit(booking) {
   const plan = booking.plan || {};
   const serviceId = getServiceIdFromBooking(booking);
   if (serviceId != null) {
-    const pickupIds = [2, 5];
+    const pickupIds = [2, 5, 8];
     return pickupIds.includes(Number(serviceId));
   }
   if (plan.customer_pickup === true) return true;
-  if (plan.id != null) return [2, 5].includes(Number(plan.id));
+  if (plan.id != null) return [2, 5, 8].includes(Number(plan.id));
   return false;
 }
 

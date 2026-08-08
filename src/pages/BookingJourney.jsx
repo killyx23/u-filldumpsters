@@ -18,6 +18,7 @@ import { ReviewsCarousel } from '@/components/ReviewsCarousel';
 import { KeyFeatures } from '@/components/KeyFeatures';
 import { StepIndicator } from '@/components/StepIndicator';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { DiyEquipmentSelection } from '@/components/DiyEquipmentSelection';
 import {
   storePendingBooking,
   retrievePendingBooking,
@@ -30,6 +31,11 @@ import { isCheckoutEmailVerified, isCheckoutEmailVerifiedSync } from '@/utils/ch
 import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
+import {
+  isDiyHomepageService,
+  isDiyMachineService,
+} from '@/config/diyEquipmentMachines';
+import { fetchServiceById } from '@/utils/servicePlan';
 
 const INITIAL_BOOKING_DATA = {
   firstName: '',
@@ -72,6 +78,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [highestStep, setHighestStep] = useState(0);
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [showDiyEquipmentSelection, setShowDiyEquipmentSelection] = useState(false);
   const [bookingData, setBookingData] = useState(INITIAL_BOOKING_DATA);
   const [addonsData, setAddonsData] = useState(INITIAL_ADDONS_DATA);
   const [basePrice, setBasePrice] = useState(0);
@@ -102,6 +109,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setCurrentStep(0);
     setHighestStep(0);
     setSelectedPlan(null);
+    setShowDiyEquipmentSelection(false);
     setBookingData(INITIAL_BOOKING_DATA);
     setAddonsData(INITIAL_ADDONS_DATA);
     setBasePrice(0);
@@ -138,7 +146,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       document.body.scrollTop = 0;
     });
     return () => cancelAnimationFrame(id);
-  }, [currentStep]);
+  }, [currentStep, showDiyEquipmentSelection]);
 
   const applyPendingBookingState = useCallback(async (pending, resumeStep) => {
     const hydratedPlan = await hydratePlanFromPending(pending);
@@ -319,8 +327,52 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   };
 
   const handlePlanSelect = (plan) => {
+    if (isDiyHomepageService(plan?.id)) {
+      setSelectedPlan(null);
+      setShowDiyEquipmentSelection(true);
+      setCurrentStep(0);
+      window.scrollTo(0, 0);
+      return;
+    }
+    setShowDiyEquipmentSelection(false);
     setSelectedPlan(plan);
     setCurrentStep(1);
+    window.scrollTo(0, 0);
+  };
+
+  const handleDiyMachineSelect = async (machine) => {
+    const serviceId = Number(machine?.serviceId);
+    if (!Number.isFinite(serviceId)) return;
+
+    try {
+      const { data, error } = await fetchServiceById(supabase, serviceId);
+      if (error) throw error;
+      if (!data) {
+        toast({
+          title: 'Service Unavailable',
+          description: 'That equipment is not available to book right now. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      setSelectedPlan(data);
+      setShowDiyEquipmentSelection(false);
+      setCurrentStep(1);
+      window.scrollTo(0, 0);
+    } catch (err) {
+      console.error('[BookingJourney] DIY machine select failed:', err);
+      toast({
+        title: 'Could Not Load Equipment',
+        description: 'Please try selecting again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDiyEquipmentBack = () => {
+    setShowDiyEquipmentSelection(false);
+    setSelectedPlan(null);
+    setCurrentStep(0);
     window.scrollTo(0, 0);
   };
 
@@ -594,6 +646,13 @@ function BookingJourney({ reorderData, onReorderApplied }) {
 
   const goBackOneStep = () => {
     if (currentStep === 1) {
+      if (isDiyMachineService(selectedPlan?.id)) {
+        setShowDiyEquipmentSelection(true);
+        setSelectedPlan(null);
+        setCurrentStep(0);
+        window.scrollTo(0, 0);
+        return;
+      }
       requestLeaveBooking();
       return;
     }
@@ -621,6 +680,15 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   };
 
   const renderContent = () => {
+    if (showDiyEquipmentSelection) {
+      return (
+        <DiyEquipmentSelection
+          onSelectMachine={handleDiyMachineSelect}
+          onBack={handleDiyEquipmentBack}
+        />
+      );
+    }
+
     switch (currentStep) {
       case 1:
         return (

@@ -14,5 +14,5 @@ export function isCustomerPickupService(plan, addons = {}) {
   if (isDelivery) return false;
   if (plan.customer_pickup === true) return true;
   const id = Number(plan.id);
-  return id === 2 || id === 5;
+  return id === 2 || id === 5 || id === 8;
 }

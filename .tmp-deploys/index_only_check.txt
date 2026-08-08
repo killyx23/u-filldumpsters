@@ -1,0 +1,4 @@
+/**
+ * test-lock-lifecycle (admin only)
+ *
+ * Compress a booking into a short live window and exerci

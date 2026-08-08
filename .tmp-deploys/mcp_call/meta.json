@@ -1,0 +1,6 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "test-lock-lifecycle",
+  "entrypoint_path": "index.ts",
+  "verify_jwt": true
+}
