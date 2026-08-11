@@ -434,12 +434,12 @@ export const CustomerPortal = () => {
     useEffect(() => {
         if (!user || !session?.access_token) return;
         
-        console.log('[CustomerPortal] Setting up auto-refresh interval (30s)');
+        console.log('[CustomerPortal] Setting up auto-refresh interval (5m)');
         
         const intervalId = setInterval(() => {
             console.log('[CustomerPortal] Auto-refresh triggered');
             fetchData(false);
-        }, 30000);
+        }, 5 * 60 * 1000);
 
         return () => {
             console.log('[CustomerPortal] Cleaning up auto-refresh interval');

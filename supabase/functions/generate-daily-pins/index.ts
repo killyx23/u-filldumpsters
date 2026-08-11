@@ -498,18 +498,6 @@ Deno.serve(async (req)=>{
           });
           continue;
         }
-        const { error: bookingUpdateError } = await supabase.from("bookings").update({
-          pin_generated_at: now
-        }).eq("id", booking.id);
-        if (bookingUpdateError) {
-          console.error(`[generate-daily-pins] Failed to update booking #${booking.id}:`, bookingUpdateError.message);
-          generateResults.push({
-            bookingId: booking.id,
-            success: false,
-            error: bookingUpdateError.message
-          });
-          continue;
-        }
         const startTimeUTC = pinResult.startDate;
         const endTimeUTC = pinResult.endDate;
         // Expire any previous active row for this order before insert.
@@ -535,7 +523,21 @@ Deno.serve(async (req)=>{
         });
         if (insertError) {
           console.error(`[generate-daily-pins] DB insert failed for booking #${booking.id}:`, insertError.message);
-        } else if (pinResult.lockConfirmed) {
+          generateResults.push({
+            bookingId: booking.id,
+            success: false,
+            error: insertError.message,
+          });
+          continue;
+        }
+        // Only mark generated after a successful insert so cron can retry on failure.
+        const { error: bookingUpdateError } = await supabase.from("bookings").update({
+          pin_generated_at: now
+        }).eq("id", booking.id);
+        if (bookingUpdateError) {
+          console.error(`[generate-daily-pins] Failed to update booking #${booking.id}:`, bookingUpdateError.message);
+        }
+        if (pinResult.lockConfirmed) {
           await maybeSendPinNotification(supabase, booking, pinResult.pin, startTimeUTC, endTimeUTC);
         }
         console.log(`[generate-daily-pins] ✓ Booking #${booking.id} complete (${pinResult.pinType}) confirmed=${pinResult.lockConfirmed}`);

@@ -436,15 +436,17 @@ Deno.serve(async (req)=>{
       }, 500);
     }
     // ----------------------------------------------------------------
-    // Persist
+    // Persist — only mark pin_generated_at after a successful insert
     // ----------------------------------------------------------------
     const now = new Date().toISOString();
-    await supabase.from("bookings").update({
-      pin_generated_at: now
-    }).eq("id", bookingId);
     const startTimeUTC = pinResult.startDate;
     const endTimeUTC = pinResult.endDate;
-    await supabase.from("rental_access_codes").insert({
+    await supabase
+      .from("rental_access_codes")
+      .update({ status: "expired" })
+      .eq("order_id", booking.id)
+      .eq("status", "active");
+    const { error: insertError } = await supabase.from("rental_access_codes").insert({
       order_id: booking.id,
       customer_email: booking.email,
       customer_phone: booking.phone || "",
@@ -458,6 +460,16 @@ Deno.serve(async (req)=>{
       lock_confirmed_at: pinResult.lockConfirmed ? now : null,
       confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
     });
+    if (insertError) {
+      console.error(`[generate-pin] DB insert failed for booking #${bookingId}:`, insertError.message);
+      return jsonResponse({
+        success: false,
+        error: `PIN was created on the lock but failed to save: ${insertError.message}`,
+      }, 500);
+    }
+    await supabase.from("bookings").update({
+      pin_generated_at: now
+    }).eq("id", bookingId);
     if (pinResult.lockConfirmed) {
       await maybeSendPinNotification(supabase, booking, pinResult.pin, startTimeUTC, endTimeUTC);
     }

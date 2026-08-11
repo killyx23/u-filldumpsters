@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
 import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { sendSms } from "../_shared/notify.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -915,6 +916,16 @@ Deno.serve(async (req)=>{
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      // SMS companion (respects customers.sms_opt_in). Email success is enough to mark notified.
+      const phone = booking.customers?.phone || booking.phone || "";
+      const smsOptIn = booking.customers?.sms_opt_in !== false;
+      const smsContent =
+        `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. ` +
+        `Activates ${activationLabel}. View: ${siteUrl}/customer-portal?tab=access-codes`;
+      const smsResult = await sendSms(phone, smsContent, { smsOptIn });
+      console.log(`[${timestamp}] [send-booking-confirmation] pin_update SMS:`, smsResult);
+
       const notifiedAt = new Date().toISOString();
       await supabase.from("bookings").update({ pin_notification_sent_at: notifiedAt }).eq("id", booking.id);
       await supabase
@@ -928,6 +939,7 @@ Deno.serve(async (req)=>{
         provider: pinResult.provider,
         recipient: recipientEmail,
         email_type: "pin_update",
+        sms: smsResult,
       }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

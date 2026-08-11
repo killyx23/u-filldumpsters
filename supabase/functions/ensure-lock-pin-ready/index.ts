@@ -1,139 +1,165 @@
 /**
- * ensure-lock-pin-ready
+ * ensure-lock-pin-ready (thin orchestrator)
  *
- * Watchdog cron (every 15 min): for Confirmed self-pickup bookings starting within
- * the next 12 hours, ensure a bridge-confirmed PIN is on the padlock.
+ * Runs every 5 minutes. Creates PINs by invoking generate-daily-pins (service role),
+ * then confirms pending bridge jobs, notifies customers, escalates AlgoPIN via a
+ * second generate-daily-pins-friendly path, and posts urgent admin chat on failure.
  *
- * - No PIN yet → create via ensurePinOnLock
- * - PIN exists but lock_confirmed_at IS NULL → retry ensurePinOnLock, bump confirm_attempts
- * - Under 1 hour to pickup and still unconfirmed → AlgoPIN fallback + admin alert
- * - After 3 failed confirm attempts → admin alert (once per attempt milestone)
+ * Kept small so it can be deployed reliably via Management API.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { getCorsHeaders } from "../_shared/cors.ts";
-import { sendEmail } from "../_shared/notify.ts";
-import {
-  addGraceHour,
-  buildBookingDateUTC,
-  getBookingWindow,
-  getPinActivationStart,
-  isWithinPinGenerationWindow,
-  PIN_LEAD_TIME_MS,
-} from "../_shared/pinTiming.ts";
-import { ensurePinOnLock, pollJob } from "../_shared/lockPin.ts";
-import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 
-const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
-const FINAL_HOUR_MS = 60 * 60 * 1000;
-const ALERT_ATTEMPTS_THRESHOLD = 3;
+const IGLOO_API = "https://api.igloodeveloper.co/igloohome";
+const PIN_LEAD_MS = 12 * 60 * 60 * 1000;
+const RETRY_BUDGET_MS = 15 * 60 * 1000;
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const ALERT_ATTEMPTS = 3;
 
-function makeJsonResponse(corsHeaders: Record<string, string>) {
-  return (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+function cors(req: Request) {
+  const h: Record<string, string> = {
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Content-Type": "application/json",
+  };
+  const origin = req.headers.get("Origin");
+  const allowed = (Deno.env.get("ALLOWED_ORIGINS") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (origin && allowed.includes(origin)) {
+    h["Access-Control-Allow-Origin"] = origin;
+    h["Vary"] = "Origin";
+  }
+  return h;
+}
+
+function json(headers: Record<string, string>, body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+async function oauth(clientId: string, clientSecret: string) {
+  const credentials = btoa(`${clientId}:${clientSecret}`);
+  const tryScopes = [
+    "igloohomeapi/create-pin-bridge-proxied-job igloohomeapi/get-devices igloohomeapi/get-job-status igloohomeapi/algopin-onetime igloohomeapi/store-device-activity",
+    "",
+  ];
+  for (const scope of tryScopes) {
+    const form = new URLSearchParams({ grant_type: "client_credentials" });
+    if (scope) form.set("scope", scope);
+    const res = await fetch("https://auth.igloohome.co/oauth2/token", {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: form,
     });
-}
-
-async function readResponse(res: Response) {
-  const text = await res.text();
-  try {
-    return { text, json: text ? JSON.parse(text) : null };
-  } catch {
-    return { text, json: null };
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.access_token) return body.access_token as string;
   }
+  return null;
 }
 
-function isTrailerRental(booking: Record<string, unknown>) {
-  const plan = (booking.plan || {}) as Record<string, unknown>;
-  const addons = (booking.addons || {}) as Record<string, unknown>;
-  if (addons.isDelivery || addons.deliveryService) return false;
-  if (plan.customer_pickup === true) return true;
-  const id = Number(plan.id);
-  if (id === 2 || id === 5) return true;
-  const planName = String(plan.name ?? booking.service_name ?? "").toLowerCase();
-  const serviceType = String(plan.service_type ?? booking.service_type ?? "");
-  return serviceType === "trailer_rental" || planName.includes("dump loader") || planName.includes("trailer");
-}
-
-async function getOAuthTokenForWatchdog(clientId: string, clientSecret: string) {
-  const result = await getOAuthToken(clientId, clientSecret, GENERATE_PIN_SCOPES);
-  if (!result.token) {
-    console.error("[ensure-lock-pin-ready] OAuth failed:", result.reason);
-    return null;
+async function pollJob(token: string, jobId: string, budgetMs = 20000) {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const res = await fetch(`${IGLOO_API}/jobs/${jobId}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    const body = await res.json().catch(() => null);
+    if (body?.completed === true || body?.jobResponse?.jobStatus === 0) return "completed";
+    if (body?.jobResponse?.jobStatus === 2) return "failed";
   }
-  return result.token;
+  return "pending";
 }
 
-async function createAlgoPin(
-  accessToken: string,
-  lockId: string,
-  booking: Record<string, unknown>,
-) {
-  const startDate = getPinActivationStart(booking as { drop_off_date?: string; drop_off_time_slot?: string });
-  const startDateHourOnly = startDate.replace(/T(\d{2}):\d{2}:00/, "T$1:00:00");
-  const pickupDate = String(booking.pickup_date || "");
-  const startUnix = new Date(startDateHourOnly).getTime() / 1000;
-  const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
-  const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/algopin/onetime`, {
+async function createAlgoPin(token: string, lockId: string, booking: Record<string, unknown>) {
+  const drop = String(booking.drop_off_date || "");
+  const startDate = `${drop}T12:00:00+00:00`.replace(/T(\d{2}):\d{2}:00/, "T$1:00:00");
+  const pickup = String(booking.pickup_date || drop);
+  const variance = 1;
+  const res = await fetch(`${IGLOO_API}/devices/${lockId}/algopin/onetime`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
     body: JSON.stringify({
       accessName: `Dump Loader Rental - Order #${booking.id} (AlgoPIN fallback)`,
-      startDate: startDateHourOnly,
+      startDate,
       variance,
     }),
   });
-  const body = await readResponse(res);
-  if (!res.ok && res.status !== 201) {
-    return { success: false as const, error: `AlgoPIN HTTP ${res.status}`, raw: body.json };
+  const body = await res.json().catch(() => null);
+  const pin = String(body?.pin || body?.access_code || body?.code || "");
+  if ((!res.ok && res.status !== 201) || !pin) {
+    return { success: false as const, error: `AlgoPIN failed HTTP ${res.status}` };
   }
-  const pin = String(body.json?.pin || body.json?.access_code || body.json?.code || "");
-  if (!pin) return { success: false as const, error: "AlgoPIN response missing pin", raw: body.json };
   return {
     success: true as const,
     pin,
-    pinId: String(body.json?.pinId || body.json?.id || ""),
-    startDate: startDateHourOnly,
+    pinId: String(body?.pinId || body?.id || ""),
+    startDate,
   };
 }
 
-async function logSyncError(
+async function notifyPinReady(
   // deno-lint-ignore no-explicit-any
   supabase: any,
-  orderId: number,
-  notes: string,
+  booking: Record<string, unknown>,
+  pin: string,
+  startTime: string,
+  endTime: string,
 ) {
-  await supabase.from("rental_tracking_logs").insert({
-    order_id: orderId,
-    event_type: "sync_error",
-    event_timestamp: new Date().toISOString(),
-    notes,
+  if (booking.pin_notification_sent_at) return;
+  await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: booking.id,
+      email_type: "pin_update",
+      pin,
+      start_time: startTime,
+      end_time: endTime,
+    },
   });
-}
-
-async function alertAdmin(subject: string, html: string) {
-  const adminEmail = Deno.env.get("BREVO_FROM_EMAIL");
-  if (!adminEmail) {
-    console.warn("[ensure-lock-pin-ready] No BREVO_FROM_EMAIL for admin alert");
-    return;
-  }
-  const result = await sendEmail(adminEmail, subject, html);
-  if (!result.success) {
-    console.error("[ensure-lock-pin-ready] Admin alert failed:", result.error);
+  try {
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("phone, sms_opt_in")
+      .eq("id", booking.customer_id)
+      .maybeSingle();
+    const phone = customer?.phone || booking.phone || "";
+    if (customer?.sms_opt_in === false || !phone) return;
+    const digits = String(phone).replace(/\D/g, "");
+    const to = digits.length === 10
+      ? `+1${digits}`
+      : digits.length === 11 && digits.startsWith("1")
+      ? `+${digits}`
+      : null;
+    if (!to) return;
+    const site = (Deno.env.get("SITE_URL") || "https://u-filldumpsters.com").replace(/\/$/, "");
+    const content =
+      `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. View: ${site}/customer-portal?tab=access-codes`;
+    const key = Deno.env.get("BREVO_API_KEY");
+    if (!key) return;
+    await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
+      method: "POST",
+      headers: { "api-key": key, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        sender: (Deno.env.get("BREVO_SMS_SENDER") || "UFillDump").slice(0, 11),
+        recipient: to,
+        content,
+        type: "transactional",
+      }),
+    });
+  } catch {
+    // non-fatal
   }
 }
 
 Deno.serve(async (req) => {
-  const corsHeaders = getCorsHeaders(req);
-  const jsonResponse = makeJsonResponse(corsHeaders);
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const headers = cors(req);
+  if (req.method === "OPTIONS") return new Response(null, { headers });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -141,57 +167,61 @@ Deno.serve(async (req) => {
     const clientId = Deno.env.get("IGLOOHOME_CLIENT_ID") ?? "";
     const clientSecret = Deno.env.get("IGLOOHOME_CLIENT_SECRET") ?? "";
     const lockId = Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID") || "";
-    const bridgeId = Deno.env.get("IGLOOHOME_BRIDGE_ID") || "";
 
-    const authHeader = req.headers.get("Authorization");
-    const incomingKey = authHeader?.replace("Bearer ", "").trim();
-    if (!incomingKey || incomingKey !== serviceRoleKey) {
-      return jsonResponse({ success: false, error: "Unauthorized" }, 401);
+    const incoming = req.headers.get("Authorization")?.replace("Bearer ", "").trim();
+    if (!incoming || incoming !== serviceRoleKey) {
+      return json(headers, { success: false, error: "Unauthorized" }, 401);
     }
-    if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret || !lockId || !bridgeId) {
-      return jsonResponse({ success: false, error: "Missing env" }, 500);
+    if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret || !lockId) {
+      return json(headers, { success: false, error: "Missing env" }, 500);
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const accessToken = await getOAuthTokenForWatchdog(clientId, clientSecret);
+    // 1) Coarse create/retry via existing daily generator (service-role auth).
+    const genRes = await fetch(`${supabaseUrl}/functions/v1/generate-daily-pins`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    const genBody = await genRes.json().catch(() => ({ ok: false }));
+
+    const accessToken = await oauth(clientId, clientSecret);
     if (!accessToken) {
-      return jsonResponse({ success: false, error: "OAuth failed" }, 502);
+      return json(headers, { success: false, error: "OAuth failed", generateDailyPins: genBody }, 502);
     }
 
     const now = new Date();
     const nowMs = now.getTime();
-    const horizonIso = new Date(nowMs + PIN_LEAD_TIME_MS).toISOString().slice(0, 10);
     const today = now.toISOString().slice(0, 10);
+    const horizon = new Date(nowMs + PIN_LEAD_MS).toISOString().slice(0, 10);
 
-    const { data: bookings, error: fetchError } = await supabase
+    const { data: bookings } = await supabase
       .from("bookings")
       .select("*")
       .eq("status", "Confirmed")
       .gte("drop_off_date", today)
-      .lte("drop_off_date", horizonIso)
-      .order("drop_off_date", { ascending: true });
-
-    if (fetchError) {
-      return jsonResponse({ success: false, error: fetchError.message }, 500);
-    }
-
-    const candidates = (bookings || []).filter((b: Record<string, unknown>) => {
-      if (!isTrailerRental(b)) return false;
-      if (!isWithinPinGenerationWindow(b, now)) return false;
-      return true;
-    });
+      .lte("drop_off_date", horizon);
 
     const results: Array<Record<string, unknown>> = [];
 
-    for (const booking of candidates) {
-      const orderId = Number(booking.id);
-      const window = getBookingWindow(booking);
-      const msToPickup = window.startMs - nowMs;
-      const inFinalHour = msToPickup <= FINAL_HOUR_MS && msToPickup > -FINAL_HOUR_MS;
+    for (const booking of bookings || []) {
+      const plan = booking.plan || {};
+      const name = String(plan.name || "").toLowerCase();
+      const isTrailer =
+        Number(plan.id) === 2 ||
+        Number(plan.id) === 5 ||
+        name.includes("trailer") ||
+        name.includes("dump loader") ||
+        plan.customer_pickup === true;
+      if (!isTrailer) continue;
 
+      const orderId = Number(booking.id);
       const { data: activePin } = await supabase
         .from("rental_access_codes")
         .select("*")
@@ -201,41 +231,62 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      // Already confirmed — nothing to do.
-      if (activePin?.lock_confirmed_at) {
+      if (activePin?.lock_confirmed_at && activePin.access_pin) {
+        if (!booking.pin_notification_sent_at) {
+          await notifyPinReady(
+            supabase,
+            booking,
+            String(activePin.access_pin),
+            String(activePin.start_time || ""),
+            String(activePin.end_time || ""),
+          );
+        }
         results.push({ orderId, action: "skip_confirmed" });
         continue;
       }
 
-      // If we have a jobId and it's still pending, try a quick poll first.
       if (activePin?.pin_id && activePin.pin_type === "bridge_proxied") {
-        const poll = await pollJob(accessToken, activePin.pin_id, 20_000, 2500);
-        if (poll.state === "completed") {
+        const state = await pollJob(accessToken, activePin.pin_id);
+        if (state === "completed") {
+          const nowIso = new Date().toISOString();
           await supabase
             .from("rental_access_codes")
-            .update({ lock_confirmed_at: new Date().toISOString() })
+            .update({ lock_confirmed_at: nowIso })
             .eq("id", activePin.id);
+          await notifyPinReady(
+            supabase,
+            booking,
+            String(activePin.access_pin),
+            String(activePin.start_time || ""),
+            String(activePin.end_time || ""),
+          );
           results.push({ orderId, action: "confirmed_existing" });
           continue;
         }
       }
 
-      const startDate = getPinActivationStart(booking);
-      const endDate = addGraceHour(
-        buildBookingDateUTC(booking.pickup_date, booking.pickup_time_slot, 5),
-      );
+      const attempts = Number(activePin?.confirm_attempts || 0) + 1;
+      const ageMs = activePin?.created_at
+        ? nowMs - new Date(activePin.created_at).getTime()
+        : 0;
+      const dropOff = booking.drop_off_date ? new Date(`${booking.drop_off_date}T12:00:00Z`).getTime() : nowMs;
+      const msToPickup = dropOff - nowMs;
+      const needAlgo =
+        !!activePin &&
+        !activePin.lock_confirmed_at &&
+        (attempts >= ALERT_ATTEMPTS || ageMs >= RETRY_BUDGET_MS || msToPickup <= TWO_HOURS_MS);
 
-      // Final-hour AlgoPIN fallback when bridge still hasn't confirmed.
-      if (inFinalHour && activePin && !activePin.lock_confirmed_at) {
+      if (needAlgo) {
         const algo = await createAlgoPin(accessToken, lockId, booking);
         if (algo.success) {
+          const nowIso = new Date().toISOString();
           await supabase
             .from("rental_access_codes")
             .update({ status: "expired" })
             .eq("order_id", orderId)
             .eq("status", "active");
-          const nowIso = new Date().toISOString();
-          await supabase.from("rental_access_codes").insert({
+          const endDate = `${booking.pickup_date || booking.drop_off_date}T23:59:59+00:00`;
+          const { error: insertError } = await supabase.from("rental_access_codes").insert({
             order_id: orderId,
             customer_email: booking.email,
             customer_phone: booking.phone || "",
@@ -247,103 +298,62 @@ Deno.serve(async (req) => {
             end_time: endDate,
             status: "active",
             lock_confirmed_at: nowIso,
-            confirm_attempts: (activePin.confirm_attempts || 0) + 1,
+            confirm_attempts: attempts,
           });
-          await supabase.from("bookings").update({ pin_generated_at: nowIso }).eq("id", orderId);
-          const notes =
-            `AlgoPIN fallback issued for order #${orderId} — bridge never confirmed. ` +
-            `PIN ${algo.pin} (single-use offline).`;
-          await logSyncError(supabase, orderId, notes);
-          await alertAdmin(
-            `AlgoPIN fallback — Order #${orderId}`,
-            `<h2>Bridge PIN failed — AlgoPIN issued</h2>
-             <p><strong>Order:</strong> #${orderId}</p>
-             <p><strong>Customer:</strong> ${booking.name || ""} (${booking.email || "n/a"})</p>
-             <p><strong>Pickup:</strong> ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}</p>
-             <p><strong>AlgoPIN:</strong> ${algo.pin}</p>
-             <p>The bridge could not confirm the custom PIN. An offline AlgoPIN was issued so the customer can still open the lock.</p>`,
-          );
-          results.push({ orderId, action: "algopin_fallback", pin: algo.pin });
-          continue;
+          if (!insertError) {
+            await supabase.from("bookings").update({ pin_generated_at: nowIso }).eq("id", orderId);
+            await notifyPinReady(supabase, booking, algo.pin, algo.startDate, endDate);
+            results.push({ orderId, action: "algopin_fallback", pin: algo.pin });
+            continue;
+          }
         }
+
+        const failMsg =
+          `URGENT: Access PIN has NOT been generated for Order #${orderId}. ` +
+          `Bridge confirmation failed and AlgoPIN fallback did not succeed. ` +
+          `Pickup: ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}. ` +
+          `Generate a PIN manually before the customer arrives.`;
+        if (booking.customer_id) {
+          await supabase.from("chat_messages").insert({
+            conversation_id: `cust_${booking.customer_id}`,
+            customer_id: booking.customer_id,
+            booking_id: orderId,
+            sender_type: "admin",
+            message_content: failMsg,
+            is_read: false,
+            message_severity: "urgent",
+            message_context: { action: "pin_failed", order_id: orderId, source: "ensure-lock-pin-ready" },
+          });
+        }
+        await supabase.from("rental_tracking_logs").insert({
+          order_id: orderId,
+          event_type: "sync_error",
+          event_timestamp: new Date().toISOString(),
+          notes: failMsg,
+        });
+        results.push({ orderId, action: "failed_alerted" });
+        continue;
       }
 
-      // Create or retry bridge PIN.
-      const ensured = await ensurePinOnLock(supabase, accessToken, {
-        orderId,
-        lockId,
-        bridgeId,
-        startDate,
-        endDate,
-        accessName: `Dump Loader Rental - Order #${orderId}`,
-        clearBudgetMs: 40_000,
-        createBudgetMs: 50_000,
-      });
-
-      const attempts = (activePin?.confirm_attempts || 0) + 1;
-      const nowIso = new Date().toISOString();
-
-      await supabase
-        .from("rental_access_codes")
-        .update({ status: "expired" })
-        .eq("order_id", orderId)
-        .eq("status", "active");
-
-      await supabase.from("rental_access_codes").insert({
-        order_id: orderId,
-        customer_email: booking.email,
-        customer_phone: booking.phone || "",
-        access_pin: ensured.pin,
-        pin_id: ensured.jobId || "",
-        pin_type: "bridge_proxied",
-        lock_id: lockId,
-        start_time: startDate,
-        end_time: endDate,
-        status: "active",
-        lock_confirmed_at: ensured.lockConfirmed ? nowIso : null,
-        confirm_attempts: attempts,
-      });
-      await supabase.from("bookings").update({ pin_generated_at: nowIso }).eq("id", orderId);
-
-      if (ensured.lockConfirmed) {
-        results.push({ orderId, action: "created_confirmed", pin: ensured.pin });
-      } else {
-        await logSyncError(
-          supabase,
-          orderId,
-          `Bridge PIN not confirmed (attempt ${attempts}): ${ensured.error || ensured.createState}. jobId=${ensured.jobId}`,
-        );
-        if (attempts >= ALERT_ATTEMPTS_THRESHOLD) {
-          await alertAdmin(
-            `PIN not confirmed on lock — Order #${orderId}`,
-            `<h2>Bridge has not confirmed PIN delivery</h2>
-             <p><strong>Order:</strong> #${orderId}</p>
-             <p><strong>Customer:</strong> ${booking.name || ""} (${booking.email || "n/a"})</p>
-             <p><strong>Pickup:</strong> ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}</p>
-             <p><strong>Job ID:</strong> ${ensured.jobId || "n/a"}</p>
-             <p><strong>Attempts:</strong> ${attempts}</p>
-             <p><strong>State:</strong> ${ensured.createState}</p>
-             <p>Wake the padlock / check bridge range. Watchdog will retry; AlgoPIN fallback fires in the final hour before pickup.</p>`,
-          );
-        }
-        results.push({
-          orderId,
-          action: "created_unconfirmed",
-          pin: ensured.pin,
-          jobId: ensured.jobId,
-          attempts,
-        });
+      if (activePin && !activePin.lock_confirmed_at) {
+        await supabase
+          .from("rental_access_codes")
+          .update({ confirm_attempts: attempts })
+          .eq("id", activePin.id);
+        results.push({ orderId, action: "awaiting_confirmation", attempts });
+      } else if (!activePin) {
+        results.push({ orderId, action: "awaiting_generate_daily_pins" });
       }
     }
 
-    return jsonResponse({
+    return json(headers, {
       success: true,
+      generateDailyPins: genBody,
       processed: results.length,
       results,
     });
   } catch (error) {
-    console.error("[ensure-lock-pin-ready]", error);
-    return jsonResponse({
+    return json(headers, {
       success: false,
       error: error instanceof Error ? error.message : String(error),
     }, 500);

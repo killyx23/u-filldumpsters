@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Loader2, Key, Calendar, Clock, Info, RefreshCw, AlertCircle, QrCode, Shield, BookOpen } from 'lucide-react';
@@ -14,6 +14,9 @@ import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLoc
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 
+const PENDING_POLL_MS = 30_000;
+const PENDING_POLL_MAX_MS = 20 * 60 * 1000;
+
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
   const [accessCode, setAccessCode] = useState(null);
@@ -23,28 +26,24 @@ export const AccessCodesPage = ({ customerData }) => {
   const [generatingQR, setGeneratingQR] = useState(false);
   const [generatingPin, setGeneratingPin] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [issuingToLock, setIssuingToLock] = useState(false);
   const MAX_RETRIES = 5;
+  const hasLoadedOnceRef = useRef(false);
+  const pendingPollStartedAtRef = useRef(null);
+  const customerId = customerData?.id;
 
-  useEffect(() => {
-    console.log('[AccessCodesPage] Component mounted');
-    if (customerData) {
-      console.log('[AccessCodesPage] Customer data available:', customerData.id);
-      fetchAccessCode();
-    }
-  }, [customerData]);
-
-  const fetchAccessCode = async () => {
+  const fetchAccessCode = useCallback(async ({ silent = false } = {}) => {
     const context = 'AccessCodesPage-fetchAccessCode';
-    
+    if (!customerData?.id) return;
+
     try {
-      setLoading(true);
+      if (!silent || !hasLoadedOnceRef.current) {
+        setLoading(true);
+      }
       setError(null);
 
       console.log(`[${context}] Starting fetch for customer:`, customerData.id);
 
-      // Fetch active rental booking
-      console.log(`[${context}] Querying bookings table...`);
-      
       const { data: bookingData, error: bookingError } = await supabase
         .from('bookings')
         .select('*')
@@ -62,44 +61,26 @@ export const AccessCodesPage = ({ customerData }) => {
       if (!bookingData) {
         console.log(`[${context}] No active rental found`);
         setError('No active rental found');
-        setLoading(false);
+        setBooking(null);
+        setAccessCode(null);
         return;
       }
 
-      console.log(`[${context}] Booking found:`, {
-        bookingId: bookingData.id,
-        bookingIdType: typeof bookingData.id,
-        planId: bookingData.plan?.id,
-        planName: bookingData.plan?.name,
-        status: bookingData.status
-      });
-
       setBooking(bookingData);
 
-      // Check if this is a Dump Loader Trailer Rental
-      const isDumpLoaderRental = 
+      const isDumpLoaderRental =
         bookingData.plan?.name?.toLowerCase().includes('dump loader') ||
         bookingData.plan?.name?.toLowerCase().includes('trailer') ||
         parseInt(bookingData.plan?.id) === 2;
 
-      console.log(`[${context}] Service type check:`, {
-        isDumpLoaderRental,
-        planName: bookingData.plan?.name
-      });
-
       if (!isDumpLoaderRental) {
         setError('This service does not require an access code');
-        setLoading(false);
+        setAccessCode(null);
         return;
       }
 
-      // CRITICAL FIX: Ensure order_id is treated as bigint
-      // The rental_access_codes.order_id column is bigint, so we need to ensure proper type matching
       const orderId = bookingData.id;
-      
-      console.log(`[${context}] Fetching access code for order_id: ${orderId} (type: ${typeof orderId})`);
 
-      // Method 1: Try direct query with proper bigint handling
       const { data: accessCodeData, error: accessCodeError } = await supabase
         .from('rental_access_codes')
         .select('*')
@@ -108,110 +89,98 @@ export const AccessCodesPage = ({ customerData }) => {
         .order('created_at', { ascending: false })
         .limit(1);
 
-      console.log(`[${context}] Access code query result:`, {
-        error: accessCodeError,
-        errorCode: accessCodeError?.code,
-        errorMessage: accessCodeError?.message,
-        dataCount: accessCodeData?.length || 0,
-        hasData: !!accessCodeData && accessCodeData.length > 0,
-        rawData: accessCodeData
-      });
-
       if (accessCodeError) {
         console.error(`[${context}] Access code query error:`, accessCodeError);
-        
-        // If we get an error, try alternative query method
-        console.log(`[${context}] Attempting alternative query method...`);
-        
-        const { data: altData, error: altError } = await supabase
-          .from('rental_access_codes')
-          .select('*')
-          .filter('order_id', 'eq', orderId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(1);
-        
-        console.log(`[${context}] Alternative query result:`, {
-          error: altError,
-          dataCount: altData?.length || 0,
-          data: altData
-        });
-        
-        if (altData && altData.length > 0) {
-          console.log(`[${context}] Alternative query succeeded!`);
-          setAccessCode(altData[0]);
-          setRetryCount(0);
-          setLoading(false);
-          return;
-        }
       }
 
-      // Handle query results
       if (accessCodeData && accessCodeData.length > 0) {
         const codeRecord = accessCodeData[0];
-        
-        console.log(`[${context}] Access code record found:`, {
-          id: codeRecord.id,
-          orderId: codeRecord.order_id,
-          orderIdType: typeof codeRecord.order_id,
-          hasPin: !!codeRecord.access_pin,
-          accessPin: codeRecord.access_pin,
-          startTime: codeRecord.start_time,
-          endTime: codeRecord.end_time,
-          status: codeRecord.status
-        });
-
-        console.log(`[${context}] Access pin value: "${codeRecord.access_pin}"`);
-
         setAccessCode(codeRecord);
-
-        // If PIN found, reset retry count
-        if (codeRecord.access_pin) {
-          console.log(`[${context}] PIN found, resetting retry count`);
+        setIssuingToLock(!!codeRecord.access_pin && !codeRecord.lock_confirmed_at && codeRecord.pin_type === 'bridge_proxied');
+        if (codeRecord.access_pin && (codeRecord.lock_confirmed_at || codeRecord.pin_type === 'algopin')) {
           setRetryCount(0);
+          pendingPollStartedAtRef.current = null;
+        } else if (codeRecord.access_pin && !codeRecord.lock_confirmed_at) {
+          setIssuingToLock(true);
         }
       } else {
-        console.log(`[${context}] No access code records found for order_id: ${orderId}`);
-        console.log(`[${context}] Query details:`, {
-          table: 'rental_access_codes',
-          filter: `order_id = ${orderId}`,
-          orderIdProvided: orderId,
-          orderIdType: typeof orderId
-        });
-        
-        // Debug: Try to fetch ALL records to see what's in the table
-        const { data: allRecords, error: debugError } = await supabase
-          .from('rental_access_codes')
-          .select('id, order_id, access_pin, status')
-          .limit(10);
-        
-        console.log(`[${context}] DEBUG - Recent access code records in table:`, {
-          error: debugError,
-          recordCount: allRecords?.length || 0,
-          records: allRecords?.map(r => ({
-            id: r.id,
-            order_id: r.order_id,
-            order_id_type: typeof r.order_id,
-            has_pin: !!r.access_pin,
-            status: r.status
-          }))
-        });
-        
         setAccessCode(null);
+        setIssuingToLock(false);
       }
-
     } catch (err) {
       console.error(`[${context}] Unexpected error:`, err);
       setError(err.message);
-      toast({
-        title: 'Error',
-        description: err.message,
-        variant: 'destructive'
-      });
+      if (!silent) {
+        toast({
+          title: 'Error',
+          description: err.message,
+          variant: 'destructive'
+        });
+      }
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
-  };
+  }, [customerData]);
+
+  useEffect(() => {
+    if (customerId) {
+      fetchAccessCode({ silent: false });
+    }
+  }, [customerId, fetchAccessCode]);
+
+  // While inside the PIN window and no confirmed PIN yet, poll quietly every 30s (max 20 min).
+  useEffect(() => {
+    if (!booking) return;
+    const pinReady =
+      !!accessCode?.access_pin &&
+      (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
+    const windowOpen = isWithinPinGenerationWindow(booking) && !isBookingEnded(booking);
+    if (!windowOpen || pinReady) {
+      pendingPollStartedAtRef.current = null;
+      return;
+    }
+
+    if (!pendingPollStartedAtRef.current) {
+      pendingPollStartedAtRef.current = Date.now();
+    }
+
+    const intervalId = setInterval(() => {
+      const started = pendingPollStartedAtRef.current || Date.now();
+      if (Date.now() - started > PENDING_POLL_MAX_MS) {
+        clearInterval(intervalId);
+        return;
+      }
+      fetchAccessCode({ silent: true });
+    }, PENDING_POLL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [booking, accessCode, fetchAccessCode]);
+
+  // Realtime: pick up PIN rows as soon as the server writes them.
+  useEffect(() => {
+    if (!booking?.id) return;
+
+    const channel = supabase
+      .channel(`access-codes-order-${booking.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rental_access_codes',
+          filter: `order_id=eq.${booking.id}`,
+        },
+        () => {
+          fetchAccessCode({ silent: true });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [booking?.id, fetchAccessCode]);
 
   const generateMagicLinkToken = async () => {
     const context = 'AccessCodesPage-generateMagicLink';
@@ -287,7 +256,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
     setRetryCount(prev => prev + 1);
     console.log(`[AccessCodesPage] Retry count: ${retryCount + 1}/${MAX_RETRIES}`);
-    fetchAccessCode();
+    fetchAccessCode({ silent: true });
   };
 
   const handleGeneratePin = async () => {
@@ -344,13 +313,18 @@ export const AccessCodesPage = ({ customerData }) => {
         pin_type: data.pinType || '',
         start_time: `${booking.drop_off_date}T00:00:00Z`,
         end_time: `${booking.pickup_date}T23:59:59Z`,
-        status: 'active'
+        status: 'active',
+        lock_confirmed_at: data.lockConfirmed ? new Date().toISOString() : null,
       });
+      setIssuingToLock(!data.lockConfirmed && data.pinType === 'bridge_proxied');
       setRetryCount(0);
+      await fetchAccessCode({ silent: true });
 
       toast({
-        title: 'Access PIN Generated',
-        description: 'Your access PIN is ready.'
+        title: data.lockConfirmed ? 'Access PIN Ready' : 'PIN Issuing to Lock',
+        description: data.lockConfirmed
+          ? 'Your access PIN is confirmed and ready.'
+          : 'Your PIN was queued on the lock. This page will update when confirmation arrives.',
       });
     } catch (err) {
       console.error('[AccessCodesPage] Generate PIN error:', err);
@@ -389,6 +363,11 @@ export const AccessCodesPage = ({ customerData }) => {
   const pinWindowOpen = booking ? isWithinPinGenerationWindow(booking) : false;
   const bookingEnded = booking ? isBookingEnded(booking) : false;
   const pinEligibleFrom = booking ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
+  const pinReady =
+    !!accessCode?.access_pin &&
+    (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
+  const isBackupPin = pinReady && accessCode?.pin_type === 'algopin';
+  const pinPendingInWindow = pinWindowOpen && !bookingEnded && !pinReady;
   // Customer-visible window uses appointment times (no hidden grace hour on end_time).
   const visibleStartLabel = booking
     ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
@@ -540,14 +519,14 @@ export const AccessCodesPage = ({ customerData }) => {
                 </p>
               </CardContent>
             </Card>
-          ) : accessCode?.access_pin ? (
+          ) : pinReady ? (
             <>
               <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl">
                 <CardContent className="p-8 md:p-12">
                   <div className="text-center space-y-6">
                     <div>
                       <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold mb-2">
-                        YOUR ACCESS PIN
+                        {isBackupPin ? 'YOUR ACCESS PIN (BACKUP)' : 'YOUR ACCESS PIN'}
                       </p>
                       <div className="bg-slate-950 rounded-lg p-8 inline-block">
                         <p className="text-6xl md:text-7xl lg:text-8xl font-bold font-mono text-white tracking-wider">
@@ -635,21 +614,25 @@ export const AccessCodesPage = ({ customerData }) => {
             <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">
               <CardContent className="p-8 text-center">
                 <Key className="h-16 w-16 text-yellow-600 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-yellow-900 mb-2">Access Code Generating...</h2>
+                <h2 className="text-2xl font-bold text-yellow-900 mb-2">
+                  {issuingToLock || accessCode?.access_pin ? 'Issuing to Lock…' : 'Preparing Your Access PIN'}
+                </h2>
                 
                 {retryCount >= MAX_RETRIES ? (
                   <>
                     <p className="text-red-800 text-lg mb-4 font-semibold">
-                      Access code is taking longer than expected. Please try refreshing manually or contact support.
+                      Your PIN is taking longer than expected. Support has been or will be alerted automatically. You can still try generating manually or contact us.
                     </p>
                     <p className="text-sm text-yellow-700 mb-6">
-                      Maximum refresh attempts ({MAX_RETRIES}) reached. If your access code still doesn't appear, please contact our support team for assistance.
+                      Maximum refresh attempts ({MAX_RETRIES}) reached.
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="text-yellow-800 text-lg mb-6">
-                      No active access PIN was found for this rental. Generate one now or check again for updates.
+                      {issuingToLock || accessCode?.access_pin
+                        ? 'Your PIN was sent to the padlock and we are waiting for confirmation. This usually finishes within a few minutes.'
+                        : 'Your pickup window is open. Our system creates your PIN automatically within about 5 minutes. You can also generate it manually below.'}
                     </p>
                     {retryCount > 0 && (
                       <p className="text-sm text-yellow-700 mb-4">
@@ -693,9 +676,9 @@ export const AccessCodesPage = ({ customerData }) => {
                   </Button>
                 </div>
                 
-                {retryCount < MAX_RETRIES && (
+                {retryCount < MAX_RETRIES && pinPendingInWindow && (
                   <p className="text-xs text-yellow-700 mt-4">
-                    Click "Refresh Now" to manually check for your access code
+                    This page checks automatically every 30 seconds while your PIN is pending.
                   </p>
                 )}
               </CardContent>
@@ -704,7 +687,7 @@ export const AccessCodesPage = ({ customerData }) => {
         </motion.div>
 
         {/* QR Codes Section */}
-        {accessCode?.access_pin && !isRentalExpired() && (
+        {pinReady && !isRentalExpired() && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

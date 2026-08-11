@@ -198,14 +198,14 @@ function AppointmentCard({ booking, isPrimary, onNavigateToTab }) {
             <MapPin className="h-4 w-4 text-green-400 mt-0.5 shrink-0" />
             <div>
               <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-0.5">Pickup Location</p>
-              <p className="text-green-300 text-sm font-medium">Full pick up location &amp; map available in booking details</p>
+              <p className="text-green-300 text-sm font-medium">Your pick up location &amp; map available in booking details</p>
             </div>
           </div>
         ) : (
           <div className="flex items-start gap-2 bg-black/20 rounded-lg px-3 py-2.5">
             <AlertCircle className="h-4 w-4 text-yellow-400 mt-0.5 shrink-0" />
             <p className="text-xs text-yellow-200 leading-relaxed">
-              Full pick up location unlocks within 12 hours of your pickup time. Miles and drive estimate below
+              Your pick up location unlocks within 12 hours of your pickup time. Miles and drive estimate below
               so you can plan ahead.
             </p>
           </div>
