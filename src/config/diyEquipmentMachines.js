@@ -3,6 +3,8 @@
  * Service 5 = Mini Excavator; service 8 = Mini Telescoping Loader 3 in 1.
  */
 
+import { siteImages } from '@/config/siteImages';
+
 export const DIY_HOMEPAGE_SERVICE_ID = 5;
 
 export const DIY_EQUIPMENT_MACHINES = [
@@ -11,14 +13,14 @@ export const DIY_EQUIPMENT_MACHINES = [
     title: 'Mini Excavator',
     description:
       'Compact excavator for digging, trenching, grading, and small excavation projects.',
-    image: '/images/mini-excavator.png',
+    image: siteImages.miniExcavator,
   },
   {
     serviceId: 8,
     title: 'Mini Telescoping Loader 3 in 1',
     description:
       'Compact telescoping loader for lifting, loading, and backyard material moving.',
-    image: '/images/mini-telescoping-loader.png',
+    image: siteImages.miniTelescopingLoader,
   },
 ];
 

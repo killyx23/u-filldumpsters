@@ -1,12 +1,13 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { siteImages } from '@/config/siteImages';
 
 export const Banner = () => {
   return (
     <div className="relative w-full h-[200px] md:h-[300px] overflow-hidden">
       {/* Background Image */}
       <img 
-        src="https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/8524e4e335a6a5924956a3d49db2e487.png" 
+        src={siteImages.banner} 
         alt="Mountain Lake Landscape" 
         className="absolute inset-0 w-full h-full object-cover"
       />

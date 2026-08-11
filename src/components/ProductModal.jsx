@@ -5,52 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card } from '@/components/ui/card';
+import { siteImages } from '@/config/siteImages';
 
 const ProductModal = ({ isOpen, onClose }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  const productImages = [
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/1eb71dd14ce1c00f3ae44d87e8f75c40.jpg",
-      title: "Feature Diagram"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/2873b0d0a82a61c4a19b11ff87b0d54c.jpg",
-      title: "Side View"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/51c03cb59f65a3a6de7e2c0cea6cd0a1.jpg",
-      title: "Full Cart View"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/5b3a6c7df3e8e054e99ea5c91fefff17.jpg",
-      title: "Loaded Cart"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/606a27ef6d5ac3f6a4be89ca68aaa94d.jpg",
-      title: "Dumping Action"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/7b85d85c6fd89eaed3a5a0db42e8dc7a.jpg",
-      title: "Detail Shot"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/b64e3c53e93abec19efa6a7cc2085d98.jpg",
-      title: "Frame Construction"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d3ebe77a4f0a97c0c7e6f5d48c8c0ba8.jpg",
-      title: "Wheel Assembly"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d65e88a5d16e84fdec8b9da7e5cc95f9.jpg",
-      title: "Handle Detail"
-    },
-    {
-      url: "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/e39f62cc6fa2a31f8bc98a3ab60c8f20.jpg",
-      title: "In Use"
-    }
-  ];
+  const productImages = siteImages.gorillaCartGallery;
 
   const features = [
     "1,200 lb. capacity",

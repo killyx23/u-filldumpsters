@@ -7,6 +7,7 @@ import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
+import { siteImages } from '@/config/siteImages';
 
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
@@ -103,7 +104,7 @@ export const Header = ({ onReorderSelect }) => {
                 >
                   <div className="relative p-0 transition-transform duration-300 group-hover:scale-105 bg-white rounded-xl">
                     <img 
-                      src="https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/6e46b28934e98900a7bb6e2e2a49851c.png" 
+                      src={siteImages.logo} 
                       alt="U-Fill Dumpsters Logo" 
                       className="h-[120px] md:h-[160px] lg:h-[180px] w-auto object-contain"
                     />

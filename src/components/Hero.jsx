@@ -4,6 +4,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { fetchHomepageServices, getHeroStaticFallback } from '@/utils/servicePlan';
 import { DIY_HOMEPAGE_DISPLAY_NAME } from '@/config/diyEquipmentMachines';
+import { getHeroImageForService } from '@/config/siteImages';
 
 const ServiceCard = ({
   name,
@@ -12,16 +13,7 @@ const ServiceCard = ({
   onClick
 }) => {
   const numericId = Number(id);
-  let imageUrl = "";
-  if (numericId === 1) {
-    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/ab93b9ab311fb0efb03f5a24f0c97ada.jpg";
-  } else if (numericId === 2) {
-    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/71ba93b0b17b71051b7ab08600b18632.jpg";
-  } else if (numericId === 3) {
-    imageUrl = "https://horizons-cdn.hostinger.com/cea2470f-97d4-49f4-bb80-a5f3b466837f/d690552d16c0ca79c2f9b31cc3dd1aa0.png";
-  } else if (numericId === 5) {
-    imageUrl = "/images/diy-heavy-equipment.png";
-  }
+  const imageUrl = getHeroImageForService(numericId);
 
   const handleActivate = () => onClick(numericId);
   
