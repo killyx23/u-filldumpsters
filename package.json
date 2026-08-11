@@ -12,6 +12,7 @@
     "supabase:stop": "supabase stop",
     "supabase:status": "supabase status",
     "dev:backend": "npm run supabase:start && npm run supabase:sync-local-env",
+    "dev:functions": "npx --yes supabase@2.98.2 functions serve --env-file supabase/functions/.env",
     "build": "node tools/generate-llms.js || true && vite build",
     "preview": "vite preview --host :: --port 3000",
     "lint": "eslint . --quiet",

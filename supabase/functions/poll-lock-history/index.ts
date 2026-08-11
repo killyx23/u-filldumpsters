@@ -1,7 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.30.0';
 import { getCorsHeaders } from "./cors.ts";
-const IGLOOHOME_API_KEY = Deno.env.get('IGLOOHOME_API_KEY') || 'lbaznyxkupyz1uy5ais4p0rk07s9vvg1hxptbo9vc48cxblhoyw';
-const LOCK_ID = Deno.env.get('IGLOOHOME_LOCK_ID') || 'EB1X095c23a6';
+// Legacy Connect API poller — superseded by igloohome-webhook + sync-lock-activity.
+// Fail closed: no hardcoded credentials or bridge-id-as-lock defaults.
+const IGLOOHOME_API_KEY = Deno.env.get('IGLOOHOME_API_KEY');
+const LOCK_ID = Deno.env.get('IGLOOHOME_LOCK_ID') || Deno.env.get('IGLOOHOME_DEVICE_ID');
 const IGLOOHOME_API_BASE = 'https://connect.igloohome.co/v2';
 const BREVO_API_KEY = Deno.env.get('BREVO_API_KEY');
 const BREVO_FROM_EMAIL = Deno.env.get('BREVO_FROM_EMAIL');
@@ -13,6 +15,18 @@ Deno.serve(async (req)=>{
     });
   }
   try {
+    if (!IGLOOHOME_API_KEY || !LOCK_ID) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Missing IGLOOHOME_API_KEY or IGLOOHOME_LOCK_ID/IGLOOHOME_DEVICE_ID. Prefer igloohome-webhook + sync-lock-activity.',
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
     const supabaseClient = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
     console.log('[poll-lock-history] Starting lock history poll...');
     // Get all active rentals (status not 'Returned' or 'Cancelled')

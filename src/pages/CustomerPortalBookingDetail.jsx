@@ -12,6 +12,7 @@ import { useResolvedBookingService } from '@/hooks/useResolvedBookingService';
 import { showDirectionsMap } from '@/utils/bookingPickupWindow';
 import { PickupLocationSection } from '@/components/customer-portal/PickupLocationSection';
 import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectionsMap';
+import { BookingAccessCodeSection } from '@/components/customer-portal/BookingAccessCodeSection';
 
 const PORTAL_BOOKINGS_PATH = '/customer-portal?tab=bookings';
 
@@ -178,6 +179,7 @@ export const CustomerPortalBookingDetail = () => {
                 </p>
               </div>
             </div>
+            <BookingAccessCodeSection booking={booking} />
           </CardContent>
         </Card>
 

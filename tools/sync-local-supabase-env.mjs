@@ -161,6 +161,19 @@ function run() {
 
   upsertEnvValues(functionsEnvPath, functionEnvUpdates);
 
+  const functionsEnv = parseEnvFile(functionsEnvPath);
+  const iglooRequired = [
+    "IGLOOHOME_CLIENT_ID",
+    "IGLOOHOME_CLIENT_SECRET",
+    "IGLOOHOME_BRIDGE_ID",
+  ];
+  const hasLockId = !!(
+    functionsEnv.IGLOOHOME_LOCK_ID?.trim() ||
+    functionsEnv.IGLOOHOME_DEVICE_ID?.trim()
+  );
+  const missingIgloo = iglooRequired.filter((key) => !functionsEnv[key]?.trim());
+  if (!hasLockId) missingIgloo.push("IGLOOHOME_LOCK_ID (or IGLOOHOME_DEVICE_ID)");
+
   console.log("[sync-local-supabase-env] Updated (local Supabase only):");
   console.log(`- ${frontendEnvPath}`);
   console.log("    VITE_SUPABASE_URL");
@@ -174,8 +187,16 @@ function run() {
       "[sync-local-supabase-env] STRIPE_SECRET_KEY not found in .env.local or supabase/.env — payment step will fail until you add it.",
     );
   }
+  if (missingIgloo.length) {
+    console.warn(
+      "[sync-local-supabase-env] Igloohome PIN vars missing in supabase/functions/.env: " +
+        missingIgloo.join(", ") +
+        ". Access codes will fail until you add them, then run: npm run dev:functions",
+    );
+  }
   console.log("");
   console.log("Frontend must NOT use SECRET_KEY / service role — that stays in functions .env only.");
+  console.log("Serve edge functions with: npm run dev:functions");
 }
 
 run();
