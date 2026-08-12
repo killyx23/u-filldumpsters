@@ -285,6 +285,11 @@ Deno.serve(async (req) => {
 
     const event = extractEvent(body);
     const type = eventTypeOf(event);
+    console.log("[igloohome-webhook] Verified event", JSON.stringify({
+      verifiedBy: verification.method,
+      eventType: type,
+      payload: redactPins(body),
+    }));
 
     if (type === EVENT_JOB_COMPLETE) {
       const result = await handleJobComplete(supabase, event!);

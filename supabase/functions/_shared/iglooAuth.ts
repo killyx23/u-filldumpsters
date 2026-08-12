@@ -49,6 +49,40 @@ export const ACTIVITY_SYNC_SCOPE = "igloohomeapi/get-activity-logs-bridge-proxie
  */
 export const DEVICE_ACTIVITY_SCOPE = "igloohomeapi/get-device-activity";
 
+/** Operation-specific scopes for remote Bridge Lock/Unlock jobs. */
+export const REMOTE_LOCK_SCOPE = "igloohomeapi/lock-bridge-proxied-job";
+export const REMOTE_UNLOCK_SCOPE = "igloohomeapi/unlock-bridge-proxied-job";
+
+/**
+ * Obtain a fresh token for one remote lock operation.
+ * Igloohome requires the operation scope to be explicitly requested.
+ */
+export async function getRemoteLockJobToken(
+  clientId: string,
+  clientSecret: string,
+  operation: "lock" | "unlock",
+): Promise<OAuthResult> {
+  const requiredScope = operation === "lock" ? REMOTE_LOCK_SCOPE : REMOTE_UNLOCK_SCOPE;
+  const result = await requestOAuthToken(clientId, clientSecret, [
+    requiredScope,
+    "igloohomeapi/get-job-status",
+  ]);
+  if (result.token && tokenHasScope(result.token, requiredScope)) return result;
+
+  const operationOnly = await requestOAuthToken(clientId, clientSecret, [requiredScope]);
+  if (operationOnly.token && tokenHasScope(operationOnly.token, requiredScope)) {
+    return operationOnly;
+  }
+
+  return {
+    token: null,
+    reason: result.token
+      ? `OAuth token did not contain required scope ${requiredScope}`
+      : operationOnly.reason || result.reason || `Could not obtain ${operation} token`,
+    scopesUsed: operationOnly.scopesUsed || result.scopesUsed,
+  };
+}
+
 /** Scopes required to pull lock activity logs (jobType 15). */
 export const ACTIVITY_SYNC_SCOPES = [
   ACTIVITY_SYNC_SCOPE,

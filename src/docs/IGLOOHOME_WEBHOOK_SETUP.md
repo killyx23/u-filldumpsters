@@ -75,18 +75,14 @@ IGLOOHOME_LOCK_ID=          # or IGLOOHOME_DEVICE_ID
 IGLOOHOME_BRIDGE_ID=
 ```
 
-Webhook credentials — set **one** of the first two (auto-detected):
+Webhook credentials:
 
 ```
-# Preferred: RSA public key from igloohome (base64 DER PKCS#1 RSA-2048).
+# RSA public key from igloohome (base64 DER PKCS#1 RSA-2048).
 # Not self-serve — request from: dev+support@igloocompany.co
 IGLOOHOME_PUBLIC_KEY=
 
-# Alternative if the portal gives a shared secret instead
-IGLOOHOME_WEBHOOK_SECRET=
-
-# Local testing only — accept unsigned posts (or when PUBLIC_KEY is set
-# and you cannot forge a valid RSA signature for simulate_webhook)
+# Local testing only — accept unsigned posts (simulate_webhook cannot forge RSA)
 IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true
 
 # Optional: break-in / bridge-offline alerts (defaults to BREVO_FROM_EMAIL)
@@ -113,7 +109,7 @@ https://<project-ref>.supabase.co/functions/v1/igloohome-webhook
 
 Subscribe to **Activity Log Received (5)**, **Bridge Connection (10)**, and **Job Complete (3)**.
 
-3. Put `IGLOOHOME_PUBLIC_KEY` (or `IGLOOHOME_WEBHOOK_SECRET`) in Edge Function secrets.
+3. Put `IGLOOHOME_PUBLIC_KEY` in Edge Function secrets.
 
 Local config already sets this in `supabase/config.toml`:
 
@@ -166,7 +162,7 @@ npm run test:igloohome
 
 | Symptom | Fix |
 |---|---|
-| Webhook returns 401 | Signature failed. Locally set `IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true`, or set the public key / secret correctly |
+| Webhook returns 401 | Signature failed. Check `IGLOOHOME_PUBLIC_KEY` matches igloohome's key; failure logs include the configured public key and signed-string candidates |
 | Gateway 401 before your code | Deploy/serve with `verify_jwt = false` / `--no-verify-jwt` |
 | Events stored but booking not updated | PIN did not match an active `rental_access_codes` row — run Setup first |
 | Presence stuck on `unknown` | No type-5 activity yet — use Simulate Webhook or Sync Lock Activity |
@@ -177,7 +173,7 @@ npm run test:igloohome
 
 - [ ] Migration applied on hosted DB
 - [ ] `igloohome-webhook` deployed with `--no-verify-jwt`
-- [ ] `IGLOOHOME_PUBLIC_KEY` (or secret) set in Edge Function secrets
+- [ ] `IGLOOHOME_PUBLIC_KEY` set in Edge Function secrets
 - [ ] `IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED` **not** true in production
 - [ ] Webhook URL registered for events 3, 5, and 10
 - [ ] End-to-end test: unlock with booking PIN → rental started; lock after end → returned

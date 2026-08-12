@@ -3,10 +3,8 @@
  *
  *   npm run test:igloohome
  *
- * The edge functions are Deno TypeScript, so each module is transpiled with
- * esbuild and imported with a stubbed `Deno.env`. No network, no Supabase, and
- * no real igloohome credentials are required — the RSA keypair is generated
- * here and signed exactly the way igloohome documents it.
+ * Signs exactly as Igloohome documents (Node crypto example): PKCS#1 public key
+ * bytes as HMAC key, RSA PKCS1 v1.5 over the HMAC digest.
  */
 
 import crypto from "node:crypto";
@@ -51,76 +49,57 @@ const BODY = JSON.stringify({ payload: { event: { type: 5 } } });
 const PUBLIC_PATH = "/functions/v1/igloohome-webhook";
 const REWRITTEN_PATH = "/igloohome-webhook";
 
-/** Reproduces igloohome's documented signing process. */
-function iglooSign(keyBytes, pathname) {
-  const signed = ["POST", HOST, pathname, "application/json", DATE, BODY].join("|");
-  const digest = crypto.createHmac("sha256", keyBytes).update(signed).digest();
+/** Igloohome documented signing process (Node crypto example). */
+function iglooSign(keyBytes, pathname, host = HOST) {
+  const signed = ["POST", host, pathname, "application/json", DATE, BODY].join("|");
+  const hmacDigest = crypto.createHmac("sha256", keyBytes).update(signed, "ascii").digest();
   return crypto
-    .sign("sha256", digest, { key: privateKey, padding: crypto.constants.RSA_PKCS1_PADDING })
+    .sign("sha256", hmacDigest, { key: privateKey, padding: crypto.constants.RSA_PKCS1_PADDING })
     .toString("base64");
 }
 
-function request(signature) {
-  const headers = { host: HOST, date: DATE, "content-type": "application/json" };
+function request(signature, rewrittenPath = REWRITTEN_PATH, hostHeader = HOST) {
+  const headers = { host: hostHeader, date: DATE, "content-type": "application/json" };
   if (signature !== null) headers["x-igloocompany-sha256"] = signature;
-  return new Request(`https://${HOST}${REWRITTEN_PATH}`, { method: "POST", headers, body: BODY });
+  return new Request(`https://${HOST}${rewrittenPath}`, { method: "POST", headers, body: BODY });
 }
 
-console.log("\nRSA public key verification");
+console.log("\nRSA public key verification (Igloohome docs)");
 env.IGLOOHOME_PUBLIC_KEY = pkcs1Der.toString("base64");
 
-// Supabase strips /functions/v1 before the function sees the request, so the
-// signed path never matches the observed path. This is the failure mode most
-// likely to bite in production.
 let result = await verifyIglooWebhook(request(iglooSign(pkcs1Der, PUBLIC_PATH)), BODY);
-check("accepts a signature over the public /functions/v1 path", result.valid, result.reason);
-check("reports the rsa_public_key method", result.method === "rsa_public_key");
+check("accepts signature over /functions/v1 path", result.valid, result.reason);
+check("reports rsa_public_key method", result.method === "rsa_public_key");
 
 result = await verifyIglooWebhook(request(iglooSign(pkcs1Der, REWRITTEN_PATH)), BODY);
-check("accepts a signature over the rewritten path", result.valid, result.reason);
+check("accepts signature over rewritten /igloohome-webhook path", result.valid, result.reason);
+
+env.SUPABASE_URL = "https://example.supabase.co";
+result = await verifyIglooWebhook(
+  request(iglooSign(pkcs1Der, PUBLIC_PATH, "example.supabase.co"), REWRITTEN_PATH, "edge-runtime.supabase.com"),
+  BODY,
+);
+check("accepts when edge runtime rewrites Host header", result.valid, result.reason);
+delete env.SUPABASE_URL;
 
 result = await verifyIglooWebhook(request(iglooSign(pkcs1Der, PUBLIC_PATH)), `${BODY} tampered`);
-check("rejects a tampered body", !result.valid);
+check("rejects tampered body", !result.valid);
 
 result = await verifyIglooWebhook(request("Zm9vYmFy"), BODY);
-check("rejects a bogus signature", !result.valid);
+check("rejects bogus signature", !result.valid);
 
 result = await verifyIglooWebhook(request(null), BODY);
-check("rejects a missing signature header", !result.valid);
-
-const spkiDer = publicKey.export({ type: "spki", format: "der" });
-env.IGLOOHOME_PUBLIC_KEY = spkiDer.toString("base64");
-result = await verifyIglooWebhook(request(iglooSign(spkiDer, PUBLIC_PATH)), BODY);
-check("accepts an SPKI-encoded public key too", result.valid, result.reason);
-
-console.log("\nShared secret fallback");
-delete env.IGLOOHOME_PUBLIC_KEY;
-env.IGLOOHOME_WEBHOOK_SECRET = "s3cret";
-const hmacSignature = crypto
-  .createHmac("sha256", "s3cret")
-  .update(["POST", HOST, PUBLIC_PATH, "application/json", DATE, BODY].join("|"))
-  .digest("base64");
-result = await verifyIglooWebhook(request(hmacSignature), BODY);
-check("accepts a valid shared-secret HMAC", result.valid, result.reason);
-check("reports the shared_secret method", result.method === "shared_secret");
-result = await verifyIglooWebhook(request(hmacSignature), `${BODY}x`);
-check("rejects a tampered body under the shared secret", !result.valid);
+check("rejects missing signature header", !result.valid);
 
 console.log("\nFail-closed behaviour");
-delete env.IGLOOHOME_WEBHOOK_SECRET;
 delete env.IGLOOHOME_PUBLIC_KEY;
-result = await verifyIglooWebhook(request(hmacSignature), BODY);
-check("rejects when no credential is configured", !result.valid && result.method === "none");
+result = await verifyIglooWebhook(request(iglooSign(pkcs1Der, PUBLIC_PATH)), BODY);
+check("rejects when public key not configured", !result.valid && result.method === "none");
+
 env.IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED = "true";
 result = await verifyIglooWebhook(request(null), BODY);
-check("allows unsigned posts only with the explicit dev opt-in", result.valid);
-
-// PUBLIC_KEY must not block the unsigned dev override when no signature is sent.
-env.IGLOOHOME_PUBLIC_KEY = pkcs1Der.toString("base64");
-result = await verifyIglooWebhook(request(null), BODY);
-check("unsigned opt-in still works when a public key is also set", result.valid);
+check("allows unsigned only with explicit dev opt-in", result.valid);
 delete env.IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED;
-delete env.IGLOOHOME_PUBLIC_KEY;
 
 console.log("\nActivity log parsing");
 check("logType 50 is an unlock", logTypeToEventKind(50) === "unlock");

@@ -41,6 +41,8 @@ import {
   GENERATE_PIN_SCOPES,
   getActivitySyncToken,
   getDeviceActivityToken,
+  getRemoteLockJobToken,
+  tokenScopes,
   ACTIVITY_SYNC_SCOPE_HINT,
   DEVICE_ACTIVITY_SCOPE_HINT,
 } from "../_shared/iglooAuth.ts";
@@ -476,6 +478,67 @@ Deno.serve(async (req) => {
         ],
         results: await diagnoseOAuth(clientId, clientSecret),
       });
+    }
+
+    // -------- remote_lock / remote_unlock (no booking needed) --------
+    if (action === "remote_lock" || action === "remote_unlock") {
+      if (!clientId || !clientSecret || !lockId || !bridgeId) {
+        return jsonResponse({
+          success: false,
+          error: "Missing IGLOOHOME_CLIENT_ID / SECRET / LOCK_ID / BRIDGE_ID",
+        }, 500);
+      }
+
+      const operation = action === "remote_lock" ? "lock" : "unlock";
+      const jobType = operation === "lock" ? 1 : 2;
+      const oauth = await getRemoteLockJobToken(clientId, clientSecret, operation);
+      if (!oauth.token) {
+        return jsonResponse({
+          success: false,
+          action,
+          error: oauth.reason,
+          scopesRequested: oauth.scopesUsed,
+        }, 502);
+      }
+
+      const grantedScopes = tokenScopes(oauth.token);
+      const createRes = await fetch(
+        `${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${oauth.token}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ jobType, jobData: {} }),
+        },
+      );
+      const createBody = await readResponse(createRes);
+      const jobId = createBody.json?.jobId || createBody.json?.id;
+      if (!createRes.ok || !jobId) {
+        return jsonResponse({
+          success: false,
+          action,
+          jobType,
+          httpStatus: createRes.status,
+          grantedScopes,
+          error: createBody.json || createBody.text || "Bridge job request failed",
+        }, 502);
+      }
+
+      const outcome = await waitForJobCompletion(oauth.token, jobId, 8, 2500);
+      return jsonResponse({
+        success: outcome.state === "completed",
+        action,
+        jobType,
+        jobId,
+        jobState: outcome.state,
+        grantedScopes,
+        polls: outcome.polls,
+        raw: outcome.raw,
+        webhookExpected: "Signed event.type 3 (Job Complete)",
+      }, outcome.state === "failed" ? 502 : 200);
     }
 
     const bookingId = Number(body.bookingId ?? body.booking_id ?? body.order_id);
@@ -1439,7 +1502,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       success: false,
-      error: `Unknown action: ${action}. Use status|setup|restore|simulate_unlock|simulate_lock|sync|probe`,
+      error: `Unknown action: ${action}. Use status|setup|restore|simulate_unlock|simulate_lock|sync|probe|remote_lock|remote_unlock`,
     }, 400);
   } catch (error) {
     console.error("[test-lock-lifecycle] Unhandled:", error);
