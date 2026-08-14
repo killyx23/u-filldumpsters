@@ -5,7 +5,7 @@
  * - Grace-hour sweep closes rentals whose last lock fell in/after the end window
  */
 
-import { getBookingWindow } from "./pinTiming.ts";
+import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "./pinTiming.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -154,7 +154,7 @@ export async function applyLockEvent(
   const { data: booking, error } = await supabase
     .from("bookings")
     .select(
-      "id, status, plan, addons, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot, rented_out_at, returned_at, rental_started_notified_at, return_notified_at",
+      `id, status, plan, addons, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, rental_started_notified_at, return_notified_at`,
     )
     .eq("id", event.orderId)
     .single();
@@ -202,7 +202,7 @@ export async function sweepGraceHourReturns(
   const { data: candidates, error } = await supabase
     .from("bookings")
     .select(
-      "id, status, plan, addons, drop_off_date, drop_off_time_slot, pickup_date, pickup_time_slot, rented_out_at, returned_at, rental_started_notified_at, return_notified_at",
+      `id, status, plan, addons, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, rental_started_notified_at, return_notified_at`,
     )
     .not("rented_out_at", "is", null)
     .is("returned_at", null)

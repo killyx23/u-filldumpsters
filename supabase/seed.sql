@@ -5938,4 +5938,102 @@ SELECT pg_catalog.setval('"supabase_functions"."hooks_id_seq"', 1, false);
 -- PostgreSQL database dump complete
 --
 
+-- Seed is loaded with triggers off (session_replication_role = replica). Re-enable them so
+-- time-window normalisation runs, then re-apply derived scheduling config so local `db reset`
+-- matches production (where these migrations ran against live catalog data).
+SET session_replication_role = DEFAULT;
+
+insert into public.inventory_rules (service_id, inventory_item_id, quantity_required)
+select distinct
+       base.delivery_variant_service_id,
+       ir.inventory_item_id,
+       ir.quantity_required
+from public.services base
+join public.inventory_rules ir on ir.service_id = base.id
+where base.delivery_variant_service_id is not null
+on conflict (service_id, inventory_item_id) do nothing;
+
+insert into public.inventory_rules (
+  service_id, inventory_item_id, quantity_required, occupancy_model, scheduling_granularity
+)
+values (1, 2, 1, 'dropoff_and_pickup_only', 'slot')
+on conflict (service_id, inventory_item_id) do update set
+  quantity_required = excluded.quantity_required,
+  occupancy_model = excluded.occupancy_model,
+  scheduling_granularity = excluded.scheduling_granularity;
+
+update public.inventory_rules
+set occupancy_model = 'range', scheduling_granularity = 'day'
+where service_id = 2 and inventory_item_id in (1, 2);
+
+update public.inventory_rules
+set occupancy_model = 'dropoff_and_pickup_only', scheduling_granularity = 'slot'
+where service_id = 3 and inventory_item_id = 2;
+
+update public.inventory_rules
+set occupancy_model = 'range', scheduling_granularity = 'day'
+where service_id = 4 and inventory_item_id in (1, 2);
+
+insert into public.inventory_items (id, name, type, total_quantity)
+values (5, 'Mini Telescoping Loader', 'loader', 1)
+on conflict (id) do update set name = excluded.name, type = excluded.type;
+
+-- Service 8 is inserted by a migration that clones service 5, but on a fresh reset
+-- service 5 does not exist yet at that point. Recreate it from the seeded catalog.
+insert into public.services (
+  id, name, description, base_price, price_unit, sale_price, homepage_description,
+  weekly_rate, daily_rate, service_type, homepage_price, homepage_price_unit, features,
+  occupancy_model, mileage_rate, delivery_fee, is_taxable, delivery_fee_is_taxable,
+  mileage_is_taxable, show_on_homepage, display_order, homepage_highlight,
+  customer_pickup, delivery_variant_service_id, is_rentable
+)
+select
+  8,
+  'Mini Telescoping Loader 3 in 1',
+  'Mini telescoping loader rental for lifting, loading, and compact landscaping projects.',
+  s.base_price, s.price_unit, s.sale_price,
+  'Compact telescoping loader for backyard lifting and material moving.',
+  s.weekly_rate, s.daily_rate, coalesce(s.service_type, 'hourly'),
+  s.homepage_price, s.homepage_price_unit,
+  '["You pick up & return", "Easy Self-Serve Rental"]'::jsonb,
+  s.occupancy_model, s.mileage_rate, s.delivery_fee, s.is_taxable,
+  s.delivery_fee_is_taxable, s.mileage_is_taxable, false, 0, null, true, null, true
+from public.services s
+where s.id = 5
+  and not exists (select 1 from public.services where id = 8);
+
+insert into public.inventory_rules (
+  service_id, inventory_item_id, quantity_required, occupancy_model, scheduling_granularity
+)
+select 8, 5, 1, 'range', 'day'
+where exists (select 1 from public.services where id = 8)
+on conflict (service_id, inventory_item_id) do update set
+  quantity_required = excluded.quantity_required,
+  occupancy_model = excluded.occupancy_model,
+  scheduling_granularity = excluded.scheduling_granularity;
+
+-- Explicit id=5 does not advance the serial; leave the next insert at max+1.
+select setval(
+  'public.inventory_items_id_seq',
+  (select max(id) from public.inventory_items)
+);
+
+update public.services set slot_interval_minutes = 120 where id in (1, 4) and slot_interval_minutes is null;
+update public.services set slot_interval_minutes = 60 where id in (2, 3, 5, 8) and slot_interval_minutes is null;
+
+update public.services set group_id = (select id from public.service_groups where slug = 'dumpster-rentals') where id = 1;
+update public.services set group_id = (select id from public.service_groups where slug = 'trailer-rentals') where id in (2, 4);
+update public.services set group_id = (select id from public.service_groups where slug = 'heavy-equipment') where id in (5, 8);
+update public.services set group_id = (select id from public.service_groups where slug = 'material-delivery') where id = 3;
+
+update public.bookings
+   set drop_off_time_slot = drop_off_time_slot
+ where drop_off_window_start is null or pickup_window_start is null;
+
+update public.pending_customers
+   set drop_off_time_slot = drop_off_time_slot
+ where drop_off_window_start is null or pickup_window_start is null;
+
+select public.sync_booking_reservations(id) from public.bookings;
+
 RESET ALL;

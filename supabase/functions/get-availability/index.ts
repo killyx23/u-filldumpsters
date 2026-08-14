@@ -1,20 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getCorsHeaders } from "./cors.ts";
 import { addDays, format, parseISO, isBefore, parse, set, addMinutes, isSameDay, startOfDay } from 'npm:date-fns@2.30.0';
-// import { addDays, format, parseISO, isBefore, parse, set, addMinutes, isSameDay, startOfDay } from 'https://esm.sh/date-fns@2';
-// Safe JSON parser — handles strings, objects, and nulls without throwing
-const safeParse = (val)=>{
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'string') {
-    try {
-      return JSON.parse(val);
-    } catch  {
-      return null;
-    }
-  }
-  return val;
-};
-const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate, now)=>{
+
+const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate, now) => {
   if (!startTime || !endTime) return [];
   let start = parse(startTime, 'HH:mm:ss', currentDate);
   const end = parse(endTime, 'HH:mm:ss', currentDate);
@@ -32,13 +20,14 @@ const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate
     milliseconds: 0
   });
   const slots = [];
-  while(isBefore(currentTime, end)){
+  while (isBefore(currentTime, end)) {
     const slotEnd = addMinutes(currentTime, intervalMinutes);
     if (isBefore(slotEnd, addMinutes(end, 1))) {
       const isWindow = intervalMinutes >= 120;
       const label = isWindow ? `${format(currentTime, 'h:mm a')} - ${format(slotEnd, 'h:mm a')}` : `${format(currentTime, 'h:mm a')}`;
       slots.push({
         value: format(currentTime, 'HH:mm:ss'),
+        end: format(slotEnd, 'HH:mm:ss'),
         label
       });
     }
@@ -46,31 +35,92 @@ const generateSlotsFromRange = (startTime, endTime, intervalMinutes, currentDate
   }
   return slots;
 };
-const bookingOccupiesDate = (occupancyModel, date, bookingDropOffDate, bookingPickupDate)=>{
-  const d = startOfDay(date);
-  const drop = startOfDay(parseISO(bookingDropOffDate));
-  const pick = startOfDay(parseISO(bookingPickupDate));
-  switch(occupancyModel){
-    case 'dropoff_only':
-      return isSameDay(d, drop);
-    case 'dropoff_and_pickup_only':
-      return isSameDay(d, drop) || isSameDay(d, pick);
-    case 'same_day':
-      if (!isSameDay(drop, pick)) {
-        return d >= drop && d <= pick;
-      }
-      return isSameDay(d, drop);
-    case 'range':
-    default:
-      return d >= drop && d <= pick;
+
+/**
+ * Resolves which service's inventory_rules/reservations a request is actually asking about.
+ *
+ * Phase 2d: replaces the hardcoded `serviceId === 2 && isDelivery -> 4` with a lookup of
+ * services.delivery_variant_service_id, so any future delivery variant is covered without an
+ * edge function edit — the same fix Phase 1 applied to the write-time trigger.
+ */
+function resolveServiceIdForAvailability(serviceId, isDelivery, servicesById) {
+  const base = Number(serviceId);
+  if (!isDelivery) return base;
+  const variant = servicesById.get(base)?.delivery_variant_service_id;
+  return variant ? Number(variant) : base;
+}
+
+/** Phase 2d: services.slot_interval_minutes replaces the hardcoded intervalMap. */
+function slotIntervalFor(serviceIdForAvail, servicesById) {
+  return servicesById.get(serviceIdForAvail)?.slot_interval_minutes || 120;
+}
+
+/**
+ * Sum of reservation rows for one resource/date, split into the part that blocks any request
+ * ("day" rows, plus any slot row — see resource_quantity_used) and the individual slot rows a
+ * candidate window needs to be overlap-tested against.
+ *
+ * Mirrors public.resource_quantity_used exactly, but as a single bulk in-memory reduction over
+ * one query instead of one RPC call per (date, slot, resource) — at this business's data volume
+ * that is a handful of rows per resource per month, so the O(n) scan costs nothing, and it keeps
+ * get-availability's one Supabase round trip per request. scripts/verify-resource-reservations.mjs
+ * exercises public.resource_quantity_used directly so the two can't silently drift apart.
+ */
+function buildReservationIndex(reservations) {
+  const index = new Map(); // `${resource_id}|${date}` -> { dayQty, slotRows: [{start,end,qty}] }
+  for (const r of reservations ?? []) {
+    const key = `${r.resource_id}|${r.reserved_date}`;
+    const entry = index.get(key) ?? { dayQty: 0, slotRows: [] };
+    if (r.granularity === 'day') {
+      entry.dayQty += r.quantity;
+    } else {
+      entry.slotRows.push({ start: r.slot_start, end: r.slot_end, qty: r.quantity });
+    }
+    index.set(key, entry);
   }
-};
-Deno.serve(async (req)=>{
+  return index;
+}
+
+function dayUsage(index, resourceId, dateStr) {
+  const entry = index.get(`${resourceId}|${dateStr}`);
+  if (!entry) return 0;
+  return entry.dayQty + entry.slotRows.reduce((sum, row) => sum + row.qty, 0);
+}
+
+function slotUsage(index, resourceId, dateStr, slotStart, slotEnd) {
+  const entry = index.get(`${resourceId}|${dateStr}`);
+  if (!entry) return 0;
+  const overlapping = entry.slotRows
+    .filter((row) => row.start < slotEnd && row.end > slotStart)
+    .reduce((sum, row) => sum + row.qty, 0);
+  return entry.dayQty + overlapping;
+}
+
+/**
+ * Phase 2f.3: annotates a generated slot list with per-slot capacity for slot-granular
+ * requirements. No-op (every slot stays available) when the service has none, which is every
+ * service today — Phase 2f is infrastructure ahead of any service actually being configured for
+ * slot granularity (see the design doc's Phase 1 data-audit deferral).
+ */
+function annotateSlots(slots, dateStr, slotGranularItems, reservationIndex) {
+  if (slotGranularItems.length === 0) {
+    return slots.map((s) => ({ ...s, available: true }));
+  }
+  return slots.map((slot) => {
+    let remaining = Infinity;
+    for (const item of slotGranularItems) {
+      const used = slotUsage(reservationIndex, item.inventory_item_id, dateStr, slot.value, slot.end ?? slot.value);
+      const itemRemaining = item.inventory_items.total_quantity - used;
+      remaining = Math.min(remaining, itemRemaining);
+    }
+    return { ...slot, available: remaining >= 1, remaining: Math.max(0, remaining) };
+  });
+}
+
+Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: corsHeaders
-    });
+    return new Response('ok', { headers: corsHeaders });
   }
   try {
     const { serviceId, startDate, endDate, isDelivery, excludeBookingId } = await req.json();
@@ -81,227 +131,150 @@ Deno.serve(async (req)=>{
     const start = parseISO(startDate);
     const end = parseISO(endDate);
     const dateRange = [];
-    for(let d = start; d <= end; d = addDays(d, 1)){
+    for (let d = start; d <= end; d = addDays(d, 1)) {
       dateRange.push(format(d, 'yyyy-MM-dd'));
     }
-    const serviceIdForAvail = isDelivery && Number(serviceId) === 2 ? 4 : Number(serviceId);
     const excludeId = excludeBookingId != null && excludeBookingId !== ''
       ? Number(excludeBookingId)
       : null;
-    // ─────────────────────────────────────────────
-    // DEBUG: Log resolved input parameters
-    // ─────────────────────────────────────────────
+
+    // Fetched up front (small table) so delivery-variant resolution and slot intervals are data
+    // lookups rather than hardcoded ids — see resolveServiceIdForAvailability / slotIntervalFor.
+    const { data: services, error: servicesError } = await supabaseAdmin
+      .from('services')
+      .select('id, occupancy_model, delivery_variant_service_id, slot_interval_minutes, service_type');
+    if (servicesError) throw servicesError;
+    const servicesById = new Map((services ?? []).map((s) => [Number(s.id), s]));
+
+    const serviceIdForAvail = resolveServiceIdForAvailability(serviceId, isDelivery, servicesById);
+    const interval = slotIntervalFor(serviceIdForAvail, servicesById);
+    const isWindowService = servicesById.get(serviceIdForAvail)?.service_type === 'window';
+
     console.log(`\n${'='.repeat(80)}`);
-    console.log(`[get-availability] REQUEST START`);
-    console.log(`[get-availability] serviceId=${serviceId}, isDelivery=${isDelivery}, serviceIdForAvail=${serviceIdForAvail}`);
+    console.log(`[get-availability] serviceId=${serviceId}, isDelivery=${isDelivery}, serviceIdForAvail=${serviceIdForAvail}, interval=${interval}min`);
     console.log(`[get-availability] dateRange: ${startDate} → ${endDate} (${dateRange.length} days)`);
     console.log(`[get-availability] excludeBookingId=${excludeId ?? 'none'}`);
     console.log(`${'='.repeat(80)}`);
-    // ─────────────────────────────────────────────
-    // EXPANDED STATUS FILTER
-    // Now includes 'pending_payment', 'pending', and 'flagged'
-    // so in-progress bookings count toward capacity
-    // ─────────────────────────────────────────────
-    const activeStatuses = [
-      'Confirmed',
-      'confirmed',
-      'Rescheduled',
-      'rescheduled',
-      'Delivered',
-      'delivered',
-      'waiting_to_be_returned',
-      'pending_review',
-      'pending_verification',
-      'pending_payment',
-      'pending',
-      'flagged'
-    ];
-    let bookingsQuery = supabaseAdmin
-      .from('bookings')
-      .select('id, plan, drop_off_date, pickup_date, addons, status')
-      .lte('drop_off_date', endDate)
-      .gte('pickup_date', startDate)
-      .in('status', activeStatuses);
-    if (Number.isFinite(excludeId)) {
-      bookingsQuery = bookingsQuery.neq('id', excludeId);
-    }
-    const [{ data: weeklyRules, error: weeklyError }, { data: dateSpecificRules, error: specificError }, { data: bookings, error: bookingsError }, { data: inventoryRules, error: inventoryRulesError }, { data: services, error: servicesError }] = await Promise.all([
+
+    const [
+      { data: weeklyRules, error: weeklyError },
+      { data: dateSpecificRules, error: specificError },
+      { data: inventoryRules, error: inventoryRulesError },
+    ] = await Promise.all([
       supabaseAdmin.from('service_availability').select('*').eq('service_id', serviceIdForAvail),
       supabaseAdmin.from('date_specific_availability').select('*').eq('service_id', serviceIdForAvail).in('date', dateRange),
-      bookingsQuery,
-      supabaseAdmin.from('inventory_rules').select('service_id, inventory_item_id, quantity_required, inventory_items(id, total_quantity, name)'),
-      supabaseAdmin.from('services').select('id, occupancy_model')
+      supabaseAdmin.from('inventory_rules').select('service_id, inventory_item_id, quantity_required, occupancy_model, scheduling_granularity, inventory_items(id, total_quantity, name)'),
     ]);
     if (weeklyError) throw weeklyError;
     if (specificError) throw specificError;
-    if (bookingsError) throw bookingsError;
     if (inventoryRulesError) throw inventoryRulesError;
-    if (servicesError) throw servicesError;
-    // ─────────────────────────────────────────────
-    // DEBUG: Log fetched data counts
-    // ─────────────────────────────────────────────
-    console.log(`\n[get-availability] DATA FETCHED:`);
-    console.log(`  Weekly rules:        ${weeklyRules?.length ?? 0}`);
-    console.log(`  Date-specific rules: ${dateSpecificRules?.length ?? 0}`);
-    console.log(`  Bookings in range:   ${bookings?.length ?? 0}`);
-    console.log(`  Inventory rules:     ${inventoryRules?.length ?? 0}`);
-    console.log(`  Services:            ${services?.length ?? 0}`);
-    // DEBUG: Log each booking in the range
-    if (bookings && bookings.length > 0) {
-      console.log(`\n[get-availability] BOOKINGS IN DATE RANGE:`);
-      bookings.forEach((b, i)=>{
-        const plan = safeParse(b.plan);
-        const addons = safeParse(b.addons);
-        const resolvedServiceId = addons?.isDelivery && plan?.id === 2 ? 4 : plan?.id;
-        console.log(`  [${i}] booking_id=${b.id} | status=${b.status} | service=${resolvedServiceId} | drop_off=${b.drop_off_date} | pickup=${b.pickup_date}`);
-      });
-    } else {
-      console.log(`\n[get-availability] No bookings found in date range with active statuses.`);
+
+    const requiredItems = (inventoryRules ?? []).filter((r) => r.service_id === serviceIdForAvail);
+    const dayGranularItems = requiredItems.filter((r) => (r.scheduling_granularity ?? 'day') !== 'slot');
+    const slotGranularItems = requiredItems.filter((r) => r.scheduling_granularity === 'slot');
+    const resourceIds = [...new Set(requiredItems.map((r) => r.inventory_item_id))];
+
+    if (requiredItems.length === 0) {
+      console.log(`  ⚠️  NO INVENTORY RULES for service ${serviceIdForAvail} — capacity is UNCHECKED`);
     }
-    // DEBUG: Log inventory rules
-    console.log(`\n[get-availability] INVENTORY RULES:`);
-    inventoryRules?.forEach((ir)=>{
-      console.log(`  service_id=${ir.service_id} → item_id=${ir.inventory_item_id} (${ir.inventory_items?.name ?? '?'}) | qty_required=${ir.quantity_required} | total_stock=${ir.inventory_items?.total_quantity ?? '?'}`);
-    });
-    // DEBUG: Log services + occupancy
-    console.log(`\n[get-availability] SERVICES + OCCUPANCY:`);
-    services?.forEach((s)=>{
-      console.log(`  service_id=${s.id} → occupancy_model=${s.occupancy_model}`);
-    });
-    const weeklyRulesMap = new Map(weeklyRules.map((r)=>[
-        r.day_of_week,
-        r
-      ]));
-    const specificRulesMap = new Map(dateSpecificRules.map((r)=>[
-        r.date,
-        r
-      ]));
-    const occupancyByServiceId = new Map((services ?? []).map((s)=>[
-        Number(s.id),
-        String(s.occupancy_model ?? 'range')
-      ]));
+
+    // Reservations are pre-expanded one row per occupied day (see booking_reservation_rows), so
+    // this single indexed range query replaces the old nested loop over every booking's raw
+    // plan/addons JSONB (bookingOccupiesDate + the O(bookings × rules) scan it drove).
+    let reservationIndex = new Map();
+    if (resourceIds.length > 0) {
+      let reservationsQuery = supabaseAdmin
+        .from('booking_resource_reservations')
+        .select('resource_id, reserved_date, quantity, slot_start, slot_end, granularity, booking_id')
+        .in('resource_id', resourceIds)
+        .gte('reserved_date', startDate)
+        .lte('reserved_date', endDate);
+      if (Number.isFinite(excludeId)) {
+        reservationsQuery = reservationsQuery.neq('booking_id', excludeId);
+      }
+      const { data: reservations, error: reservationsError } = await reservationsQuery;
+      if (reservationsError) throw reservationsError;
+      reservationIndex = buildReservationIndex(reservations);
+      console.log(`  Reservations in range for resources [${resourceIds.join(',')}]: ${reservations?.length ?? 0}`);
+    }
+
+    const weeklyRulesMap = new Map(weeklyRules.map((r) => [r.day_of_week, r]));
+    const specificRulesMap = new Map(dateSpecificRules.map((r) => [r.date, r]));
+
     const availability = {};
     const now = new Date();
-    for (const dateStr of dateRange){
+    for (const dateStr of dateRange) {
       const date = startOfDay(parseISO(dateStr));
       const dayOfWeek = date.getDay();
-      const ruleSource = specificRulesMap.has(dateStr) ? 'date_specific' : weeklyRulesMap.has(dayOfWeek) ? 'weekly' : 'none';
       const rule = specificRulesMap.get(dateStr) || weeklyRulesMap.get(dayOfWeek);
       let isAvailable = rule ? rule.is_available !== false : false;
-      // ─────────────────────────────────────────────
-      // DEBUG: Per-date header
-      // ─────────────────────────────────────────────
-      console.log(`\n${'─'.repeat(60)}`);
-      console.log(`[get-availability] DATE: ${dateStr} (dayOfWeek=${dayOfWeek})`);
-      console.log(`  Rule source: ${ruleSource}`);
-      console.log(`  Base is_available: ${isAvailable}`);
+
       if (isAvailable) {
-        const requiredItems = (inventoryRules ?? []).filter((r)=>r.service_id === serviceIdForAvail);
-        console.log(`  Inventory items required for service ${serviceIdForAvail}: ${requiredItems.length}`);
-        if (requiredItems.length === 0) {
-          console.log(`  ⚠️  NO INVENTORY RULES for this service — capacity is UNCHECKED`);
-        }
-        for (const requiredItem of requiredItems){
+        for (const requiredItem of dayGranularItems) {
           const item = requiredItem.inventory_items;
           if (!item) {
             console.log(`  ⚠️  inventory_items join is null for rule service_id=${requiredItem.service_id}, item_id=${requiredItem.inventory_item_id} — SKIPPING`);
             continue;
           }
-          // Count bookings that use this inventory item on this date
-          const bookingsUsingItem = (bookings ?? []).filter((b)=>{
-            if (Number.isFinite(excludeId) && Number(b.id) === excludeId) return false;
-            const plan = safeParse(b.plan);
-            const addons = safeParse(b.addons);
-            const bookingServiceId = addons?.isDelivery && plan?.id === 2 ? 4 : plan?.id;
-            if (!bookingServiceId) return false;
-            const bookingRequiresItem = (inventoryRules ?? []).some((ir)=>ir.service_id === bookingServiceId && ir.inventory_item_id === item.id);
-            if (!bookingRequiresItem) return false;
-            const occupancyModel = occupancyByServiceId.get(Number(bookingServiceId)) ?? 'range';
-            const occupies = bookingOccupiesDate(occupancyModel, date, b.drop_off_date, b.pickup_date);
-            return occupies;
-          });
-          const quantityUsed = bookingsUsingItem.reduce((acc, curr)=>{
-            const plan = safeParse(curr.plan);
-            const addons = safeParse(curr.addons);
-            const bookingServiceId = addons?.isDelivery && plan?.id === 2 ? 4 : plan?.id;
-            const ruleForItem = (inventoryRules ?? []).find((ir)=>ir.service_id === bookingServiceId && ir.inventory_item_id === item.id);
-            return acc + (ruleForItem ? ruleForItem.quantity_required : 0);
-          }, 0);
-          const wouldExceed = quantityUsed + requiredItem.quantity_required > item.total_quantity;
-          // ─────────────────────────────────────────────
-          // DEBUG: Inventory capacity check detail
-          // ─────────────────────────────────────────────
-          console.log(`  ┌─ INVENTORY CHECK: "${item.name}" (item_id=${item.id})`);
-          console.log(`  │  total_stock     = ${item.total_quantity}`);
-          console.log(`  │  quantity_used   = ${quantityUsed} (from ${bookingsUsingItem.length} booking(s))`);
-          console.log(`  │  qty_required    = ${requiredItem.quantity_required} (for new booking)`);
-          console.log(`  │  would_exceed    = ${wouldExceed} (${quantityUsed} + ${requiredItem.quantity_required} > ${item.total_quantity})`);
-          if (bookingsUsingItem.length > 0) {
-            console.log(`  │  Bookings consuming this item on ${dateStr}:`);
-            bookingsUsingItem.forEach((b)=>{
-              const plan = safeParse(b.plan);
-              const addons = safeParse(b.addons);
-              const bsId = addons?.isDelivery && plan?.id === 2 ? 4 : plan?.id;
-              console.log(`  │    booking_id=${b.id} | status=${b.status} | service=${bsId} | ${b.drop_off_date}→${b.pickup_date}`);
-            });
-          }
+          const used = dayUsage(reservationIndex, item.id, dateStr);
+          const wouldExceed = used + requiredItem.quantity_required > item.total_quantity;
           if (wouldExceed) {
+            console.log(`  [${dateStr}] "${item.name}" full: ${used} + ${requiredItem.quantity_required} > ${item.total_quantity}`);
             isAvailable = false;
-            console.log(`  │  ❌ CAPACITY EXCEEDED → marking ${dateStr} UNAVAILABLE`);
-            console.log(`  └─────────────────────────────────`);
             break;
-          } else {
-            console.log(`  │  ✅ Capacity OK (${item.total_quantity - quantityUsed - requiredItem.quantity_required} remaining after this booking)`);
-            console.log(`  └─────────────────────────────────`);
           }
         }
-      } else {
-        console.log(`  ⛔ Date is unavailable by calendar rule (is_available=false)`);
       }
-      // Generate time slots
-      const intervalMap = {
-        1: 120,
-        2: 60,
-        3: 60,
-        4: 120,
-        5: 60
-      };
-      const interval = intervalMap[serviceIdForAvail] || 120;
+
+      // Delivery-window services (16-yard dumpster, delivered trailer) have a distinct
+      // "delivery pickup window" for the return trip, separate from the self-pickup
+      // pickup/return-by config used by hourly services. Phase 2f.4 relies on this being
+      // correct: BookingForm now sources plan 1/4's pickup window from here instead of
+      // querying date_specific_availability directly.
       const deliverySlots = rule ? generateSlotsFromRange(rule.delivery_start_time ?? rule.delivery_window_start_time, rule.delivery_end_time ?? rule.delivery_window_end_time, interval, date, now) : [];
-      const pickupSlots = rule ? generateSlotsFromRange(rule.pickup_start_time, rule.pickup_end_time ?? rule.return_by_time, interval, date, now) : [];
+      const pickupSlots = rule
+        ? isWindowService
+          ? generateSlotsFromRange(rule.delivery_pickup_start_time ?? rule.delivery_pickup_window_start_time, rule.delivery_pickup_end_time ?? rule.delivery_pickup_window_end_time, interval, date, now)
+          : generateSlotsFromRange(rule.pickup_start_time, rule.pickup_end_time ?? rule.return_by_time, interval, date, now)
+        : [];
       const returnSlots = rule ? generateSlotsFromRange(rule.return_start_time ?? rule.return_by_time, rule.return_end_time, 60, date, now) : [];
       const hourlySlots = rule ? generateSlotsFromRange(rule.hourly_start_time, rule.hourly_end_time, 60, date, now) : [];
+
+      // Phase 2f.3: date-level availability now also requires at least one generated slot to
+      // have room, when the service has a slot-granular requirement. This is a no-op for every
+      // service configured today (none has scheduling_granularity = 'slot' yet), so existing
+      // day-only behaviour is unchanged; it activates automatically once one is added.
+      const annotatedDeliverySlots = annotateSlots(deliverySlots, dateStr, slotGranularItems, reservationIndex);
+      const annotatedPickupSlots = annotateSlots(pickupSlots, dateStr, slotGranularItems, reservationIndex);
+
+      if (isAvailable && slotGranularItems.length > 0) {
+        const candidateSlots = [...annotatedDeliverySlots, ...annotatedPickupSlots];
+        if (candidateSlots.length > 0 && !candidateSlots.some((s) => s.available)) {
+          console.log(`  [${dateStr}] slot-granular resource has no free slot — marking unavailable`);
+          isAvailable = false;
+        }
+      }
+
       availability[dateStr] = {
         available: isAvailable,
-        deliverySlots,
-        pickupSlots,
+        deliverySlots: annotatedDeliverySlots,
+        pickupSlots: annotatedPickupSlots,
         returnSlots,
-        hourlySlots
+        hourlySlots,
       };
-      console.log(`  FINAL: ${dateStr} → available=${isAvailable} | slots: delivery=${deliverySlots.length}, pickup=${pickupSlots.length}, return=${returnSlots.length}, hourly=${hourlySlots.length}`);
     }
-    console.log(`\n${'='.repeat(80)}`);
+
     console.log(`[get-availability] REQUEST COMPLETE`);
     console.log(`${'='.repeat(80)}\n`);
-    return new Response(JSON.stringify({
-      availability
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
-      status: 200
+    return new Response(JSON.stringify({ availability }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
     });
   } catch (error) {
     console.error('[get-availability] ERROR:', error.message, error.stack);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      },
-      status: 500
+    return new Response(JSON.stringify({ error: error.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 500,
     });
   }
 });

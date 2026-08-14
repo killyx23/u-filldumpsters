@@ -2,6 +2,27 @@ import React from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import { parseISO } from 'date-fns';
+import { parseBookingTimeSlot, parseClockTime } from '@/utils/parseBookingTimeSlot';
+
+/**
+ * Build the event instant for one end of a booking.
+ *
+ * This used to concatenate the raw slot text onto the date, which only produced a valid
+ * timestamp for slots stored as 'HH:mm:ss'. The 12-hour form ('6:00 AM') and both pipe window
+ * forms ('06:00:00|08:00:00') yielded Invalid Date, so most bookings failed to place on the
+ * calendar at all. The typed window columns are used when present.
+ */
+const eventInstant = (dateIso, typedTime, textSlot, fallbackHour) => {
+  if (!dateIso) return null;
+
+  const time =
+    parseClockTime(typedTime) ??
+    parseBookingTimeSlot(textSlot, 0)?.start ??
+    { hour: fallbackHour, minute: 0, second: 0 };
+
+  const pad = (n) => String(n).padStart(2, '0');
+  return parseISO(`${dateIso}T${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}`);
+};
 
 export const PortalCalendar = ({ bookings }) => {
   const events = bookings.map(booking => {
@@ -26,8 +47,13 @@ export const PortalCalendar = ({ bookings }) => {
     const outEvent = {
         ...baseEvent,
         title: `Out: ${serviceName}`,
-        start: parseISO(booking.drop_off_date + 'T' + (booking.drop_off_time_slot || '08:00')),
-        allDay: !booking.drop_off_time_slot,
+        start: eventInstant(
+            booking.drop_off_date,
+            booking.drop_off_window_start,
+            booking.drop_off_time_slot,
+            8,
+        ),
+        allDay: !booking.drop_off_time_slot && !booking.drop_off_window_start,
     };
 
     if (serviceType === 3) return [outEvent]; // Only drop-off
@@ -35,13 +61,18 @@ export const PortalCalendar = ({ bookings }) => {
     const inEvent = {
         ...baseEvent,
         title: `In: ${serviceName}`,
-        start: parseISO(booking.pickup_date + 'T' + (booking.pickup_time_slot || '17:00')),
-        allDay: !booking.pickup_time_slot,
+        start: eventInstant(
+            booking.pickup_date,
+            booking.pickup_window_start,
+            booking.pickup_time_slot,
+            17,
+        ),
+        allDay: !booking.pickup_time_slot && !booking.pickup_window_start,
         backgroundColor: bgColor === '#3b82f6' ? '#0ea5e9' : bgColor, // Slightly different blue for return
     };
 
     return [outEvent, inEvent];
-  }).flat();
+  }).flat().filter(event => event.start !== null);
 
   return (
     <div className="space-y-6">

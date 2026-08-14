@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { BookingsManager } from '@/components/admin/BookingsManager';
 import { CustomersManager } from '@/components/admin/CustomersManager';
 import { PricingManager } from '@/components/admin/PricingManager';
+import { CapacityManager } from '@/components/admin/CapacityManager';
 import { AvailabilityManager } from '@/components/admin/AvailabilityManager';
 import { EquipmentManager } from '@/components/admin/EquipmentManager';
 import { ActionItemsManager } from '@/components/admin/ActionItemsManager';
@@ -21,7 +22,7 @@ import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSection
 import { LoyaltyPointsManager } from '@/components/admin/LoyaltyPointsManager';
 import { ReferralsManager } from '@/components/admin/ReferralsManager';
 import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift } from 'lucide-react';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, Boxes } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
@@ -266,6 +267,7 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="bookings" className="py-2"><Truck className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Bookings</span></TabsTrigger>
                         <TabsTrigger value="customers" className="py-2"><Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Customers</span></TabsTrigger>
                         <TabsTrigger value="availability" className="py-2"><Calendar className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Availability</span></TabsTrigger>
+                        <TabsTrigger value="capacity" className="py-2"><Boxes className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Capacity</span></TabsTrigger>
                         <TabsTrigger value="pricing" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Pricing</span></TabsTrigger>
                         <TabsTrigger value="charges-fees" className="py-2"><DollarSign className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Charges & Fees</span></TabsTrigger>
                         <TabsTrigger value="equipment" className="py-2"><Wrench className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Equipment</span></TabsTrigger>
@@ -316,6 +318,7 @@ export const AdminDashboard = () => {
                             <TabsContent value="bookings"><BookingsManager initialBookings={bookings} adminEmail={user?.email} onBookingsChange={fetchDashboardData} /></TabsContent>
                             <TabsContent value="customers"><CustomersManager /></TabsContent>
                             <TabsContent value="availability"><AvailabilityManager /></TabsContent>
+                            <TabsContent value="capacity"><CapacityManager /></TabsContent>
                             <TabsContent value="pricing"><PricingManager /></TabsContent>
                             <TabsContent value="charges-fees"><ChargesAndFeesManager /></TabsContent>
                             <TabsContent value="equipment"><EquipmentManager /></TabsContent>
