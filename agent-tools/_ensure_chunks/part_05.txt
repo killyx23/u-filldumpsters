@@ -1,0 +1,175 @@
+on getOAuthTokenForWatchdog(clientId: string, clientSecret: string) {
+  const result = await getOAuthToken(clientId, clientSecret, GENERATE_PIN_SCOPES);
+  if (!result.token) {
+    console.error("[ensure-lock-pin-ready] OAuth failed:", result.reason);
+    return null;
+  }
+  return result.token;
+}
+
+async function createAlgoPin(
+  accessToken: string,
+  lockId: string,
+  booking: Record<string, unknown>,
+) {
+  const startDate = getPinActivationStart(booking as { drop_off_date?: string; drop_off_time_slot?: string });
+  const startDateHourOnly = startDate.replace(/T(\d{2}):\d{2}:00/, "T$1:00:00");
+  const pickupDate = String(booking.pickup_date || "");
+  const startUnix = new Date(startDateHourOnly).getTime() / 1000;
+  const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
+  const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
+  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/algopin/onetime`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      accessName: `Dump Loader Rental - Order #${booking.id} (AlgoPIN fallback)`,
+      startDate: startDateHourOnly,
+      variance,
+    }),
+  });
+  const body = await readResponse(res);
+  if (!res.ok && res.status !== 201) {
+    return { success: false as const, error: `AlgoPIN HTTP ${res.status}`, raw: body.json };
+  }
+  const pin = String(body.json?.pin || body.json?.access_code || body.json?.code || "");
+  if (!pin) return { success: false as const, error: "AlgoPIN response missing pin", raw: body.json };
+  return {
+    success: true as const,
+    pin,
+    pinId: String(body.json?.pinId || body.json?.id || ""),
+    startDate: startDateHourOnly,
+  };
+}
+
+async function logSyncError(
+  supabase: any,
+  orderId: number,
+  notes: string,
+) {
+  await supabase.from("rental_tracking_logs").insert({
+    order_id: orderId,
+    event_type: "sync_error",
+    event_timestamp: new Date().toISOString(),
+    notes,
+  });
+}
+
+async function alertAdmin(subject: string, html: string) {
+  const adminEmail = Deno.env.get("BREVO_FROM_EMAIL");
+  if (!adminEmail) {
+    console.warn("[ensure-lock-pin-ready] No BREVO_FROM_EMAIL for admin alert");
+    return;
+  }
+  const result = await sendEmail(adminEmail, subject, html);
+  if (!result.success) {
+    console.error("[ensure-lock-pin-ready] Admin alert failed:", result.error);
+  }
+}
+
+async function alertCustomerChat(
+  supabase: any,
+  booking: Record<string, unknown>,
+  message: string,
+) {
+  const customerId = Number(booking.customer_id);
+  if (!customerId) {
+    console.warn("[ensure-lock-pin-ready] No customer_id for chat alert on order", booking.id);
+    return;
+  }
+  const { error } = await supabase.from("chat_messages").insert({
+    conversation_id: `cust_${customerId}`,
+    customer_id: customerId,
+    booking_id: Number(booking.id),
+    sender_type: "admin",
+    message_content: message,
+    is_read: false,
+    message_severity: "urgent",
+    message_context: {
+      action: "pin_failed",
+      order_id: Number(booking.id),
+      source: "ensure-lock-pin-ready",
+    },
+  });
+  if (error) {
+    console.error("[ensure-lock-pin-ready] chat_messages insert failed:", error.message);
+  }
+}
+
+async function maybeNotifyCustomer(
+  supabase: any,
+  booking: Record<string, unknown>,
+  pin: string,
+  startTime: string,
+  endTime: string,
+) {
+  if (booking.pin_notification_sent_at) return;
+  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: booking.id,
+      email_type: "pin_update",
+      pin,
+      start_time: startTime,
+      end_time: endTime,
+    },
+  });
+  if (error) {
+    console.error(`[ensure-lock-pin-ready] PIN notification failed for #${booking.id}:`, error.message);
+  }
+}
+
+function shouldUseAlgoPinFallback(
+  activePin: Record<string, unknown> | null,
+  attempts: number,
+  nowMs: number,
+  msToPickup: number,
+): boolean {
+  if (attempts >= ALERT_ATTEMPTS_THRESHOLD) return true;
+  if (msToPickup <= FINAL_HOUR_MS && msToPickup > -FINAL_HOUR_MS) return true;
+  if (activePin?.created_at) {
+    const age = nowMs - new Date(String(activePin.created_at)).getTime();
+    if (age >= RETRY_BUDGET_MS && !activePin.lock_confirmed_at) return true;
+  }
+  return false;
+}
+
+Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+  const jsonResponse = makeJsonResponse(corsHeaders);
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const clientId = Deno.env.get("IGLOOHOME_CLIENT_ID") ?? "";
+    const clientSecret = Deno.env.get("IGLOOHOME_CLIENT_SECRET") ?? "";
+    const lockId = Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID") || "";
+    const bridgeId = Deno.env.get("IGLOOHOME_BRIDGE_ID") || "";
+
+    const authHeader = req.headers.get("Authorization");
+    const incomingKey = authHeader?.replace("Bearer ", "").trim();
+    if (!incomingKey || incomingKey !== serviceRoleKey) {
+      return jsonResponse({ success: false, error: "Unauthorized" }, 401);
+    }
+    if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret || !lockId || !bridgeId) {
+      return jsonResponse({ success: false, error: "Missing env" }, 500);
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const accessToken = await getOAuthTokenForWatchdog(clientId, clientSecret);
+    if (!accessToken) {
+      return jsonResponse({ success: false, error: "OAuth failed" }, 502);
+    }
+
+    const now = new Date();
+    const nowMs = now.getTime();
+    const horizonIso = new Date(nowMs + PIN_LEAD_TIME_MS).toISOString().slice(0, 10);
+    const today = now.toISOString().slice(0, 10);
+
+    const

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 import { PortalNavigation } from '@/components/customer-portal/PortalNavigation';
 import { PortalDashboard } from '@/components/customer-portal/PortalDashboard';
@@ -686,7 +687,7 @@ export const CustomerPortal = () => {
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex-1">
                                                         <p className="text-white font-semibold">
-                                                            {booking.plan?.name || 'Service'}
+                                                            {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
                                                         </p>
                                                         <p className="text-sm text-blue-200">
                                                             {format(new Date(booking.created_at), 'MMMM d, yyyy')}

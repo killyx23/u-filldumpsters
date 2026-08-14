@@ -4,12 +4,12 @@ export const getServiceContent = (planId) => {
   // Plan 2: Dump Loader Trailer Rental
   if (id === 2) {
     return {
-      serviceName: 'Dump Loader Trailer Rental',
+      serviceName: 'Dump Trailer Rental',
       description: 'Pick up the trailer at our South Saratoga Springs location. A 2-5/16" ball hitch is required.',
       whatNextSteps: [
         { 
           title: 'Trailer Ready', 
-          description: "We'll have the dump loader trailer ready for pickup at our South Saratoga Springs location." 
+          description: "We'll have the dump trailer ready for pickup at our South Saratoga Springs location." 
         },
         { 
           title: 'Pickup', 

@@ -10,7 +10,7 @@ const ProductShowcase = ({ onOpenModal }) => {
   const services = [
     {
       id: "service-16-yard",
-      title: "16-Yard Roll-Off",
+      title: "Dumpster Rental",
       description: "Perfect for major renovations and construction.",
       capacity: "Up to 4 Tons",
       image: siteImages.showcaseDumpster

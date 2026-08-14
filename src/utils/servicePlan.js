@@ -226,8 +226,8 @@ export function filterRentableServices(services = []) {
 }
 
 const HERO_STATIC_FALLBACK = [
-  { id: 2, name: 'Dump Loader Trailer Rental Service' },
-  { id: 1, name: '16 Yard Dumpster' },
+  { id: 2, name: 'Dump Trailer Rental Service' },
+  { id: 1, name: 'Dumpster Rental' },
   { id: 5, name: 'DIY Heavy Equipment' },
   { id: 3, name: 'Rock, Decorative Rock, Mulch, & Gravel Delivery Service' },
 ];

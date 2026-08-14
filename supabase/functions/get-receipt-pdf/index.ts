@@ -4,6 +4,7 @@ import { PDFDocument, rgb, StandardFonts } from 'https://esm.sh/pdf-lib@1.17.1';
 import { format } from 'https://deno.land/std@0.208.0/datetime/mod.ts';
 import { resolveBookingGrandTotal } from '../_shared/resolveBookingGrandTotal.ts';
 import { formatPlainBookingTime } from '../_shared/formatBookingTime.ts';
+import { formatCustomerFacingPlanName } from '../_shared/displayPlanName.ts';
 
 const formatDate = (dateStr: string | null) =>
   dateStr ? format(new Date(dateStr), 'MM/dd/yyyy') : 'N/A';
@@ -82,7 +83,7 @@ async function generatePDFReceipt(booking: any) {
   drawText('SERVICE DETAILS', margin + 6, y, { font: fontBold, size: 9, color: rgb(1, 1, 1) });
   drawText('AMOUNT', width - margin, y, { font: fontBold, size: 9, color: rgb(1, 1, 1), align: 'right' });
   y -= 22;
-  const serviceName = (booking.plan?.name || 'Service') + (booking.addons?.isDelivery ? ' with Delivery' : '');
+  const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (booking.addons?.isDelivery ? ' with Delivery' : '');
   const dropOff = formatDate(booking.drop_off_date);
   const pickup  = formatDate(booking.pickup_date);
   drawText(serviceName, margin, y, { font: fontBold, size: 10, color: black });

@@ -74,8 +74,8 @@ function App() {
         <ScrollToTop />
         <BookingFlowProvider>
         <Helmet>
-          <title>Dumpster Rental Services | Book Online Today</title>
-          <meta name="description" content="Professional dumpster rental services for residential and commercial projects. Easy online booking, competitive rates, and reliable service." />
+          <title>Dumpster Rental | Book Online Today</title>
+          <meta name="description" content="Professional dumpster rental for residential and commercial projects. Easy online booking, competitive rates, and reliable service." />
         </Helmet>
         
         <div className="flex flex-col min-h-screen text-white">

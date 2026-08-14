@@ -2,11 +2,12 @@ import React from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import { parseISO } from 'date-fns';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const PortalCalendar = ({ bookings }) => {
   const events = bookings.map(booking => {
     const isDelivery = booking.addons?.isDelivery;
-    const serviceName = (booking.plan?.name || 'Service') + (isDelivery ? ' with Delivery' : '');
+    const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
     const serviceType = booking.plan?.id;
 
     let bgColor = '#3b82f6'; // Scheduled (blue)

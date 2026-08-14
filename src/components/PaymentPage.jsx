@@ -116,7 +116,7 @@ const CheckoutForm = ({
   }, [isPaymentElementReady, paymentElementError]);
   
   const isDelivery = plan?.id === 2 && deliveryService;
-  const currentPlan = isDelivery ? { ...plan, name: "Dump Loader Trailer with Delivery" } : (plan || {});
+  const currentPlan = isDelivery ? { ...plan, name: "Dump Trailer with Delivery" } : (plan || {});
   
   const isDeliveryService = plan?.id === 1 || plan?.id === 4 || (plan?.id === 2 && deliveryService);
 

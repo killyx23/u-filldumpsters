@@ -86,7 +86,7 @@ async function createAlgoPin(token: string, lockId: string, booking: Record<stri
       Accept: "application/json",
     },
     body: JSON.stringify({
-      accessName: `Dump Loader Rental - Order #${booking.id} (AlgoPIN fallback)`,
+      accessName: `Dump Trailer Rental - Order #${booking.id} (AlgoPIN fallback)`,
       startDate,
       variance,
     }),
@@ -218,6 +218,7 @@ Deno.serve(async (req) => {
         Number(plan.id) === 5 ||
         name.includes("trailer") ||
         name.includes("dump loader") ||
+        name.includes("dump trailer") ||
         plan.customer_pickup === true;
       if (!isTrailer) continue;
 

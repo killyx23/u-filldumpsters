@@ -1,0 +1,32 @@
+[
+  {
+    "name": "index.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/0_index.ts",
+    "len": 16953
+  },
+  {
+    "name": "cors.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/1_cors.ts",
+    "len": 53
+  },
+  {
+    "name": "../_shared/pinTiming.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/2__shared_pinTiming.ts",
+    "len": 4870
+  },
+  {
+    "name": "../_shared/lockPin.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/3__shared_lockPin.ts",
+    "len": 10874
+  },
+  {
+    "name": "../_shared/iglooAuth.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/4__shared_iglooAuth.ts",
+    "len": 10333
+  },
+  {
+    "name": "../_shared/cors.ts",
+    "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_deploy_payloads/_gp_raw/5__shared_cors.ts",
+    "len": 1059
+  }
+]

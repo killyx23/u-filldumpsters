@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { HardwareProtectionInfoDialog } from '@/components/addons/HardwareProtectionInfoDialog';
+import { mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 /**
  * Protection Section Component
@@ -28,13 +29,11 @@ export const ProtectionSection = ({
 
     // Detect specific dump loader service types
     const isDumpLoaderWithDelivery = plan?.name && 
-                                     plan.name.toLowerCase().includes('dump loader') &&
+                                     mentionsDumpTrailer(plan.name) &&
                                      plan.name.toLowerCase().includes('delivery');
 
     const isDumpLoaderTrailerRental = plan?.name && 
-                                      (plan.name.toLowerCase().includes('dump loader') ||
-                                       plan.name.toLowerCase().includes('dump trailer') ||
-                                       plan.name.toLowerCase().includes('loader trailer')) &&
+                                      mentionsDumpTrailer(plan.name) &&
                                       !plan.name.toLowerCase().includes('delivery') &&
                                       !plan.name.toLowerCase().includes('16 yard') &&
                                       !plan.name.toLowerCase().includes('dumpster');

@@ -1,0 +1,205 @@
+get-devices",
+      ],
+    },
+    { label: "only igloohomeapi/algopin-onetime", scopes: ["igloohomeapi/algopin-onetime"] },
+    { label: `only ${ACTIVITY_SYNC_SCOPE}`, scopes: [ACTIVITY_SYNC_SCOPE] },
+    { label: `only ${DEVICE_ACTIVITY_SCOPE}`, scopes: [DEVICE_ACTIVITY_SCOPE] },
+    { label: "only igloohomeapi/create-bridge-proxied-job (legacy)", scopes: ["igloohomeapi/create-bridge-proxied-job"] },
+    ...BRIDGE_PIN_SCOPES.map((s) => ({ label: `only ${s}`, scopes: [s] as const })),
+  ];
+
+  const results: DiagnoseRow[] = [];
+  for (const c of cases) {
+    const r = await requestOAuthToken(clientId, clientSecret, c.scopes);
+    results.push({
+      scopes: c.label,
+      ok: !!r.token,
+      reason: r.token ? null : (r.reason ?? "unknown"),
+    });
+  }
+  return results;
+}
+
+export function bridgeOfflineHint(errorText: string | undefined | null): string | null {
+  const t = String(errorText || "");
+  if (/unable to contact bridge|bridge.*offline|406/i.test(t)) {
+    return (
+      "Igloohome's cloud cannot reach your Bridge right now. " +
+      "An empty PIN list in the Igloo app does not mean the Bridge is online — " +
+      "check Bridge power/Wi‑Fi, wait ~1 minute after it reconnects, then retry. " +
+      "Meanwhile use Setup + AlgoPIN (works offline)."
+    );
+  }
+  return null;
+}
+
+const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
+
+export type JobState = "completed" | "failed" | "pending";
+
+export type PollResult = {
+  state: JobState;
+  raw: unknown;
+  polls: Array<Record<string, unknown>>;
+};
+
+type SupabaseClient = any;
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function readResponse(res: Response) {
+  const text = await res.text();
+  try {
+    return { text, json: text ? JSON.parse(text) : null };
+  } catch {
+    return { text, json: null };
+  }
+}
+
+function isoNow() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+export async function pollJob(
+  accessToken: string,
+  jobId: string,
+  budgetMs = 45_000,
+  delayMs = 2500,
+): Promise<PollResult> {
+  const polls: Array<Record<string, unknown>> = [];
+  let raw: unknown = null;
+  const deadline = Date.now() + budgetMs;
+  let attempt = 0;
+
+  while (Date.now() < deadline) {
+    attempt += 1;
+    await sleep(delayMs);
+    if (Date.now() >= deadline && attempt > 1) break;
+
+    const res = await fetch(`${IGLOOHOME_API_BASE_URL}/jobs/${jobId}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    });
+    const body = await readResponse(res);
+    raw = body.json ?? body.text;
+    const jobResponse = body.json?.jobResponse;
+    const jobStatus = jobResponse?.jobStatus;
+    const completed = body.json?.completed;
+    polls.push({
+      attempt,
+      httpStatus: res.status,
+      completed: completed ?? null,
+      jobStatus: jobStatus ?? null,
+    });
+
+    if (completed === true || jobStatus === 0) {
+      return { state: "completed", raw, polls };
+    }
+    if (jobStatus === 2) {
+      return { state: "failed", raw, polls };
+    }
+  }
+
+  return { state: "pending", raw, polls };
+}
+
+export async function deletePinVerified(
+  accessToken: string,
+  lockId: string,
+  bridgeId: string,
+  pin: string,
+  budgetMs = 45_000,
+): Promise<{ ok: boolean; jobId: string; state: JobState; polls: PollResult["polls"]; error?: string }> {
+  const url = `${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ jobType: 5, jobData: { pin } }),
+  });
+  const body = await readResponse(res);
+  if (!res.ok && res.status !== 201) {
+    return {
+      ok: false,
+      jobId: "",
+      state: "failed",
+      polls: [],
+      error: `Delete failed HTTP ${res.status}: ${body.json?.error ?? body.text}`,
+    };
+  }
+  const jobId = String(body.json?.jobId || body.json?.pinId || body.json?.id || "");
+  if (!jobId) {
+    return { ok: false, jobId: "", state: "pending", polls: [], error: "Delete accepted but no jobId returned" };
+  }
+  const poll = await pollJob(accessToken, jobId, budgetMs);
+  return {
+    ok: poll.state === "completed",
+    jobId,
+    state: poll.state,
+    polls: poll.polls,
+    error: poll.state === "failed" ? "Lock rejected delete job" : undefined,
+  };
+}
+
+export async function clearKnownPins(
+  supabase: SupabaseClient,
+  accessToken: string,
+  orderId: number,
+  opts: {
+    lockId: string;
+    bridgeId: string;
+    
+    budgetMs?: number;
+    
+    settleMs?: number;
+  },
+): Promise<{
+  attempted: number;
+  confirmed: number;
+  failed: number;
+  pending: number;
+  details: Array<Record<string, unknown>>;
+}> {
+  const budgetMs = opts.budgetMs ?? 60_000;
+  const settleMs = opts.settleMs ?? 15_000;
+  const deadline = Date.now() + budgetMs;
+  const details: Array<Record<string, unknown>> = [];
+
+  const { data: rows } = await supabase
+    .from("rental_access_codes")
+    .select("id, access_pin, pin_type, status, lock_deleted_at")
+    .eq("order_id", orderId)
+    .is("lock_deleted_at", null);
+
+  let attempted = 0;
+  let confirmed = 0;
+  let failed = 0;
+  let pending = 0;
+
+  for (const row of rows || []) {
+    if (Date.now() >= deadline) {
+      pending += 1;
+      details.push({ id: row.id, pin: row.access_pin, skipped: true, reason: "budget_exhausted" });
+      continue;
+    }
+
+    if (row.pin_type === "algopin") {
+      await supabase
+        .from("rental_access_codes")
+        .update({
+          status: row.status === "active" ? "expired" : row.status,
+          lock_deleted_at: new Date().toISOString(),
+        })
+        .eq("id", row.id);
+      confirmed += 1;
+      details.push({ id: row.id, pin: row.access_pin, pin_type: "algopin", state: "db_only" });
+      continue;
+    }
+
+    if (!row.access_pin) continue;
+    attempted += 1;
+    const remaining = Math.max(5_000, deadline - Date.now());

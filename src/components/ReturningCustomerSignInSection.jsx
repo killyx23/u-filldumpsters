@@ -8,6 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect }) => {
   const [mode, setMode] = useState('input'); // input, sending, sent, verifying, authenticated
@@ -375,7 +376,7 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
                           <div className="flex items-center gap-2 mb-1">
                             <FileText className="h-4 w-4 text-blue-400 flex-shrink-0" />
                             <span className="text-sm font-semibold text-white truncate">
-                              {booking.plan?.name || 'Service'}
+                              {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
                             </span>
                           </div>
                           <div className="flex items-center gap-3 text-xs text-gray-300">

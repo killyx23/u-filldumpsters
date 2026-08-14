@@ -7,6 +7,7 @@ import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2 } from 'lucide-react';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -49,7 +50,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect }) => {
             </div>
             <div className="flex justify-between items-start">
                 <div>
-                    <p className="font-bold text-lg text-white">{booking.plan.name}</p>
+                    <p className="font-bold text-lg text-white">{formatCustomerFacingPlanName(booking.plan.name)}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
                     <p className="text-xs text-gray-400 mt-1">Stripe Intent ID: {paymentInfo?.stripe_payment_intent_id || 'N/A'}</p>
                 </div>

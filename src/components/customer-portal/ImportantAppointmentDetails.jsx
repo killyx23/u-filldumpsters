@@ -18,6 +18,7 @@ import {
   getBusinessAddress,
 } from '@/utils/distanceCalculationHelper';
 import { getServiceIdFromBooking } from '@/utils/servicePlan';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const ACTIVE_STATUSES = new Set([
   'pending_payment',
@@ -110,13 +111,14 @@ function AppointmentCard({ booking, isPrimary, onNavigateToTab }) {
   const navigate = useNavigate();
 
   const plan = booking.plan || {};
-  const serviceDisplayName =
+  const serviceDisplayName = formatCustomerFacingPlanName(
     plan.name ||
     (getServiceIdFromBooking(booking) === 2
-      ? 'Dump Loader Trailer'
+      ? 'Dump Trailer'
       : getServiceIdFromBooking(booking) === 5
       ? 'Excavator'
-      : 'Rental Service');
+      : 'Rental Service')
+  );
 
   const { pickupStart, returnBy } = getPickupWindowTimes(booking);
   const phase = getPickupLocationPhase(booking);

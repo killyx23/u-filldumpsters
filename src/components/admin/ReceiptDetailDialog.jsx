@@ -7,6 +7,7 @@ import React from 'react';
     import { convertTo12Hour } from '@/utils/timeFormatConverter';
     import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
     import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -95,7 +96,7 @@ import React from 'react';
 
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Rental Details</h4>
-                            <DetailRow icon={<Info />} label="Service" value={plan.name} />
+                            <DetailRow icon={<Info />} label="Service" value={formatCustomerFacingPlanName(plan.name)} />
                             <DetailRow icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(resolveOneWayMiles(booking, customers))} />
                             <DetailRow icon={<Clock />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} />
                             <DetailRow icon={<Clock />} label={plan.id === 2 ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} />

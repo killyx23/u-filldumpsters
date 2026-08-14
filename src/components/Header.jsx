@@ -102,11 +102,12 @@ export const Header = ({ onReorderSelect }) => {
                   className="flex items-center group border-0 bg-transparent p-0 cursor-pointer"
                   aria-label="U-Fill Dumpsters home"
                 >
-                  <div className="relative p-0 transition-transform duration-300 group-hover:scale-105 bg-white rounded-xl">
+                  <div className="relative p-0 transition-transform duration-300 group-hover:scale-105">
                     <img 
                       src={siteImages.logo} 
                       alt="U-Fill Dumpsters Logo" 
-                      className="h-[120px] md:h-[160px] lg:h-[180px] w-auto object-contain"
+                      className="h-[120px] md:h-[160px] lg:h-[180px] w-auto max-w-[min(92vw,560px)] object-contain object-center bg-transparent select-none"
+                      draggable={false}
                     />
                   </div>
               </button>

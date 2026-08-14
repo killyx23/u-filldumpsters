@@ -27,6 +27,7 @@ import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
 import { useNavigate } from 'react-router-dom';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const BookingForm = ({
   plan,
@@ -827,7 +828,7 @@ export const BookingForm = ({
     return <div className="flex justify-center items-center h-96"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
   }
 
-  const planName = currentPlan?.name || plan?.name || 'Selected Service';
+  const planName = formatCustomerFacingPlanName(currentPlan?.name || plan?.name) || 'Selected Service';
   const labels = getFieldLabels();
   
   const renderDescription = () => {
@@ -921,7 +922,7 @@ export const BookingForm = ({
       return (
          <div className="text-blue-200 space-y-3 text-sm leading-relaxed">
           <p>
-            Our <strong>16 Yard Dumpster Rental</strong> is perfect for mid-to-large cleanouts, remodeling projects, and construction debris.
+            Our <strong>Dumpster Rental</strong> is perfect for mid-to-large cleanouts, remodeling projects, and construction debris.
           </p>
           <div className="bg-black/20 p-3 rounded border border-blue-500/20 mt-4">
             <p className="font-bold text-white mb-1">Pricing Details:</p>
@@ -946,7 +947,7 @@ export const BookingForm = ({
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
           <p>
-            Our <strong>Dump Loader Trailer Rental</strong> is the heavy-duty solution for DIYers and professionals alike. This versatile 16'x7'x4' trailer empowers you to move materials on your own schedule—saving you time, money, and the hassle of multiple trips.
+            Our <strong>Dump Trailer Rental</strong> is the heavy-duty solution for DIYers and professionals alike. This versatile 16'x7'x4' trailer empowers you to move materials on your own schedule—saving you time, money, and the hassle of multiple trips.
           </p>
           
           <div>
@@ -1316,7 +1317,7 @@ export const BookingForm = ({
         <DialogDescription asChild>
           <div className="my-4 text-base text-blue-200 space-y-4">
             <p>
-              We apologize for the inconvenience. Dump Loader Trailer delivery is temporarily
+              We apologize for the inconvenience. Dump Trailer delivery is temporarily
               unavailable on our current schedule, and we are working to have it available again soon.
             </p>
             <p>

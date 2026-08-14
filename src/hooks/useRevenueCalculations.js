@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useFinancialData } from './useFinancialData';
 import { getPriceFromSnapshotOrCurrent } from '@/utils/equipmentPricingIntegration';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const useRevenueCalculations = (options = {}) => {
   const { dateRangeStart, dateRangeEnd } = options;
@@ -26,7 +27,7 @@ export const useRevenueCalculations = (options = {}) => {
     const totalRevenue = bookings.reduce((sum, b) => sum + calculateBookingRevenue(b), 0);
 
     const revenueByService = bookings.reduce((acc, b) => {
-      const serviceName = b.plan?.name || 'Unknown';
+      const serviceName = formatCustomerFacingPlanName(b.plan?.name) || 'Unknown';
       acc[serviceName] = (acc[serviceName] || 0) + calculateBookingRevenue(b);
       return acc;
     }, {});

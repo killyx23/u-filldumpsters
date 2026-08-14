@@ -9,6 +9,7 @@ import { toast } from '@/components/ui/use-toast';
 import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoyaltyBadge';
 import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onStartNewOrder }) => {
   const [status, setStatus] = useState('idle'); // idle, sending, sent, verifying, authenticated
@@ -341,7 +342,7 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex-1 space-y-2">
                               <h4 className="font-semibold text-white text-lg">
-                                {booking.plan?.name || 'Service'}
+                                {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
                               </h4>
                               <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-300">
                                 <span className="flex items-center gap-1">

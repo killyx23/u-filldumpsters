@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
   const [data, setData] = useState([]);
@@ -92,7 +93,7 @@ export const StatusDetailsModal = ({ isOpen, onClose, type, customerId }) => {
   };
 
   const renderItemContent = (item) => {
-    const planName = item.plan?.name || 'Custom Rental';
+    const planName = formatCustomerFacingPlanName(item.plan?.name) || 'Custom Rental';
     const isDelivery = item.addons?.deliveryService || item.addons?.isDelivery;
     const showWindow = shouldShowTimeWindow(item.plan, isDelivery);
     const isSelfService = isSelfServiceTrailer(item.plan, isDelivery);

@@ -1,0 +1,197 @@
+     "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  );
+  if (!res.ok) {
+    return { success: false, provider: "twilio", error: await res.text() };
+  }
+  return { success: true, provider: "twilio", result: await res.json() };
+}
+
+export async function sendSms(
+  phone: string | null | undefined,
+  content: string,
+  options: { smsOptIn?: boolean | null } = {},
+): Promise<SendSmsResult> {
+  if (options.smsOptIn === false) {
+    return { success: true, skipped: true, reason: "sms_opt_out" };
+  }
+  const toE164 = normalizePhoneE164(phone);
+  if (!toE164) {
+    return { success: true, skipped: true, reason: "invalid_phone" };
+  }
+
+  try {
+    if (SMS_PROVIDER === "twilio") {
+      return await sendSmsTwilio(toE164, content);
+    }
+    return await sendSmsBrevo(toE164, content);
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
+
+export const RETURN_GRACE_MS = 60 * 60 * 1000;
+
+export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
+
+export type BookingWindowFields = {
+  drop_off_date?: string | null;
+  drop_off_time_slot?: string | null;
+  pickup_date?: string | null;
+  pickup_time_slot?: string | null;
+};
+
+export function buildBookingDateUTC(
+  date: string,
+  timeSlot: string | null | undefined,
+  fallbackHourUTC: number,
+): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  if (timeSlot) {
+    const match = timeSlot.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (match) {
+      let hour = parseInt(match[1], 10);
+      const minute = parseInt(match[2], 10);
+      const meridiem = match[3].toUpperCase();
+      if (meridiem === "PM" && hour !== 12) hour += 12;
+      if (meridiem === "AM" && hour === 12) hour = 0;
+      const utcHour = hour + 6;
+      if (utcHour >= 24) {
+        const nextDay = new Date(date + "T00:00:00Z");
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        const nextDayStr = nextDay.toISOString().split("T")[0];
+        return `${nextDayStr}T${pad(utcHour - 24)}:${pad(minute)}:00+00:00`;
+      }
+      return `${date}T${pad(utcHour)}:${pad(minute)}:00+00:00`;
+    }
+  }
+
+  return `${date}T${pad(fallbackHourUTC)}:00:00+00:00`;
+}
+
+export function addGraceHour(isoDate: string): string {
+  const ms = new Date(isoDate).getTime() + RETURN_GRACE_MS;
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+export function clampIgloohomeStart(isoDate: string, now: Date = new Date()): string {
+  const hourFloor = new Date(now.getTime());
+  hourFloor.setUTCMinutes(0, 0, 0);
+  const ms = Math.max(new Date(isoDate).getTime(), hourFloor.getTime());
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+export function getBookingWindow(booking: BookingWindowFields) {
+  const startIso = buildBookingDateUTC(
+    booking.drop_off_date ?? "",
+    booking.drop_off_time_slot,
+    12,
+  );
+  const endIso = buildBookingDateUTC(
+    booking.pickup_date ?? "",
+    booking.pickup_time_slot,
+    5,
+  );
+
+  const startMs = new Date(startIso).getTime();
+  const endMs = new Date(endIso).getTime();
+  const graceEndMs = endMs + RETURN_GRACE_MS;
+  const graceEndIso = new Date(graceEndMs).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+  const activationMs = startMs - PIN_EARLY_ACTIVATION_MS;
+  const activationIso = new Date(activationMs).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+
+  return {
+    startMs,
+    endMs,
+    graceEndMs,
+    pinEligibleFromMs: startMs - PIN_LEAD_TIME_MS,
+    activationMs,
+    activationIso,
+    startIso,
+    endIso,
+    graceEndIso,
+  };
+}
+
+export function getPinActivationStart(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): string {
+  const { activationIso } = getBookingWindow(booking);
+  return clampIgloohomeStart(activationIso, now);
+}
+
+export function getCustomerVisibleEndIso(booking: BookingWindowFields): string {
+  return getBookingWindow(booking).endIso;
+}
+
+export function isWithinPinGenerationWindow(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  if (!booking.drop_off_date || !booking.pickup_date) return false;
+  const { pinEligibleFromMs, graceEndMs } = getBookingWindow(booking);
+  const nowMs = now.getTime();
+  return nowMs >= pinEligibleFromMs && nowMs < graceEndMs;
+}
+
+export function isBookingEnded(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  if (!booking.pickup_date) return false;
+  const { graceEndMs } = getBookingWindow(booking);
+  return now.getTime() >= graceEndMs;
+}
+
+export function getPinWindowSkipReason(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): "too_early" | "ended" | null {
+  if (!booking.drop_off_date || !booking.pickup_date) return "too_early";
+  const { pinEligibleFromMs, graceEndMs } = getBookingWindow(booking);
+  const nowMs = now.getTime();
+  if (nowMs < pinEligibleFromMs) return "too_early";
+  if (nowMs >= graceEndMs) return "ended";
+  return null;
+}
+
+export const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
+
+export const BRIDGE_PIN_SCOPES = [
+  "igloohomeapi/create-pin-bridge-proxied-job",
+  "igloohomeapi/delete-pin-bridge-proxied-job",
+  "igloohomeapi/get-devices",
+  "igloohomeapi/get-job-status",
+  "igloohomeapi/store-device-activity",
+] as const;
+
+export const GENERATE_PIN_SCOPES = [
+  "igloohomeapi/create-pin-bridge-proxied-job",
+  "igloohomeapi/get-devices",
+  "igloohomeapi/get-job-status",
+  "igloohomeapi/algopin-onetime",
+  "igloohomeapi/store-device-activity",
+] as const;
+
+export const OPTIONAL_OAUTH_SCOPES = [
+  "igloohomeapi/create-bridge-proxied-job",
+] as const;
+
+export type OAuthResult = { token: string | null; reason?: string; scopesUsed?: string };
+
+export const ACTIVITY_SYNC_SCOPE = "igloohomeapi/get-activity-logs-bridge-proxied-job";
+
+export const DEVICE_ACTIVITY_SCOPE = "igloohomeapi/get-device-activity";
+
+export const ACTIVITY_SYNC_SCOPES = [
+  ACTIVITY_SYNC_SCOPE,
+  "igloohomeapi/get-devices",
+  "iglo

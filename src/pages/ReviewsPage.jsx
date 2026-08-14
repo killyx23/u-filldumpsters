@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
 import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
 import { reviewNeedsExpand } from '@/utils/reviewDisplayHelper';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const StarRating = ({ rating }) => (
     <div className="flex">
@@ -24,7 +25,7 @@ const StarRating = ({ rating }) => (
 
 const ReviewCard = ({ review, index, onReadMore }) => {
     const isDeliveryTrailer = review.bookings?.plan?.id === 2 && review.bookings?.addons?.isDelivery;
-    const serviceName = isDeliveryTrailer ? 'Dump Loader Trailer Rental Service with Delivery' : review.bookings?.plan?.name || 'Service';
+    const serviceName = isDeliveryTrailer ? 'Dump Trailer Rental Service with Delivery' : formatCustomerFacingPlanName(review.bookings?.plan?.name) || 'Service';
     const hasMedia = review.image_urls?.length > 0 || review.video_url;
     const needsExpand = reviewNeedsExpand(review);
     const displayTitle = review.title || 'A Great Experience';
@@ -180,7 +181,7 @@ export const ReviewsPage = () => {
                                 </div>
                                 <div className="flex items-center text-yellow-400 text-sm font-semibold">
                                     <Package className="h-4 w-4 mr-2" />
-                                    <span>{selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Loader Trailer Rental Service with Delivery' : selectedReview.bookings?.plan?.name || 'Service'}</span>
+                                    <span>{selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Trailer Rental Service with Delivery' : formatCustomerFacingPlanName(selectedReview.bookings?.plan?.name) || 'Service'}</span>
                                 </div>
                             </DialogDescription>
                         </DialogHeader>

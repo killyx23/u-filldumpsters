@@ -1,0 +1,184 @@
+const ALLOWED_HEADERS = 'authorization, x-client-info, apikey, content-type';
+const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+
+function parseAllowedOrigins(): Set<string> {
+  const raw = Deno.env.get('ALLOWED_ORIGINS') ?? '';
+  return new Set(
+    raw
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  );
+}
+
+let cachedOrigins: Set<string> | null = null;
+
+function getAllowedOrigins(): Set<string> {
+  if (!cachedOrigins) {
+    cachedOrigins = parseAllowedOrigins();
+  }
+  return cachedOrigins;
+}
+
+export function getCorsHeaders(req: Request): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Headers': ALLOWED_HEADERS,
+    'Access-Control-Allow-Methods': ALLOWED_METHODS,
+  };
+
+  const origin = req.headers.get('Origin');
+  if (origin && getAllowedOrigins().has(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Vary'] = 'Origin';
+  }
+
+  return headers;
+}
+
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
+const BREVO_SMS_SENDER = Deno.env.get("BREVO_SMS_SENDER") || "UFillDump";
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const SMS_PROVIDER = (Deno.env.get("SMS_PROVIDER") || "brevo").toLowerCase();
+const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
+const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
+const TWILIO_FROM_NUMBER = Deno.env.get("TWILIO_FROM_NUMBER");
+
+export type SendEmailResult = {
+  success: boolean;
+  provider?: string;
+  error?: string;
+  result?: unknown;
+};
+
+export type SendSmsResult = {
+  success: boolean;
+  provider?: string;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+  result?: unknown;
+};
+
+export function normalizePhoneE164(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (phone.trim().startsWith("+") && digits.length >= 10) return `+${digits}`;
+  return null;
+}
+
+export async function sendEmail(
+  toEmail: string,
+  subject: string,
+  htmlContent: string,
+  maxRetries = 2,
+): Promise<SendEmailResult> {
+  let lastError: string | null = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const ts = new Date().toISOString();
+    try {
+      if (BREVO_API_KEY) {
+        const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "api-key": BREVO_API_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sender: { email: BREVO_FROM_EMAIL, name: "U-Fill Dumpsters" },
+            to: [{ email: toEmail }],
+            subject,
+            htmlContent,
+          }),
+        });
+        if (brevoResponse.ok) {
+          const result = await brevoResponse.json();
+          return { success: true, provider: "brevo", result };
+        }
+        lastError = `Brevo API error: ${await brevoResponse.text()}`;
+        console.error(`[${ts}] [notify] Brevo email failed:`, lastError);
+      }
+
+      if (RESEND_API_KEY) {
+        const resendResponse = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: "U-Fill Dumpsters <noreply@u-filldumpsters.com>",
+            to: [toEmail],
+            subject,
+            html: htmlContent,
+          }),
+        });
+        if (resendResponse.ok) {
+          const result = await resendResponse.json();
+          return { success: true, provider: "resend", result };
+        }
+        lastError = `Resend API error: ${await resendResponse.text()}`;
+        console.error(`[${ts}] [notify] Resend email failed:`, lastError);
+      }
+
+      if (!BREVO_API_KEY && !RESEND_API_KEY) {
+        return { success: false, error: "No email service configured" };
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[${ts}] [notify] Email exception:`, lastError);
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+      }
+    }
+  }
+  return { success: false, error: lastError || "Unknown email error" };
+}
+
+async function sendSmsBrevo(toE164: string, content: string): Promise<SendSmsResult> {
+  if (!BREVO_API_KEY) {
+    return { success: false, error: "BREVO_API_KEY not configured" };
+  }
+  const res = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
+    method: "POST",
+    headers: {
+      "api-key": BREVO_API_KEY,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      sender: BREVO_SMS_SENDER.slice(0, 11),
+      recipient: toE164,
+      content,
+      type: "transactional",
+    }),
+  });
+  if (!res.ok) {
+    return { success: false, provider: "brevo", error: await res.text() };
+  }
+  return { success: true, provider: "brevo", result: await res.json() };
+}
+
+async function sendSmsTwilio(toE164: string, content: string): Promise<SendSmsResult> {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
+    return { success: false, error: "Twilio env vars not configured" };
+  }
+  const auth = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
+  const body = new URLSearchParams({
+    To: toE164,
+    From: TWILIO_FROM_NUMBER,
+    Body: content,
+  });
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+   
