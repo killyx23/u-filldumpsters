@@ -2,23 +2,21 @@
  * Verification for the `x-igloocompany-sha256` header on igloohome webhooks.
  *
  * Igloohome documents the signed string as:
- *   METHOD|HOST|PATH|CONTENT-TYPE|DATE|BODY
+ *   METHOD|HOST|URL_PATH|CONTENT_TYPE|DATE|BODY
  *
- * Two credential styles are supported and auto-detected:
+ * Then HMAC-SHA256 that string using the PKCS#1 RSA public key bytes (DER) as
+ * the HMAC key, and RSA-SHA256 verify the digest against the header signature.
  *
- *   IGLOOHOME_PUBLIC_KEY  — the documented scheme. HMAC-SHA256 the signed
- *                           string using the raw public key bytes as the HMAC
- *                           key, then RSA (PKCS#1 v1.5 / SHA-256) verify that
- *                           digest against the header signature.
- *   IGLOOHOME_WEBHOOK_SECRET — plain shared-secret HMAC-SHA256, base64.
+ * Env: IGLOOHOME_PUBLIC_KEY — base64 PKCS#1 DER (2048-bit RSA), from
+ * dev+support@igloocompany.co
  *
- * Set IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true to accept unsigned posts when
- * neither is configured (local development only).
+ * Local only: IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED=true accepts posts with no
+ * signature header (simulate tools cannot forge Igloohome's RSA signature).
  */
 
 export type WebhookVerifyResult = {
   valid: boolean;
-  method: "rsa_public_key" | "shared_secret" | "unsigned_allowed" | "none";
+  method: "rsa_public_key" | "unsigned_allowed" | "none";
   reason?: string;
 };
 
@@ -33,32 +31,13 @@ function base64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary);
+/** Match Node crypto HMAC `.update(payload, 'ascii')`. */
+function stringToAsciiBytes(s: string): Uint8Array {
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 0xff;
+  return bytes;
 }
 
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return mismatch === 0;
-}
-
-async function hmacSha256(keyBytes: Uint8Array, data: string): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
-  return new Uint8Array(sig);
-}
-
-/** DER length prefix for a payload of `len` bytes. */
 function derLength(len: number): number[] {
   if (len < 0x80) return [len];
   const out: number[] = [];
@@ -78,12 +57,8 @@ function derWrap(tag: number, contents: Uint8Array): Uint8Array {
   return out;
 }
 
-/**
- * Web Crypto only imports SPKI. Igloohome hands out a PKCS#1 `RSAPublicKey`,
- * so wrap it in the rsaEncryption AlgorithmIdentifier envelope.
- */
+/** Web Crypto imports SPKI; Igloohome issues PKCS#1 `RSAPublicKey` DER. */
 function pkcs1ToSpki(pkcs1: Uint8Array): Uint8Array {
-  // SEQUENCE { OID 1.2.840.113549.1.1.1, NULL }
   const algorithmIdentifier = new Uint8Array([
     0x30, 0x0d,
     0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
@@ -96,129 +71,155 @@ function pkcs1ToSpki(pkcs1: Uint8Array): Uint8Array {
   return derWrap(0x30, body);
 }
 
-async function importRsaPublicKey(keyBytes: Uint8Array): Promise<CryptoKey> {
-  const algorithm = { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" };
-  try {
-    return await crypto.subtle.importKey("spki", keyBytes, algorithm, false, ["verify"]);
-  } catch {
-    return await crypto.subtle.importKey("spki", pkcs1ToSpki(keyBytes), algorithm, false, [
-      "verify",
-    ]);
-  }
+async function importPkcs1PublicKey(pkcs1Der: Uint8Array): Promise<CryptoKey> {
+  return await crypto.subtle.importKey(
+    "spki",
+    pkcs1ToSpki(pkcs1Der),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+}
+
+/** HMAC-SHA256(key=publicKeyDer, message=signedString) per Igloohome docs. */
+async function hmacSha256(keyBytes: Uint8Array, signed: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    keyBytes,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, stringToAsciiBytes(signed));
+  return new Uint8Array(sig);
 }
 
 /**
- * Candidate signed strings.
+ * Build candidate signed strings per Igloohome docs.
  *
- * Supabase rewrites the request path before it reaches the function, so
- * `url.pathname` is usually `/igloohome-webhook` while igloohome signed
- * `/functions/v1/igloohome-webhook`. Content-Type may also arrive with a
- * charset parameter appended by a proxy. Try the plausible combinations
- * rather than guessing one and failing silently in production.
+ * Supabase Edge may rewrite before the function runs:
+ * - `/functions/v1/igloohome-webhook` → `/igloohome-webhook`
+ * - `Host: <project>.supabase.co` → `Host: edge-runtime.supabase.com`
+ *
+ * Igloohome signs the public URL the portal was configured with.
  */
 function buildSignedStrings(req: Request, rawBody: string): string[] {
   const url = new URL(req.url);
-  const host = req.headers.get("host") || url.host;
+  const method = req.method.toUpperCase();
   const date = req.headers.get("date") || "";
-  const rawContentType = req.headers.get("content-type") || "application/json";
-  const baseContentType = rawContentType.split(";")[0].trim();
+  const contentType = req.headers.get("content-type") || "application/json";
+  const baseContentType = contentType.split(";")[0].trim();
+
+  const hosts = new Set<string>();
+  const headerHost = req.headers.get("host");
+  if (headerHost) hosts.add(headerHost);
+  if (url.host) hosts.add(url.host);
+  const hostOverride = Deno.env.get("IGLOOHOME_WEBHOOK_HOST");
+  if (hostOverride) hosts.add(hostOverride);
+  try {
+    const supabaseHost = new URL(Deno.env.get("SUPABASE_URL") || "").host;
+    if (supabaseHost) hosts.add(supabaseHost);
+  } catch {
+    // ignore invalid SUPABASE_URL
+  }
 
   const paths = new Set<string>();
   paths.add(url.pathname);
   if (!url.pathname.startsWith("/functions/v1")) {
     paths.add(`/functions/v1${url.pathname}`);
   } else {
-    paths.add(url.pathname.replace(/^\/functions\/v1/, ""));
+    paths.add(url.pathname.replace(/^\/functions\/v1/, "") || url.pathname);
   }
-  const override = Deno.env.get("IGLOOHOME_WEBHOOK_PATH");
-  if (override) paths.add(override);
+  const pathOverride = Deno.env.get("IGLOOHOME_WEBHOOK_PATH");
+  if (pathOverride) paths.add(pathOverride);
 
-  const contentTypes = new Set([rawContentType, baseContentType]);
+  const contentTypes = contentType === baseContentType
+    ? [contentType]
+    : [contentType, baseContentType];
 
   const candidates: string[] = [];
-  for (const path of paths) {
-    for (const contentType of contentTypes) {
-      candidates.push(`${req.method}|${host}|${path}|${contentType}|${date}|${rawBody}`);
+  for (const host of hosts) {
+    for (const path of paths) {
+      for (const ct of contentTypes) {
+        candidates.push(`${method}|${host}|${path}|${ct}|${date}|${rawBody}`);
+      }
     }
   }
-  return candidates;
+  return [...new Set(candidates)];
 }
 
 export async function verifyIglooWebhook(
   req: Request,
   rawBody: string,
 ): Promise<WebhookVerifyResult> {
-  const publicKey = Deno.env.get("IGLOOHOME_PUBLIC_KEY");
-  const sharedSecret = Deno.env.get("IGLOOHOME_WEBHOOK_SECRET");
+  const publicKeyB64 = Deno.env.get("IGLOOHOME_PUBLIC_KEY")?.trim();
   const allowUnsigned = Deno.env.get("IGLOOHOME_WEBHOOK_ALLOW_UNSIGNED") === "true";
 
-  // Dev override must win even when a public key is present — local simulate
-  // tools cannot forge igloohome's RSA signature.
   if (allowUnsigned && !req.headers.get("x-igloocompany-sha256")) {
     return { valid: true, method: "unsigned_allowed" };
   }
 
-  if (!publicKey && !sharedSecret) {
-    return allowUnsigned
-      ? { valid: true, method: "unsigned_allowed" }
-      : {
-        valid: false,
-        method: "none",
-        reason:
-          "Neither IGLOOHOME_PUBLIC_KEY nor IGLOOHOME_WEBHOOK_SECRET is set. Request the webhook public key from dev+support@igloocompany.co.",
-      };
-  }
-
-  const provided = (req.headers.get("x-igloocompany-sha256") || "").replace(/^"|"$/g, "").trim();
-  if (!provided) {
+  if (!publicKeyB64) {
     return {
       valid: false,
-      method: publicKey ? "rsa_public_key" : "shared_secret",
-      reason: "Missing x-igloocompany-sha256 header",
+      method: "none",
+      reason: "IGLOOHOME_PUBLIC_KEY is not set. Request the webhook public key from dev+support@igloocompany.co.",
     };
   }
 
-  const candidates = buildSignedStrings(req, rawBody);
-
-  if (publicKey) {
-    try {
-      const keyBytes = base64ToBytes(publicKey);
-      const cryptoKey = await importRsaPublicKey(keyBytes);
-      const signature = base64ToBytes(provided);
-      for (const signed of candidates) {
-        const digest = await hmacSha256(keyBytes, signed);
-        const ok = await crypto.subtle.verify(
-          "RSASSA-PKCS1-v1_5",
-          cryptoKey,
-          signature,
-          digest,
-        );
-        if (ok) return { valid: true, method: "rsa_public_key" };
-      }
-      return {
-        valid: false,
-        method: "rsa_public_key",
-        reason: "RSA signature did not match any candidate signed string",
-      };
-    } catch (err) {
-      return {
-        valid: false,
-        method: "rsa_public_key",
-        reason: `Public key verification error: ${err instanceof Error ? err.message : err}`,
-      };
-    }
+  const provided = (req.headers.get("x-igloocompany-sha256") || "")
+    .replace(/^"|"$/g, "")
+    .trim();
+  if (!provided) {
+    return { valid: false, method: "rsa_public_key", reason: "Missing x-igloocompany-sha256 header" };
   }
 
-  const secretBytes = new TextEncoder().encode(sharedSecret!);
-  for (const signed of candidates) {
-    const expected = bytesToBase64(await hmacSha256(secretBytes, signed));
-    if (timingSafeEqual(provided, expected)) {
-      return { valid: true, method: "shared_secret" };
+  try {
+    const keyBytes = base64ToBytes(publicKeyB64);
+    const cryptoKey = await importPkcs1PublicKey(keyBytes);
+    const signature = base64ToBytes(provided);
+    const candidates = buildSignedStrings(req, rawBody);
+
+    for (const signed of candidates) {
+      const hmacDigest = await hmacSha256(keyBytes, signed);
+      const ok = await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        cryptoKey,
+        signature,
+        hmacDigest,
+      );
+      if (ok) return { valid: true, method: "rsa_public_key" };
     }
+
+    const url = new URL(req.url);
+    console.warn("[igloohome-webhook] Signature verification failed", JSON.stringify({
+      publicKey: publicKeyB64,
+      publicKeyDerBytes: keyBytes.length,
+      host: req.headers.get("host"),
+      path: url.pathname,
+      date: req.headers.get("date"),
+      contentType: req.headers.get("content-type"),
+      bodyLen: rawBody.length,
+      bodyPreview: rawBody.slice(0, 120),
+      candidateCount: candidates.length,
+      primaryCandidate: candidates[0] ?? null,
+      altCandidate: candidates[1] ?? null,
+    }));
+
+    return {
+      valid: false,
+      method: "rsa_public_key",
+      reason: "RSA signature did not match any candidate signed string",
+    };
+  } catch (err) {
+    console.warn("[igloohome-webhook] Signature verification error", JSON.stringify({
+      publicKey: publicKeyB64,
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    return {
+      valid: false,
+      method: "rsa_public_key",
+      reason: `Public key verification error: ${err instanceof Error ? err.message : err}`,
+    };
   }
-  return {
-    valid: false,
-    method: "shared_secret",
-    reason: "HMAC signature did not match any candidate signed string",
-  };
 }
