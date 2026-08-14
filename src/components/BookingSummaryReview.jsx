@@ -15,6 +15,7 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -201,7 +202,7 @@ export const BookingSummaryReview = ({
         };
     }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, deliveryService, taxOptions]);
 
-    const planName = plan?.name || 'Selected Plan';
+    const planName = formatCustomerFacingPlanName(plan?.name) || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
 
     const contactAddress = bookingData?.contactAddress || {};

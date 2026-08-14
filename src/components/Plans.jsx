@@ -191,8 +191,8 @@ export const Plans = ({ onSelectPlan }) => {
                 >
                     <h3 className="text-2xl font-bold text-yellow-400 mb-3">U-Fill Dumpsters LLC</h3>
                     <p className="text-lg text-blue-200 leading-relaxed">
-                        Your trusted partner for waste management solutions. We're committed to providing
-                        fast, reliable, and affordable services to help you get the job done right.
+                        Your trusted partner for DIYers who need heavy-duty equipment to get the job done right. We are committed to providing
+                        fast, reliable, and affordable services to help you succeed.
                     </p>
                 </motion.div>
             </div>

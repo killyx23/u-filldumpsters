@@ -4,6 +4,7 @@ import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts
 import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendSms } from "../_shared/notify.ts";
+import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -344,7 +345,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   console.log(` site url: ${siteUrl}`);
   const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
   console.log(`portal URL: ${portalUrl}`);
-  const serviceName = serviceDetails?.name || plan.name || "N/A";
+  const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
   let equipmentHTML = "";
   if (addons.equipment && addons.equipment.length > 0) {
@@ -889,7 +890,7 @@ Deno.serve(async (req)=>{
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>Your Dump Loader access code is ready. Enter it on the padlock at pickup.</p>
+      <p>Your Dump Trailer access code is ready. Enter it on the padlock at pickup.</p>
       <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
         <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
         <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>

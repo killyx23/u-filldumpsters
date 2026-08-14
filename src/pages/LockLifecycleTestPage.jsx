@@ -251,7 +251,7 @@ export default function LockLifecycleTestPage() {
             </Link>
             <h1 className="text-3xl font-bold">Lock Lifecycle Test</h1>
             <p className="text-slate-400 mt-1">
-              Compress a Dump Loader booking into a short live PIN window so you can
+              Compress a Dump Trailer booking into a short live PIN window so you can
               unlock/lock the padlock and verify Rented → Returned + email/SMS in minutes.
             </p>
             <p className="text-xs text-slate-500 mt-2 font-mono">
@@ -291,7 +291,7 @@ export default function LockLifecycleTestPage() {
           <CardHeader>
             <CardTitle>1. Choose booking</CardTitle>
             <CardDescription className="text-slate-400">
-              Self-pickup Dump Loader order (plan id 2). Use a Confirmed booking that exists in
+              Self-pickup Dump Trailer order (plan id 2). Use a Confirmed booking that exists in
               the database you are pointed at — local seed data and production have different ids.
             </CardDescription>
           </CardHeader>

@@ -2,6 +2,7 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -161,8 +162,8 @@ const generateRescheduleEmailHTML = (opts: {
   const newDrop = formatDateTime(source.new_drop_off_date || booking.drop_off_date, source.new_drop_off_time || booking.drop_off_time_slot);
   const newPick = formatDateTime(source.new_pickup_date || booking.pickup_date, source.new_pickup_time || booking.pickup_time_slot);
 
-  const serviceFrom = String(source.original_service_name || (booking.plan as Record<string, unknown>)?.name || "N/A");
-  const serviceTo = String(source.new_service_name || (booking.plan as Record<string, unknown>)?.name || serviceFrom);
+  const serviceFrom = formatCustomerFacingPlanName(String(source.original_service_name || (booking.plan as Record<string, unknown>)?.name || "N/A"));
+  const serviceTo = formatCustomerFacingPlanName(String(source.new_service_name || (booking.plan as Record<string, unknown>)?.name || serviceFrom));
   const serviceChanged = serviceFrom !== serviceTo;
 
   const addressChanged = Boolean(source.address_changed);

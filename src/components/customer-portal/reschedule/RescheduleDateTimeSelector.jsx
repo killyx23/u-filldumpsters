@@ -20,6 +20,7 @@ import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const isDateUnavailable = (date, availability) => {
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -59,7 +60,7 @@ export const RescheduleDateTimeSelector = ({
 
     const originalDropOff = dropOffDateStr ? parseISO(dropOffDateStr) : new Date();
     const originalPickup = pickupDateStr ? parseISO(pickupDateStr) : new Date();
-    const originalPlanName = safeExtractString(booking?.plan?.name, 'Standard Service');
+    const originalPlanName = formatCustomerFacingPlanName(safeExtractString(booking?.plan?.name, 'Standard Service'));
 
     const serviceId = selectedService?.id || booking?.plan?.id;
     const resolvedBookingId = bookingId ?? booking?.id ?? null;

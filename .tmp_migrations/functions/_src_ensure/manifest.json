@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "project_id": "essesdjgtmralbkglpzw",
+    "name": "ensure-lock-pin-ready",
+    "entrypoint_path": "index.ts",
+    "verify_jwt": false
+  },
+  "manifest": [
+    {
+      "name": "index.ts",
+      "file": "index.ts"
+    },
+    {
+      "name": "cors.ts",
+      "file": "cors.ts"
+    },
+    {
+      "name": "../_shared/cors.ts",
+      "file": "_shared_cors.ts"
+    },
+    {
+      "name": "../_shared/notify.ts",
+      "file": "_shared_notify.ts"
+    },
+    {
+      "name": "../_shared/pinTiming.ts",
+      "file": "_shared_pinTiming.ts"
+    },
+    {
+      "name": "../_shared/lockPin.ts",
+      "file": "_shared_lockPin.ts"
+    },
+    {
+      "name": "../_shared/iglooAuth.ts",
+      "file": "_shared_iglooAuth.ts"
+    }
+  ]
+}

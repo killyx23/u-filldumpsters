@@ -13,6 +13,7 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 const PENDING_POLL_MS = 30_000;
 const PENDING_POLL_MAX_MS = 20 * 60 * 1000;
@@ -69,7 +70,7 @@ export const AccessCodesPage = ({ customerData }) => {
       setBooking(bookingData);
 
       const isDumpLoaderRental =
-        bookingData.plan?.name?.toLowerCase().includes('dump loader') ||
+        mentionsDumpTrailer(bookingData.plan?.name) ||
         bookingData.plan?.name?.toLowerCase().includes('trailer') ||
         parseInt(bookingData.plan?.id) === 2;
 
@@ -476,7 +477,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
               <div>
                 <p className="text-sm text-blue-200">Service Type</p>
-                <p className="font-medium text-lg">Dump Loader Trailer Rental</p>
+                  <p className="font-medium text-lg">Dump Trailer Rental</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

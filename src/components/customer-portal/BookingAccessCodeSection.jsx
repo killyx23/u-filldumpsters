@@ -8,6 +8,7 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { BookingLockStatusSection } from '@/components/customer-portal/BookingLockStatusSection';
+import { mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 const PENDING_POLL_MS = 30_000;
 const PENDING_POLL_MAX_MS = 20 * 60 * 1000;
@@ -16,7 +17,7 @@ const MAX_RETRIES = 5;
 function requiresAccessCode(booking) {
   const planName = booking?.plan?.name?.toLowerCase() || '';
   return (
-    planName.includes('dump loader') ||
+    mentionsDumpTrailer(planName) ||
     planName.includes('trailer') ||
     parseInt(booking?.plan?.id, 10) === 2
   );

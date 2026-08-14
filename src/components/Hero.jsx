@@ -5,6 +5,7 @@ import { Loader2, AlertCircle } from 'lucide-react';
 import { fetchHomepageServices, getHeroStaticFallback } from '@/utils/servicePlan';
 import { DIY_HOMEPAGE_DISPLAY_NAME } from '@/config/diyEquipmentMachines';
 import { getHeroImageForService } from '@/config/siteImages';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const ServiceCard = ({
   name,
@@ -122,8 +123,8 @@ export const Hero = () => {
     if (!targetElement) {
       const headings = Array.from(document.querySelectorAll('h3, h2'));
       const searchTexts = {
-        1: '16 Yard Dumpster',
-        2: 'Dump Loader Trailer',
+        1: 'Dumpster Rental',
+        2: 'Dump Trailer',
         3: 'Rock, Mulch',
         5: DIY_HOMEPAGE_DISPLAY_NAME,
       };
@@ -174,22 +175,30 @@ export const Hero = () => {
       <div className="absolute inset-0 bg-gradient-to-b from-blue-900/40 to-transparent z-0"></div>
       
       <div className="container mx-auto px-4 relative z-10">
-        <div className="max-w-4xl mx-auto mb-16">
+        <div className="max-w-6xl mx-auto mb-16">
           <motion.h1 
             initial={{ opacity: 0, y: -20 }} 
             animate={{ opacity: 1, y: 0 }} 
             transition={{ duration: 0.6 }} 
-            className="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight text-white"
+            className="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight text-white text-center text-balance leading-tight"
+          >
+            Compact Machinery & Dumpster Rentals
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.15 }}
+            className="text-2xl md:text-3xl font-semibold text-yellow-400 mb-4"
           >
             Your Project, Our Priority
-          </motion.h1>
+          </motion.p>
           <motion.p 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             transition={{ duration: 0.6, delay: 0.2 }} 
             className="text-xl md:text-2xl text-blue-100 max-w-2xl mx-auto leading-relaxed"
           >
-            Fast, reliable, and affordable dumpsters and equipment rentals. Book online in minutes and enjoy seamless, professional delivery tailored to your project schedule.
+            Fast, reliable, and affordable dumpster rental and equipment. Book online in minutes and enjoy seamless, professional delivery tailored to your project schedule.
           </motion.p>
         </div>
 
@@ -208,7 +217,7 @@ export const Hero = () => {
               <ServiceCard 
                 key={service.id} 
                 id={service.id} 
-                name={service.name} 
+                name={formatCustomerFacingPlanName(service.name)} 
                 delay={0.4 + index * 0.15} 
                 onClick={scrollToService} 
               />

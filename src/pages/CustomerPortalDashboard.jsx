@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
@@ -82,7 +83,7 @@ export const CustomerPortalDashboard = () => {
 
       // Check if this is a Dump Loader Trailer Rental
       const isDumpLoaderRental = 
-        bookingData.plan?.name?.toLowerCase().includes('dump loader') ||
+        mentionsDumpTrailer(bookingData.plan?.name) ||
         bookingData.plan?.name?.toLowerCase().includes('trailer') ||
         parseInt(bookingData.plan?.id) === 2;
 
@@ -275,7 +276,7 @@ export const CustomerPortalDashboard = () => {
 
                 <div>
                   <p className="text-sm text-blue-200">Service Type</p>
-                  <p className="font-medium text-lg">Dump Loader Trailer Rental</p>
+                  <p className="font-medium text-lg">Dump Trailer Rental</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

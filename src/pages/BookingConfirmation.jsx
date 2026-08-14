@@ -15,6 +15,7 @@ import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
 import { buildAccessCodesQrUrl } from '@/utils/buildPortalQrUrls';
+import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 export const BookingConfirmation = () => {
   const [searchParams] = useSearchParams();
@@ -372,7 +373,7 @@ export const BookingConfirmation = () => {
 
         const serviceName = booking.plan?.name || '';
         const isDumpLoaderRental =
-          serviceName.toLowerCase().includes('dump loader') ||
+          mentionsDumpTrailer(serviceName) ||
           serviceName.toLowerCase().includes('trailer') ||
           parseInt(booking.plan?.id) === 2;
 
@@ -569,11 +570,12 @@ export const BookingConfirmation = () => {
 
   const formatDate = (dateString) => formatBookingDateOnly(dateString, 'EEEE, MMMM d, yyyy');
 
-  const serviceName = serviceDetails?.name || bookingDetails.plan?.name || 'N/A';
+  const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || bookingDetails.plan?.name) || 'N/A';
   const isDelivery = bookingDetails.addons?.deliveryService || bookingDetails.addons?.isDelivery;
   
   const isDumpLoaderRental = 
-    serviceName.toLowerCase().includes('dump loader') ||
+    mentionsDumpTrailer(serviceName) ||
+    mentionsDumpTrailer(bookingDetails.plan?.name) ||
     serviceName.toLowerCase().includes('trailer') ||
     parseInt(bookingDetails.plan?.id) === 2;
   

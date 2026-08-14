@@ -1,0 +1,13 @@
+{
+  "name": "ensure-lock-pin-ready",
+  "verify_jwt": false,
+  "files": {
+    "index.ts": "be6ab07cd8016312963374b7d423bbe11adf29c30ea25862809b1c07cc17ffc6",
+    "cors.ts": "04e33f69fff4a8fa4c71ddadad0b2723d3bda39cc79754c6e37089d510fba34c",
+    "../_shared/cors.ts": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+    "../_shared/notify.ts": "3447aca4072ff6ea13224386670e4c6666a7f2b7e21ed06ad15999d1c2cc5257",
+    "../_shared/pinTiming.ts": "c19320d7a150f28f275a9dbcd7ee137cf3ca565c863487c70041d4fdb7eb5cfe",
+    "../_shared/lockPin.ts": "caac7d83d944d386514d7559804e105cb162a4ca2b6373699ddd868f46f4f651",
+    "../_shared/iglooAuth.ts": "a2f9666a0800df23a77e4f4d14a344bc98291d7210807ec55ee821edde223d7a"
+  }
+}

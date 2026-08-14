@@ -1,0 +1,145 @@
+(supabase, orderId, failMsg);
+        await alertCustomerChat(supabase, booking, failMsg);
+        await alertAdmin(
+          `PIN generation FAILED — Order #${orderId}`,
+          `<h2>No access PIN available</h2>
+           <p><strong>Order:</strong> #${orderId}</p>
+           <p><strong>Customer:</strong> ${booking.name || ""} (${booking.email || "n/a"})</p>
+           <p><strong>Pickup:</strong> ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}</p>
+           <p><strong>AlgoPIN error:</strong> ${algo.error || "unknown"}</p>
+           <p>Manual intervention required.</p>`,
+        );
+        results.push({ orderId, action: "failed_alerted", error: algo.error });
+        continue;
+      }
+
+      const ensured = await ensurePinOnLock(supabase, accessToken, {
+        orderId,
+        lockId,
+        bridgeId,
+        startDate,
+        endDate,
+        accessName: `Dump Loader Rental - Order #${orderId}`,
+        clearBudgetMs: 40_000,
+        createBudgetMs: 50_000,
+      });
+
+      const nowIso = new Date().toISOString();
+
+      if (!ensured.jobId && !ensured.lockConfirmed) {
+        const algo = await createAlgoPin(accessToken, lockId, booking);
+        if (algo.success) {
+          await supabase
+            .from("rental_access_codes")
+            .update({ status: "expired" })
+            .eq("order_id", orderId)
+            .eq("status", "active");
+          const { error: insertError } = await supabase.from("rental_access_codes").insert({
+            order_id: orderId,
+            customer_email: booking.email,
+            customer_phone: booking.phone || "",
+            access_pin: algo.pin,
+            pin_id: algo.pinId,
+            pin_type: "algopin",
+            lock_id: lockId,
+            start_time: algo.startDate,
+            end_time: endDate,
+            status: "active",
+            lock_confirmed_at: nowIso,
+            confirm_attempts: attempts,
+          });
+          if (!insertError) {
+            await supabase.from("bookings").update({ pin_generated_at: nowIso }).eq("id", orderId);
+            await maybeNotifyCustomer(supabase, booking, algo.pin, algo.startDate, endDate);
+            await logSyncError(
+              supabase,
+              orderId,
+              `AlgoPIN issued after hard bridge failure for #${orderId}: ${ensured.error || ensured.createState}`,
+            );
+            results.push({ orderId, action: "algopin_hard_fail_fallback", pin: algo.pin });
+            continue;
+          }
+        }
+      }
+
+      await supabase
+        .from("rental_access_codes")
+        .update({ status: "expired" })
+        .eq("order_id", orderId)
+        .eq("status", "active");
+
+      const { error: insertError } = await supabase.from("rental_access_codes").insert({
+        order_id: orderId,
+        customer_email: booking.email,
+        customer_phone: booking.phone || "",
+        access_pin: ensured.pin,
+        pin_id: ensured.jobId || "",
+        pin_type: "bridge_proxied",
+        lock_id: lockId,
+        start_time: startDate,
+        end_time: endDate,
+        status: "active",
+        lock_confirmed_at: ensured.lockConfirmed ? nowIso : null,
+        confirm_attempts: attempts,
+      });
+
+      if (insertError) {
+        console.error(`[ensure-lock-pin-ready] Bridge PIN insert failed #${orderId}:`, insertError.message);
+        await logSyncError(supabase, orderId, `Bridge PIN insert failed: ${insertError.message}`);
+        if (underTwoHours || attempts >= ALERT_ATTEMPTS_THRESHOLD) {
+          await alertCustomerChat(
+            supabase,
+            booking,
+            `URGENT: Access PIN for Order #${orderId} was queued on the lock but failed to save in the portal (${insertError.message}). Staff must verify/generate before pickup.`,
+          );
+          await alertAdmin(
+            `PIN DB insert failed — Order #${orderId}`,
+            `<p>Insert failed: ${insertError.message}</p>`,
+          );
+        }
+        results.push({ orderId, action: "insert_failed", error: insertError.message });
+        continue;
+      }
+
+      await supabase.from("bookings").update({ pin_generated_at: nowIso }).eq("id", orderId);
+
+      if (ensured.lockConfirmed) {
+        await maybeNotifyCustomer(supabase, booking, ensured.pin, startDate, endDate);
+        results.push({ orderId, action: "created_confirmed", pin: ensured.pin });
+      } else {
+        await logSyncError(
+          supabase,
+          orderId,
+          `Bridge PIN not confirmed (attempt ${attempts}): ${ensured.error || ensured.createState}. jobId=${ensured.jobId}`,
+        );
+        if (attempts >= ALERT_ATTEMPTS_THRESHOLD || underTwoHours) {
+          const msg =
+            `Access PIN for Order #${orderId} is not confirmed on the lock yet ` +
+            `(attempt ${attempts}). Pickup: ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}. ` +
+            `Watchdog will retry / issue AlgoPIN backup. Job: ${ensured.jobId || "n/a"}.`;
+          await alertCustomerChat(supabase, booking, msg);
+          await alertAdmin(
+            `PIN not confirmed on lock — Order #${orderId}`,
+            `<h2>Bridge has not confirmed PIN delivery</h2>
+             <p><strong>Order:</strong> #${orderId}</p>
+             <p><strong>Customer:</strong> ${booking.name || ""} (${booking.email || "n/a"})</p>
+             <p><strong>Pickup:</strong> ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}</p>
+             <p><strong>Job ID:</strong> ${ensured.jobId || "n/a"}</p>
+             <p><strong>Attempts:</strong> ${attempts}</p>
+             <p><strong>State:</strong> ${ensured.createState}</p>
+             <p>Wake the padlock / check bridge range. Watchdog will retry; AlgoPIN backup fires after the retry budget.</p>`,
+          );
+        }
+        results.push({
+          orderId,
+          action: "created_unconfirmed",
+          pin: ensured.pin,
+          jobId: ensured.jobId,
+          attempts,
+        });
+      }
+    }
+
+    return jsonResponse({
+      success: true,
+    

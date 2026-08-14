@@ -14,6 +14,7 @@ import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -138,11 +139,10 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const hasInsurance = bookingHadInsurance(addons);
     
     const currentPlan = addons?.plan || plan;
-    const serviceName = currentPlan.name;
+    const serviceName = formatCustomerFacingPlanName(currentPlan.name);
 
-    // Check if this is a Dump Loader Trailer rental
     const isDumpLoaderRental = 
-        currentPlan.name?.toLowerCase().includes('dump loader') ||
+        mentionsDumpTrailer(currentPlan.name) ||
         currentPlan.name?.toLowerCase().includes('trailer') ||
         parseInt(currentPlan.id) === 2;
 

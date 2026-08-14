@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onRescheduleClick }) => {
   const [filterStatus, setFilterStatus] = useState('all');
@@ -117,7 +118,7 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredBookings.length > 0 ? filteredBookings.map(booking => {
           const isDelivery = booking.addons?.isDelivery;
-          const serviceName = (booking.plan?.name || 'Service') + (isDelivery ? ' with Delivery' : '');
+          const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
           const statusInfo = getStatusInfo(booking);
           const canModify = !booking.pending_address_verification && ['pending_payment', 'Confirmed', 'Rescheduled'].includes(booking.status);
           const isCompleted = ['Completed', 'flagged', 'Returned'].includes(booking.status) || booking.returned_at;

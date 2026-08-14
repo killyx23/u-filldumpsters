@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
 import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
 import { reviewNeedsExpand } from '@/utils/reviewDisplayHelper';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const StarRating = ({ rating }) => (
     <div className="flex">
@@ -24,7 +25,11 @@ const StarRating = ({ rating }) => (
 const ReviewCard = ({ review, onReadMore }) => {
     // Safely access nested properties to prevent crashes
     const isDeliveryTrailer = review.bookings?.plan?.id === 2 && review.bookings?.addons?.isDelivery;
-    const serviceName = review.bookings?.plan?.name ? (isDeliveryTrailer ? 'Dump Loader Trailer Rental Service with Delivery' : review.bookings.plan.name) : 'Service';
+    const serviceName = review.bookings?.plan?.name
+      ? (isDeliveryTrailer
+        ? 'Dump Trailer Rental Service with Delivery'
+        : formatCustomerFacingPlanName(review.bookings.plan.name))
+      : 'Service';
     const customerName = review.customers?.name || 'Valued Customer';
     const hasMedia = review.image_urls?.length > 0 || review.video_url;
     const needsExpand = reviewNeedsExpand(review);
@@ -220,7 +225,7 @@ export const ReviewsCarousel = () => {
                                 </div>
                                 <div className="flex items-center text-yellow-400 text-sm font-semibold">
                                     <Package className="h-4 w-4 mr-2" />
-                                    <span>{selectedReview.bookings?.plan?.name ? (selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Loader Trailer Rental Service with Delivery' : selectedReview.bookings?.plan?.name) : 'Service'}</span>
+                                    <span>{selectedReview.bookings?.plan?.name ? (selectedReview.bookings?.plan?.id === 2 && selectedReview.bookings?.addons?.isDelivery ? 'Dump Trailer Rental Service with Delivery' : formatCustomerFacingPlanName(selectedReview.bookings?.plan?.name)) : 'Service'}</span>
                                 </div>
                             </DialogDescription>
                         </DialogHeader>

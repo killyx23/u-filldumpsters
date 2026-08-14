@@ -5,7 +5,7 @@
  */
 
 export const siteImages = {
-  logo: '/images/logo.png',
+  logo: '/images/logo.webp',
   banner: '/images/banner-saratoga.png',
 
   /** Homepage hero service cards keyed by services.id */

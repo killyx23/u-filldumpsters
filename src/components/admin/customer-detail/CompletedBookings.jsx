@@ -5,6 +5,7 @@ import { StatusBadge } from '@/components/admin/StatusBadge';
 import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink } from 'lucide-react';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -81,7 +82,7 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <h4 className="text-xl font-bold text-white">{booking.plan?.name || 'N/A'}</h4>
+                                <h4 className="text-xl font-bold text-white">{formatCustomerFacingPlanName(booking.plan?.name) || 'N/A'}</h4>
                                 <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
                                 <p className="text-sm text-gray-400 mt-1">Booking #{booking.id}</p>
                             </div>
