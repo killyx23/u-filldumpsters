@@ -5,7 +5,7 @@ import {
     calculateDays,
     buildOriginalAddonsList,
 } from '@/utils/rescheduleCalculations';
-import { filterRentableServices } from '@/utils/servicePlan';
+import { filterRentableServices, excludeDeliveryVariantServices } from '@/utils/servicePlan';
 import { fetchPlansForService, DEFAULT_INSURANCE_PRICE } from '@/utils/protectionPlans';
 
 export const useRescheduleDataLoader = (bookingId) => {
@@ -30,6 +30,7 @@ export const useRescheduleDataLoader = (bookingId) => {
                     .select('*');
                 if (servicesErr) throw servicesErr;
                 const services = filterRentableServices(servicesRaw || []);
+                const catalogServices = excludeDeliveryVariantServices(services);
 
                 const { data: allEquipment, error: allEquipErr } = await supabase
                     .from('equipment')
@@ -55,7 +56,8 @@ export const useRescheduleDataLoader = (bookingId) => {
                 );
 
                 const originalServiceId = booking.plan?.id || booking.service_id;
-                const originalService = services.find((s) => s.id === originalServiceId) || services[0];
+                const originalService =
+                    services.find((s) => Number(s.id) === Number(originalServiceId)) || services[0];
 
                 const distanceMiles = Number(booking.customers?.distance_miles || 0);
                 const origDays = calculateDays(booking.drop_off_date, booking.pickup_date);
@@ -70,7 +72,7 @@ export const useRescheduleDataLoader = (bookingId) => {
                 setData({
                     originalBooking: booking,
                     originalService,
-                    availableServices: services,
+                    availableServices: catalogServices,
                     allEquipment: allEquipment || [],
                     originalAddonsList,
                     originalCosts: {

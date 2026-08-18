@@ -127,6 +127,11 @@ async function main() {
     ["dumpster-rentals", "trailer-rentals", "heavy-equipment", "material-delivery"],
   );
   check("no ungrouped bucket appears when every homepage service has a group", buckets.some((b) => b.slug === "__ungrouped__"), false);
+  check(
+    "delivery variant (service 4) is not a homepage catalog row",
+    homepageRows.some((s) => Number(s.id) === 4),
+    false,
+  );
 
   console.log("\n=== groupServicesForDisplay handles ungrouped services gracefully ===");
   const withUngrouped = groupServicesForDisplay([

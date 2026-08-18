@@ -72,7 +72,9 @@ export const Plans = ({ onSelectPlan }) => {
         return enhancedPlan;
     });
 
-    const groupedPlans = groupServicesForDisplay(plansWithDumpFees);
+    const orderedPlans = groupServicesForDisplay(plansWithDumpFees).flatMap(
+        (group) => group.services
+    );
 
     if (loading) {
         return (
@@ -110,8 +112,8 @@ export const Plans = ({ onSelectPlan }) => {
         'Professional Service',
     ];
 
-    const gridClassFor = (count) =>
-        count >= 4
+    const gridClass =
+        orderedPlans.length >= 4
             ? 'grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 xl:gap-8 gap-y-16 w-full'
             : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 xl:gap-8 gap-y-16 w-full';
 
@@ -149,39 +151,19 @@ export const Plans = ({ onSelectPlan }) => {
                     ))}
                 </motion.div>
 
-                {groupedPlans.map((group, groupIndex) => (
-                    <div key={group.slug} className={groupIndex < groupedPlans.length - 1 ? 'mb-20' : ''}>
-                        {group.name && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 10 }}
-                                whileInView={{ opacity: 1, y: 0 }}
-                                viewport={{ once: true }}
-                                transition={{ duration: 0.5 }}
-                                className="text-center mb-10"
-                            >
-                                <h3 className="text-2xl lg:text-3xl font-bold text-yellow-400 mb-2">
-                                    {group.name}
-                                </h3>
-                                {group.description && (
-                                    <p className="text-blue-200 max-w-2xl mx-auto">{group.description}</p>
-                                )}
-                            </motion.div>
-                        )}
-                        <div className={gridClassFor(group.services.length)}>
-                            {group.services.map((plan) => {
-                                const isTemporarilyUnavailable = availability[plan.id] === false;
-                                return (
-                                    <PlanCard
-                                        key={plan.id}
-                                        plan={plan}
-                                        onSelect={onSelectPlan}
-                                        isTemporarilyUnavailable={isTemporarilyUnavailable}
-                                    />
-                                );
-                            })}
-                        </div>
-                    </div>
-                ))}
+                <div className={gridClass}>
+                    {orderedPlans.map((plan) => {
+                        const isTemporarilyUnavailable = availability[plan.id] === false;
+                        return (
+                            <PlanCard
+                                key={plan.id}
+                                plan={plan}
+                                onSelect={onSelectPlan}
+                                isTemporarilyUnavailable={isTemporarilyUnavailable}
+                            />
+                        );
+                    })}
+                </div>
 
                 <motion.div
                     initial={{ opacity: 0, y: 50 }}

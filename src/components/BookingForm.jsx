@@ -27,6 +27,7 @@ import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
 import { useNavigate } from 'react-router-dom';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { getDeliveryVariantServiceId, serviceOffersDeliveryOption } from '@/utils/servicePlan';
 
 export const BookingForm = ({
   plan,
@@ -64,7 +65,8 @@ export const BookingForm = ({
   const [feesLoading, setFeesLoading] = useState(true);
   const [feesError, setFeesError] = useState(null);
   
-  const isDelivery = plan?.id === 2 && deliveryService;
+  const offersDeliveryOption = serviceOffersDeliveryOption(plan);
+  const isDelivery = offersDeliveryOption && deliveryService;
   const { getFeeForService } = useDumpFees();
 
   console.group('[BookingForm] Component Initialization');
@@ -75,11 +77,12 @@ export const BookingForm = ({
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
+    const matchById = (id) => allPlans.find((p) => Number(p.id) === Number(id)) || null;
     if (isDelivery) {
-      const variantId = plan?.delivery_variant_service_id ?? 4;
-      return allPlans.find((p) => p.id === variantId) || null;
+      const variantId = getDeliveryVariantServiceId(plan);
+      return matchById(variantId) || matchById(plan?.id);
     }
-    return allPlans.find((p) => p.id === plan?.id) || null;
+    return matchById(plan?.id);
   }, [isDelivery, allPlans, plan, loadingPlans]);
 
   const handleReorderSelect = async (pastBooking) => {
@@ -216,7 +219,7 @@ export const BookingForm = ({
 
     setCheckingDeliveryAvailability(true);
     try {
-      const deliveryServiceId = plan?.delivery_variant_service_id ?? 4;
+      const deliveryServiceId = getDeliveryVariantServiceId(plan);
       const selectedDate = bookingData.dropOffDate || bookingData.pickupDate || null;
       const isClosed = await isDeliveryServiceClosedForBooking(deliveryServiceId, selectedDate, 30);
       if (isClosed) {
@@ -236,7 +239,7 @@ export const BookingForm = ({
     } finally {
       setCheckingDeliveryAvailability(false);
     }
-  }, [plan?.delivery_variant_service_id, bookingData.dropOffDate, bookingData.pickupDate, setDeliveryService]);
+  }, [plan, bookingData.dropOffDate, bookingData.pickupDate, setDeliveryService]);
 
   useEffect(() => {
     if (!isHourlySelfPickupPlan(currentPlan, isDelivery) || !bookingData.dropOffDate) {
@@ -1017,7 +1020,7 @@ export const BookingForm = ({
           <div className="bg-white/5 p-6 rounded-lg h-fit border border-white/5">
             <div className="flex items-center mb-4">
               <h3 className="text-2xl font-bold text-yellow-400">{planName}</h3>
-              {plan?.id === 2 && !isDelivery && (
+              {offersDeliveryOption && !isDelivery && (
                 <Dialog>
                   <DialogTrigger asChild>
                     <AlertCircle className="h-6 w-6 ml-2 text-yellow-500 cursor-pointer animate-pulse transition-transform hover:scale-110" />
@@ -1114,7 +1117,7 @@ export const BookingForm = ({
               opacity: 1,
               x: 0
             }} className="space-y-4">
-              {plan?.id === 2 && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
+              {offersDeliveryOption && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
                     <Checkbox
                       id="deliveryService"
                       checked={deliveryService}

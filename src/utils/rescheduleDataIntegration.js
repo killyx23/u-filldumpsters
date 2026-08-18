@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { eachDayOfInterval, format, isValid, parseISO } from 'date-fns';
 import { rescheduleDebugLogger } from './rescheduleDebugLogger';
-import { filterRentableServices } from '@/utils/servicePlan';
+import { filterCustomerCatalogServices } from '@/utils/servicePlan';
 
 export const fetchAllServices = async () => {
     console.log("[Data Integration] Fetching all services...");
@@ -14,7 +14,7 @@ export const fetchAllServices = async () => {
         console.error("[Data Integration] Error fetching services:", error);
         throw error;
     }
-    return filterRentableServices(data || []);
+    return filterCustomerCatalogServices(data || []);
 };
 
 export const fetchBlockedDatesForService = async (serviceId, currentBookingId = null) => {

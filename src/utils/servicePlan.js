@@ -8,6 +8,28 @@ import {
  */
 
 /**
+ * Delivery-variant row id for a base service (e.g. 2 → 4).
+ * Falls back to 4 for legacy dump-trailer rows that never got the pointer.
+ * @param {object|null|undefined} service
+ * @returns {number|null}
+ */
+export function getDeliveryVariantServiceId(service) {
+  if (!service) return null;
+  const pointed = Number(service.delivery_variant_service_id);
+  if (Number.isFinite(pointed) && pointed > 0) return pointed;
+  if (Number(service.id) === 2) return 4;
+  return null;
+}
+
+/**
+ * True when the customer should see the "need delivery / no truck" toggle.
+ * @param {object|null|undefined} service
+ */
+export function serviceOffersDeliveryOption(service) {
+  return getDeliveryVariantServiceId(service) != null;
+}
+
+/**
  * Resolve effective service id (base vs delivery variant).
  * @param {object} service - Row from services
  * @param {boolean} isDelivery
@@ -15,8 +37,8 @@ import {
  */
 export function resolveServiceIdForBooking(service, isDelivery = false) {
   if (!service) return null;
-  if (isDelivery && service.delivery_variant_service_id) {
-    return Number(service.delivery_variant_service_id);
+  if (isDelivery) {
+    return getDeliveryVariantServiceId(service) ?? Number(service.id);
   }
   return Number(service.id);
 }
@@ -225,6 +247,31 @@ export function filterRentableServices(services = []) {
   });
 }
 
+/**
+ * Drop rows that are another service's delivery_variant_service_id (e.g. hide 4 next to 2).
+ * Customer catalogs should show the base SKU only; the variant is the checkbox.
+ * @param {object[]} services
+ */
+export function excludeDeliveryVariantServices(services = []) {
+  const list = services || [];
+  const variantIds = new Set(
+    list
+      .map((service) => Number(service?.delivery_variant_service_id))
+      .filter((id) => Number.isFinite(id) && id > 0)
+  );
+  // Legacy dump-trailer delivery row even if the pointer is missing on this result set.
+  variantIds.add(4);
+  return list.filter((service) => !variantIds.has(Number(service?.id)));
+}
+
+/**
+ * Rentable services that customers pick (homepage, reschedule), excluding delivery twins.
+ * @param {object[]} services
+ */
+export function filterCustomerCatalogServices(services = []) {
+  return excludeDeliveryVariantServices(filterRentableServices(services));
+}
+
 const HERO_STATIC_FALLBACK = [
   { id: 2, name: 'Dump Trailer Rental Service' },
   { id: 1, name: 'Dumpster Rental' },
@@ -247,7 +294,7 @@ export async function fetchHomepageServicesLegacy(supabase) {
     .in('id', HOMEPAGE_SERVICE_IDS)
     .order('id');
   if (result.data) {
-    return { ...result, data: filterRentableServices(result.data) };
+    return { ...result, data: filterCustomerCatalogServices(result.data) };
   }
   return result;
 }
@@ -267,7 +314,7 @@ export async function fetchHomepageServices(supabase) {
     .order('display_order', { ascending: true });
 
   if (!filtered.error && filtered.data?.length > 0) {
-    return { ...filtered, data: filterRentableServices(filtered.data) };
+    return { ...filtered, data: filterCustomerCatalogServices(filtered.data) };
   }
 
   if (filtered.error) {
