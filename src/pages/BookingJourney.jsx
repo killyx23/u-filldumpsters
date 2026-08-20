@@ -36,6 +36,7 @@ import {
   isDiyMachineService,
 } from '@/config/diyEquipmentMachines';
 import { fetchServiceById } from '@/utils/servicePlan';
+import { setStoredReferralCode } from '@/utils/referralCodeStorage';
 
 const INITIAL_BOOKING_DATA = {
   firstName: '',
@@ -183,7 +184,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     const params = new URLSearchParams(location.search);
     const refCode = params.get('ref');
     if (refCode) {
-      localStorage.setItem('referral_code', refCode);
+      setStoredReferralCode(refCode);
     }
   }, [location.search]);
 

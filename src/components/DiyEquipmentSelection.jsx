@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { DIY_EQUIPMENT_MACHINES } from '@/config/diyEquipmentMachines';
 
 /**
- * Pre-step after DIY Heavy Equipment Book Now — choose Mini Excavator or Loader.
+ * Pre-step after Compact Equipment Rental Book Now — choose Mini Excavator or Loader.
  */
 export const DiyEquipmentSelection = ({ onSelectMachine, onBack, machines = DIY_EQUIPMENT_MACHINES }) => {
   return (
@@ -28,10 +28,10 @@ export const DiyEquipmentSelection = ({ onSelectMachine, onBack, machines = DIY_
           className="text-center mb-10"
         >
           <h1 className="text-3xl md:text-4xl font-bold text-white mb-3">
-            Choose Your Equipment
+            Compact Equipment Rental
           </h1>
           <p className="text-blue-200 text-lg max-w-2xl mx-auto">
-            Select the machine you want to rent. Next you&apos;ll enter booking details
+            Choose the machine you want to rent. Next you&apos;ll enter booking details
             just like our other self-pickup rentals.
           </p>
         </motion.div>

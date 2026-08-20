@@ -398,6 +398,15 @@ export const BookingSummaryReview = ({
                         </div>
                     </div>
 
+                    {addonsData?.referral?.isValid && (
+                        <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-500/30">
+                            <p className="text-sm text-blue-200">
+                                Referral code <span className="font-semibold text-white">{addonsData.referral.code}</span> applied.
+                                Your friend will receive rewards when this booking is completed.
+                            </p>
+                        </div>
+                    )}
+
                     <div className="bg-black/20 p-6 rounded-xl border border-white/10">
                         <h3 className="text-xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Price Breakdown</h3>
                         

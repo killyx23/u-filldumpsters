@@ -296,6 +296,14 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     setAddonsData(prev => ({ ...prev, coupon }));
   };
 
+  const handleReferralApply = (referral) => {
+    setAddonsData(prev => ({
+      ...prev,
+      referral,
+      referralCode: referral?.code || null,
+    }));
+  };
+
   const loyaltyPreviewTotal = useMemo(() => {
     const equipmentPrices = {};
     equipmentMetaWithPrices.forEach((item) => {
@@ -475,6 +483,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   onProceed={handleProceed}
                   isProcessing={false}
                   onCouponApply={handleCouponApply}
+                  onReferralApply={handleReferralApply}
+                  customerEmail={customerEmail}
                   deliveryService={deliveryService}
                   fetchedMileageRate={fetchedMileageRate}
                   fetchedDeliveryFeeFlat={fetchedDeliveryFeeFlat}

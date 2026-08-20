@@ -8,6 +8,7 @@ import BookingJourney from '@/pages/BookingJourney';
 import { FaqPage } from '@/pages/FaqPage';
 import { ReviewsPage } from '@/pages/ReviewsPage';
 import { ContactPage } from '@/pages/ContactPage';
+import { AboutPage } from '@/pages/AboutPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminLogin } from '@/pages/AdminLogin';
 import { CustomerDetailView } from '@/components/admin/customer-detail/CustomerDetailView';
@@ -94,6 +95,7 @@ function App() {
               <Route path="/faqs" element={<FaqPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
               <Route path="/contact" element={<ContactPage />} />
+              <Route path="/about" element={<AboutPage />} />
               <Route path="/admin-login" element={<AdminLogin />} />
               <Route path="/customer-login" element={<CustomerLogin />} />
               <Route path="/login" element={<CustomerLogin />} />

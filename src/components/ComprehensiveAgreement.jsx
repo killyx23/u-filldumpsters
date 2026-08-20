@@ -222,7 +222,7 @@ const AgreementText = ({ fees }) => {
         </li>
       </ul>
 
-      <h3 className="text-lg text-yellow-300">SECTION 6: DO-IT-YOURSELF (DIY) HEAVY EQUIPMENT OPERATIONAL CLAUSES</h3>
+      <h3 className="text-lg text-yellow-300">SECTION 6: COMPACT EQUIPMENT RENTAL OPERATIONAL CLAUSES</h3>
       <p><em>(Applicable whenever renting Mini Excavators, Mini Skid Steers, Track Loaders, or Heavy Machinery Attachments)</em></p>
       <ul className="list-disc list-inside space-y-2">
         <li>

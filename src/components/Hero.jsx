@@ -88,7 +88,7 @@ export const Hero = () => {
         let data =
           homepageResult.data?.map((s) => ({
             id: s.id,
-            // Keep DIY category label on hero even after service 5 is Mini Excavator in DB
+            // Keep Compact Equipment Rental category label on hero even after service 5 is Mini Excavator in DB
             name: Number(s.id) === 5 ? DIY_HOMEPAGE_DISPLAY_NAME : s.name,
           })) || [];
 

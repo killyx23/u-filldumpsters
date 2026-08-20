@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw } from 'lucide-react';
+import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw, Users } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
@@ -148,6 +148,10 @@ export const Header = ({ onReorderSelect }) => {
                         <RotateCcw className="h-5 w-5" />
                         <span>Returning Customer</span>
                       </button>
+                      <Link to="/about" onClick={closeMenu} className="flex items-center space-x-3 text-lg hover:text-yellow-400 transition-colors tap-target">
+                        <Users className="h-5 w-5" />
+                        <span>About Us</span>
+                      </Link>
                       <Link to="/contact" onClick={closeMenu} className="flex items-center space-x-3 text-lg hover:text-yellow-400 transition-colors tap-target">
                         <MessageSquare className="h-5 w-5" />
                         <span>Contact</span>
