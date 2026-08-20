@@ -1,6 +1,9 @@
 import {
   DIY_HOMEPAGE_DISPLAY_NAME,
+  DIY_HOMEPAGE_DESCRIPTION,
+  DIY_HOMEPAGE_PICKUP_FEATURE,
 } from '@/config/diyEquipmentMachines';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 /**
  * Single source of truth: public.services for live catalog.
@@ -65,6 +68,14 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
     service.homepage_highlight?.trim() || fallbackHighlights[Number(service.id)] || '';
   const isDumpsterHomepage = Number(service.id) === 1;
   const isDiyHomepage = Number(service.id) === 5;
+  const { features: rawFeatures, deliveryFee } = resolvePlanCardFeatures(service);
+  const displayFeatures = isDiyHomepage
+    ? rawFeatures.map((feature) => {
+        if (typeof feature !== 'string') return feature;
+        if (/^you pick up/i.test(feature)) return DIY_HOMEPAGE_PICKUP_FEATURE;
+        return feature;
+      })
+    : rawFeatures;
   return {
     ...service,
     highlight: highlightText
@@ -74,12 +85,12 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
     displayPriceUnit: isDumpsterHomepage
       ? 'Daily Rate'
       : service.homepage_price_unit ?? service.price_unit ?? '',
-    displayDescription: service.homepage_description || service.description || '',
-    ...(() => {
-      const { features: displayFeatures, deliveryFee } = resolvePlanCardFeatures(service);
-      return { displayFeatures, displayDeliveryFee: deliveryFee };
-    })(),
-    // Service 5 books as Mini Excavator, but the homepage category card stays DIY Heavy Equipment.
+    displayDescription: isDiyHomepage
+      ? DIY_HOMEPAGE_DESCRIPTION
+      : service.homepage_description || service.description || '',
+    displayFeatures,
+    displayDeliveryFee: deliveryFee,
+    // Service 5 books as Mini Excavator, but the homepage category card stays Compact Equipment Rental.
     displayName: isDiyHomepage
       ? DIY_HOMEPAGE_DISPLAY_NAME
       : service.name?.trim() || highlightText || 'Service Plan',
@@ -162,7 +173,9 @@ export function resolveBookingService(booking, liveService = null) {
     addons.isDelivery || addons.deliveryService || booking?.delivery_service
   );
 
-  const displayName = service?.name || auditPlan.name || 'Service';
+  const displayName = formatCustomerFacingPlanName(
+    service?.name || auditPlan.name || 'Service'
+  );
   const isCustomerPickup = service
     ? Boolean(service.customer_pickup) && !isDelivery
     : isCustomerPickupFromAudit(auditPlan, addons);
@@ -228,7 +241,7 @@ export function filterRentableServices(services = []) {
 const HERO_STATIC_FALLBACK = [
   { id: 2, name: 'Dump Trailer Rental Service' },
   { id: 1, name: 'Dumpster Rental' },
-  { id: 5, name: 'DIY Heavy Equipment' },
+  { id: 5, name: 'Compact Equipment Rental' },
   { id: 3, name: 'Rock, Decorative Rock, Mulch, & Gravel Delivery Service' },
 ];
 

@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
 import { clearProtectionPlansCache } from '@/utils/protectionPlans';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const ServicePricingCard = ({ service, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
@@ -48,7 +49,7 @@ const ServicePricingCard = ({ service, onSave }) => {
 
     return (
         <div className="bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border border-white/10">
-            <p className="text-lg font-bold text-white w-full md:w-1/4">{service.name}</p>
+            <p className="text-lg font-bold text-white w-full md:w-1/4">{formatCustomerFacingPlanName(service.name)}</p>
             <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
                 <div className="flex items-center gap-2">
                     <Label>Base Price:</Label>
@@ -131,7 +132,7 @@ const DumpFeeCard = ({ service, dumpFeeData, onSave }) => {
 
     return (
         <div className="bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border border-white/10">
-            <p className="text-lg font-bold text-white w-full md:w-1/4">{service.name}</p>
+            <p className="text-lg font-bold text-white w-full md:w-1/4">{formatCustomerFacingPlanName(service.name)}</p>
             <div className="flex flex-wrap items-center gap-4 flex-1 justify-end">
                 <div className="flex items-center gap-2">
                     <Label className="text-white">Fee Per Ton ($):</Label>
@@ -327,7 +328,7 @@ const InsuranceItemForm = ({
                                 className="border-white/30 data-[state=checked]:bg-purple-500"
                             />
                             <Label htmlFor={`plan-service-${service.id}`} className="text-white cursor-pointer text-sm">
-                                {service.name}
+                                {formatCustomerFacingPlanName(service.name)}
                             </Label>
                         </div>
                     ))}
@@ -834,7 +835,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
                                 {services.map(service => (
                                     <div key={service.id} className="flex items-center space-x-2">
                                         <Checkbox id={`service-${service.id}`} checked={selectedServices.includes(service.id)} onCheckedChange={() => handleServiceToggle(service.id)} className="border-white/30 data-[state=checked]:bg-blue-500" />
-                                        <Label htmlFor={`service-${service.id}`} className="text-white cursor-pointer text-sm">{service.name}</Label>
+                                        <Label htmlFor={`service-${service.id}`} className="text-white cursor-pointer text-sm">{formatCustomerFacingPlanName(service.name)}</Label>
                                     </div>
                                 ))}
                             </div>

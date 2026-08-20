@@ -1,5 +1,5 @@
 /**
- * DIY Heavy Equipment machine picker (homepage service id 5 → choose machine).
+ * Compact Equipment Rental machine picker (homepage service id 5 → choose machine).
  * Service 5 = Mini Excavator; service 8 = Mini Telescoping Loader 3 in 1.
  */
 
@@ -37,4 +37,10 @@ export function isDiyMachineService(serviceId) {
 }
 
 /** Homepage catalog still shows this label for service id 5. */
-export const DIY_HOMEPAGE_DISPLAY_NAME = 'DIY Heavy Equipment';
+export const DIY_HOMEPAGE_DISPLAY_NAME = 'Compact Equipment Rental';
+
+export const DIY_HOMEPAGE_DESCRIPTION =
+  'Strong machinery for digging, trenching, grading, and small excavation projects. Same-day or multi-day rentals available. (Pick up location is in South Saratoga Springs.)';
+
+export const DIY_HOMEPAGE_PICKUP_FEATURE =
+  'You pick up and you return or we have delivery available';

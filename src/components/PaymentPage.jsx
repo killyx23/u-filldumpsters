@@ -27,6 +27,7 @@ import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { buildPlanSnapshot } from '@/utils/servicePlan';
 import { ensureBookingMileage } from '@/utils/bookingMileage';
+import { getStoredReferralCode } from '@/utils/referralCodeStorage';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -688,8 +689,7 @@ export const PaymentPage = ({ onBack }) => {
       console.log(`[${timestamp}] [PaymentPage] Creating actual booking from pending customer data with total $${validatedTotalAmount}...`);
 
       try {
-        const referralCodeFromStorage =
-          typeof window !== 'undefined' ? window.localStorage.getItem('referral_code') : null;
+        const referralCodeFromStorage = getStoredReferralCode();
         const normalizedReferralCode = String(
           pendingData.addons_data?.referralCode ||
           pendingData.addons_data?.referral_code ||
