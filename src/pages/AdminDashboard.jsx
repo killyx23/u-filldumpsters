@@ -20,12 +20,15 @@ import { AIKnowledgeBaseManager } from '@/components/admin/AIKnowledgeBaseManage
 import { AIKnowledgeSectionManager } from '@/components/admin/AIKnowledgeSectionManager';
 import { LoyaltyPointsManager } from '@/components/admin/LoyaltyPointsManager';
 import { ReferralsManager } from '@/components/admin/ReferralsManager';
+import { AbandonedCheckoutsManager } from '@/components/admin/AbandonedCheckoutsManager';
+import { HowCanWeDoBetterManager } from '@/components/admin/HowCanWeDoBetterManager';
 import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift } from 'lucide-react';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, MailWarning, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
 import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
+import { isActionItemVerificationBooking } from '@/utils/paymentDelta';
 
 export const AdminDashboard = () => {
     const { user, signOut } = useAuth();
@@ -163,7 +166,9 @@ export const AdminDashboard = () => {
     };
 
     const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
-    const actionItemCount = (bookings.filter(b => ['pending_verification', 'pending_review', 'flagged', 'pending_payment'].includes(b.status) && !b.pending_address_verification).length) + customersWithUnreadNotes.length;
+    const actionItemCount = (bookings.filter(b =>
+        (isActionItemVerificationBooking(b) || b.status === 'flagged') && !b.pending_address_verification
+    ).length) + customersWithUnreadNotes.length;
 
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
@@ -260,6 +265,12 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="referrals" className="py-2 bg-indigo-900/20 data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
                             <Users className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Referrals</span>
                         </TabsTrigger>
+                        <TabsTrigger value="did-not-finalize" className="py-2 bg-orange-900/20 data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                            <MailWarning className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Did Not Finalize</span>
+                        </TabsTrigger>
+                        <TabsTrigger value="how-can-we-do-better" className="py-2 bg-amber-900/20 data-[state=active]:bg-amber-500 data-[state=active]:text-slate-900">
+                            <MessageCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">How can we do better</span>
+                        </TabsTrigger>
                         <TabsTrigger value="ai-knowledge" className="py-2 bg-purple-900/20 data-[state=active]:bg-purple-600 data-[state=active]:text-white">
                             <Brain className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">AI Knowledge</span>
                         </TabsTrigger>
@@ -279,11 +290,19 @@ export const AdminDashboard = () => {
                         <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>
                     ) : (
                         <>
-                            <TabsContent value="action-items"><ActionItemsManager bookings={bookings} customersWithUnreadNotes={customersWithUnreadNotes} /></TabsContent>
+                            <TabsContent value="action-items">
+                                <ActionItemsManager
+                                    bookings={bookings}
+                                    customersWithUnreadNotes={customersWithUnreadNotes}
+                                    onUpdate={() => fetchDashboardData(false)}
+                                />
+                            </TabsContent>
                             <TabsContent value="pending-address"><PendingVerificationsManager /></TabsContent>
                             <TabsContent value="financial"><FinancialBooksManager /></TabsContent>
                             <TabsContent value="loyalty"><LoyaltyPointsManager /></TabsContent>
                             <TabsContent value="referrals"><ReferralsManager /></TabsContent>
+                            <TabsContent value="did-not-finalize"><AbandonedCheckoutsManager /></TabsContent>
+                            <TabsContent value="how-can-we-do-better"><HowCanWeDoBetterManager /></TabsContent>
                             <TabsContent value="ai-knowledge">
                                 <div className="space-y-8">
                                     <Tabs defaultValue="entries" className="w-full">

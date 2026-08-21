@@ -96,6 +96,71 @@ function upsertEnvValues(filePath, updates, allowedKeys) {
   fs.writeFileSync(filePath, `${nextLines.join("\n").replace(/\n+$/g, "")}\n`, "utf8");
 }
 
+function sqlDollarQuote(tag, value) {
+  let token = tag;
+  let i = 0;
+  while (String(value).includes(`$${token}$`)) {
+    i += 1;
+    token = `${tag}${i}`;
+  }
+  return `$${token}$${value}$${token}$`;
+}
+
+/**
+ * pg_net crons run inside the DB container and need vault secrets:
+ * - supabase_url: in-docker Kong URL (not host localhost)
+ * - service_role_key: local service role JWT
+ */
+function seedLocalVaultCronSecrets(serviceRoleKey) {
+  const kongUrl = "http://kong:8000";
+  const urlLit = sqlDollarQuote("u", kongUrl);
+  const keyLit = sqlDollarQuote("k", serviceRoleKey);
+  const sql = `
+DO $seed$
+DECLARE
+  existing_id uuid;
+BEGIN
+  SELECT id INTO existing_id FROM vault.secrets WHERE name = 'supabase_url' LIMIT 1;
+  IF existing_id IS NULL THEN
+    PERFORM vault.create_secret(${urlLit}, 'supabase_url', 'Local API URL for pg_net crons');
+  ELSE
+    PERFORM vault.update_secret(existing_id, ${urlLit}, 'supabase_url', 'Local API URL for pg_net crons');
+  END IF;
+
+  SELECT id INTO existing_id FROM vault.secrets WHERE name = 'service_role_key' LIMIT 1;
+  IF existing_id IS NULL THEN
+    PERFORM vault.create_secret(${keyLit}, 'service_role_key', 'Local service role for pg_net crons');
+  ELSE
+    PERFORM vault.update_secret(existing_id, ${keyLit}, 'service_role_key', 'Local service role for pg_net crons');
+  END IF;
+END
+$seed$;
+`;
+
+  try {
+    execSync("docker exec -i supabase_db_u-filldumpsters psql -U postgres -v ON_ERROR_STOP=1 -f -", {
+      cwd: projectRoot,
+      input: sql,
+      stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    console.log(
+      "[sync-local-supabase-env] Seeded vault secrets supabase_url (http://kong:8000) and service_role_key for pg_net crons.",
+    );
+  } catch (error) {
+    console.warn(
+      "[sync-local-supabase-env] Could not seed vault secrets for pg_net crons. Abandoned-checkout reminder cron will fail until they exist.",
+    );
+    const stderr = String(error?.stderr || error?.message || "");
+    const safe = stderr
+      .split("\n")
+      .filter((line) => !/eyJ|Bearer |service_role/i.test(line))
+      .slice(0, 8)
+      .join("\n");
+    if (safe.trim()) console.warn(safe);
+  }
+}
+
 function run() {
   let envOutput = "";
   try {
@@ -161,6 +226,8 @@ function run() {
 
   upsertEnvValues(functionsEnvPath, functionEnvUpdates);
 
+  seedLocalVaultCronSecrets(secretKey);
+
   const functionsEnv = parseEnvFile(functionsEnvPath);
   const iglooRequired = [
     "IGLOOHOME_CLIENT_ID",
@@ -197,6 +264,7 @@ function run() {
   console.log("");
   console.log("Frontend must NOT use SECRET_KEY / service role — that stays in functions .env only.");
   console.log("Serve edge functions with: npm run dev:functions");
+  console.log("Vault pg_net secrets: supabase_url, service_role_key");
 }
 
 run();

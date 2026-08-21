@@ -28,6 +28,13 @@ import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { buildPlanSnapshot } from '@/utils/servicePlan';
 import { ensureBookingMileage } from '@/utils/bookingMileage';
 import { getStoredReferralCode } from '@/utils/referralCodeStorage';
+import {
+  markEquipmentHoldActive,
+  rememberPaymentEquipmentHold,
+  cancelPendingPaymentBookingById,
+  clearRememberedPaymentEquipmentHold,
+  clearEquipmentHoldFlagWithoutRestock,
+} from '@/utils/pendingBookingEquipmentHold';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -212,6 +219,14 @@ const CheckoutForm = ({
       }
 
       console.log(`[${timestamp}] [PaymentPage] ✅ Payment succeeded! Redirecting...`);
+
+      // Paid — keep stock allocated; stop treating this as an unpaid hold
+      clearRememberedPaymentEquipmentHold();
+      if (bookingId) {
+        clearEquipmentHoldFlagWithoutRestock(bookingId).catch((err) => {
+          console.warn('[PaymentPage] Could not clear equipment hold flag after payment:', err);
+        });
+      }
       
       const confirmationUrl = `${window.location.origin}/confirmation?booking_id=${bookingId}&payment_intent=${paymentIntent?.id}`;
       
@@ -231,8 +246,26 @@ const CheckoutForm = ({
     }
   };
 
-  const handleAddressCorrection = () => {
-    navigate('/book');
+  const handleAddressCorrection = async () => {
+    const pendingToken = new URLSearchParams(window.location.search).get('bookingId');
+    setIsProcessing(true);
+    try {
+      if (bookingId) {
+        await cancelPendingPaymentBookingById(bookingId, {
+          notes: 'Customer corrected delivery address before payment',
+        });
+      }
+    } catch (err) {
+      console.warn('[PaymentPage] Address correction cleanup failed:', err);
+    } finally {
+      setIsProcessing(false);
+    }
+
+    if (pendingToken) {
+      navigate('/', { state: { resumeStep: 2, token: pendingToken } });
+    } else {
+      navigate('/');
+    }
   };
 
   // Service-specific labels
@@ -774,6 +807,8 @@ export const PaymentPage = ({ onBack }) => {
 
         console.log(`[${timestamp}] [PaymentPage] ✓ Booking created with ID: ${data.id}`);
         setBookingId(data.id);
+        // Remember unpaid booking for Leave Booking on ALL services (not only equipment holds)
+        rememberPaymentEquipmentHold(data.id);
         if (normalizedReferralCode && typeof window !== 'undefined') {
           window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
         }
@@ -824,16 +859,21 @@ export const PaymentPage = ({ onBack }) => {
           }
         }
 
-        // Decrement equipment quantities if needed
+        // Decrement equipment quantities if needed (hold until payment or abandon)
         if (pendingData.addons_data?.equipment?.length > 0) {
           console.log(`[${timestamp}] [PaymentPage] Decrementing equipment quantities...`);
           const equipmentToDecrement = pendingData.addons_data.equipment.map(item => ({
             equipment_id: item.dbId || item.equipment_id,
             quantity: item.quantity,
           }));
-          await supabase.rpc('decrement_equipment_quantities', {
+          const { error: decrementError } = await supabase.rpc('decrement_equipment_quantities', {
             items_to_decrement: equipmentToDecrement,
           });
+          if (decrementError) {
+            console.error(`[${timestamp}] [PaymentPage] Equipment decrement failed:`, decrementError);
+          } else {
+            await markEquipmentHoldActive(data.id, bookingPayload.addons);
+          }
         }
 
       } catch (error) {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { isFollowUpHold } from '@/utils/followUpResolution';
 
 export const StatusBadge = ({ status, booking = null }) => {
     const baseClasses = "text-xs font-bold px-2 py-1 rounded-full inline-block capitalize";
@@ -39,6 +40,13 @@ export const StatusBadge = ({ status, booking = null }) => {
 
     // Timestamp-driven overrides for self-pickup when status is still Confirmed
     let displayStatus = statusText[status] || String(status || '').replace(/_/g, ' ');
+    let displayClass = statusStyles[status] || 'bg-gray-500/20 text-gray-300';
+
+    if (status === 'flagged' && isFollowUpHold(booking?.follow_up_resolution)) {
+      displayStatus = 'Repair before next rental';
+      displayClass = 'bg-orange-500/20 text-orange-300';
+    }
+
     if (isPickup) {
       if (booking?.returned_at && status !== 'Completed' && status !== 'flagged' && status !== 'Cancelled') {
         displayStatus = status === 'pending_checklist'
@@ -49,5 +57,5 @@ export const StatusBadge = ({ status, booking = null }) => {
       }
     }
 
-    return <span className={`${baseClasses} ${statusStyles[status] || 'bg-gray-500/20 text-gray-300'}`}>{displayStatus}</span>;
+    return <span className={`${baseClasses} ${displayClass}`}>{displayStatus}</span>;
 };

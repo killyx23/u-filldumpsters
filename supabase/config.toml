@@ -372,6 +372,12 @@ allow_dynamic_registration = false
 # function runs. Deploy with: supabase functions deploy igloohome-webhook --no-verify-jwt
 verify_jwt = false
 
+[functions.send-abandoned-checkout-reminder]
+# Invoked by pg_cron via pg_net with the service_role Bearer token. Keep JWT
+# verification on so only cron/service role can trigger mass reminder sends —
+# but the Authorization header from vault must be present (see migration cron).
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -289,6 +289,13 @@ Deno.serve(async (req)=>{
     if (verificationSkipped && !booking.was_verification_skipped) {
       bookingUpdatePayload.was_verification_skipped = true;
     }
+    // Paid — keep stock allocated; clear unpaid hold flag so cleanup/cancel do not restock
+    if (booking.addons?.equipment_hold_active === true) {
+      bookingUpdatePayload.addons = {
+        ...booking.addons,
+        equipment_hold_active: false,
+      };
+    }
     const { data: updatedBooking, error: updateError } = await supabase.from("bookings").update(bookingUpdatePayload).eq("id", bookingId).select("*, customers!inner(*)").single();
     if (updateError || !updatedBooking) {
       throw new Error(`Failed to update booking status: ${updateError?.message ?? "unknown"}`);

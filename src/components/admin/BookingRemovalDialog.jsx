@@ -12,6 +12,7 @@ import { SecureDeleteFlow } from '@/components/admin/SecureDeleteDialog';
 import { RescheduleDialog } from '@/components/customer-portal/reschedule/RescheduleDialog';
 import { buildArchiveDetails, getStripeChargeId } from '@/utils/bookingArchiveHelper';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
+import { releaseEquipmentHold, bookingHasActiveEquipmentHold } from '@/utils/pendingBookingEquipmentHold';
 
 const REASONS = {
     CANCELLED: 'cancelled',
@@ -186,6 +187,13 @@ export const BookingRemovalDialog = ({
                     })
                     .eq('id', booking.id);
                 if (updateError) throw updateError;
+            }
+
+            if (bookingHasActiveEquipmentHold(booking) || booking.status === 'pending_payment') {
+                const releaseResult = await releaseEquipmentHold(booking);
+                if (releaseResult.error) {
+                    console.warn('[BookingRemovalDialog] Equipment restock warning:', releaseResult.error);
+                }
             }
 
             await expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
