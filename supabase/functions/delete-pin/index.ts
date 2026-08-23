@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
+import { getJwtAal } from "../_shared/jwtAal.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 function makeJsonResponse(corsHeaders) {
@@ -169,6 +170,12 @@ Deno.serve(async (req)=>{
         return jsonResponse({
           success: false,
           error: "Admin access required"
+        }, 403);
+      }
+      if (getJwtAal(token) !== "aal2") {
+        return jsonResponse({
+          success: false,
+          error: "Admin MFA required"
         }, 403);
       }
     }

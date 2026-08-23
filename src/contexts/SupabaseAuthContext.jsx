@@ -2,8 +2,15 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
+import { parseJwtAal } from '@/lib/adminMfa';
 
 const AuthContext = createContext(undefined);
+
+const emptyMfa = {
+  currentAal: 'aal1',
+  needsMfaEnrollment: false,
+  needsMfaChallenge: false,
+};
 
 export const AuthProvider = ({ children }) => {
   const { toast } = useToast();
@@ -12,6 +19,16 @@ export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentAal, setCurrentAal] = useState('aal1');
+  const [needsMfaEnrollment, setNeedsMfaEnrollment] = useState(false);
+  const [needsMfaChallenge, setNeedsMfaChallenge] = useState(false);
+  const [mfaReady, setMfaReady] = useState(false);
+
+  const applyMfaState = useCallback((next) => {
+    setCurrentAal(next.currentAal);
+    setNeedsMfaEnrollment(next.needsMfaEnrollment);
+    setNeedsMfaChallenge(next.needsMfaChallenge);
+  }, []);
 
   // Check if user has admin privileges
   const checkAdminStatus = useCallback(async (currentUser) => {
@@ -50,35 +67,87 @@ export const AuthProvider = ({ children }) => {
     return false;
   }, []);
 
-  const handleSession = useCallback(async (session) => {
-    console.log('[AuthContext] Session changed:', session?.user?.email || 'No user');
-    
-    setSession(session);
-    setUser(session?.user ?? null);
-    
-    if (session?.user) {
-      await checkAdminStatus(session.user);
-    } else {
-      setIsAdmin(false);
+  const refreshMfa = useCallback(async (activeSession, adminFlag) => {
+    if (!activeSession?.user || !adminFlag) {
+      applyMfaState({
+        ...emptyMfa,
+        currentAal: parseJwtAal(activeSession?.access_token),
+      });
+      return emptyMfa;
     }
-    
+
+    const aal = parseJwtAal(activeSession.access_token);
+    try {
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) {
+        console.error('[AuthContext] listFactors error:', error);
+        const fallback = {
+          currentAal: aal,
+          needsMfaEnrollment: false,
+          needsMfaChallenge: aal !== 'aal2',
+        };
+        applyMfaState(fallback);
+        return fallback;
+      }
+
+      const hasVerifiedTotp = (data?.totp ?? []).some((factor) => factor.status === 'verified');
+      const next = {
+        currentAal: aal,
+        needsMfaEnrollment: !hasVerifiedTotp,
+        needsMfaChallenge: hasVerifiedTotp && aal !== 'aal2',
+      };
+      applyMfaState(next);
+      return next;
+    } catch (err) {
+      console.error('[AuthContext] MFA refresh failed:', err);
+      const fallback = {
+        currentAal: aal,
+        needsMfaEnrollment: false,
+        needsMfaChallenge: aal !== 'aal2',
+      };
+      applyMfaState(fallback);
+      return fallback;
+    }
+  }, [applyMfaState]);
+
+  const handleSession = useCallback(async (nextSession) => {
+    console.log('[AuthContext] Session changed:', nextSession?.user?.email || 'No user');
+
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+
+    if (!nextSession?.user) {
+      setIsAdmin(false);
+      applyMfaState(emptyMfa);
+      setMfaReady(true);
+      setLoading(false);
+      return;
+    }
+
+    setMfaReady(false);
+    const admin = await checkAdminStatus(nextSession.user);
+    await refreshMfa(nextSession, admin);
+    setMfaReady(true);
     setLoading(false);
-  }, [checkAdminStatus]);
+  }, [checkAdminStatus, refreshMfa, applyMfaState]);
 
   useEffect(() => {
     console.log('[AuthContext] Initializing auth state...');
-    
+
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      await handleSession(session);
+      const { data: { session: initialSession } } = await supabase.auth.getSession();
+      await handleSession(initialSession);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, nextSession) => {
         console.log('[AuthContext] Auth state change event:', event);
-        await handleSession(session);
+        // Defer so MFA/session APIs are not called inside the auth callback (supabase-js deadlock).
+        setTimeout(() => {
+          handleSession(nextSession);
+        }, 0);
       }
     );
 
@@ -90,7 +159,7 @@ export const AuthProvider = ({ children }) => {
 
   const signUp = useCallback(async (email, password, options) => {
     console.log('[AuthContext] Sign up attempt:', email);
-    
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -113,7 +182,7 @@ export const AuthProvider = ({ children }) => {
 
   const signIn = useCallback(async (email, password) => {
     console.log('[AuthContext] Sign in attempt:', email);
-    
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -135,7 +204,7 @@ export const AuthProvider = ({ children }) => {
 
   const signOut = useCallback(async () => {
     console.log('[AuthContext] Sign out attempt');
-    
+
     const { error } = await supabase.auth.signOut();
 
     if (error) {
@@ -148,25 +217,52 @@ export const AuthProvider = ({ children }) => {
     } else {
       console.log('[AuthContext] Sign out successful');
       setIsAdmin(false);
+      applyMfaState(emptyMfa);
+      setMfaReady(true);
     }
 
     return { error };
-  }, [toast]);
+  }, [toast, applyMfaState]);
 
   const value = useMemo(() => ({
     user,
     session,
     loading,
     isAdmin,
+    currentAal,
+    needsMfaEnrollment,
+    needsMfaChallenge,
+    mfaReady,
+    refreshMfa: async () => {
+      const { data: { session: latest } } = await supabase.auth.getSession();
+      const admin = latest?.user?.app_metadata?.is_admin === true || isAdmin;
+      return refreshMfa(latest, admin);
+    },
     signUp,
     signIn,
     signOut,
-  }), [user, session, loading, isAdmin, signUp, signIn, signOut]);
+  }), [
+    user,
+    session,
+    loading,
+    isAdmin,
+    currentAal,
+    needsMfaEnrollment,
+    needsMfaChallenge,
+    mfaReady,
+    refreshMfa,
+    signUp,
+    signIn,
+    signOut,
+  ]);
 
   console.log('[AuthContext] Current state:', {
     hasUser: !!user,
     userEmail: user?.email,
     isAdmin,
+    currentAal,
+    needsMfaEnrollment,
+    needsMfaChallenge,
     loading,
   });
 

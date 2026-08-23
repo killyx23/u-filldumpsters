@@ -9,6 +9,7 @@ import {
 } from "../_shared/pinTiming.ts";
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
+import { getJwtAal } from "../_shared/jwtAal.ts";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
 /** Statuses eligible for customer portal + daily pin jobs */
@@ -342,6 +343,12 @@ Deno.serve(async (req)=>{
         return jsonResponse({
           success: false,
           error: "Admin access required"
+        }, 403);
+      }
+      if (getJwtAal(token) !== "aal2") {
+        return jsonResponse({
+          success: false,
+          error: "Admin MFA required"
         }, 403);
       }
     }

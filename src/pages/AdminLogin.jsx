@@ -14,7 +14,17 @@ export const AdminLogin = () => {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { user, isAdmin, loading: authLoading, signIn, signOut } = useAuth();
+  const {
+    user,
+    isAdmin,
+    loading: authLoading,
+    currentAal,
+    needsMfaEnrollment,
+    needsMfaChallenge,
+    mfaReady,
+    signIn,
+    signOut,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -27,19 +37,45 @@ export const AdminLogin = () => {
     isSubmitting,
   });
 
-  // Handle successful admin login
+  // Handle successful admin login — MFA enroll/challenge before dashboard
   useEffect(() => {
-    if (!authLoading && user && isAdmin) {
-      console.log('[AdminLogin] ✅ Admin user authenticated - redirecting to dashboard');
+    if (authLoading || !mfaReady || !user || !isAdmin) return;
+
+    if (needsMfaEnrollment || needsMfaChallenge || currentAal !== 'aal2') {
+      console.log('[AdminLogin] Admin authenticated — MFA required');
       toast({
-        title: "Login Successful",
-        description: `Welcome, ${user.email}`,
+        title: 'Authenticator required',
+        description: needsMfaEnrollment
+          ? 'Set up an authenticator app to continue.'
+          : 'Enter the code from your authenticator app.',
       });
-      
-      const from = location.state?.from?.pathname || '/admin/dashboard';
-      navigate(from, { replace: true });
+      navigate('/admin-mfa', {
+        replace: true,
+        state: { from: location.state?.from },
+      });
+      return;
     }
-  }, [user, isAdmin, authLoading, navigate, location, toast]);
+
+    console.log('[AdminLogin] ✅ Admin user authenticated with MFA - redirecting to dashboard');
+    toast({
+      title: 'Login Successful',
+      description: `Welcome, ${user.email}`,
+    });
+
+    const from = location.state?.from?.pathname || '/admin/dashboard';
+    navigate(from, { replace: true });
+  }, [
+    user,
+    isAdmin,
+    authLoading,
+    currentAal,
+    needsMfaEnrollment,
+    needsMfaChallenge,
+    mfaReady,
+    navigate,
+    location,
+    toast,
+  ]);
 
   // Handle unauthorized redirect from AdminRouteGuard
   useEffect(() => {

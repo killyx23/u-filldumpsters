@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Key, UserPlus, Copy, Unlock } from 'lucide-react';
+import { AdminMfaSettings } from '@/components/admin/AdminMfaSettings';
 
 export const SettingsManager = () => {
   const { isAdmin } = useAuth();
@@ -143,6 +144,8 @@ export const SettingsManager = () => {
 
   return (
     <div className="space-y-6">
+      <AdminMfaSettings />
+
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
         <h2 className="text-xl font-bold text-white mb-2 flex items-center">
           <Unlock className="mr-2 h-5 w-5 text-purple-400" />
@@ -194,7 +197,7 @@ export const SettingsManager = () => {
             Invite Admin
           </h2>
           <p className="text-sm text-gray-400 mb-4">
-            Creates a new admin account with a one-time temporary password. Existing users cannot be promoted here — use the Supabase Dashboard for that. The first admin must be configured in Supabase Dashboard (app_metadata: is_admin: true).
+            Creates a new admin account with a one-time temporary password. They must enroll an authenticator app on first login. Existing users cannot be promoted here — use the Supabase Dashboard for that. The first admin must be configured in Supabase Dashboard (app_metadata: is_admin: true).
           </p>
 
           <form onSubmit={handleInviteAdmin} className="space-y-4 max-w-xl">
