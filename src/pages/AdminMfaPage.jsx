@@ -10,6 +10,8 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { useToast } from '@/components/ui/use-toast';
 import {
   challengeAndVerifyTotp,
+  decideAdminMfaView,
+  getVerifiedTotpFactors,
   toQrImageSrc,
   unenrollUnverifiedTotpFactors,
 } from '@/lib/adminMfa';
@@ -35,7 +37,7 @@ function AuthenticatorCodeInput({ value, onChange, disabled }) {
   );
 }
 
-function EnrollMfa({ onEnrolled }) {
+function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
   const { toast } = useToast();
   const [factorId, setFactorId] = useState('');
   const [qr, setQr] = useState('');
@@ -49,6 +51,11 @@ function EnrollMfa({ onEnrolled }) {
     setStarting(true);
     setError('');
     try {
+      const existing = await getVerifiedTotpFactors(supabase);
+      if (existing.length > 0) {
+        onAlreadyEnrolled();
+        return null;
+      }
       await unenrollUnverifiedTotpFactors(supabase);
       const { data, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: 'totp',
@@ -63,21 +70,14 @@ function EnrollMfa({ onEnrolled }) {
       setStarting(false);
       return null;
     }
-  }, []);
+  }, [onAlreadyEnrolled]);
 
   useEffect(() => {
     let cancelled = false;
-    let createdFactorId = null;
 
     (async () => {
       const data = await startEnrollment();
-      if (!data || cancelled) {
-        if (data?.id) {
-          await supabase.auth.mfa.unenroll({ factorId: data.id });
-        }
-        return;
-      }
-      createdFactorId = data.id;
+      if (!data || cancelled) return;
       setFactorId(data.id);
       setQr(toQrImageSrc(data.totp.qr_code));
       setSecret(data.totp.secret);
@@ -86,9 +86,6 @@ function EnrollMfa({ onEnrolled }) {
 
     return () => {
       cancelled = true;
-      if (createdFactorId) {
-        supabase.auth.mfa.unenroll({ factorId: createdFactorId });
-      }
     };
   }, [startEnrollment]);
 
@@ -213,20 +210,20 @@ function ChallengeMfa({ onVerified }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error: listError } = await supabase.auth.mfa.listFactors();
-      if (cancelled) return;
-      if (listError) {
-        setError(listError.message);
-        setLoadingFactor(false);
-        return;
+      try {
+        const verified = await getVerifiedTotpFactors(supabase);
+        if (cancelled) return;
+        const totp = verified[0];
+        if (!totp) {
+          setError('No authenticator is enrolled on this account.');
+        } else {
+          setFactorId(totp.id);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Could not load authenticator.');
+      } finally {
+        if (!cancelled) setLoadingFactor(false);
       }
-      const totp = (data?.totp ?? []).find((factor) => factor.status === 'verified');
-      if (!totp) {
-        setError('No authenticator is enrolled on this account.');
-      } else {
-        setFactorId(totp.id);
-      }
-      setLoadingFactor(false);
     })();
     return () => {
       cancelled = true;
@@ -247,8 +244,16 @@ function ChallengeMfa({ onVerified }) {
       });
       await onVerified();
     } catch (err) {
-      setError(err.message || 'That code was not valid. Try the latest code from your app.');
+      const message = err.message || 'That code was not valid. Try the latest code from your app.';
+      setError(message);
       setCode('');
+      if (/session|jwt|expired|not found/i.test(message)) {
+        toast({
+          variant: 'destructive',
+          title: 'Session expired',
+          description: 'Sign in again, then enter a fresh authenticator code.',
+        });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -311,14 +316,16 @@ export const AdminMfaPage = () => {
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [forceChallenge, setForceChallenge] = useState(false);
   const from = location.state?.from?.pathname || '/admin/dashboard';
+  const switchToChallenge = useCallback(() => setForceChallenge(true), []);
 
   const continueToAdmin = async () => {
     await refreshMfa();
     navigate(from, { replace: true });
   };
 
-  if (authLoading || (user && isAdmin && !mfaReady)) {
+  if (authLoading || (user && !mfaReady)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />
@@ -341,11 +348,18 @@ export const AdminMfaPage = () => {
     );
   }
 
-  if (currentAal === 'aal2' && !needsMfaEnrollment && !needsMfaChallenge) {
+  const mfaView = forceChallenge
+    ? 'challenge'
+    : decideAdminMfaView({
+        currentAal,
+        verifiedTotpCount: needsMfaEnrollment ? 0 : (needsMfaChallenge || currentAal === 'aal2' ? 1 : 0),
+      });
+
+  if (mfaView === 'dashboard') {
     return <Navigate to={from} replace />;
   }
 
-  const showEnroll = needsMfaEnrollment || (!needsMfaChallenge && currentAal !== 'aal2');
+  const showEnroll = mfaView === 'enroll';
 
   return (
     <motion.div
@@ -370,7 +384,10 @@ export const AdminMfaPage = () => {
         </div>
 
         {showEnroll ? (
-          <EnrollMfa onEnrolled={continueToAdmin} />
+          <EnrollMfa
+            onEnrolled={continueToAdmin}
+            onAlreadyEnrolled={switchToChallenge}
+          />
         ) : (
           <ChallengeMfa onVerified={continueToAdmin} />
         )}

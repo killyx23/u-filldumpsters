@@ -79,6 +79,7 @@ export const AdminLogin = () => {
 
   // Handle unauthorized redirect from AdminRouteGuard
   useEffect(() => {
+    if (authLoading || !mfaReady) return;
     if (location.state?.error === 'unauthorized' && location.state?.userEmail) {
       console.warn('[AdminLogin] Unauthorized access detected:', location.state.userEmail);
       toast({
@@ -86,13 +87,12 @@ export const AdminLogin = () => {
         title: "Access Denied",
         description: `${location.state.userEmail} does not have admin privileges.`,
       });
-      
-      // Sign out the non-admin user
+
       if (user && !isAdmin) {
         signOut();
       }
     }
-  }, [location.state, user, isAdmin, signOut, toast]);
+  }, [location.state, user, isAdmin, signOut, toast, authLoading, mfaReady]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

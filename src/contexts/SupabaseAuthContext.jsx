@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
-import { parseJwtAal } from '@/lib/adminMfa';
+import { getVerifiedTotpFactors, parseJwtAal } from '@/lib/adminMfa';
 
 const AuthContext = createContext(undefined);
 
@@ -78,19 +78,8 @@ export const AuthProvider = ({ children }) => {
 
     const aal = parseJwtAal(activeSession.access_token);
     try {
-      const { data, error } = await supabase.auth.mfa.listFactors();
-      if (error) {
-        console.error('[AuthContext] listFactors error:', error);
-        const fallback = {
-          currentAal: aal,
-          needsMfaEnrollment: false,
-          needsMfaChallenge: aal !== 'aal2',
-        };
-        applyMfaState(fallback);
-        return fallback;
-      }
-
-      const hasVerifiedTotp = (data?.totp ?? []).some((factor) => factor.status === 'verified');
+      const verifiedTotp = await getVerifiedTotpFactors(supabase);
+      const hasVerifiedTotp = verifiedTotp.length > 0;
       const next = {
         currentAal: aal,
         needsMfaEnrollment: !hasVerifiedTotp,

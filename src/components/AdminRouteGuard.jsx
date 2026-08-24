@@ -18,7 +18,7 @@ const AdminRouteGuard = ({ children }) => {
     path: location.pathname,
   });
 
-  if (loading || (user && isAdmin && !mfaReady)) {
+  if (loading || (user && !mfaReady)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 via-indigo-900 to-purple-900">
         <Loader2 className="h-16 w-16 animate-spin text-yellow-400 mb-4" />

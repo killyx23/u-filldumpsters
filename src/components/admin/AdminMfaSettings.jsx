@@ -8,6 +8,7 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp
 import { Loader2, ShieldCheck, Smartphone, Copy } from 'lucide-react';
 import {
   challengeAndVerifyTotp,
+  getVerifiedTotpFactors,
   toQrImageSrc,
   unenrollUnverifiedTotpFactors,
 } from '@/lib/adminMfa';
@@ -30,9 +31,7 @@ export const AdminMfaSettings = () => {
   const loadFactors = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error: listError } = await supabase.auth.mfa.listFactors();
-      if (listError) throw listError;
-      setFactors((data?.totp ?? []).filter((factor) => factor.status === 'verified'));
+      setFactors(await getVerifiedTotpFactors(supabase));
     } catch (err) {
       console.error('[AdminMfaSettings] listFactors:', err);
       toast({

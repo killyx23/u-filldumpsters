@@ -1,3 +1,14 @@
+/**
+ * Decide which /admin-mfa UI to show.
+ * A verified TOTP factor means enroll is done — AAL1 only needs a challenge.
+ */
+export function decideAdminMfaView({ currentAal, verifiedTotpCount }) {
+  const count = Number(verifiedTotpCount) || 0;
+  if (count > 0 && currentAal === 'aal2') return 'dashboard';
+  if (count > 0) return 'challenge';
+  return 'enroll';
+}
+
 /** Decode the AAL claim from a Supabase access token. Missing/invalid → aal1. */
 export function parseJwtAal(accessToken) {
   if (!accessToken || typeof accessToken !== 'string') return 'aal1';
@@ -19,10 +30,28 @@ export function toQrImageSrc(qrCode) {
   return `data:image/svg+xml;utf-8,${encodeURIComponent(qrCode)}`;
 }
 
-export async function unenrollUnverifiedTotpFactors(supabase) {
-  const { data, error } = await supabase.auth.mfa.listFactors();
+/** Prefer GET /user factors — session.user.factors is often empty after password login. */
+export async function getVerifiedTotpFactors(supabase) {
+  const { data: { user }, error } = await supabase.auth.getUser();
   if (error) throw error;
-  const unverified = (data?.all ?? []).filter(
+  const fromUser = (user?.factors ?? []).filter(
+    (factor) => factor.factor_type === 'totp' && factor.status === 'verified',
+  );
+  if (fromUser.length > 0) return fromUser;
+
+  const listed = await supabase.auth.mfa.listFactors();
+  if (listed.error) throw listed.error;
+  const fromList = listed.data?.totp ?? [];
+  if (fromList.length > 0) return fromList;
+  return (listed.data?.all ?? []).filter(
+    (factor) => factor.factor_type === 'totp' && factor.status === 'verified',
+  );
+}
+
+export async function unenrollUnverifiedTotpFactors(supabase) {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const unverified = (user?.factors ?? []).filter(
     (factor) => factor.factor_type === 'totp' && factor.status === 'unverified',
   );
   for (const factor of unverified) {
