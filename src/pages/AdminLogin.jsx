@@ -39,10 +39,18 @@ export const AdminLogin = () => {
 
   // Handle successful admin login — MFA enroll/challenge before dashboard
   useEffect(() => {
-    if (authLoading || !mfaReady || !user || !isAdmin) return;
+    if (authLoading || !mfaReady) return;
+
+    if (isSubmitting && !user) {
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!user || !isAdmin) return;
 
     if (needsMfaEnrollment || needsMfaChallenge || currentAal !== 'aal2') {
       console.log('[AdminLogin] Admin authenticated — MFA required');
+      setIsSubmitting(false);
       toast({
         title: 'Authenticator required',
         description: needsMfaEnrollment
@@ -57,6 +65,7 @@ export const AdminLogin = () => {
     }
 
     console.log('[AdminLogin] ✅ Admin user authenticated with MFA - redirecting to dashboard');
+    setIsSubmitting(false);
     toast({
       title: 'Login Successful',
       description: `Welcome, ${user.email}`,
@@ -72,6 +81,7 @@ export const AdminLogin = () => {
     needsMfaEnrollment,
     needsMfaChallenge,
     mfaReady,
+    isSubmitting,
     navigate,
     location,
     toast,

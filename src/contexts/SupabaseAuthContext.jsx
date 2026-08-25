@@ -1,8 +1,8 @@
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
-import { getVerifiedTotpFactors, parseJwtAal } from '@/lib/adminMfa';
+import { getVerifiedTotpFactors, isInvalidSessionError, parseJwtAal } from '@/lib/adminMfa';
 
 const AuthContext = createContext(undefined);
 
@@ -23,12 +23,24 @@ export const AuthProvider = ({ children }) => {
   const [needsMfaEnrollment, setNeedsMfaEnrollment] = useState(false);
   const [needsMfaChallenge, setNeedsMfaChallenge] = useState(false);
   const [mfaReady, setMfaReady] = useState(false);
+  const handleSessionGeneration = useRef(0);
 
   const applyMfaState = useCallback((next) => {
     setCurrentAal(next.currentAal);
     setNeedsMfaEnrollment(next.needsMfaEnrollment);
     setNeedsMfaChallenge(next.needsMfaChallenge);
   }, []);
+
+  const clearStaleLocalSession = useCallback(async () => {
+    console.warn('[AuthContext] Clearing stale local auth session');
+    await supabase.auth.signOut({ scope: 'local' });
+    setSession(null);
+    setUser(null);
+    setIsAdmin(false);
+    applyMfaState(emptyMfa);
+    setMfaReady(true);
+    setLoading(false);
+  }, [applyMfaState]);
 
   // Check if user has admin privileges
   const checkAdminStatus = useCallback(async (currentUser) => {
@@ -89,6 +101,10 @@ export const AuthProvider = ({ children }) => {
       return next;
     } catch (err) {
       console.error('[AuthContext] MFA refresh failed:', err);
+      if (isInvalidSessionError(err)) {
+        await clearStaleLocalSession();
+        return emptyMfa;
+      }
       const fallback = {
         currentAal: aal,
         needsMfaEnrollment: false,
@@ -97,9 +113,10 @@ export const AuthProvider = ({ children }) => {
       applyMfaState(fallback);
       return fallback;
     }
-  }, [applyMfaState]);
+  }, [applyMfaState, clearStaleLocalSession]);
 
   const handleSession = useCallback(async (nextSession) => {
+    const generation = ++handleSessionGeneration.current;
     console.log('[AuthContext] Session changed:', nextSession?.user?.email || 'No user');
 
     setSession(nextSession);
@@ -115,7 +132,11 @@ export const AuthProvider = ({ children }) => {
 
     setMfaReady(false);
     const admin = await checkAdminStatus(nextSession.user);
+    if (generation !== handleSessionGeneration.current) return;
+
     await refreshMfa(nextSession, admin);
+    if (generation !== handleSessionGeneration.current) return;
+
     setMfaReady(true);
     setLoading(false);
   }, [checkAdminStatus, refreshMfa, applyMfaState]);
@@ -125,6 +146,13 @@ export const AuthProvider = ({ children }) => {
 
     const getSession = async () => {
       const { data: { session: initialSession } } = await supabase.auth.getSession();
+      if (initialSession) {
+        const { error } = await supabase.auth.getUser();
+        if (error && isInvalidSessionError(error)) {
+          await clearStaleLocalSession();
+          return;
+        }
+      }
       await handleSession(initialSession);
     };
 
@@ -144,7 +172,7 @@ export const AuthProvider = ({ children }) => {
       console.log('[AuthContext] Cleaning up auth subscription');
       subscription.unsubscribe();
     };
-  }, [handleSession]);
+  }, [handleSession, clearStaleLocalSession]);
 
   const signUp = useCallback(async (email, password, options) => {
     console.log('[AuthContext] Sign up attempt:', email);

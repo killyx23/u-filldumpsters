@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decideAdminMfaView, parseJwtAal, toQrImageSrc } from './adminMfa.js';
+import { decideAdminMfaView, isInvalidSessionError, parseJwtAal, toQrImageSrc } from './adminMfa.js';
 
 test('aal1 with no verified TOTP shows enroll QR', () => {
   assert.equal(decideAdminMfaView({ currentAal: 'aal1', verifiedTotpCount: 0 }), 'enroll');
@@ -24,4 +24,12 @@ test('parseJwtAal reads aal from a JWT payload', () => {
 test('toQrImageSrc prefixes SVG QR codes', () => {
   assert.equal(toQrImageSrc('data:image/svg+xml;utf-8,abc'), 'data:image/svg+xml;utf-8,abc');
   assert.match(toQrImageSrc('<svg></svg>'), /^data:image\/svg\+xml/);
+});
+
+test('isInvalidSessionError detects stale Supabase sessions', () => {
+  assert.equal(
+    isInvalidSessionError(new Error('Session from session_id claim in JWT does not exist')),
+    true,
+  );
+  assert.equal(isInvalidSessionError(new Error('Invalid login credentials')), false);
 });

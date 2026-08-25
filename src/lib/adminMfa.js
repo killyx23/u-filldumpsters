@@ -30,20 +30,40 @@ export function toQrImageSrc(qrCode) {
   return `data:image/svg+xml;utf-8,${encodeURIComponent(qrCode)}`;
 }
 
-/** Prefer GET /user factors — session.user.factors is often empty after password login. */
-export async function getVerifiedTotpFactors(supabase) {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  const fromUser = (user?.factors ?? []).filter(
+/** True when the browser JWT points at a session Supabase no longer has. */
+export function isInvalidSessionError(error) {
+  if (!error) return false;
+  const message = String(error.message || error).toLowerCase();
+  return (
+    message.includes('session from session_id claim in jwt does not exist')
+    || message.includes('invalid refresh token')
+    || message.includes('refresh token not found')
+    || message.includes('jwt expired')
+    || /session.*not found/i.test(message)
+  );
+}
+
+function verifiedTotpFromList(data) {
+  const fromTotp = (data?.totp ?? []).filter((factor) => factor.status === 'verified');
+  if (fromTotp.length > 0) return fromTotp;
+  return (data?.all ?? []).filter(
     (factor) => factor.factor_type === 'totp' && factor.status === 'verified',
   );
-  if (fromUser.length > 0) return fromUser;
+}
 
+/**
+ * List MFA factors without calling getUser first — avoids racing signInWithPassword
+ * when a stale session_id is still in local storage.
+ */
+export async function getVerifiedTotpFactors(supabase) {
   const listed = await supabase.auth.mfa.listFactors();
   if (listed.error) throw listed.error;
-  const fromList = listed.data?.totp ?? [];
+  const fromList = verifiedTotpFromList(listed.data);
   if (fromList.length > 0) return fromList;
-  return (listed.data?.all ?? []).filter(
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  return (user?.factors ?? []).filter(
     (factor) => factor.factor_type === 'totp' && factor.status === 'verified',
   );
 }
