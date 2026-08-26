@@ -31,6 +31,7 @@ import {
 } from "../_shared/lockDeviceState.ts";
 import { verifyIglooWebhook } from "../_shared/iglooWebhookAuth.ts";
 import { alertBreakInAttempt, alertBridgeOfflineWhileUnlocked } from "../_shared/lockAlerts.ts";
+import { notifyPinReady } from "../_shared/pinNotify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -82,29 +83,119 @@ function eventTypeOf(event: Record<string, unknown> | null): number | null {
   return null;
 }
 
+const JOB_TYPE_CREATE_PIN = 4;
+const JOB_TYPE_DELETE_PIN = 5;
+
+/** Igloohome job statuses: 0 = completed, 2 = failed (matches _shared/lockPin.ts pollJob). */
+function isJobCompleted(jobStatus: unknown, completedFlag: unknown): boolean {
+  return completedFlag === true || jobStatus === 0;
+}
+
+/**
+ * Job Complete tells us the *result* of a create/delete we issued. Use it to
+ * flip rental_access_codes.lock_confirmed_at / lock_deleted_at immediately
+ * instead of waiting for the next reconciler sweep to poll the job.
+ */
+async function reconcilePinFromJob(
+  supabase: SupabaseClient,
+  jobId: string,
+  jobType: number | null,
+  jobStatus: unknown,
+  completedFlag: unknown,
+): Promise<{ orderId: number; booking: Record<string, unknown> } | null> {
+  if (!isJobCompleted(jobStatus, completedFlag)) return null;
+  if (jobType !== JOB_TYPE_CREATE_PIN && jobType !== JOB_TYPE_DELETE_PIN) return null;
+
+  const { data: pinRow } = await supabase
+    .from("rental_access_codes")
+    .select("id, order_id, access_pin, pin_type, start_time, end_time, lock_confirmed_at, lock_deleted_at")
+    .eq("pin_id", jobId)
+    .eq("pin_type", "bridge_proxied")
+    .maybeSingle();
+  if (!pinRow) return null;
+
+  const nowIso = new Date().toISOString();
+
+  if (jobType === JOB_TYPE_CREATE_PIN && !pinRow.lock_confirmed_at) {
+    await supabase.from("rental_access_codes").update({ lock_confirmed_at: nowIso }).eq("id", pinRow.id);
+    console.log(`[igloohome-webhook] Job ${jobId}: create confirmed for order #${pinRow.order_id}`);
+    const { data: booking } = await supabase
+      .from("bookings")
+      .select("*")
+      .eq("id", pinRow.order_id)
+      .maybeSingle();
+    if (booking) return { orderId: pinRow.order_id, booking };
+    return null;
+  }
+
+  if (jobType === JOB_TYPE_DELETE_PIN && !pinRow.lock_deleted_at) {
+    await supabase
+      .from("rental_access_codes")
+      .update({ status: "expired", lock_deleted_at: nowIso })
+      .eq("id", pinRow.id);
+    console.log(`[igloohome-webhook] Job ${jobId}: delete confirmed for order #${pinRow.order_id}`);
+  }
+
+  return null;
+}
+
 async function handleJobComplete(
   supabase: SupabaseClient,
   event: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+): Promise<{ result: Record<string, unknown>; pinConfirmed: { orderId: number; booking: Record<string, unknown> } | null }> {
   const data = asRecord(event.data) || event;
   const jobId = pickString(data, ["jobId", "job_id", "id"]);
-  if (!jobId) return { handled: false, reason: "missing jobId" };
+  if (!jobId) return { result: { handled: false, reason: "missing jobId" }, pinConfirmed: null };
 
   const jobStatusRaw = data.jobStatus ?? data.job_status ?? asRecord(data.jobResponse)?.jobStatus;
   const jobTypeRaw = data.jobType ?? data.job_type;
+  const jobType = typeof jobTypeRaw === "number" ? jobTypeRaw : null;
   const deviceId = pickString(data, ["deviceId", "device_id", "lockId"]) || defaultDeviceId();
 
   const { error } = await supabase.from("lock_jobs").upsert({
     job_id: jobId,
     device_id: deviceId,
-    job_type: typeof jobTypeRaw === "number" ? jobTypeRaw : null,
+    job_type: jobType,
     job_status: typeof jobStatusRaw === "number" ? jobStatusRaw : null,
     raw: redactPins(event),
     updated_at: new Date().toISOString(),
   }, { onConflict: "job_id" });
 
   if (error) console.error("[igloohome-webhook] lock_jobs upsert failed:", error.message);
-  return { handled: !error, jobId, jobStatus: jobStatusRaw ?? null };
+
+  let pinConfirmed: { orderId: number; booking: Record<string, unknown> } | null = null;
+  try {
+    pinConfirmed = await reconcilePinFromJob(supabase, jobId, jobType, jobStatusRaw, data.completed);
+  } catch (err) {
+    console.error("[igloohome-webhook] reconcilePinFromJob failed:", err);
+  }
+
+  return { result: { handled: !error, jobId, jobStatus: jobStatusRaw ?? null }, pinConfirmed };
+}
+
+/**
+ * Fire-and-forget call into the reconciler so a bridge reconnect flushes any
+ * PIN create/delete that got stuck while it was offline, instead of waiting
+ * up to 5 minutes for the next cron sweep.
+ */
+async function triggerReconciler(reason: string): Promise<void> {
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceKey) return;
+    const res = await fetch(`${supabaseUrl}/functions/v1/reconcile-lock-pins`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ reason }),
+    });
+    console.log(`[igloohome-webhook] Reconciler flush (${reason}) -> HTTP ${res.status}`);
+  } catch (err) {
+    console.error(`[igloohome-webhook] Reconciler flush (${reason}) failed:`, err);
+  }
 }
 
 async function handleBridgeConnection(
@@ -141,9 +232,16 @@ async function handleBridgeConnection(
   }, { onConflict: "bridge_id" });
   if (error) console.error("[igloohome-webhook] lock_bridges upsert failed:", error.message);
 
+  const alerts: Array<() => Promise<void>> = [];
+
+  // Bridge just came back — flush any PIN create/delete that got stuck
+  // while it was unreachable instead of waiting for the next cron sweep.
+  if (isOnline === true && changed) {
+    alerts.push(() => triggerReconciler("bridge_reconnect"));
+  }
+
   // Losing connectivity while a lock is still open is the worst case: the
   // equipment is accessible and we will not hear about further activity.
-  const alerts: Array<() => Promise<void>> = [];
   if (isOnline === false && changed) {
     const { data: openDevices } = await supabase
       .from("lock_devices")
@@ -201,8 +299,29 @@ async function processDeferred(
   supabase: SupabaseClient,
   recorded: RecordedEvent[],
   bridgeAlerts: Array<() => Promise<void>>,
+  pinConfirmed?: { orderId: number; booking: Record<string, unknown> } | null,
 ): Promise<void> {
   try {
+    if (pinConfirmed) {
+      const { data: pinRow } = await supabase
+        .from("rental_access_codes")
+        .select("access_pin, start_time, end_time")
+        .eq("order_id", pinConfirmed.orderId)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (pinRow?.access_pin) {
+        await notifyPinReady(
+          supabase,
+          pinConfirmed.booking,
+          String(pinRow.access_pin),
+          String(pinRow.start_time || ""),
+          String(pinRow.end_time || ""),
+        );
+      }
+    }
+
     for (const { event, deviceId, orderId } of recorded) {
       if (event.eventType === "breakin") {
         const { data: device } = await supabase
@@ -292,7 +411,8 @@ Deno.serve(async (req) => {
     }));
 
     if (type === EVENT_JOB_COMPLETE) {
-      const result = await handleJobComplete(supabase, event!);
+      const { result, pinConfirmed } = await handleJobComplete(supabase, event!);
+      if (pinConfirmed) runDeferred(processDeferred(supabase, [], [], pinConfirmed));
       return jsonResponse({ success: true, eventType: type, ...result });
     }
 
@@ -304,7 +424,7 @@ Deno.serve(async (req) => {
 
     if (type === EVENT_ACTIVITY_LOG) {
       const { recorded, parsed, stored } = await handleActivityLogs(supabase, event!);
-      runDeferred(processDeferred(supabase, recorded, []));
+      runDeferred(processDeferred(supabase, recorded, [], null));
       return jsonResponse({
         success: true,
         eventType: type,
