@@ -1,3 +1,10 @@
+/**
+ * @deprecated Superseded by `reconcile-lock-pins`, which merges this
+ * function's delete/create phases with ensure-lock-pin-ready's
+ * confirm/escalate phase into a single 5-minute cron job. Left in place
+ * (unscheduled) for manual invocation / rollback until reconcile-lock-pins
+ * has been validated in production; see 20260826_consolidate_pin_reconciler_cron.sql.
+ */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
