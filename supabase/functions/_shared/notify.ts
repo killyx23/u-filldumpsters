@@ -17,6 +17,8 @@ export type SendEmailResult = {
   provider?: string;
   error?: string;
   result?: unknown;
+  /** Provider message id when available (Brevo messageId / Resend id). */
+  messageId?: string;
 };
 
 export type SendSmsResult = {
@@ -64,7 +66,16 @@ export async function sendEmail(
         });
         if (brevoResponse.ok) {
           const result = await brevoResponse.json();
-          return { success: true, provider: "brevo", result };
+          const messageId =
+            typeof result?.messageId === "string"
+              ? result.messageId
+              : typeof result?.messageIds?.[0] === "string"
+              ? result.messageIds[0]
+              : undefined;
+          console.log(
+            `[${ts}] [notify] Brevo accepted email to=${toEmail} from=${BREVO_FROM_EMAIL} messageId=${messageId || "unknown"}`,
+          );
+          return { success: true, provider: "brevo", result, messageId };
         }
         lastError = `Brevo API error: ${await brevoResponse.text()}`;
         console.error(`[${ts}] [notify] Brevo email failed:`, lastError);
@@ -86,7 +97,11 @@ export async function sendEmail(
         });
         if (resendResponse.ok) {
           const result = await resendResponse.json();
-          return { success: true, provider: "resend", result };
+          const messageId = typeof result?.id === "string" ? result.id : undefined;
+          console.log(
+            `[${ts}] [notify] Resend accepted email to=${toEmail} messageId=${messageId || "unknown"}`,
+          );
+          return { success: true, provider: "resend", result, messageId };
         }
         lastError = `Resend API error: ${await resendResponse.text()}`;
         console.error(`[${ts}] [notify] Resend email failed:`, lastError);

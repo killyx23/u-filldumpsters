@@ -1,5 +1,6 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { isAdminWithMfa } from "../_shared/jwtAal.ts";
 
 const ALLOWED_BODY_KEYS = new Set(["email", "full_name"]);
 
@@ -75,8 +76,12 @@ Deno.serve(async (req) => {
     }
 
     const caller = userData.user;
-    if (caller.app_metadata?.is_admin !== true) {
-      return jsonResponse({ error: "Admin privileges required" }, 403, corsHeaders);
+    if (!isAdminWithMfa(caller, token)) {
+      return jsonResponse(
+        { error: "Admin privileges and authenticator MFA are required" },
+        403,
+        corsHeaders,
+      );
     }
 
     let body: Record<string, unknown>;

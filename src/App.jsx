@@ -8,9 +8,11 @@ import BookingJourney from '@/pages/BookingJourney';
 import { FaqPage } from '@/pages/FaqPage';
 import { ReviewsPage } from '@/pages/ReviewsPage';
 import { ContactPage } from '@/pages/ContactPage';
+import { HowCanWeDoBetterPage } from '@/pages/HowCanWeDoBetterPage';
 import { AboutPage } from '@/pages/AboutPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminLogin } from '@/pages/AdminLogin';
+import { AdminMfaPage } from '@/pages/AdminMfaPage';
 import { CustomerDetailView } from '@/components/admin/customer-detail/CustomerDetailView';
 import { AdminRouteGuard } from '@/components/AdminRouteGuard';
 import { SupabaseAuthProvider } from '@/contexts/SupabaseAuthContext';
@@ -95,8 +97,10 @@ function App() {
               <Route path="/faqs" element={<FaqPage />} />
               <Route path="/reviews" element={<ReviewsPage />} />
               <Route path="/contact" element={<ContactPage />} />
+              <Route path="/how-can-we-do-better" element={<HowCanWeDoBetterPage />} />
               <Route path="/about" element={<AboutPage />} />
               <Route path="/admin-login" element={<AdminLogin />} />
+              <Route path="/admin-mfa" element={<AdminMfaPage />} />
               <Route path="/customer-login" element={<CustomerLogin />} />
               <Route path="/login" element={<CustomerLogin />} />
               <Route path="/customer-portal-login" element={<CustomerPortalLogin />} />

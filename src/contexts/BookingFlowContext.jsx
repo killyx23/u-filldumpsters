@@ -8,6 +8,10 @@ import React, {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LeaveBookingDialog } from '@/components/LeaveBookingDialog';
+import {
+  releaseRememberedPaymentEquipmentHold,
+  sendEarlyLeaveFeedbackEmail,
+} from '@/utils/pendingBookingEquipmentHold';
 
 export const BOOKING_FLOW_STORAGE_KEY = 'ufill_booking_flow';
 
@@ -90,8 +94,23 @@ export function BookingFlowProvider({ children }) {
     setDialogOpen(false);
   }, []);
 
-  const confirmLeaveBooking = useCallback(() => {
+  const confirmLeaveBooking = useCallback(async () => {
     setDialogOpen(false);
+    let leaveBookingId = null;
+    try {
+      const leaveResult = await releaseRememberedPaymentEquipmentHold({
+        notes: 'Customer left booking before payment completed',
+      });
+      leaveBookingId = leaveResult?.bookingId || null;
+    } catch (err) {
+      console.warn('[BookingFlow] Failed to release payment equipment hold on leave:', err);
+    }
+
+    if (leaveBookingId) {
+      // Best-effort email — do not block navigation home
+      void sendEarlyLeaveFeedbackEmail(leaveBookingId, window.location.origin);
+    }
+
     resetCallbackRef.current?.();
     setFlowMetaState(defaultFlowMeta);
     writeStoredFlowMeta(defaultFlowMeta);

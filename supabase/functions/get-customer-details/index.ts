@@ -1,5 +1,6 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { isAdminWithMfa } from '../_shared/jwtAal.ts';
 
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
     }
 
     const caller = userData.user;
-    const isAdmin = caller.app_metadata?.is_admin === true;
+    const isAdmin = isAdminWithMfa(caller, token);
     const ownsCustomer =
       customer.user_id === caller.id ||
       Number.parseInt(String(caller.user_metadata?.customer_db_id), 10) === parsedCustomerId;

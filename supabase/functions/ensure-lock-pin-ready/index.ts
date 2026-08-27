@@ -1,6 +1,13 @@
 /**
  * ensure-lock-pin-ready (thin orchestrator)
  *
+ * @deprecated Superseded by `reconcile-lock-pins`, which merges this
+ * function's confirm/escalate phase with generate-daily-pins' delete/create
+ * phases into a single 5-minute cron job (also triggered on demand by
+ * igloohome-webhook when the bridge reconnects). Left in place (unscheduled)
+ * for manual invocation / rollback until reconcile-lock-pins has been
+ * validated in production; see 20260826_consolidate_pin_reconciler_cron.sql.
+ *
  * Runs every 5 minutes. Creates PINs by invoking generate-daily-pins (service role),
  * then confirms pending bridge jobs, notifies customers, escalates AlgoPIN via a
  * second generate-daily-pins-friendly path, and posts urgent admin chat on failure.
