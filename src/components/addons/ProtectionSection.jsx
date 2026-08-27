@@ -19,7 +19,7 @@ export const ProtectionSection = ({
     handleDrivewayProtectionChange, 
     plan, 
     addonPrices,
-    isDelivery,
+    isDelivery: _isDelivery,
     hasDrivewayPlan = false,
     rentalInsurancePlan = null,
     drivewayProtectionPlan = null,
@@ -32,18 +32,7 @@ export const ProtectionSection = ({
                                      mentionsDumpTrailer(plan.name) &&
                                      plan.name.toLowerCase().includes('delivery');
 
-    const isDumpLoaderTrailerRental = plan?.name && 
-                                      mentionsDumpTrailer(plan.name) &&
-                                      !plan.name.toLowerCase().includes('delivery') &&
-                                      !plan.name.toLowerCase().includes('16 yard') &&
-                                      !plan.name.toLowerCase().includes('dumpster');
-
-    const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && isDelivery) || plan?.id === 4;
-    const showDrivewayProtection =
-        hasDrivewayPlan &&
-        isDeliveryRequired &&
-        !isDumpLoaderTrailerRental &&
-        !isDumpLoaderWithDelivery;
+    const showDrivewayProtection = hasDrivewayPlan && Number(plan?.id) === 1;
     
     const insurancePrice = addonPrices?.insurance ?? rentalInsurancePlan?.price ?? 20;
     const drivewayPrice = addonPrices?.drivewayProtection ?? drivewayProtectionPlan?.price ?? 15;
@@ -106,7 +95,7 @@ export const ProtectionSection = ({
                         </RadioGroup>
                     </div>
 
-                    {/* Driveway Protection - Only show for delivery services (excluding dump loaders) */}
+                    {/* Driveway Protection - Dumpster delivery only */}
                     {showDrivewayProtection && (
                         <div>
                             <div className="flex items-center gap-2 mb-3">

@@ -255,7 +255,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost =
-            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+            Number(plan?.id) === 1 && addonsData?.drivewayProtection === 'accept'
                 ? Number(drivewayPrice)
                 : 0;
 

@@ -250,7 +250,7 @@ export const ComprehensiveHistoryDialog = ({
                                               : booking.addons.insurance === 'accept' ? 'Accepted' : 'Declined'
                                           }
                                         />
-                                        {booking.plan.id !== 2 && (
+                                        {Number(booking.plan.id) === 1 && (
                                           <DetailItem
                                             icon={<ShieldCheck />}
                                             label="Driveway Protection"

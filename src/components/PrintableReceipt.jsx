@@ -3,7 +3,7 @@ import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
 import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
@@ -13,8 +13,9 @@ import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
-import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
+import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -149,11 +150,18 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     // Time window formatting options
     const showTimeWindow = shouldShowTimeWindow(currentPlan, isDelivery);
     const isSelfService = isSelfServiceTrailer(currentPlan, isDelivery);
+    const offersDrivewayProtection = serviceOffersDrivewayProtection(currentPlan);
+    const showOneWayDistance = !bookingIsCompanyDelivery({ ...booking, plan: currentPlan, addons });
     const timeOptions = {
         isWindow: showTimeWindow,
         isSelfService: isSelfService,
         serviceType: currentPlan?.service_type
     };
+    const formatReceiptTime = (timeSlot, extra = {}) => (
+        showTimeWindow
+            ? formatTimeWindowBetween(timeSlot, { ...timeOptions, ...extra })
+            : formatTimeWindow(timeSlot, { ...timeOptions, ...extra })
+    );
 
     const formatPlainBookingTime = (timeSlot) => {
         const date = parseBookingTimeToDate(timeSlot);
@@ -212,7 +220,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
       ? Number(addons.insurancePriceApplied || addons.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
       : 0;
     const drivewayProtectionCost =
-      (currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept'
+      offersDrivewayProtection && addons.drivewayProtection === 'accept'
         ? Number(addons.drivewayPriceApplied || addons.driveway_price || 0)
         : 0;
 
@@ -485,18 +493,20 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     {/* Service Details */}
                     <div className="mb-4 p-3 bg-gray-50 rounded">
                         <p className="font-semibold text-lg">{serviceName}</p>
-                        <p className="text-sm text-gray-600 mt-1">
-                            Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}
-                        </p>
+                        {showOneWayDistance && (
+                            <p className="text-sm text-gray-600 mt-1">
+                                Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}
+                            </p>
+                        )}
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
-                                <p>Drop-off: {formatBookingDateOnly(reschedule_history[0].from_drop_off_date)} - {formatTimeWindow(reschedule_history[0].from_drop_off_time, timeOptions)}</p>
-                                <p>Pickup: {formatBookingDateOnly(reschedule_history[0].from_pickup_date)} - {formatTimeWindow(reschedule_history[0].from_pickup_time, timeOptions)}</p>
+                                <p>Drop-off: {formatBookingDateOnly(reschedule_history[0].from_drop_off_date)} {formatReceiptTime(reschedule_history[0].from_drop_off_time, { isReturnBy: false })}</p>
+                                <p>Pickup: {formatBookingDateOnly(reschedule_history[0].from_pickup_date)} {formatReceiptTime(reschedule_history[0].from_pickup_time, { isReturnBy: isSelfService })}</p>
                             </div>
                         )}
-                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} - ${formatTimeWindow(drop_off_time_slot, { ...timeOptions, isReturnBy: false })}`}</p>
-                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} - ${formatTimeWindow(pickup_time_slot, { ...timeOptions, isReturnBy: isSelfService })}`}</p>}
+                        <p className="text-sm text-gray-600 mt-1">{showTimeWindow ? "Delivery" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(drop_off_date)} ${formatReceiptTime(drop_off_time_slot, { isReturnBy: false })}`}</p>
+                        {currentPlan.id !== 3 && <p className="text-sm text-gray-600">{isSelfService ? "Return" : "Pickup"}: {isPendingReview ? pendingReason : `${formatBookingDateOnly(pickup_date)} ${formatReceiptTime(pickup_time_slot, { isReturnBy: isSelfService })}`}</p>}
                     </div>
 
                     {/* 8-Category Breakdown */}
@@ -792,7 +802,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver&apos;s license, auto insurance document, and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
                 {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
                 {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
-                {(currentPlan.id === 1 || isDelivery) && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
+                {offersDrivewayProtection && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
                 {addons.addressVerificationSkipped && <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>}
                 <AgreementText booking={booking} hasInsurance={hasInsurance} />
                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>

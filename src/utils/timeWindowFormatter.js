@@ -96,6 +96,25 @@ export function formatTimeWindow(timeString, options = {}) {
 }
 
 /**
+ * Delivery arrival/pickup copy: "between 6:00 AM and 8:00 AM".
+ * Uses an explicit pipe range when present, otherwise a 2-hour window from the start time.
+ */
+export function formatTimeWindowBetween(timeString, options = {}) {
+  const formatted = formatTimeWindow(timeString, {
+    ...options,
+    isWindow: true,
+    isSelfService: false,
+    isReturnBy: false,
+  });
+  if (!formatted || formatted === 'Time not specified') return formatted;
+  if (formatted.includes(' - ')) {
+    const [start, end] = formatted.split(' - ');
+    if (start && end) return `between ${start} and ${end}`;
+  }
+  return formatted;
+}
+
+/**
  * Format booking date and time window
  * @param {string|Date} date - Date string or Date object
  * @param {string} timeSlot - Time slot string

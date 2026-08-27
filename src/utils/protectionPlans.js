@@ -5,6 +5,14 @@ export const PLAN_TYPES = {
   DRIVEWAY_PROTECTION: 'driveway_protection',
 };
 
+/** Dumpster delivery (roll-off) is the only service that offers driveway protection. */
+export const DUMPSTER_DELIVERY_SERVICE_ID = 1;
+
+export function serviceOffersDrivewayProtection(planOrId) {
+  const id = planOrId && typeof planOrId === 'object' ? Number(planOrId.id) : Number(planOrId);
+  return id === DUMPSTER_DELIVERY_SERVICE_ID;
+}
+
 export const DEFAULT_INSURANCE_PRICE = 25.0;
 export const DEFAULT_DRIVEWAY_PRICE = 15.0;
 
@@ -97,7 +105,7 @@ export const fetchPlansForService = async (serviceId) => {
         isPrimary: true,
         infoText: '',
       },
-      drivewayProtection: numericServiceId === 1 || numericServiceId === 4
+      drivewayProtection: numericServiceId === DUMPSTER_DELIVERY_SERVICE_ID
         ? {
             id: null,
             planKey: 'driveway_protection',

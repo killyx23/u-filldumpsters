@@ -46,7 +46,7 @@ export const OrderSummary = ({
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
-    const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
+    const showDrivewayProtection = Number(plan?.id) === 1;
 
     // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {

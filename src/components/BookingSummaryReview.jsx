@@ -6,7 +6,7 @@ import { format, parseISO, isValid } from 'date-fns';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
@@ -111,7 +111,7 @@ export const BookingSummaryReview = ({
         // Protection costs - Use hook for insurance price
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost =
-            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+            Number(plan?.id) === 1 && addonsData?.drivewayProtection === 'accept'
                 ? Number(drivewayPrice)
                 : 0;
 
@@ -231,7 +231,9 @@ export const BookingSummaryReview = ({
         if (plan?.id === 2 && !deliveryService) {
             return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
         }
-        // For all other services, use the standard formatTimeWindow
+        if (showTimeWindow) {
+            return formatTimeWindowBetween(timeSlot, timeOptions);
+        }
         return formatTimeWindow(timeSlot, timeOptions);
     };
 

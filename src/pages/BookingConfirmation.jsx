@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/use-toast';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
-import { formatTimeWindow, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 import { createTaxRecord } from '@/utils/createTaxRecord';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { resolveBookingGrandTotal } from '@/utils/resolveBookingGrandTotal';
@@ -586,6 +586,11 @@ export const BookingConfirmation = () => {
     isSelfService: isSelfService,
     serviceType: bookingDetails.plan?.service_type
   };
+  const formatConfirmationTime = (timeSlot) => (
+    showTimeWindow
+      ? formatTimeWindowBetween(timeSlot, timeOptions)
+      : formatTimeWindow(timeSlot, timeOptions)
+  );
 
   const taxRateUsed = bookingDetails.tax_rate_used || 7.45;
   const taxAmount = bookingDetails.tax_amount || 0;
@@ -780,9 +785,9 @@ export const BookingConfirmation = () => {
                 <Calendar className="h-5 w-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" />
                 <span>
                   <strong className="text-blue-100">{isSelfService ? 'Pickup Start:' : 'Delivery Date:'}</strong>{' '}
-                  {formatDate(bookingDetails.drop_off_date)} ({formatTimeWindow(bookingDetails.drop_off_time_slot, timeOptions)})<br />
+                  {formatDate(bookingDetails.drop_off_date)} ({formatConfirmationTime(bookingDetails.drop_off_time_slot)})<br />
                   <strong className="text-blue-100">{isSelfService ? 'Return Deadline:' : 'Pickup Date:'}</strong>{' '}
-                  {formatDate(bookingDetails.pickup_date)} ({formatTimeWindow(bookingDetails.pickup_time_slot, timeOptions)})
+                  {formatDate(bookingDetails.pickup_date)} ({formatConfirmationTime(bookingDetails.pickup_time_slot)})
                 </span>
               </p>
               {!isSelfService && (
