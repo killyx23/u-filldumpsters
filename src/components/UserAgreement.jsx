@@ -15,7 +15,7 @@ import React from 'react';
     const dumploaderAgreement = [
         { title: "1. Rental Period & Fees", content: "Pickup is at 8:00 AM, return is by 10:00 PM. A $75 extension fee applies for late returns. Disposal fees ($45.00/ton) are billed after service. You authorize us to charge the card on file for all fees." },
         { title: "2. Prohibited Materials & Weight", content: "No hazardous materials, large concrete, or boulders. Dirt/soil loads must not exceed halfway up trailer walls. Max weight is 4.5 tons." },
-        { title: "3. Full Liability for Equipment", content: "You are fully responsible for the dump loader and any other rented equipment from pickup until return. This includes damage, loss, or theft. You authorize the Company to charge your payment method for the full repair or replacement cost." },
+        { title: "3. Full Liability for Equipment", content: "You are fully responsible for the dump trailer and any other rented equipment from pickup until return. This includes damage, loss, or theft. You authorize the Company to charge your payment method for the full repair or replacement cost." },
         { title: "4. Safe Operation & Towing", content: "You must have a capable vehicle with a 2-5/16\" ball hitch. You are responsible for safe operation. A $20 cleaning fee applies if returned dirty." },
         { title: "5. Delivery Service", content: "If you chose delivery, you are responsible for checking local street placement ordinances. A 'Dry Run' fee of 50% of service cost applies if access is blocked for drop-off or pickup." },
     ];
@@ -23,7 +23,7 @@ import React from 'react';
     export const UserAgreement = ({ plan, onClose, onAccept }) => {
       const location = useLocation();
       const agreementContent = plan?.id === 2 ? dumploaderAgreement : dumpsterAgreement;
-      const agreementTitle = plan?.id === 2 ? "Dumploader Rental Agreement" : "Dumpster Rental Agreement";
+      const agreementTitle = plan?.id === 2 ? "Dump Trailer Rental Agreement" : "Dumpster Rental Agreement";
     
       return (
         <motion.div

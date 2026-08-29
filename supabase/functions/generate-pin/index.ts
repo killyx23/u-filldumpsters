@@ -9,6 +9,7 @@ import {
 } from "../_shared/pinTiming.ts";
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
+import { getJwtAal } from "../_shared/jwtAal.ts";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
 /** Statuses eligible for customer portal + daily pin jobs */
@@ -154,7 +155,7 @@ async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, 
   const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
   const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
   const payload = {
-    accessName: `Dump Loader Rental - Order #${orderId} (AlgoPIN)`,
+    accessName: `Dump Trailer Rental - Order #${orderId} (AlgoPIN)`,
     startDate: startDateHourOnly,
     variance
   };
@@ -200,7 +201,7 @@ async function generatePinWithFallback(accessToken, lockId, bridgeId, supabase, 
   // PIN stays valid 1 hour past scheduled return so late returns still open the lock
   const endDate = addGraceHour(buildIgloohomeDate(booking.pickup_date, booking.pickup_time_slot, 5));
   console.log("[generate-pin] PIN window:", { startDate, endDate });
-  const accessName = `Dump Loader Rental - Order #${orderId}`;
+  const accessName = `Dump Trailer Rental - Order #${orderId}`;
 
   const bridgeResult = await ensurePinOnLock(supabase, accessToken, {
     orderId,
@@ -342,6 +343,12 @@ Deno.serve(async (req)=>{
         return jsonResponse({
           success: false,
           error: "Admin access required"
+        }, 403);
+      }
+      if (getJwtAal(token) !== "aal2") {
+        return jsonResponse({
+          success: false,
+          error: "Admin MFA required"
         }, 403);
       }
     }

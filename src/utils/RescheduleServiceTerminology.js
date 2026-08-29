@@ -53,9 +53,9 @@ export const getServiceTerminology = (serviceId, isDelivery = false) => {
 export const getServiceDescription = (serviceId) => {
     switch (serviceId) {
         case 1:
-            return "16 Yard Dumpster Rental perfect for mid-to-large cleanouts. Delivered to your location.";
+            return "Dumpster Rental perfect for mid-to-large cleanouts. Delivered to your location.";
         case 2:
-            return "Dump Loader Trailer Rental. Heavy-duty solution for hauling materials. Pickup or delivery available.";
+            return "Dump Trailer Rental. Heavy-duty solution for hauling materials. Pickup or delivery available.";
         default:
             return "Premium equipment rental service.";
     }

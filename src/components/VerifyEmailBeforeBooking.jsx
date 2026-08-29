@@ -21,6 +21,7 @@ import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
 
@@ -254,7 +255,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost =
-            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+            Number(plan?.id) === 1 && addonsData?.drivewayProtection === 'accept'
                 ? Number(drivewayPrice)
                 : 0;
 
@@ -727,7 +728,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                         <div className="flex items-start text-gray-200">
                             <Package className="h-5 w-5 mr-3 text-blue-400 mt-0.5 flex-shrink-0" />
                             <div>
-                                <p className="font-semibold text-white">{plan?.name || 'Selected Plan'}</p>
+                                <p className="font-semibold text-white">{formatCustomerFacingPlanName(plan?.name) || 'Selected Plan'}</p>
                                 {addonsData?.equipment?.length > 0 && (
                                     <p className="text-gray-400">+ {addonsData.equipment.length} Add-on(s)</p>
                                 )}

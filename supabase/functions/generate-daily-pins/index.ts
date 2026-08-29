@@ -1,3 +1,10 @@
+/**
+ * @deprecated Superseded by `reconcile-lock-pins`, which merges this
+ * function's delete/create phases with ensure-lock-pin-ready's
+ * confirm/escalate phase into a single 5-minute cron job. Left in place
+ * (unscheduled) for manual invocation / rollback until reconcile-lock-pins
+ * has been validated in production; see 20260826_consolidate_pin_reconciler_cron.sql.
+ */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
@@ -180,7 +187,7 @@ async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, 
   const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
   const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
   const payload = {
-    accessName: `Dump Loader Rental - Order #${orderId} (AlgoPIN)`,
+    accessName: `Dump Trailer Rental - Order #${orderId} (AlgoPIN)`,
     startDate: startDateHourOnly,
     variance
   };
@@ -225,7 +232,7 @@ async function generatePinWithFallback(accessToken, lockId, bridgeId, supabase, 
   // PIN stays valid 1 hour past scheduled return so late returns still open the lock
   const endDate = addGraceHour(buildIgloohomeDate(booking.pickup_date, booking.pickup_time_slot, 5));
   console.log("[generate-daily-pins] PIN window:", { startDate, endDate });
-  const accessName = `Dump Loader Rental - Order #${orderId}`;
+  const accessName = `Dump Trailer Rental - Order #${orderId}`;
 
   const bridgeResult = await ensurePinOnLock(supabase, accessToken, {
     orderId,
@@ -284,7 +291,7 @@ async function generatePinWithFallback(accessToken, lockId, bridgeId, supabase, 
 function isTrailerRental(booking) {
   const planName = booking.plan?.name ?? booking.service_name ?? "";
   const serviceType = booking.plan?.service_type ?? booking.service_type ?? "";
-  return serviceType === "trailer_rental" || planName.toLowerCase().includes("dump loader") || planName.toLowerCase().includes("trailer");
+  return serviceType === "trailer_rental" || planName.toLowerCase().includes("dump loader") || planName.toLowerCase().includes("dump trailer") || planName.toLowerCase().includes("trailer");
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);

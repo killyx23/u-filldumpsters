@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { AlertTriangle, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const highlightSaratogaSprings = (text) => {
     if (typeof text !== 'string') return text;
@@ -84,7 +85,7 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
     const displayPrice = plan?.displayPrice ?? plan?.homepage_price ?? plan?.base_price ?? 0;
     const displayPriceUnit =
         plan?.displayPriceUnit || plan?.homepage_price_unit || plan?.price_unit || '';
-    const planName = plan?.displayName || plan?.name || plan?.highlight?.text || 'Service Plan';
+    const planName = formatCustomerFacingPlanName(plan?.displayName || plan?.name || plan?.highlight?.text) || 'Service Plan';
 
     const displayDeliveryFee =
       plan?.displayDeliveryFee != null && Number(plan.displayDeliveryFee) > 0

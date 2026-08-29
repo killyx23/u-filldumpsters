@@ -16,7 +16,9 @@
     "build": "node tools/generate-llms.js || true && vite build",
     "preview": "vite preview --host :: --port 3000",
     "lint": "eslint . --quiet",
-    "test:igloohome": "node tools/test-igloohome-webhook.mjs"
+    "test:igloohome": "node tools/test-igloohome-webhook.mjs",
+    "test:pin-reconciler": "node tools/test-pin-reconciler-local.mjs",
+    "test:admin-mfa": "node --test src/lib/adminMfa.test.mjs && node tools/test-admin-mfa.mjs"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "^1.2.1",

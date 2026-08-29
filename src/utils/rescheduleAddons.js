@@ -14,9 +14,9 @@ export function isDrivewayAddon(addon) {
   return name.includes('driveway protection');
 }
 
-/** Delivery services that include driveway protection in booking flow. */
+/** Dumpster delivery is the only service that offers driveway protection. */
 export function serviceSupportsDriveway(serviceId) {
-  return [1, 4].includes(Number(serviceId));
+  return Number(serviceId) === 1;
 }
 
 /** Mirror AddonsForm: disposal hidden for dump loader self-pickup (service 2). */

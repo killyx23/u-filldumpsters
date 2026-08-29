@@ -6,6 +6,7 @@ import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
 
 /**
  * Reusable Price Breakdown Component
@@ -76,7 +77,7 @@ export const PriceBreakdown = ({
       ? Number(addons?.insurancePriceApplied || addons?.insurance_price || 0) || DEFAULT_INSURANCE_PRICE
       : 0;
     const drivewayProtectionCost =
-      addons?.drivewayProtection === 'accept'
+      serviceOffersDrivewayProtection(plan || booking?.plan) && addons?.drivewayProtection === 'accept'
         ? Number(addons?.drivewayPriceApplied || addons?.driveway_price || 0)
         : 0;
 

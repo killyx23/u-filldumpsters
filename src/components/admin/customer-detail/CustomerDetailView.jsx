@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
+import { hasPaymentDelta } from '@/utils/paymentDelta';
 
 export const CustomerDetailView = () => {
     const { user } = useAuth();
@@ -213,10 +214,6 @@ export const CustomerDetailView = () => {
         const pendingAddr = bookings.filter(b => b.pending_address_verification);
         const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'Rescheduled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
-        const hasPaymentDelta = (b) => {
-            const details = b.payment_delta_details;
-            return details && (Number(details.amount_due) > 0 || details.state === 'pending');
-        };
         const verification = bookings.filter(b => !b.pending_address_verification && (
             b.status === 'pending_verification' ||
             b.status === 'pending_review' ||
@@ -350,7 +347,12 @@ export const CustomerDetailView = () => {
                 </TabsContent>
                 <TabsContent value="history">
                     <BookingHistory bookings={historyActiveBookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} adminEmail={user?.email} />
-                    <CompletedBookings bookings={[...completedBookings, ...cancelledBookings, ...rescheduledBookings]} equipment={equipment} customerId={customer.id} />
+                    <CompletedBookings
+                        bookings={[...completedBookings, ...cancelledBookings, ...rescheduledBookings]}
+                        equipment={equipment}
+                        customerId={customer.id}
+                        onUpdate={() => fetchCustomerDetails(false)}
+                    />
                 </TabsContent>
             </Tabs>
             

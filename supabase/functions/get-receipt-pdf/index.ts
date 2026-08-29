@@ -3,7 +3,8 @@ import { getCorsHeaders } from "./cors.ts";
 import { PDFDocument, rgb, StandardFonts } from 'https://esm.sh/pdf-lib@1.17.1';
 import { format } from 'https://deno.land/std@0.208.0/datetime/mod.ts';
 import { resolveBookingGrandTotal } from '../_shared/resolveBookingGrandTotal.ts';
-import { formatPlainBookingTime } from '../_shared/formatBookingTime.ts';
+import { formatPlainBookingTime, formatDeliveryTimeWindowBetween } from '../_shared/formatBookingTime.ts';
+import { formatCustomerFacingPlanName } from '../_shared/displayPlanName.ts';
 
 const formatDate = (dateStr: string | null) =>
   dateStr ? format(new Date(dateStr), 'MM/dd/yyyy') : 'N/A';
@@ -11,8 +12,12 @@ const formatDate = (dateStr: string | null) =>
 const formatCurrency = (amount: number | null | undefined) =>
   amount != null ? `$${Number(amount).toFixed(2)}` : '$0.00';
 
-const formatSlot = (slot: string | null | undefined) =>
-  slot ? formatPlainBookingTime(String(slot)) : 'N/A';
+const formatSlot = (slot: string | null | undefined, isDelivery = false) => {
+  if (!slot) return 'N/A';
+  return isDelivery
+    ? formatDeliveryTimeWindowBetween(String(slot))
+    : formatPlainBookingTime(String(slot));
+};
 
 const drawDivider = (page: any, y: number, margin: number, pageWidth: number, color: any) => {
   page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.5, color });
@@ -82,15 +87,21 @@ async function generatePDFReceipt(booking: any) {
   drawText('SERVICE DETAILS', margin + 6, y, { font: fontBold, size: 9, color: rgb(1, 1, 1) });
   drawText('AMOUNT', width - margin, y, { font: fontBold, size: 9, color: rgb(1, 1, 1), align: 'right' });
   y -= 22;
-  const serviceName = (booking.plan?.name || 'Service') + (booking.addons?.isDelivery ? ' with Delivery' : '');
+  const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (booking.addons?.isDelivery ? ' with Delivery' : '');
   const dropOff = formatDate(booking.drop_off_date);
   const pickup  = formatDate(booking.pickup_date);
+  const isDelivery = Boolean(
+    booking.addons?.isDelivery ||
+    booking.addons?.deliveryService ||
+    Number(booking.plan?.id) === 1 ||
+    Number(booking.plan?.id) === 4
+  );
   drawText(serviceName, margin, y, { font: fontBold, size: 10, color: black });
   drawText(formatCurrency(booking.plan?.price || 0), width - margin, y, { size: 10, align: 'right' });
   y -= 14;
-  drawText(`Drop-off: ${dropOff}  (${formatSlot(booking.drop_off_time_slot)})`, margin + 10, y, { size: 9, color: gray });
+  drawText(`Drop-off: ${dropOff}  (${formatSlot(booking.drop_off_time_slot, isDelivery)})`, margin + 10, y, { size: 9, color: gray });
   y -= 12;
-  drawText(`Pick-up:  ${pickup}  (${formatSlot(booking.pickup_time_slot)})`, margin + 10, y, { size: 9, color: gray });
+  drawText(`Pick-up:  ${pickup}  (${formatSlot(booking.pickup_time_slot, isDelivery)})`, margin + 10, y, { size: 9, color: gray });
 
   const receiptHistory = Array.isArray(booking.receipt_status_history) ? booking.receipt_status_history : [];
   const rescheduleApproval = [...receiptHistory].reverse().find((e: any) => e?.action === 'reschedule_approved');

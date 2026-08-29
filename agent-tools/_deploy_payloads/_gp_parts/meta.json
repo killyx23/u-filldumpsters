@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "generate-pin", "entrypoint_path": "index.ts", "verify_jwt": true, "file_names": ["index.ts", "cors.ts", "../_shared/pinTiming.ts", "../_shared/lockPin.ts", "../_shared/iglooAuth.ts", "../_shared/cors.ts"]}

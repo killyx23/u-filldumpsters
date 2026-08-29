@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/customSupabaseClient';
+import { getStoredReferralCode } from '@/utils/referralCodeStorage';
 import {
   fetchServiceById,
   getServiceIdFromBooking,
@@ -106,9 +107,21 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
     const agreementFeeSnapshot = Array.isArray(options.agreementFeeSnapshot)
       ? options.agreementFeeSnapshot
       : [];
+    const referralFromStorage = getStoredReferralCode();
+    const resolvedReferralCode =
+      addonsData?.referralCode ||
+      addonsData?.referral?.code ||
+      referralFromStorage ||
+      null;
+
+    const addonsWithReferral = {
+      ...(addonsData || {}),
+      referralCode: resolvedReferralCode,
+    };
+
     const addonsWithFeeSnapshot = agreementFeeSnapshot.length
-      ? { ...addonsData, agreementFeeSnapshot }
-      : addonsData;
+      ? { ...addonsWithReferral, agreementFeeSnapshot }
+      : addonsWithReferral;
 
     const emailPreverified = await isCheckoutEmailVerified(email, bookingData);
 

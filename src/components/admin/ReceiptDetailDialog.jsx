@@ -1,12 +1,14 @@
 import React from 'react';
-    import { format, parseISO } from 'date-fns';
-    import { Button } from '@/components/ui/button';
-    import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-    import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag, Repeat, MapPin } from 'lucide-react';
-    import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
-    import { convertTo12Hour } from '@/utils/timeFormatConverter';
-    import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
-    import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { format, parseISO } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag, Repeat, MapPin } from 'lucide-react';
+import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
+import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
+import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -34,25 +36,28 @@ import React from 'react';
         };
         const paymentInfo = Array.isArray(stripe_payment_info) ? stripe_payment_info[0] : stripe_payment_info;
         const coupon = addons?.coupon;
-        const isDelivery = addons?.isDelivery;
+        const isDelivery = addons?.isDelivery || addons?.deliveryService;
+        const offersDrivewayProtection = serviceOffersDrivewayProtection(plan);
+        const showOneWayDistance = !bookingIsCompanyDelivery(booking);
+        const showTimeWindow = shouldShowTimeWindow(plan, isDelivery);
+        const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+        const timeOptions = {
+            isWindow: showTimeWindow,
+            isSelfService,
+            serviceType: plan?.service_type,
+        };
 
-        const formatTime = (timeString) => {
+        const formatTime = (timeString, extra = {}) => {
             if (!timeString) return 'N/A';
-            const converted = convertTo12Hour(timeString);
-            if (converted) return converted;
-            try {
-                const date = new Date(`1970-01-01T${timeString}`);
-                return format(date, 'h:mm a');
-            } catch (e) {
-                return 'N/A';
-            }
+            if (showTimeWindow) return formatTimeWindowBetween(timeString, { ...timeOptions, ...extra });
+            return formatTimeWindow(timeString, { ...timeOptions, ...extra });
         };
 
         const rescheduleApproval = getLatestRescheduleApproval(booking);
 
         let subtotal = plan.price || 0;
         if (addons.insurance === 'accept') subtotal += addonPrices.insurance;
-        if ((plan.id === 1 || isDelivery) && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
+        if (offersDrivewayProtection && addons.drivewayProtection === 'accept') subtotal += addonPrices.drivewayProtection;
         if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
         addons.equipment?.forEach(item => {
             const meta = equipmentMeta.find(e => e.id === item.id);
@@ -95,10 +100,12 @@ import React from 'react';
 
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Rental Details</h4>
-                            <DetailRow icon={<Info />} label="Service" value={plan.name} />
-                            <DetailRow icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(resolveOneWayMiles(booking, customers))} />
-                            <DetailRow icon={<Clock />} label={plan.id === 2 ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} at ${formatTime(drop_off_time_slot)}`} />
-                            <DetailRow icon={<Clock />} label={plan.id === 2 ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} by ${formatTime(pickup_time_slot)}`} />
+                            <DetailRow icon={<Info />} label="Service" value={formatCustomerFacingPlanName(plan.name)} />
+                            {showOneWayDistance && (
+                                <DetailRow icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(resolveOneWayMiles(booking, customers))} />
+                            )}
+                            <DetailRow icon={<Clock />} label={isSelfService ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} ${formatTime(drop_off_time_slot, { isReturnBy: false })}`} />
+                            <DetailRow icon={<Clock />} label={isSelfService ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} ${formatTime(pickup_time_slot, { isReturnBy: isSelfService })}`} />
                             {booking.rented_out_at && <DetailRow icon={<Clock />} label="Actual Rented Out" value={format(parseISO(booking.rented_out_at), 'Pp')} />}
                             {booking.returned_at && <DetailRow icon={<Clock />} label="Actual Returned" value={format(parseISO(booking.returned_at), 'Pp')} />}
                         </section>
@@ -121,7 +128,7 @@ import React from 'react';
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
                             <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? `Accepted ($${addonPrices.insurance.toFixed(2)})` : 'Declined'} />
-                            {(plan.id === 1 || isDelivery) && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
+                            {offersDrivewayProtection && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
                             {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                             
                             {addons.equipment && addons.equipment.length > 0 && (

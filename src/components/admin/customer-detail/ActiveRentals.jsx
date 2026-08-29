@@ -18,6 +18,7 @@ import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -72,7 +73,7 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
 
     const feeDefaults = {
         unreturned_item: { title: "Charge for Unreturned Item", defaultDescription: `Fee for unreturned rental item: ${itemDetails?.name || ''}` },
-        cleaning: { title: "Charge Cleaning Fee", defaultDescription: "Standard cleaning fee for dump loader.", defaultAmount: "20.00" },
+        cleaning: { title: "Charge Cleaning Fee", defaultDescription: "Standard cleaning fee for dump trailer.", defaultAmount: "20.00" },
         damage: { title: "Charge for Damages", defaultDescription: "Cost of repairs for damages incurred during rental." }
     };
 
@@ -299,7 +300,7 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
                 {returnableEquipment.map(item => item.equipment?.name && renderChecklistItem(item.equipment.name, `${item.equipment.name} Returned`, 'unreturned_item', { name: item.equipment.name, equipment_id: item.equipment.id }))}
                 {booking.plan?.id === 2 && (
                     <>
-                        {renderChecklistItem('dump_loader_clean', 'Dump Loader Clean', 'cleaning', null)}
+                        {renderChecklistItem('dump_loader_clean', 'Dump Trailer Clean', 'cleaning', null)}
                         <div className="flex items-center justify-between bg-white/5 p-3 rounded-md">
                             <div className="flex items-center">
                                 <Checkbox id="no_damage" checked={checklist['no_damage']} onCheckedChange={(c) => handleCheckChange('no_damage', c)} />
@@ -498,7 +499,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                         <DistanceWarning booking={booking} customer={customer} />
 
                         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <DetailItem icon={<Package />} label="Service" value={booking.plan?.name} />
+                            <DetailItem icon={<Package />} label="Service" value={formatCustomerFacingPlanName(booking.plan?.name)} />
                             <DetailItem icon={<DollarSign />} label="Total Price" value={`$${totalPrice}`} />
                             <DetailItem icon={<Calendar />} label="Booked On" value={booking.created_at ? format(parseISO(booking.created_at), 'Pp') : 'N/A'} />
                             <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />

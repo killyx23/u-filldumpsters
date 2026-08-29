@@ -6,6 +6,7 @@ import { format, parseISO } from 'date-fns';
 import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const DocumentsSection = ({ bookings, customerData }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -65,7 +66,7 @@ export const DocumentsSection = ({ bookings, customerData }) => {
                  </div>
                  
                  <div className="text-sm text-gray-300">
-                    <p className="truncate">{booking.plan?.name}</p>
+                    <p className="truncate">{formatCustomerFacingPlanName(booking.plan?.name)}</p>
                  </div>
 
                  <div className="flex gap-2 pt-2 border-t border-white/10">

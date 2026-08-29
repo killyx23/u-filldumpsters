@@ -1,0 +1,165 @@
+[
+  {
+    "name": "ensure-lock-pin-ready",
+    "verify_jwt": false,
+    "files": [
+      {
+        "name": "index.ts",
+        "sha256": "be6ab07cd8016312963374b7d423bbe11adf29c30ea25862809b1c07cc17ffc6",
+        "len": 21176
+      },
+      {
+        "name": "cors.ts",
+        "sha256": "04e33f69fff4a8fa4c71ddadad0b2723d3bda39cc79754c6e37089d510fba34c",
+        "len": 53
+      },
+      {
+        "name": "../_shared/cors.ts",
+        "sha256": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+        "len": 1059
+      },
+      {
+        "name": "../_shared/notify.ts",
+        "sha256": "3447aca4072ff6ea13224386670e4c6666a7f2b7e21ed06ad15999d1c2cc5257",
+        "len": 6302
+      },
+      {
+        "name": "../_shared/pinTiming.ts",
+        "sha256": "c19320d7a150f28f275a9dbcd7ee137cf3ca565c863487c70041d4fdb7eb5cfe",
+        "len": 4870
+      },
+      {
+        "name": "../_shared/lockPin.ts",
+        "sha256": "caac7d83d944d386514d7559804e105cb162a4ca2b6373699ddd868f46f4f651",
+        "len": 10874
+      },
+      {
+        "name": "../_shared/iglooAuth.ts",
+        "sha256": "a2f9666a0800df23a77e4f4d14a344bc98291d7210807ec55ee821edde223d7a",
+        "len": 10333
+      }
+    ],
+    "payload_bytes": 57527
+  },
+  {
+    "name": "generate-daily-pins",
+    "verify_jwt": false,
+    "files": [
+      {
+        "name": "index.ts",
+        "sha256": "2f5e5878a6a55c8e8ad86f2fd05f6fd6ca75060a1341a6189ffdc298f0e3792b",
+        "len": 22799
+      },
+      {
+        "name": "cors.ts",
+        "sha256": "67ced368afa4ea26b84f5cef114883a48c08c47ded41a5a51826a4e0faef58a4",
+        "len": 53
+      },
+      {
+        "name": "../_shared/cors.ts",
+        "sha256": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+        "len": 1059
+      },
+      {
+        "name": "../_shared/pinTiming.ts",
+        "sha256": "c19320d7a150f28f275a9dbcd7ee137cf3ca565c863487c70041d4fdb7eb5cfe",
+        "len": 4870
+      },
+      {
+        "name": "../_shared/lockPin.ts",
+        "sha256": "caac7d83d944d386514d7559804e105cb162a4ca2b6373699ddd868f46f4f651",
+        "len": 10874
+      },
+      {
+        "name": "../_shared/iglooAuth.ts",
+        "sha256": "a2f9666a0800df23a77e4f4d14a344bc98291d7210807ec55ee821edde223d7a",
+        "len": 10333
+      }
+    ],
+    "payload_bytes": 52556
+  },
+  {
+    "name": "generate-pin",
+    "verify_jwt": true,
+    "files": [
+      {
+        "name": "index.ts",
+        "sha256": "1822ad2b6b064f6dc6d766b92215e2342b122a771915565a9963c5ae38e548d9",
+        "len": 16953
+      },
+      {
+        "name": "cors.ts",
+        "sha256": "67ced368afa4ea26b84f5cef114883a48c08c47ded41a5a51826a4e0faef58a4",
+        "len": 53
+      },
+      {
+        "name": "../_shared/cors.ts",
+        "sha256": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+        "len": 1059
+      },
+      {
+        "name": "../_shared/pinTiming.ts",
+        "sha256": "c19320d7a150f28f275a9dbcd7ee137cf3ca565c863487c70041d4fdb7eb5cfe",
+        "len": 4870
+      },
+      {
+        "name": "../_shared/lockPin.ts",
+        "sha256": "caac7d83d944d386514d7559804e105cb162a4ca2b6373699ddd868f46f4f651",
+        "len": 10874
+      },
+      {
+        "name": "../_shared/iglooAuth.ts",
+        "sha256": "a2f9666a0800df23a77e4f4d14a344bc98291d7210807ec55ee821edde223d7a",
+        "len": 10333
+      }
+    ],
+    "payload_bytes": 46518
+  },
+  {
+    "name": "send-booking-confirmation",
+    "verify_jwt": true,
+    "files": [
+      {
+        "name": "index.ts",
+        "sha256": "f1de5dd532677e2360f43bd27f11a7a2f363380977a4edd46c14ec5340077632",
+        "len": 49891
+      },
+      {
+        "name": "cors.ts",
+        "sha256": "67ced368afa4ea26b84f5cef114883a48c08c47ded41a5a51826a4e0faef58a4",
+        "len": 53
+      },
+      {
+        "name": "../_shared/cors.ts",
+        "sha256": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+        "len": 1059
+      },
+      {
+        "name": "../_shared/notify.ts",
+        "sha256": "3447aca4072ff6ea13224386670e4c6666a7f2b7e21ed06ad15999d1c2cc5257",
+        "len": 6302
+      },
+      {
+        "name": "../_shared/resolveBookingGrandTotal.ts",
+        "sha256": "e2d40b165478bddc46f56d0e2a4dc8798887ca22c84021995daea1e9ff1a9f17",
+        "len": 526
+      },
+      {
+        "name": "../_shared/formatBookingTime.ts",
+        "sha256": "dfa2141da4ecd31817accddf68af3c510220925e289bc2c94e893733ddefed5f",
+        "len": 2344
+      },
+      {
+        "name": "../_shared/normalizeSiteUrl.ts",
+        "sha256": "2d43f4181adf5fbd52e92c274b505d486f7161724427b588cc09bdca8ff34af8",
+        "len": 496
+      },
+      {
+        "name": "../_shared/bookingTax.ts",
+        "sha256": "d6f6d9554f775185e3e37e8e8365c40f324b672e7cae5a510182182855cd61fc",
+        "len": 2248
+      }
+    ],
+    "payload_bytes": 65901
+  }
+]

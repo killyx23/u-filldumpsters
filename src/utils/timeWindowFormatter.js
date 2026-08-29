@@ -52,6 +52,19 @@ export function formatTimeWindow(timeString, options = {}) {
     return 'Time not specified';
   }
 
+  // Explicit ranges from delivery pickup windows: "06:00:00|08:00:00"
+  if (typeof timeString === 'string' && timeString.includes('|')) {
+    const [startRaw, endRaw] = timeString.split('|').map((t) => t.trim()).filter(Boolean);
+    const startDate = parseBookingTimeToDate(startRaw);
+    const endDate = parseBookingTimeToDate(endRaw);
+    if (startDate && isValid(startDate) && endDate && isValid(endDate)) {
+      return `${format(startDate, 'h:mm a')} - ${format(endDate, 'h:mm a')}`;
+    }
+    if (startDate && isValid(startDate)) return format(startDate, 'h:mm a');
+    if (endDate && isValid(endDate)) return format(endDate, 'h:mm a');
+    return timeString;
+  }
+
   const date = parseBookingTimeToDate(timeString);
   if (!date || !isValid(date)) {
     return typeof timeString === 'string' ? timeString : 'Time not specified';
@@ -80,6 +93,25 @@ export function formatTimeWindow(timeString, options = {}) {
     console.error('[timeWindowFormatter] Error formatting time:', e);
     return typeof timeString === 'string' ? timeString : 'Time not specified';
   }
+}
+
+/**
+ * Delivery arrival/pickup copy: "between 6:00 AM and 8:00 AM".
+ * Uses an explicit pipe range when present, otherwise a 2-hour window from the start time.
+ */
+export function formatTimeWindowBetween(timeString, options = {}) {
+  const formatted = formatTimeWindow(timeString, {
+    ...options,
+    isWindow: true,
+    isSelfService: false,
+    isReturnBy: false,
+  });
+  if (!formatted || formatted === 'Time not specified') return formatted;
+  if (formatted.includes(' - ')) {
+    const [start, end] = formatted.split(' - ');
+    if (start && end) return `between ${start} and ${end}`;
+  }
+  return formatted;
 }
 
 /**

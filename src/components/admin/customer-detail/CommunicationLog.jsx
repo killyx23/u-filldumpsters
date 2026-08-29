@@ -23,15 +23,27 @@ const CHAT_NOTE_SOURCES = new Set([
     'Cancellation Request',
     'Reschedule Approved',
     'Address Change',
+    'Contact Form Inquiry',
+    // 'How Can We Do Better' intentionally omitted — rich chat card already shows survey answers
 ]);
+
+const noteSourceLabel = (source) => {
+    if (source === 'Change Request') return 'Scheduling Change Request';
+    if (source === 'Contact Form Inquiry') return 'Contact Form Inquiry';
+    return source;
+};
 
 const NoteFeedItem = ({ note, customerName }) => {
     const isAdminNote = note.author_type === 'admin';
     const isVerificationResolved = note.source === 'Verification Completed';
+    const isContactInquiry = note.source === 'Contact Form Inquiry';
     const needsCustomerReview = !isAdminNote && !note.is_read && !isVerificationResolved;
     const footer = (() => {
         if (isVerificationResolved) {
             return 'Verification taken care of — no pending action';
+        }
+        if (isContactInquiry && needsCustomerReview) {
+            return `Contact form from ${customerName} — needs review`;
         }
         if (needsCustomerReview) {
             return `From ${customerName} — needs review`;
@@ -58,7 +70,7 @@ const NoteFeedItem = ({ note, customerName }) => {
             <div className="flex items-center gap-2 mb-2">
                 <BookOpen className={`h-4 w-4 ${isVerificationResolved ? 'text-green-400' : 'text-yellow-400'}`} />
                 <span className={`font-semibold text-sm ${isVerificationResolved ? 'text-green-300' : 'text-yellow-300'}`}>
-                    {note.source === 'Change Request' ? 'Scheduling Change Request' : note.source}
+                    {noteSourceLabel(note.source)}
                 </span>
                 <span className="text-xs text-gray-400 flex items-center ml-auto">
                     <Clock className="h-3 w-3 mr-1" />

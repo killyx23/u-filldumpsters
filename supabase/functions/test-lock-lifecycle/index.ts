@@ -34,6 +34,7 @@ import {
   type LockActivityEvent,
 } from "../_shared/iglooActivity.ts";
 import { ensurePinOnLock, clearKnownPins } from "../_shared/lockPin.ts";
+import { isAdminWithMfa } from "../_shared/jwtAal.ts";
 import {
   getOAuthToken,
   diagnoseOAuth,
@@ -119,10 +120,10 @@ async function requireAdmin(req: Request) {
   );
   const { data: { user }, error } = await anon.auth.getUser();
   if (error || !user) return { error: "Unauthorized", status: 401 as const };
-  if (user.app_metadata?.is_admin !== true) {
+  if (!isAdminWithMfa(user, token)) {
     return {
       error:
-        "Admin access required (app_metadata.is_admin must be true — sign out and back in after it is set)",
+        "Admin access and authenticator MFA required (app_metadata.is_admin must be true and the session must be AAL2)",
       status: 403 as const,
     };
   }

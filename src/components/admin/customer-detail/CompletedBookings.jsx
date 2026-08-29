@@ -1,10 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { StatusBadge } from '@/components/admin/StatusBadge';
-import { CheckCircle, Clock, DollarSign, Package, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink } from 'lucide-react';
+import { ResolveFollowUpDialog } from '@/components/admin/ResolveFollowUpDialog';
+import { Button } from '@/components/ui/button';
+import { CheckCircle, Clock, DollarSign, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink } from 'lucide-react';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import {
+    getFollowUpReasonLabel,
+    isFollowUpHold,
+    reasonClosesFlag,
+} from '@/utils/followUpResolution';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -24,10 +32,10 @@ const IssueItem = ({ title, details }) => (
 );
 
 const DistanceWarning = ({ booking }) => {
-    const [distance, setDistance] = useState(booking.addons?.distanceInfo?.miles || null);
-    const [travelTime, setTravelTime] = useState(booking.addons?.distanceInfo?.duration || null);
+    const [distance, setDistance] = React.useState(booking.addons?.distanceInfo?.miles || null);
+    const [travelTime, setTravelTime] = React.useState(booking.addons?.distanceInfo?.duration || null);
 
-    useEffect(() => {
+    React.useEffect(() => {
         if (!distance && booking) {
             const address = booking.delivery_address?.formatted_address || `${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`;
             if(address && address.length > 10) {
@@ -54,11 +62,73 @@ const DistanceWarning = ({ booking }) => {
     );
 };
 
-export const CompletedBookings = ({ bookings, equipment, customerId }) => {
+const FollowUpResolutionBlock = ({ resolution }) => {
+    if (!resolution?.reason) return null;
+
+    const hold = isFollowUpHold(resolution) || !reasonClosesFlag(resolution.reason);
+    const resolvedAt = resolution.updated_at
+        ? format(parseISO(resolution.updated_at), 'Pp')
+        : null;
+
+    if (hold) {
+        return (
+            <div className="mt-4 border-t border-orange-400/40 pt-4 space-y-2">
+                <h5 className="font-bold text-orange-300 flex items-center">
+                    <AlertTriangle className="mr-2 h-5 w-5" />
+                    Follow-up hold
+                </h5>
+                <p className="text-orange-100"><strong>Reason:</strong> {getFollowUpReasonLabel(resolution.reason)}</p>
+                {resolution.notes && (
+                    <p className="text-orange-200"><strong>Notes:</strong> {resolution.notes}</p>
+                )}
+                {(resolvedAt || resolution.updated_by) && (
+                    <p className="text-xs text-orange-300/80">
+                        Saved{resolvedAt ? ` ${resolvedAt}` : ''}
+                        {resolution.updated_by ? ` by ${resolution.updated_by}` : ''}
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className="mt-4 border-t border-green-400/40 pt-4 space-y-2">
+            <h5 className="font-bold text-green-300 flex items-center">
+                <CheckCircle className="mr-2 h-5 w-5" />
+                Follow-up resolved
+            </h5>
+            <p className="text-green-100"><strong>Reason:</strong> {getFollowUpReasonLabel(resolution.reason)}</p>
+            {resolution.notes && (
+                <p className="text-green-200"><strong>Notes:</strong> {resolution.notes}</p>
+            )}
+            {(resolvedAt || resolution.updated_by) && (
+                <p className="text-xs text-green-300/80">
+                    Resolved{resolvedAt ? ` ${resolvedAt}` : ''}
+                    {resolution.updated_by ? ` by ${resolution.updated_by}` : ''}
+                </p>
+            )}
+        </div>
+    );
+};
+
+export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate }) => {
+    const [resolveBooking, setResolveBooking] = useState(null);
+
     if (!bookings || bookings.length === 0) return null;
 
     return (
         <div className="space-y-8 mt-8">
+            <ResolveFollowUpDialog
+                open={!!resolveBooking}
+                onOpenChange={(isOpen) => {
+                    if (!isOpen) setResolveBooking(null);
+                }}
+                booking={resolveBooking}
+                onResolved={() => {
+                    setResolveBooking(null);
+                    onUpdate?.();
+                }}
+            />
             <h3 className="text-2xl font-bold text-yellow-400">Completed & Cancelled Rentals</h3>
             {bookings.map(booking => {
                  const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
@@ -72,6 +142,9 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                  const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
                  const referralDollarsActivated = Number(booking.addons?.referralDollarsActivated || 0);
                  const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
+                 const followUpResolution = booking.follow_up_resolution || null;
+                 const isFlagged = booking.status === 'flagged';
+                 const hasHold = isFlagged && isFollowUpHold(followUpResolution);
 
                  const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
                  const stripeChargeId = archiveDetails?.stripe_charge_id || paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
@@ -79,17 +152,28 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
 
                  return (
                     <div key={booking.id} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
-                        <div className="flex justify-between items-start mb-4">
+                        <div className="flex justify-between items-start mb-4 gap-4">
                             <div>
-                                <h4 className="text-xl font-bold text-white">{booking.plan?.name || 'N/A'}</h4>
+                                <h4 className="text-xl font-bold text-white">{formatCustomerFacingPlanName(booking.plan?.name) || 'N/A'}</h4>
                                 <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
                                 <p className="text-sm text-gray-400 mt-1">Booking #{booking.id}</p>
                             </div>
-                            <div className="text-right space-y-1">
+                            <div className="text-right space-y-2 shrink-0">
                                 {booking.status === 'Rescheduled' ? (
                                     <span className="text-xs font-bold px-2 py-1 rounded-full inline-block bg-blue-500/20 text-blue-300">Rescheduled</span>
                                 ) : (
-                                    <StatusBadge status={booking.status} />
+                                    <StatusBadge status={booking.status} booking={booking} />
+                                )}
+                                {isFlagged && (
+                                    <div>
+                                        <Button
+                                            size="sm"
+                                            className={hasHold ? 'bg-orange-600 hover:bg-orange-700' : 'bg-red-600 hover:bg-red-700'}
+                                            onClick={() => setResolveBooking(booking)}
+                                        >
+                                            {hasHold ? 'Update / Close Follow-up' : 'Resolve Follow-up'}
+                                        </Button>
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -188,11 +272,16 @@ export const CompletedBookings = ({ bookings, equipment, customerId }) => {
                                 <h5 className="font-bold text-orange-400 flex items-center"><AlertTriangle className="mr-2 h-5 w-5" />Issues Logged</h5>
                                 {Object.entries(returnIssues).map(([key, value]) => {
                                     if (value.status === 'not_returned') return <IssueItem key={key} title={`Unreturned Item: ${key}`} details="Customer was charged for this item." />;
+                                    if (value.status === 'not_returned_fee_charged') return <IssueItem key={key} title={`Unreturned Item: ${key}`} details="Fee charged for unreturned item." />;
                                     if (value.status === 'not_clean') return <IssueItem key={key} title="Not Cleaned" details="A cleaning fee was applied." />;
                                     if (value.status === 'damaged') return <IssueItem key={key} title="Damage Reported" details="Damage fees were applied. See photos below." />;
                                     return null;
                                 })}
                             </div>
+                        )}
+
+                        {followUpResolution?.reason && (
+                            <FollowUpResolutionBlock resolution={followUpResolution} />
                         )}
 
                         {booking.damage_photos && booking.damage_photos.length > 0 && (

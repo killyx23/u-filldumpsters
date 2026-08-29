@@ -11,6 +11,7 @@ import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -102,7 +103,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
             </div>
             <div className="flex justify-between items-start">
                 <div>
-                    <p className="font-bold text-lg text-white">{booking.plan?.name || 'N/A'}</p>
+                    <p className="font-bold text-lg text-white">{formatCustomerFacingPlanName(booking.plan?.name) || 'N/A'}</p>
                     <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked: {format(parseISO(booking.created_at), 'Pp')}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
                     <p className="text-sm text-blue-200 flex items-center mt-1">

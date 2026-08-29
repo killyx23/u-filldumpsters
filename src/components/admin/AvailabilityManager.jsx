@@ -9,6 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { generateTimeSlotOptions } from '@/components/admin/availability/time-helpers';
 import { AVAILABILITY_UI, getServiceAvailabilityUiKind } from '@/utils/availabilityServiceUi';
 import { filterRentableServices } from '@/utils/servicePlan';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -193,7 +194,7 @@ const DateSpecificEditor = ({ date, services, existingRule, onSave, onCancel, we
                     return (
                         <div key={service.id} className="p-4 bg-white/5 rounded-lg">
                             <div className="flex justify-between items-center mb-3">
-                                <h4 className="font-bold text-lg text-yellow-400">{service.name}</h4>
+                                <h4 className="font-bold text-lg text-yellow-400">{formatCustomerFacingPlanName(service.name)}</h4>
                                 <div className="flex items-center gap-2">
                                     <Button variant="ghost" size="sm" onClick={() => handleCopy(service.id)}><Copy className="h-4 w-4 mr-2" /> Copy</Button>
                                     <Button variant="ghost" size="sm" onClick={() => handlePaste(service.id)} disabled={!clipboard || clipboard.type !== 'single'}><ClipboardPaste className="h-4 w-4 mr-2" /> Paste</Button>

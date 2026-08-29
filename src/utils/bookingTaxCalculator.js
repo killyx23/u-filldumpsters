@@ -67,7 +67,6 @@ export function buildBookingLineItems({
     });
   }
 
-  const isDelivery = plan?.id === 2 && deliveryService;
   const insuranceCost =
     addonsData?.insurance === 'accept' ? Number(insurancePrice || equipmentPrices[7] || 0) : 0;
   if (insuranceCost > 0) {
@@ -80,7 +79,7 @@ export function buildBookingLineItems({
   }
 
   const drivewayProtectionCost =
-    (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+    Number(plan?.id) === 1 && addonsData?.drivewayProtection === 'accept'
       ? Number(drivewayPrice || addonsData?.drivewayPriceApplied || 0)
       : 0;
   if (drivewayProtectionCost > 0) {

@@ -6,6 +6,7 @@ import { ArrowRight, Calendar, Clock, Receipt, AlertCircle } from 'lucide-react'
 import { Card, CardContent } from "@/components/ui/card";
 import { formatRescheduleMessage } from '@/utils/rescheduleCalculations';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const RescheduleReviewSummary = ({ 
     booking, 
@@ -37,7 +38,7 @@ export const RescheduleReviewSummary = ({
                         
                         <div className="flex items-start gap-2">
                             <Receipt className="w-4 h-4 text-gray-400 mt-0.5" />
-                            <div className="text-sm text-gray-300">{booking?.plan?.name}</div>
+                            <div className="text-sm text-gray-300">{formatCustomerFacingPlanName(booking?.plan?.name)}</div>
                         </div>
                         
                         <div className="flex items-start gap-2">

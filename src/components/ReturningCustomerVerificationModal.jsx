@@ -11,6 +11,7 @@ import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const ReturningCustomerVerificationModal = ({
   isOpen,
@@ -405,7 +406,7 @@ export const ReturningCustomerVerificationModal = ({
                     <div className="flex items-start justify-between">
                       <div>
                         <CardTitle className="text-lg">
-                          {booking.plan?.name || 'Service'}
+                          {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
                         </CardTitle>
                         <CardDescription>Order #{booking.id}</CardDescription>
                       </div>

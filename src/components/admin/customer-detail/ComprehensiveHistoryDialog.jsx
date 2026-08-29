@@ -9,6 +9,7 @@ import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTran
 import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -214,7 +215,7 @@ export const ComprehensiveHistoryDialog = ({
                             return (
                                 <div key={booking.id} className="bg-white/5 p-4 rounded-lg border-l-4 border-blue-500">
                                     <div className="flex justify-between items-center mb-2">
-                                        <h3 className="font-bold text-xl text-white">{booking.plan.name}</h3>
+                                        <h3 className="font-bold text-xl text-white">{formatCustomerFacingPlanName(booking.plan.name)}</h3>
                                         <p className="text-sm text-blue-200">{format(parseISO(booking.created_at), 'PPP, p')}</p>
                                     </div>
                                     <p className="text-xs text-gray-400 mb-4">Booking ID: {booking.id}</p>
@@ -249,7 +250,7 @@ export const ComprehensiveHistoryDialog = ({
                                               : booking.addons.insurance === 'accept' ? 'Accepted' : 'Declined'
                                           }
                                         />
-                                        {booking.plan.id !== 2 && (
+                                        {Number(booking.plan.id) === 1 && (
                                           <DetailItem
                                             icon={<ShieldCheck />}
                                             label="Driveway Protection"

@@ -6,7 +6,7 @@ import { format, parseISO, isValid } from 'date-fns';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
@@ -15,6 +15,7 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const BookingSummaryReview = ({
     bookingData,
@@ -110,7 +111,7 @@ export const BookingSummaryReview = ({
         // Protection costs - Use hook for insurance price
         const insuranceCost = addonsData?.insurance === 'accept' ? Number(insurancePrice) : 0;
         const drivewayProtectionCost =
-            (plan?.id === 1 || isDelivery) && addonsData?.drivewayProtection === 'accept'
+            Number(plan?.id) === 1 && addonsData?.drivewayProtection === 'accept'
                 ? Number(drivewayPrice)
                 : 0;
 
@@ -201,7 +202,7 @@ export const BookingSummaryReview = ({
         };
     }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, deliveryService, taxOptions]);
 
-    const planName = plan?.name || 'Selected Plan';
+    const planName = formatCustomerFacingPlanName(plan?.name) || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;
 
     const contactAddress = bookingData?.contactAddress || {};
@@ -230,7 +231,9 @@ export const BookingSummaryReview = ({
         if (plan?.id === 2 && !deliveryService) {
             return isDropOff ? availabilityTimes.pickupStartTime : availabilityTimes.returnByTime;
         }
-        // For all other services, use the standard formatTimeWindow
+        if (showTimeWindow) {
+            return formatTimeWindowBetween(timeSlot, timeOptions);
+        }
         return formatTimeWindow(timeSlot, timeOptions);
     };
 
@@ -396,6 +399,15 @@ export const BookingSummaryReview = ({
                             )}
                         </div>
                     </div>
+
+                    {addonsData?.referral?.isValid && (
+                        <div className="bg-blue-900/20 p-4 rounded-xl border border-blue-500/30">
+                            <p className="text-sm text-blue-200">
+                                Referral code <span className="font-semibold text-white">{addonsData.referral.code}</span> applied.
+                                Your friend will receive rewards when this booking is completed.
+                            </p>
+                        </div>
+                    )}
 
                     <div className="bg-black/20 p-6 rounded-xl border border-white/10">
                         <h3 className="text-xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Price Breakdown</h3>

@@ -1,0 +1,64 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "ensure-lock-pin-ready",
+  "entrypoint_path": "index.ts",
+  "verify_jwt": false,
+  "file_name": "index.ts",
+  "content_len": 48262,
+  "parts": [
+    {
+      "i": 0,
+      "offset": 0,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_00.txt"
+    },
+    {
+      "i": 1,
+      "offset": 6000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_01.txt"
+    },
+    {
+      "i": 2,
+      "offset": 12000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_02.txt"
+    },
+    {
+      "i": 3,
+      "offset": 18000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_03.txt"
+    },
+    {
+      "i": 4,
+      "offset": 24000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_04.txt"
+    },
+    {
+      "i": 5,
+      "offset": 30000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_05.txt"
+    },
+    {
+      "i": 6,
+      "offset": 36000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_06.txt"
+    },
+    {
+      "i": 7,
+      "offset": 42000,
+      "len": 6000,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_07.txt"
+    },
+    {
+      "i": 8,
+      "offset": 48000,
+      "len": 262,
+      "path": "/home/brandbekras/Dev/u-filldumpsters/agent-tools/_ensure_chunks/part_08.txt"
+    }
+  ]
+}

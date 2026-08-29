@@ -37,19 +37,54 @@ export function parseBookingTimeToDate(timeString: string): Date | null {
   return null;
 }
 
+function formatClock(date: Date): string {
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function parseDeliveryWindow(timeString: string): { start: Date; end: Date } | null {
+  if (!timeString || typeof timeString !== "string") return null;
+  const trimmed = timeString.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes("|")) {
+    const [startRaw, endRaw] = trimmed.split("|").map((t) => t.trim()).filter(Boolean);
+    const start = parseBookingTimeToDate(startRaw);
+    const end = parseBookingTimeToDate(endRaw);
+    if (start && end) return { start, end };
+    if (start) {
+      const endFallback = new Date(start);
+      endFallback.setHours(endFallback.getHours() + 2);
+      return { start, end: endFallback };
+    }
+    return null;
+  }
+
+  const start = parseBookingTimeToDate(trimmed);
+  if (!start) return null;
+  const end = new Date(start);
+  end.setHours(end.getHours() + 2);
+  return { start, end };
+}
+
 export function formatBookingTime(
   timeString: string,
   options: { isSelfService?: boolean; isReturnBy?: boolean } = {},
 ): string {
   if (!timeString) return "N/A";
+
+  if (typeof timeString === "string" && timeString.includes("|")) {
+    const window = parseDeliveryWindow(timeString);
+    if (window) return `${formatClock(window.start)} - ${formatClock(window.end)}`;
+  }
+
   const parsed = parseBookingTimeToDate(timeString);
   if (!parsed) return timeString;
 
-  const formatted = parsed.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const formatted = formatClock(parsed);
 
   if (options.isSelfService) {
     const hour24 = parsed.getHours();
@@ -65,14 +100,21 @@ export function formatBookingTime(
   return formatted;
 }
 
+/** Delivery copy: "between 6:00 AM and 8:00 AM" (pipe range or 2-hour window from start). */
+export function formatDeliveryTimeWindowBetween(timeString: string): string {
+  const window = parseDeliveryWindow(timeString);
+  if (!window) return timeString || "N/A";
+  return `between ${formatClock(window.start)} and ${formatClock(window.end)}`;
+}
+
 /** 12-hour time only (no "after" / "by" prefix) for copy that already includes those words. */
 export function formatPlainBookingTime(timeString: string): string {
   if (!timeString) return "N/A";
+  if (typeof timeString === "string" && timeString.includes("|")) {
+    const window = parseDeliveryWindow(timeString);
+    if (window) return `${formatClock(window.start)} - ${formatClock(window.end)}`;
+  }
   const parsed = parseBookingTimeToDate(timeString);
   if (!parsed) return timeString;
-  return parsed.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatClock(parsed);
 }

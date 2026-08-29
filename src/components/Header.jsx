@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw } from 'lucide-react';
+import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw, Users } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
@@ -89,9 +89,9 @@ export const Header = ({ onReorderSelect }) => {
           <div className="flex items-center justify-between min-h-[140px] md:min-h-[180px] lg:min-h-[200px] relative w-full h-full">
             
             <div className="hidden lg:flex flex-1 items-center justify-end pr-4 xl:pr-8 h-full">
-              <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase ${textEffectClass}`}>
+              <span className={`font-extrabold text-lg xl:text-xl text-center leading-snug tracking-tight uppercase max-w-[400px] block ${textEffectClass}`}>
                 U-Fill Dumpsters <br />
-                Premium Waste Solutions
+                Premium DIY solutions to help you get your jobs done right.
               </span>
             </div>
 
@@ -102,11 +102,12 @@ export const Header = ({ onReorderSelect }) => {
                   className="flex items-center group border-0 bg-transparent p-0 cursor-pointer"
                   aria-label="U-Fill Dumpsters home"
                 >
-                  <div className="relative p-0 transition-transform duration-300 group-hover:scale-105 bg-white rounded-xl">
+                  <div className="relative p-0 transition-transform duration-300 group-hover:scale-105">
                     <img 
                       src={siteImages.logo} 
                       alt="U-Fill Dumpsters Logo" 
-                      className="h-[120px] md:h-[160px] lg:h-[180px] w-auto object-contain"
+                      className="h-[120px] md:h-[160px] lg:h-[180px] w-auto max-w-[min(92vw,560px)] object-contain object-center bg-transparent select-none"
+                      draggable={false}
                     />
                   </div>
               </button>
@@ -147,6 +148,10 @@ export const Header = ({ onReorderSelect }) => {
                         <RotateCcw className="h-5 w-5" />
                         <span>Returning Customer</span>
                       </button>
+                      <Link to="/about" onClick={closeMenu} className="flex items-center space-x-3 text-lg hover:text-yellow-400 transition-colors tap-target">
+                        <Users className="h-5 w-5" />
+                        <span>About Us</span>
+                      </Link>
                       <Link to="/contact" onClick={closeMenu} className="flex items-center space-x-3 text-lg hover:text-yellow-400 transition-colors tap-target">
                         <MessageSquare className="h-5 w-5" />
                         <span>Contact</span>

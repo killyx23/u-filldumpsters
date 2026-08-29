@@ -128,7 +128,7 @@ const AgreementText = ({ fees }) => {
           add-on protection fees, is due at booking to secure the reservation unless otherwise agreed in writing.
         </li>
         <li>
-          <strong>Dumpster / Trailer Base Rates:</strong> If a Dumpster or Dump Loader Trailer Rental is chosen, the
+          <strong>Dumpster / Trailer Base Rates:</strong> If a Dumpster or Dump Trailer Rental is chosen, the
           base rental price includes one delivery and one pickup. Disposal is billed separately at a rate of{' '}
           {formatMoney(fee('dump_tonnage_rate'))} per ton based on the actual post-disposal certified scale weight.
           Disposal charges are calculated after dump processing and charged to the Customer&apos;s payment method on file.
@@ -136,7 +136,7 @@ const AgreementText = ({ fees }) => {
         <li>
           <strong>Overweight &amp; Overage Charges:</strong> Overweight charges for dumpsters are{' '}
           {formatMoney(fee('dumpster_overweight_rate'))} per ton over the allowed limit of{' '}
-          {formatTons(fee('dumpster_allowed_tons'))} tons. The Dump Loader Trailer overage rate applies past a limit
+          {formatTons(fee('dumpster_allowed_tons'))} tons. The Dump Trailer overage rate applies past a limit
           of {formatTons(fee('dump_loader_max_tons'))} tons. The Customer is solely liable for any municipal
           overweight citations or traffic penalties imposed by authorities.
         </li>
@@ -170,8 +170,8 @@ const AgreementText = ({ fees }) => {
       <h3 className="text-lg text-yellow-300">SECTION 4: WEIGHT LIMITS, LOADING, &amp; SPECIAL SERVICES</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Weight &amp; Moisture:</strong> 16-yard dumpsters are rated for up to {formatTons(fee('dumpster_allowed_tons'))}{' '}
-          tons. Dump Loader Trailers have a max capacity limit of {formatTons(fee('dump_loader_max_tons'))} tons.
+          <strong>Weight &amp; Moisture:</strong> Dumpsters are rated for up to {formatTons(fee('dumpster_allowed_tons'))}{' '}
+          tons. Dump Trailers have a max capacity limit of {formatTons(fee('dump_loader_max_tons'))} tons.
           High-density materials like dirt, soil, concrete, or rock loads must <strong>not exceed halfway up</strong>{' '}
           the trailer/bin walls. The Customer is responsible for the total scale weight regardless of rain, water,
           snow, ice, or other moisture accumulated in the open unit during the Rental Period. Overweight loads are
@@ -222,7 +222,7 @@ const AgreementText = ({ fees }) => {
         </li>
       </ul>
 
-      <h3 className="text-lg text-yellow-300">SECTION 6: DO-IT-YOURSELF (DIY) HEAVY EQUIPMENT OPERATIONAL CLAUSES</h3>
+      <h3 className="text-lg text-yellow-300">SECTION 6: COMPACT EQUIPMENT RENTAL OPERATIONAL CLAUSES</h3>
       <p><em>(Applicable whenever renting Mini Excavators, Mini Skid Steers, Track Loaders, or Heavy Machinery Attachments)</em></p>
       <ul className="list-disc list-inside space-y-2">
         <li>

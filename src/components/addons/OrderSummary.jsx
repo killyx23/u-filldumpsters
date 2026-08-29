@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Tag, Loader2, MapPin } from 'lucide-react';
+import { ArrowRight, Tag, Loader2, MapPin, Gift } from 'lucide-react';
+import { getStoredReferralCode, setStoredReferralCode } from '@/utils/referralCodeStorage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -23,6 +24,8 @@ export const OrderSummary = ({
     onProceed,
     isProcessing,
     onCouponApply,
+    onReferralApply,
+    customerEmail,
     deliveryService,
     fetchedMileageRate,
     fetchedDeliveryFeeFlat
@@ -30,6 +33,12 @@ export const OrderSummary = ({
     const [couponCode, setCouponCode] = useState('');
     const [validatingCoupon, setValidatingCoupon] = useState(false);
     const [appliedCoupon, setAppliedCoupon] = useState(addons?.coupon || null);
+    const [referralCodeInput, setReferralCodeInput] = useState('');
+    const [validatingReferral, setValidatingReferral] = useState(false);
+    const [appliedReferral, setAppliedReferral] = useState(
+        addons?.referral?.isValid ? addons.referral : null
+    );
+    const [autoReferralAttempted, setAutoReferralAttempted] = useState(false);
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(false);
     
@@ -37,7 +46,7 @@ export const OrderSummary = ({
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
-    const showDrivewayProtection = plan?.id === 1 || (plan?.id === 2 && deliveryService);
+    const showDrivewayProtection = Number(plan?.id) === 1;
 
     // Load equipment prices from equipment_pricing table (IDs 1-6 only, excluding ID 7)
     useEffect(() => {
@@ -168,6 +177,102 @@ export const OrderSummary = ({
             description: "The coupon has been removed from your order.",
         });
     };
+
+    const applyReferralResult = (referralData, { silent = false } = {}) => {
+        if (referralData?.isValid) {
+            setAppliedReferral(referralData);
+            setReferralCodeInput(referralData.code);
+            setStoredReferralCode(referralData.code);
+            if (onReferralApply) onReferralApply(referralData);
+            if (!silent) {
+                toast({
+                    title: 'Referral Code Applied',
+                    description: 'Your friend will receive referral rewards when your booking is completed.',
+                });
+            }
+            return true;
+        }
+
+        if (!silent) {
+            toast({
+                title: 'Invalid Referral Code',
+                description: referralData?.error || 'This referral code is not valid.',
+                variant: 'destructive',
+            });
+        }
+        return false;
+    };
+
+    const validateReferralCode = async (code, { silent = false } = {}) => {
+        const normalizedCode = String(code || '').trim();
+        if (!normalizedCode) {
+            if (!silent) {
+                toast({
+                    title: 'Invalid Referral Code',
+                    description: 'Please enter a referral code.',
+                    variant: 'destructive',
+                });
+            }
+            return false;
+        }
+
+        setValidatingReferral(true);
+        try {
+            const { data, error } = await supabase.rpc('validate_referral_code', {
+                p_referral_code: normalizedCode,
+                p_referee_email: customerEmail?.trim().toLowerCase() || null,
+            });
+
+            if (error) throw error;
+            return applyReferralResult(data, { silent });
+        } catch (error) {
+            console.error('Referral validation error:', error);
+            if (!silent) {
+                toast({
+                    title: 'Error',
+                    description: 'Failed to validate referral code. Please try again.',
+                    variant: 'destructive',
+                });
+            }
+            return false;
+        } finally {
+            setValidatingReferral(false);
+        }
+    };
+
+    const handleReferralValidation = async () => {
+        await validateReferralCode(referralCodeInput);
+    };
+
+    const handleRemoveReferral = () => {
+        setAppliedReferral(null);
+        setReferralCodeInput('');
+        setStoredReferralCode('');
+        if (onReferralApply) onReferralApply(null);
+        toast({
+            title: 'Referral Code Removed',
+            description: 'The referral code has been removed from your order.',
+        });
+    };
+
+    useEffect(() => {
+        if (autoReferralAttempted || appliedReferral?.isValid) return;
+
+        const storedCode = getStoredReferralCode();
+        const existingCode = addons?.referral?.isValid
+            ? addons.referral.code
+            : addons?.referralCode;
+
+        const codeToApply = existingCode || storedCode;
+        if (!codeToApply) {
+            setAutoReferralAttempted(true);
+            return;
+        }
+
+        setReferralCodeInput(codeToApply);
+        setAutoReferralAttempted(true);
+        validateReferralCode(codeToApply, { silent: true });
+    }, [addons?.referral, addons?.referralCode, appliedReferral?.isValid, autoReferralAttempted, customerEmail]);
 
     const calculatedTotals = useMemo(() => {
         const baseRental = Number(plan?.price || 0);
@@ -569,6 +674,54 @@ export const OrderSummary = ({
                         </div>
                         <button
                             onClick={handleRemoveCoupon}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                        >
+                            Remove
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {!appliedReferral && (
+                <div className="mt-6">
+                    <label className="text-sm font-medium text-white mb-2 block flex items-center">
+                        <Gift className="h-4 w-4 mr-2 text-yellow-400" />
+                        Have a referral code?
+                    </label>
+                    <p className="text-xs text-blue-200 mb-2">
+                        Enter a friend&apos;s code so they can earn rewards when your booking is completed.
+                    </p>
+                    <div className="flex gap-2">
+                        <Input
+                            value={referralCodeInput}
+                            onChange={(e) => setReferralCodeInput(e.target.value.toUpperCase())}
+                            placeholder="Enter referral code"
+                            className="bg-white/10 border-white/30 text-white placeholder-gray-400"
+                            disabled={validatingReferral}
+                        />
+                        <Button
+                            onClick={handleReferralValidation}
+                            disabled={validatingReferral || !referralCodeInput.trim()}
+                            variant="outline"
+                            className="border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
+                        >
+                            {validatingReferral ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Apply'}
+                        </Button>
+                    </div>
+                </div>
+            )}
+
+            {appliedReferral && (
+                <div className="mt-6 bg-blue-900/20 border border-blue-500/30 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                            <Gift className="h-4 w-4 mr-2 text-blue-300" />
+                            <span className="text-sm font-medium text-blue-200">
+                                Referral Applied: {appliedReferral.code}
+                            </span>
+                        </div>
+                        <button
+                            onClick={handleRemoveReferral}
                             className="text-xs text-red-400 hover:text-red-300 transition-colors"
                         >
                             Remove

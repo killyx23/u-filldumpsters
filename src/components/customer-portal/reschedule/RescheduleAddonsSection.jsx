@@ -20,6 +20,7 @@ import {
   mergeOriginalAddonsForService,
   serviceSupportsDriveway,
 } from '@/utils/rescheduleAddons';
+import { mentionsDumpTrailer } from '@/utils/displayPlanName';
 
 const getIconForEquipment = (name) => {
   const nameLower = name?.toLowerCase() || '';
@@ -60,7 +61,7 @@ export const RescheduleAddonsSection = ({
   const drivewayPrice = drivewayProtection?.price ?? 0;
   const planName = selectedService?.name || originalBooking?.plan?.name || '';
   const isDumpLoaderWithDelivery =
-    planName.toLowerCase().includes('dump loader') &&
+    mentionsDumpTrailer(planName) &&
     planName.toLowerCase().includes('delivery');
 
   const currencyInfo = { code: 'USD', symbol: '$' };

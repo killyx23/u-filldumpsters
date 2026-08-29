@@ -9,6 +9,7 @@ import { getDumpFeeForService } from '@/utils/getDumpFeeForService';
 import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
@@ -61,7 +62,7 @@ export const ReceiptPage = () => {
                     } else if (booking.plan.id) {
                         resolvedServiceId = booking.plan.id;
                     }
-                    serviceName = booking.plan.name || booking.plan.title || 'Service';
+                    serviceName = formatCustomerFacingPlanName(booking.plan.name || booking.plan.title) || 'Service';
                     basePrice = parseFloat(booking.plan.price || booking.plan.base_price || 0);
                     deliveryFee = parseFloat(booking.plan.delivery_fee || 0);
                     mileageRate = parseFloat(booking.plan.mileage_rate || 0.85);

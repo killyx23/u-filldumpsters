@@ -16,6 +16,7 @@ import {
     REVIEW_IMAGE_TYPES,
     REVIEW_VIDEO_TYPES,
 } from '@/utils/reviewMediaHelper';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
 import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -457,7 +458,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                                         <div key={booking.id} className="bg-black/20 border border-white/10 p-3 rounded-lg flex justify-between items-center hover:bg-white/5 transition-colors">
                                             <div>
                                                 <p className="font-semibold text-sm">Booking #{booking.id}</p>
-                                                <p className="text-xs text-gray-400">{booking.plan?.name || 'Service'} • {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}</p>
+                                                <p className="text-xs text-gray-400">{formatCustomerFacingPlanName(booking.plan?.name) || 'Service'} • {format(parseISO(booking.drop_off_date), 'MMM d, yyyy')}</p>
                                             </div>
                                             <Button size="sm" onClick={() => setSelectedBooking(booking)} className="bg-white text-black hover:bg-gray-200">Review</Button>
                                         </div>

@@ -27,6 +27,7 @@ import { getBookingDateTime } from '@/utils/bookingPickupWindow';
 import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
@@ -135,7 +136,7 @@ const CancellationPendingDetails = ({ booking }) => {
 
     return (
         <div className="mt-3 rounded-md border border-red-500/40 bg-red-950/40 p-3 space-y-1">
-            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Service:</span> {booking.plan?.name || 'Service'}</p>
+            <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Service:</span> {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}</p>
             <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Total Price:</span> ${(booking.total_price || 0).toFixed(2)}</p>
             <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Fee Type:</span> {summary.feeTypeLine}</p>
             <p className="text-xs text-red-100"><span className="font-semibold text-red-300">Percentage Fee:</span> {summary.percentageLabel}</p>

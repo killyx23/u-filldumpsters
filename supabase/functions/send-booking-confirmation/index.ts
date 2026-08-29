@@ -1,9 +1,10 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
-import { formatBookingTime, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
+import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendSms } from "../_shared/notify.ts";
+import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -113,6 +114,7 @@ const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE)
 const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const plan = booking.plan || {};
   const addons = booking.addons || {};
+  const offersDrivewayProtection = Number(plan?.id) === 1;
   const basePrice = Number(plan.price ?? plan.base_price ?? 0);
   const subtotal = Number(booking.subtotal_before_tax ?? 0);
   const tax = Number(booking.tax_amount ?? 0);
@@ -130,6 +132,7 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
       const amount = Number(line.amountAfterDiscount ?? line.amount ?? 0);
       if (amount <= 0) continue;
       const label = line.label || line.key || "Charge";
+      if (!offersDrivewayProtection && /driveway/i.test(String(label))) continue;
       rows += `<tr>
       <td style="padding: 6px 0; color: #4b5563;">${label}</td>
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
@@ -148,7 +151,7 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
       <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(insuranceAmount)}</td>
     </tr>`;
     }
-    if (addons.drivewayProtection === "accept") {
+    if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
       const drivewayAmt = Number(addons.drivewayPriceApplied ?? 0);
       if (drivewayAmt > 0) {
         rows += `<tr>
@@ -344,7 +347,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   console.log(` site url: ${siteUrl}`);
   const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
   console.log(`portal URL: ${portalUrl}`);
-  const serviceName = serviceDetails?.name || plan.name || "N/A";
+  const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
   let equipmentHTML = "";
   if (addons.equipment && addons.equipment.length > 0) {
@@ -365,7 +368,8 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   if (addons.insurance === "accept") {
     addonsHTML += `<li style="padding: 5px 0;">✓ Rental Insurance</li>`;
   }
-  if (addons.drivewayProtection === "accept") {
+  const offersDrivewayProtection = Number(plan?.id) === 1;
+  if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
     addonsHTML += `<li style="padding: 5px 0;">✓ Driveway Protection</li>`;
   }
   const selfService = isTrailerSelfService(booking);
@@ -374,12 +378,14 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   );
   const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
   const returnScheduleLabel = selfService ? "Return By:" : "Pickup:";
+  const deliveryWindowDropOff = formatDeliveryTimeWindowBetween(booking.drop_off_time_slot);
+  const deliveryWindowPickup = formatDeliveryTimeWindowBetween(booking.pickup_time_slot);
   const pickupScheduleValue = selfService
     ? `${formatDate(booking.drop_off_date)} ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
-    : `${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}`;
+    : `${formatDate(booking.drop_off_date)} ${deliveryWindowDropOff}`;
   const returnScheduleValue = selfService
     ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
-    : `${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot)}`;
+    : `${formatDate(booking.pickup_date)} ${deliveryWindowPickup}`;
 
   const pickupDateFormatted = formatDate(booking.drop_off_date);
   const pickupStartTimeFormatted = formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false });
@@ -402,10 +408,10 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
      `;
   } else {
     nextStepsHTML = `
-      <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} at ${formatBookingTime(booking.drop_off_time_slot)}.</li>
+      <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} ${deliveryWindowDropOff}.</li>
       <li>Our team will place the dumpster in your designated area.</li>
       <li>Fill the dumpster at your convenience during the rental period.</li>
-      <li>We'll pick up the dumpster on ${formatDate(booking.pickup_date)} by ${formatBookingTime(booking.pickup_time_slot)}.</li>
+      <li>We'll pick up the dumpster on ${formatDate(booking.pickup_date)} ${deliveryWindowPickup}.</li>
      `;
   }
   return `
@@ -889,7 +895,7 @@ Deno.serve(async (req)=>{
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>Your Dump Loader access code is ready. Enter it on the padlock at pickup.</p>
+      <p>Your Dump Trailer access code is ready. Enter it on the padlock at pickup.</p>
       <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
         <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
         <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
