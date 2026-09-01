@@ -5,6 +5,7 @@ import path from "node:path";
 const projectRoot = process.cwd();
 const frontendEnvPath = path.join(projectRoot, ".env.local");
 const supabaseEnvPath = path.join(projectRoot, "supabase", ".env");
+const branchesEnvPath = path.join(projectRoot, "supabase", "branches", ".env");
 const functionsEnvPath = path.join(projectRoot, "supabase", "functions", ".env");
 
 /** Keys we set in .env.local — never write raw CLI names like PUBLISHABLE_KEY here. */
@@ -212,8 +213,15 @@ function run() {
 
   const localEnv = parseEnvFile(frontendEnvPath);
   const supabaseEnv = parseEnvFile(supabaseEnvPath);
+  const branchesEnv = parseEnvFile(branchesEnvPath);
+  const existingFunctionsEnv = parseEnvFile(functionsEnvPath);
+  // Prefer project-root / supabase/.env, then supabase/branches/.env, then keep
+  // whatever is already in supabase/functions/.env from a prior sync.
   const stripeSecretKey =
-    localEnv.STRIPE_SECRET_KEY?.trim() || supabaseEnv.STRIPE_SECRET_KEY?.trim();
+    localEnv.STRIPE_SECRET_KEY?.trim() ||
+    supabaseEnv.STRIPE_SECRET_KEY?.trim() ||
+    branchesEnv.STRIPE_SECRET_KEY?.trim() ||
+    existingFunctionsEnv.STRIPE_SECRET_KEY?.trim();
 
   const functionEnvUpdates = {
     SUPABASE_URL: apiUrl,
@@ -251,7 +259,7 @@ function run() {
     console.log("    STRIPE_SECRET_KEY");
   } else {
     console.warn(
-      "[sync-local-supabase-env] STRIPE_SECRET_KEY not found in .env.local or supabase/.env — payment step will fail until you add it.",
+      "[sync-local-supabase-env] STRIPE_SECRET_KEY not found in .env.local, supabase/.env, or supabase/branches/.env — payment step will fail until you add it.",
     );
   }
   if (missingIgloo.length) {

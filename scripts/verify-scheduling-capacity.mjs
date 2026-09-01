@@ -251,7 +251,7 @@ async function main() {
     const baseBin = await getAvailability({ serviceId: 1, startDate: D1, endDate: D2 });
     check(`service 1 (bin only) available on ${D1}`, baseBin[D1].available, true);
 
-    console.log("\n=== A dump-loader delivery booking consumes the trailer for the whole rental ===");
+    console.log("\n=== A dump-trailer delivery booking holds the trailer only on trip days ===");
     await createBooking({ serviceId: 2, dropOff: D1, pickup: D1, isDelivery: true });
     const afterDelivery = await getAvailability({ serviceId: 2, startDate: D1, endDate: D2 });
     check(
@@ -270,12 +270,23 @@ async function main() {
     const excavator = await getAvailability({ serviceId: 5, startDate: D1, endDate: D2 });
     check(`service 5 (excavator) still available on ${D1}`, excavator[D1].available, true);
 
-    console.log("\n=== Multi-day range occupies every day it spans ===");
+    console.log("\n=== Multi-day self-pickup (service 2) occupies every day; delivery only trip days ===");
     await removeFixtureBookings();
-    await createBooking({ serviceId: 2, dropOff: D1, pickup: D2, isDelivery: true });
-    const spanning = await getAvailability({ serviceId: 2, startDate: D1, endDate: D2 });
-    check(`service 2 blocked on ${D1} (span start)`, spanning[D1].available, false);
-    check(`service 2 blocked on ${D2} (span end)`, spanning[D2].available, false);
+    await createBooking({ serviceId: 2, dropOff: D1, pickup: D2, isDelivery: false });
+    const selfPickupSpan = await getAvailability({ serviceId: 2, startDate: D1, endDate: D2 });
+    check(`service 2 self-pickup blocked on ${D1} (span start)`, selfPickupSpan[D1].available, false);
+    check(`service 2 self-pickup blocked on ${D2} (span end)`, selfPickupSpan[D2].available, false);
+
+    await removeFixtureBookings();
+    await createBooking({ serviceId: 4, dropOff: D1, pickup: D3, isDelivery: true });
+    const deliverySpan = await getAvailability({ serviceId: 2, startDate: D1, endDate: D3 });
+    check(`service 2 self-pickup blocked on delivery drop-off ${D1}`, deliverySpan[D1].available, false);
+    check(
+      `service 2 self-pickup free on middle day ${D2} (trailer not held on middle days)`,
+      deliverySpan[D2].available,
+      true,
+    );
+    check(`service 2 self-pickup blocked on delivery pickup ${D3}`, deliverySpan[D3].available, false);
 
     console.log("\n=== Cross-service: dumpster holds a bin all week but frees the trailer on middle days ===");
     await removeFixtureBookings();

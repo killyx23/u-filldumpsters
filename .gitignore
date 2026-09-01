@@ -5,6 +5,9 @@ supabase/.temp/
 dist/
 .idea/workspace.xml
 
+# Full remote dumps contain PII; keep seed local-only
+supabase/seed.sql
+
 # Env / secrets — never commit real values (.env.example is the only exception)
 .env
 .env.*

@@ -39,11 +39,18 @@ set occupancy_model = 'dropoff_and_pickup_only',
     scheduling_granularity = 'slot'
 where service_id = 3 and inventory_item_id = 2;
 
+-- Service 4: bin held for the full rental; trailer only on drop-off/pickup trip days.
 update public.inventory_rules
 set occupancy_model = 'range',
     scheduling_granularity = 'day'
 where service_id = 4
-  and inventory_item_id in (1, 2);
+  and inventory_item_id = 1;
+
+update public.inventory_rules
+set occupancy_model = 'dropoff_and_pickup_only',
+    scheduling_granularity = 'slot'
+where service_id = 4
+  and inventory_item_id = 2;
 
 -- Mini telescoping loader (service 8) is its own machine, not the excavator.
 insert into public.inventory_items (id, name, type, total_quantity)

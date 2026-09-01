@@ -344,15 +344,20 @@ export async function ensurePinOnLock(
     clearBudgetMs?: number;
     createBudgetMs?: number;
     settleMs?: number;
+    /** When upgrading from AlgoPIN, do not expire the fallback until bridge confirms. */
+    skipClear?: boolean;
   },
 ): Promise<EnsurePinResult> {
   const pin = opts.pin || String(Math.floor(Math.random() * 900000) + 100000);
-  const clear = await clearKnownPins(supabase, accessToken, opts.orderId, {
-    lockId: opts.lockId,
-    bridgeId: opts.bridgeId,
-    budgetMs: opts.clearBudgetMs ?? 50_000,
-    settleMs: opts.settleMs ?? 15_000,
-  });
+  const emptyClear = { attempted: 0, confirmed: 0, failed: 0, pending: 0, details: [] as Array<Record<string, unknown>> };
+  const clear = opts.skipClear
+    ? emptyClear
+    : await clearKnownPins(supabase, accessToken, opts.orderId, {
+      lockId: opts.lockId,
+      bridgeId: opts.bridgeId,
+      budgetMs: opts.clearBudgetMs ?? 50_000,
+      settleMs: opts.settleMs ?? 15_000,
+    });
 
   // If a delete is still pending, wait a short settle then proceed — create may still
   // fail if the old PIN is on the lock, but the watchdog will retry.

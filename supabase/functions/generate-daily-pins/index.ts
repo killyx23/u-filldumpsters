@@ -10,6 +10,7 @@ import { getCorsHeaders } from "./cors.ts";
 import {
   addGraceHour,
   buildBookingDateUTC,
+  formatAlgoPinStartIso,
   getPinActivationStart,
   getPinWindowSkipReason,
   isWithinPinGenerationWindow,
@@ -178,11 +179,7 @@ async function createBridgePin(accessToken, lockId, bridgeId, pin, startDate, en
   };
 }
 async function createAlgoPin(accessToken, lockId, dropOffDate, dropOffTimeSlot, pickupDate, orderId) {
-  const startDate = buildIgloohomeDate(dropOffDate, dropOffTimeSlot, 12);
-  // AlgoPIN requires zeroed minutes format: YYYY-MM-DDTHH:00:00+hh:mm
-  // Round down to nearest whole hour so e.g. 05:10 becomes 05:00
-  // This means the PIN activates slightly early rather than failing entirely
-  const startDateHourOnly = startDate.replace(/T(\d{2}):\d{2}:00/, "T$1:00:00");
+  const startDateHourOnly = formatAlgoPinStartIso(buildBookingDateUTC(dropOffDate, dropOffTimeSlot, 12));
   const startUnix = new Date(startDateHourOnly).getTime() / 1000;
   const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
   const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
