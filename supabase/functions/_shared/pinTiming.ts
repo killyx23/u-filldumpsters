@@ -11,6 +11,64 @@ export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
 export const RETURN_GRACE_MS = 60 * 60 * 1000;
 /** Activate the PIN this many ms before drop-off so it works the instant they arrive. */
 export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
+/** Second customer PIN message this many ms before drop-off. */
+export const PIN_REMINDER_LEAD_MS = 60 * 60 * 1000;
+
+/** Calendar YYYY-MM-DD in the yard timezone. */
+export function denverCalendarDate(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+}
+
+export function addCalendarDays(ymd: string, days: number): string {
+  const [year, month, day] = ymd.split("-").map(Number);
+  const utc = Date.UTC(year, month - 1, day + days);
+  return new Date(utc).toISOString().slice(0, 10);
+}
+
+/** Overnight lock programming: drop-off is today or tomorrow in Denver. */
+export function isDropOffTodayOrTomorrow(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  const drop = booking.drop_off_date;
+  if (!drop) return false;
+  const today = denverCalendarDate(now);
+  const tomorrow = addCalendarDays(today, 1);
+  return drop === today || drop === tomorrow;
+}
+
+/** First PIN email/SMS: lock may already hold the code; customer is told from 12h before drop-off. */
+export function isDueForFirstPinNotify(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  if (!booking.drop_off_date) return false;
+  const { startMs, graceEndMs } = getBookingWindow(booking);
+  if (!Number.isFinite(startMs) || !Number.isFinite(graceEndMs)) return false;
+  const nowMs = now.getTime();
+  return nowMs >= startMs - PIN_LEAD_TIME_MS && nowMs < graceEndMs;
+}
+
+/** 1-hour reminder: after the first PIN message, from 1h before drop-off until 15 minutes after it. */
+export function isDueForPinReminder(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  if (!booking.drop_off_date) return false;
+  const { startMs } = getBookingWindow(booking);
+  if (!Number.isFinite(startMs)) return false;
+  const nowMs = now.getTime();
+  return nowMs >= startMs - PIN_REMINDER_LEAD_MS && nowMs < startMs + 15 * 60 * 1000;
+}
 
 /**
  * When a booking has no usable time at all, assume the yard's normal operating bounds. These
@@ -70,6 +128,17 @@ export function buildBookingDateUTC(
 export function addGraceHour(isoDate: string): string {
   const ms = new Date(isoDate).getTime() + RETURN_GRACE_MS;
   return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+/**
+ * AlgoPIN rejects starts that aren't whole-hour and rejects the JS `.000Z` suffix.
+ * Required shape: `YYYY-MM-DDTHH:00:00+00:00` (see Igloohome onetime AlgoPIN docs).
+ */
+export function formatAlgoPinStartIso(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  d.setUTCMinutes(0, 0, 0);
+  return d.toISOString().replace(/\.\d{3}Z$/, "+00:00");
 }
 
 /**

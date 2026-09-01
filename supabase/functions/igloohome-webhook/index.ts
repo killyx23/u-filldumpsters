@@ -31,7 +31,6 @@ import {
 } from "../_shared/lockDeviceState.ts";
 import { verifyIglooWebhook } from "../_shared/iglooWebhookAuth.ts";
 import { alertBreakInAttempt, alertBridgeOfflineWhileUnlocked } from "../_shared/lockAlerts.ts";
-import { notifyPinReady } from "../_shared/pinNotify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -176,7 +175,7 @@ async function handleJobComplete(
 /**
  * Fire-and-forget call into the reconciler so a bridge reconnect flushes any
  * PIN create/delete that got stuck while it was offline, instead of waiting
- * up to 5 minutes for the next cron sweep.
+ * for the next overnight cron sweep. Customer PIN email waits until 5am Denver.
  */
 async function triggerReconciler(reason: string): Promise<void> {
   try {
@@ -292,36 +291,16 @@ async function handleActivityLogs(
 }
 
 /**
- * Booking state changes and notifications run after the 200 so igloohome never
- * retries because an email provider was slow.
+ * Booking state changes run after the 200 so igloohome never retries because
+ * an email provider was slow. Customer PIN email/SMS is sent by the 5am Denver
+ * reconcile-lock-pins cron, not here.
  */
 async function processDeferred(
   supabase: SupabaseClient,
   recorded: RecordedEvent[],
   bridgeAlerts: Array<() => Promise<void>>,
-  pinConfirmed?: { orderId: number; booking: Record<string, unknown> } | null,
 ): Promise<void> {
   try {
-    if (pinConfirmed) {
-      const { data: pinRow } = await supabase
-        .from("rental_access_codes")
-        .select("access_pin, start_time, end_time")
-        .eq("order_id", pinConfirmed.orderId)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (pinRow?.access_pin) {
-        await notifyPinReady(
-          supabase,
-          pinConfirmed.booking,
-          String(pinRow.access_pin),
-          String(pinRow.start_time || ""),
-          String(pinRow.end_time || ""),
-        );
-      }
-    }
-
     for (const { event, deviceId, orderId } of recorded) {
       if (event.eventType === "breakin") {
         const { data: device } = await supabase
@@ -411,8 +390,7 @@ Deno.serve(async (req) => {
     }));
 
     if (type === EVENT_JOB_COMPLETE) {
-      const { result, pinConfirmed } = await handleJobComplete(supabase, event!);
-      if (pinConfirmed) runDeferred(processDeferred(supabase, [], [], pinConfirmed));
+      const { result } = await handleJobComplete(supabase, event!);
       return jsonResponse({ success: true, eventType: type, ...result });
     }
 
@@ -424,7 +402,7 @@ Deno.serve(async (req) => {
 
     if (type === EVENT_ACTIVITY_LOG) {
       const { recorded, parsed, stored } = await handleActivityLogs(supabase, event!);
-      runDeferred(processDeferred(supabase, recorded, [], null));
+      runDeferred(processDeferred(supabase, recorded, []));
       return jsonResponse({
         success: true,
         eventType: type,

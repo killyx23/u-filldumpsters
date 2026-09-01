@@ -952,6 +952,70 @@ Deno.serve(async (req)=>{
       });
     }
 
+    if (emailType === "pin_reminder") {
+      const pin = body.pin || body.access_pin;
+      if (!pin) {
+        return new Response(JSON.stringify({ error: "pin is required for pin_reminder" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const pickupDateLabel = formatDate(booking.drop_off_date);
+      const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
+      const whenLabel = pickupTimeLabel ? `${pickupDateLabel} at ${pickupTimeLabel}` : pickupDateLabel;
+      const reminderHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:22px;">Pickup in about an hour — Order #${booking.id}</h1>
+    </div>
+    <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
+      <p>Hi ${booking.name || "there"},</p>
+      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>. Your padlock code:</p>
+      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+      </p>
+    </div>
+  </div>
+</body></html>`;
+      const reminderSubject = `Pickup soon — Order #${booking.id} access code — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_reminder to ${recipientEmail}`);
+      const reminderResult = await sendEmailWithRetry(recipientEmail, reminderSubject, reminderHtml);
+      if (!reminderResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send PIN reminder email",
+          details: reminderResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const phone = booking.customers?.phone || booking.phone || "";
+      const smsOptIn = booking.customers?.sms_opt_in !== false;
+      const smsContent =
+        `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. ` +
+        `View: ${siteUrl}/customer-portal?tab=access-codes`;
+      const smsResult = await sendSms(phone, smsContent, { smsOptIn });
+      console.log(`[${timestamp}] [send-booking-confirmation] pin_reminder SMS:`, smsResult);
+      const remindedAt = new Date().toISOString();
+      await supabase.from("bookings").update({ pin_reminder_sent_at: remindedAt }).eq("id", booking.id);
+      return new Response(JSON.stringify({
+        success: true,
+        message: "PIN reminder sent successfully",
+        provider: reminderResult.provider,
+        recipient: recipientEmail,
+        email_type: "pin_reminder",
+        sms: smsResult,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
     let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
     const { data: premiumPlan } = await supabase

@@ -96,24 +96,30 @@ console.log("\nreconcile-lock-pins — auth");
   check("reason echoed back", auth.json?.reason === "test");
 }
 
+console.log("\nreconcile-lock-pins — notify-only pass");
+{
+  const notify = await fnPost("reconcile-lock-pins", { reason: "notify" }, serviceKey);
+  check("notify returns 200", notify.status === 200, String(notify.status));
+  check("notify success", notify.json?.success === true, JSON.stringify(notify.json)?.slice(0, 300));
+  check("notify payload present", notify.json?.notify != null, JSON.stringify(notify.json)?.slice(0, 300));
+  check("notify does not run lock phases", notify.json?.deleted == null && notify.json?.generated == null);
+}
+
 console.log("\nigloohome-webhook — job complete → lock_confirmed_at");
 {
   const jobId = `test-job-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  const orderId = 1259;
-
+  const orderId = psql(`SELECT id FROM bookings WHERE status = 'Confirmed' ORDER BY id DESC LIMIT 1;`);
+  check("has a confirmed booking to attach a PIN", /^\d+$/.test(orderId), orderId);
+  if (!/^\d+$/.test(orderId)) {
+    console.log("  skip  remaining webhook pin checks (no confirmed booking)");
+  } else {
   psql(`
-    UPDATE rental_access_codes
-    SET pin_id = '${jobId}',
-        pin_type = 'bridge_proxied',
-        lock_confirmed_at = NULL,
-        lock_deleted_at = NULL,
-        status = 'active',
-        access_pin = '999001'
-    WHERE id = (
-      SELECT id FROM rental_access_codes
-      WHERE order_id = ${orderId}
-      ORDER BY created_at DESC
-      LIMIT 1
+    INSERT INTO rental_access_codes (
+      order_id, customer_email, customer_phone, access_pin, pin_id,
+      start_time, end_time, status, pin_type, lock_confirmed_at, lock_deleted_at
+    ) VALUES (
+      ${orderId}, 'test@example.com', '', '999001', '${jobId}',
+      now(), now() + interval '2 days', 'active', 'bridge_proxied', NULL, NULL
     );
   `);
 
@@ -148,6 +154,7 @@ console.log("\nigloohome-webhook — job complete → lock_confirmed_at");
   );
   check("lock_confirmed_at was null before", before === "null", before);
   check("lock_confirmed_at set after webhook", after !== "null" && after !== "", after);
+  }
 }
 
 console.log("\nigloohome-webhook — bridge reconnect triggers reconciler");

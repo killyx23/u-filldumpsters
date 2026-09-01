@@ -1,14 +1,35 @@
 /**
- * Shared "PIN is ready" notification (email + SMS).
+ * Shared PIN customer notifications (email + SMS via send-booking-confirmation).
  *
- * Extracted from ensure-lock-pin-ready so both the reconciler and the
- * igloohome-webhook job-complete handler can notify the customer the moment
- * a PIN is actually confirmed on the lock, instead of waiting for the next
- * cron sweep.
+ * First message (pin_update) is claimed on bookings.pin_notification_sent_at.
+ * 1-hour reminder (pin_reminder) is claimed on bookings.pin_reminder_sent_at.
  */
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
+
+async function invokePinEmail(
+  supabase: SupabaseClient,
+  bookingId: unknown,
+  emailType: "pin_update" | "pin_reminder",
+  pin: string,
+  startTime: string,
+  endTime: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
+    body: {
+      booking_id: bookingId,
+      email_type: emailType,
+      pin,
+      start_time: startTime,
+      end_time: endTime,
+    },
+  });
+  if (error || data?.success === false) {
+    return { ok: false, error: error?.message || data?.error || String(data) };
+  }
+  return { ok: true };
+}
 
 export async function notifyPinReady(
   supabase: SupabaseClient,
@@ -17,60 +38,77 @@ export async function notifyPinReady(
   startTime: string,
   endTime: string,
 ): Promise<void> {
-  if (booking.pin_notification_sent_at) return;
+  const bookingId = booking.id;
+  if (bookingId == null) return;
 
-  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
-    body: {
-      booking_id: booking.id,
-      email_type: "pin_update",
-      pin,
-      start_time: startTime,
-      end_time: endTime,
-    },
-  });
-  if (error) {
-    console.error(`[pinNotify] Email notification failed for booking #${booking.id}:`, error.message);
-  } else {
-    const now = new Date().toISOString();
-    await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
+  const claimedAt = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabase
+    .from("bookings")
+    .update({ pin_notification_sent_at: claimedAt })
+    .eq("id", bookingId)
+    .is("pin_notification_sent_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) {
+    console.error(`[pinNotify] Claim failed for booking #${bookingId}:`, claimError.message);
+    return;
+  }
+  if (!claimed) return;
+
+  const sent = await invokePinEmail(supabase, bookingId, "pin_update", pin, startTime, endTime);
+  if (!sent.ok) {
+    console.error(`[pinNotify] Email notification failed for booking #${bookingId}:`, sent.error);
     await supabase
-      .from("rental_access_codes")
-      .update({ notified_at: now })
-      .eq("order_id", booking.id)
-      .eq("status", "active");
+      .from("bookings")
+      .update({ pin_notification_sent_at: null })
+      .eq("id", bookingId)
+      .eq("pin_notification_sent_at", claimedAt);
+    return;
   }
 
-  try {
-    const { data: customer } = await supabase
-      .from("customers")
-      .select("phone, sms_opt_in")
-      .eq("id", booking.customer_id)
-      .maybeSingle();
-    const phone = customer?.phone || booking.phone || "";
-    if (customer?.sms_opt_in === false || !phone) return;
-    const digits = String(phone).replace(/\D/g, "");
-    const to = digits.length === 10
-      ? `+1${digits}`
-      : digits.length === 11 && digits.startsWith("1")
-      ? `+${digits}`
-      : null;
-    if (!to) return;
-    const site = (Deno.env.get("SITE_URL") || "https://u-filldumpsters.com").replace(/\/$/, "");
-    const content =
-      `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. View: ${site}/customer-portal?tab=access-codes`;
-    const key = Deno.env.get("BREVO_API_KEY");
-    if (!key) return;
-    await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
-      method: "POST",
-      headers: { "api-key": key, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        sender: (Deno.env.get("BREVO_SMS_SENDER") || "UFillDump").slice(0, 11),
-        recipient: to,
-        content,
-        type: "transactional",
-      }),
-    });
-  } catch (err) {
-    console.error(`[pinNotify] SMS notification failed for booking #${booking.id}:`, err);
+  booking.pin_notification_sent_at = claimedAt;
+  await supabase
+    .from("rental_access_codes")
+    .update({ notified_at: claimedAt })
+    .eq("order_id", bookingId)
+    .eq("status", "active");
+}
+
+export async function notifyPinReminder(
+  supabase: SupabaseClient,
+  booking: Record<string, unknown>,
+  pin: string,
+  startTime: string,
+  endTime: string,
+): Promise<void> {
+  const bookingId = booking.id;
+  if (bookingId == null) return;
+  if (!booking.pin_notification_sent_at) return;
+
+  const claimedAt = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabase
+    .from("bookings")
+    .update({ pin_reminder_sent_at: claimedAt })
+    .eq("id", bookingId)
+    .is("pin_reminder_sent_at", null)
+    .not("pin_notification_sent_at", "is", null)
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) {
+    console.error(`[pinNotify] Reminder claim failed for booking #${bookingId}:`, claimError.message);
+    return;
+  }
+  if (!claimed) return;
+
+  const sent = await invokePinEmail(supabase, bookingId, "pin_reminder", pin, startTime, endTime);
+  if (!sent.ok) {
+    console.error(`[pinNotify] Reminder email failed for booking #${bookingId}:`, sent.error);
+    await supabase
+      .from("bookings")
+      .update({ pin_reminder_sent_at: null })
+      .eq("id", bookingId)
+      .eq("pin_reminder_sent_at", claimedAt);
   }
 }

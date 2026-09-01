@@ -374,6 +374,13 @@ allow_dynamic_registration = false
 # function runs. Deploy with: supabase functions deploy igloohome-webhook --no-verify-jwt
 verify_jwt = false
 
+[functions.reconcile-lock-pins]
+# Lock ticks: hourly 12am–5am America/Denver (UTC envelope 06–12).
+# Notify ticks: hourly all day with body { reason: "notify" } (12h PIN email + 1h reminder).
+# Also invoked by igloohome-webhook on bridge reconnect (lock work only).
+# Deploy with: supabase functions deploy reconcile-lock-pins --no-verify-jwt
+verify_jwt = false
+
 [functions.send-abandoned-checkout-reminder]
 # Invoked by pg_cron via pg_net with the service_role Bearer token. Keep JWT
 # verification on so only cron/service role can trigger mass reminder sends —
@@ -383,9 +390,11 @@ verify_jwt = true
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
-# `per_worker` (default) — enables hot reload during local development.
-# `oneshot` — fallback mode if hot reload causes issues (e.g. in large repos or with symlinks).
-policy = "per_worker"
+# `per_worker` keeps a warm isolate (~2–3 min). Cron every 5 minutes then
+# logs "wall clock duration warning" / "early termination" when that isolate
+# is recycled — it is not the function hanging. `oneshot` tears the isolate
+# down when the request ends, which keeps local cron logs readable.
+policy = "oneshot"
 # Port to attach the Chrome inspector for debugging edge functions.
 inspector_port = 8083
 # The Deno major version to use.
