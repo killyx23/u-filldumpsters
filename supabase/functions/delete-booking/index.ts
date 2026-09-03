@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getCorsHeaders } from "./cors.ts";
+import { getCorsHeaders } from './cors.ts';
 
 const ADMIN_DELETE_PASSWORD = Deno.env.get('ADMIN_DELETE_PASSWORD');
 
@@ -26,30 +26,84 @@ function bookingHasActiveEquipmentHold(booking) {
   return String(booking.status || '') === 'pending_payment';
 }
 
-Deno.serve(async (req)=>{
+function jsonError(corsHeaders, error, status) {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+async function requireAdminCaller(req, corsHeaders) {
+  const authHeader = req.headers.get('Authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return { error: jsonError(corsHeaders, 'Admin authentication required.', 401) };
+  }
+
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    return { error: jsonError(corsHeaders, 'Admin authentication required.', 401) };
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+
+  const { data: { user }, error: authError } = await userClient.auth.getUser();
+  if (authError || !user) {
+    return { error: jsonError(corsHeaders, 'Unauthorized. Please sign in again.', 401) };
+  }
+  if (user.app_metadata?.is_admin !== true) {
+    return { error: jsonError(corsHeaders, 'Admin access required.', 403) };
+  }
+
+  return { user, token };
+}
+
+Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: corsHeaders
-    });
+    return new Response('ok', { headers: corsHeaders });
   }
+
   try {
+    const adminAuth = await requireAdminCaller(req, corsHeaders);
+    if (adminAuth.error) return adminAuth.error;
+
     const { bookingId, password } = await req.json();
-    if (password !== ADMIN_DELETE_PASSWORD) {
-      return new Response(JSON.stringify({
-        error: 'Invalid password.'
-      }), {
-        status: 401,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json'
-        }
-      });
+
+    const configuredPassword = String(ADMIN_DELETE_PASSWORD || '').trim();
+    if (configuredPassword) {
+      if (password !== configuredPassword) {
+        return jsonError(corsHeaders, 'Invalid password.', 401);
+      }
+    } else {
+      // Local/dev fallback when ADMIN_DELETE_PASSWORD is not configured:
+      // still require a non-empty confirmation password from the admin UI.
+      console.warn(
+        '[delete-booking] ADMIN_DELETE_PASSWORD is not set — allowing delete for authenticated admin only.',
+      );
+      if (!password || String(password).trim().length === 0) {
+        return jsonError(
+          corsHeaders,
+          'Confirmation password is required.',
+          401,
+        );
+      }
     }
+
     if (!bookingId) {
       throw new Error('Booking ID is required.');
     }
-    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    );
 
     // Restock unpaid checkout holds before deleting (e.g. abandoned pending_payment)
     const { data: booking, error: bookingFetchError } = await supabaseAdmin
@@ -60,6 +114,8 @@ Deno.serve(async (req)=>{
 
     if (bookingFetchError) {
       console.error('[delete-booking] Failed to load booking before delete:', bookingFetchError);
+    } else if (!booking) {
+      return jsonError(corsHeaders, `Booking #${bookingId} was not found.`, 404);
     } else if (bookingHasActiveEquipmentHold(booking)) {
       const items = getEquipmentHoldItems(booking);
       if (items.length > 0) {
@@ -74,36 +130,54 @@ Deno.serve(async (req)=>{
       }
     }
 
-    // Cascade of deletions
-    // 1. booking_equipment
+    // Clear relationships that can block hard deletes
+    await supabaseAdmin
+      .from('pending_customers')
+      .update({ booking_id: null })
+      .eq('booking_id', bookingId);
+
+    await supabaseAdmin.from('abandoned_checkouts').delete().eq('booking_id', bookingId);
+    await supabaseAdmin.from('feedback_tokens').delete().eq('booking_id', bookingId);
+    await supabaseAdmin.from('unsubscribe_tokens').delete().eq('booking_id', bookingId);
+
+    // Clear self-referential reschedule links (no ON DELETE action)
+    await supabaseAdmin
+      .from('bookings')
+      .update({ rescheduled_to_booking_id: null })
+      .eq('rescheduled_to_booking_id', bookingId);
+    await supabaseAdmin
+      .from('bookings')
+      .update({ rescheduled_from_booking_id: null })
+      .eq('rescheduled_from_booking_id', bookingId);
+
     await supabaseAdmin.from('booking_equipment').delete().eq('booking_id', bookingId);
-    // 2. stripe_payment_info
     await supabaseAdmin.from('stripe_payment_info').delete().eq('booking_id', bookingId);
-    // 3. customer_notes associated with the booking
     await supabaseAdmin.from('customer_notes').delete().eq('booking_id', bookingId);
-    // 4. Finally, the booking itself
+
     const { error } = await supabaseAdmin.from('bookings').delete().eq('id', bookingId);
     if (error) {
       throw error;
     }
-    return new Response(JSON.stringify({
-      message: 'Booking successfully deleted.'
-    }), {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      }
-    });
+
+    console.log(
+      `[delete-booking] Deleted booking #${bookingId} by admin ${adminAuth.user.email || adminAuth.user.id}`,
+    );
+
+    return new Response(
+      JSON.stringify({ message: 'Booking successfully deleted.' }),
+      {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
   } catch (error) {
-    console.error("Delete Booking Error:", error);
-    return new Response(JSON.stringify({
-      error: error.message
-    }), {
-      status: 500,
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json'
-      }
-    });
+    console.error('Delete Booking Error:', error);
+    return jsonError(
+      corsHeaders,
+      error?.message || 'Failed to delete booking.',
+      500,
+    );
   }
 });

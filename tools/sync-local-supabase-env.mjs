@@ -269,6 +269,12 @@ function run() {
         ". Access codes will fail until you add them, then run: npm run dev:functions",
     );
   }
+  if (!functionsEnv.ADMIN_DELETE_PASSWORD?.trim()) {
+    console.warn(
+      "[sync-local-supabase-env] ADMIN_DELETE_PASSWORD is not set in supabase/functions/.env. " +
+        "Permanent booking delete still works for signed-in admins, but you should set a dedicated deletion password for production.",
+    );
+  }
   console.log("");
   console.log("Frontend must NOT use SECRET_KEY / service role — that stays in functions .env only.");
   console.log("Serve edge functions with: npm run dev:functions");

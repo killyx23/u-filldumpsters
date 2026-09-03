@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AlertTriangle, Loader2, Trash2 } from 'lucide-react';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 /**
  * Controlled password + confirm delete flow. Used standalone and from BookingRemovalDialog.
@@ -44,18 +45,18 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
         setIsLoading(true);
         setError('');
 
-        const { error: functionError } = await supabase.functions.invoke('delete-booking', {
+        const { data, error: functionError } = await supabase.functions.invoke('delete-booking', {
             body: { bookingId, password },
         });
 
         setIsLoading(false);
 
-        if (functionError) {
-            const message = functionError.context?.error?.error || functionError.message;
+        if (functionError || data?.error) {
+            const message = await parseEdgeFunctionError(functionError, data);
             toast({ title: 'Deletion Failed', description: message, variant: 'destructive' });
-            if (message === 'Invalid password.') {
+            if (/invalid password|confirmation password/i.test(message)) {
                 setStep('password');
-                setError('Incorrect password. Please try again.');
+                setError(message);
             } else {
                 handleClose();
             }
