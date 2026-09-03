@@ -28,7 +28,7 @@ function jsonResponse(corsHeaders: Record<string, string>, body: unknown, status
 
 const ALLOWED_REASONS = new Set(["left_early", "reminded", "expired"]);
 
-type SupabaseClient = ReturnType<typeof createClient>;
+type SupabaseClient = any;
 
 async function ensureBookingCustomer(
   supabase: SupabaseClient,

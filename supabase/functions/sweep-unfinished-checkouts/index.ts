@@ -22,8 +22,10 @@ function jsonResponse(corsHeaders: Record<string, string>, body: unknown, status
   });
 }
 
+type SupabaseClient = any;
+
 async function teardownAndEmail(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   bookingId: number,
   siteUrl: string,
 ): Promise<{ booking_id: number; ok: boolean; email_sent: boolean; error?: string }> {
