@@ -164,6 +164,13 @@ export const BookingsManager = ({ initialBookings, adminEmail, onBookingsChange 
                 </span>
             );
         }
+        if (booking.status === 'booking_not_finished') {
+            return (
+                <span className="flex items-center text-slate-300 bg-slate-500/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
+                    <Clock className="w-3 h-3 mr-1" /> Booking Not Finished
+                </span>
+            );
+        }
         if (booking.status === 'Confirmed') {
             return (
                 <span className="flex items-center text-green-400 bg-green-400/10 px-2 py-1 rounded text-xs font-semibold whitespace-nowrap">
@@ -204,6 +211,7 @@ export const BookingsManager = ({ initialBookings, adminEmail, onBookingsChange 
                             <SelectItem value="pending_verification">Pending Verification</SelectItem>
                             <SelectItem value="pending_review">Manual Review</SelectItem>
                             <SelectItem value="pending_payment">Pending Payment</SelectItem>
+                            <SelectItem value="booking_not_finished">Booking Not Finished</SelectItem>
                             <SelectItem value="Delivered">Active (Delivered)</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
                             <SelectItem value="Cancelled">Cancelled</SelectItem>

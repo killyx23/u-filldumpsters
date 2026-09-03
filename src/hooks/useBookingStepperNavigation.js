@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
 import {
@@ -25,6 +25,16 @@ export function useBookingStepperNavigation(routeStep) {
   const [requiresDriverVerification, setRequiresDriverVerification] = useState(
     contextRequiresDriver ?? true
   );
+
+  // Sync token + step immediately so leave dialog / teardown work before async pending fetch.
+  useLayoutEffect(() => {
+    if (!token) return;
+    updateFlowProgress({
+      currentStep: routeStep,
+      highestStep: Math.max(flowMeta.highestStep, routeStep),
+      pendingToken: token,
+    });
+  }, [token, routeStep, updateFlowProgress, flowMeta.highestStep]);
 
   useEffect(() => {
     const syncFromPending = async () => {

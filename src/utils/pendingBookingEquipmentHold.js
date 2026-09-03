@@ -141,7 +141,7 @@ async function clearHoldFlagOnly(booking) {
 }
 
 /**
- * Release equipment hold and mark pending_payment booking Cancelled.
+ * Release equipment hold and mark pending_payment booking as booking_not_finished.
  */
 export async function cancelPendingPaymentBooking(booking, { notes } = {}) {
   if (!booking?.id) return { success: false, error: 'Missing booking' };
@@ -163,23 +163,24 @@ export async function cancelPendingPaymentBooking(booking, { notes } = {}) {
   }
 
   const row = fresh || booking;
-  if (String(row.status) === 'Cancelled') {
+  const statusLower = String(row.status || '').toLowerCase();
+  if (statusLower === 'cancelled' || statusLower === 'booking_not_finished') {
     clearRememberedPaymentEquipmentHold();
     return { success: true, alreadyCancelled: true };
   }
 
   // Only auto-cancel unpaid checkout holds — never touch paid bookings here
-  if (String(row.status) !== 'pending_payment' && row.addons?.equipment_hold_active !== true) {
+  if (statusLower !== 'pending_payment' && row.addons?.equipment_hold_active !== true) {
     return { success: true, skipped: true };
   }
 
-  if (String(row.status) !== 'pending_payment') {
+  if (statusLower !== 'pending_payment') {
     clearRememberedPaymentEquipmentHold();
     return { success: true, releasedOnly: true };
   }
 
   const archiveDetails = buildArchiveDetails({
-    action: 'cancelled',
+    action: 'booking_not_finished',
     initiatedBy: 'customer',
     adminEmail: null,
     booking: row,
@@ -190,7 +191,7 @@ export async function cancelPendingPaymentBooking(booking, { notes } = {}) {
   const { error: updateError } = await supabase
     .from('bookings')
     .update({
-      status: 'Cancelled',
+      status: 'booking_not_finished',
       archive_details: archiveDetails,
       addons: {
         ...(row.addons || {}),

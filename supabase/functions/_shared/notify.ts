@@ -44,7 +44,7 @@ export async function sendEmail(
   toEmail: string,
   subject: string,
   htmlContent: string,
-  maxRetries = 2,
+  maxRetries = 4,
 ): Promise<SendEmailResult> {
   let lastError: string | null = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

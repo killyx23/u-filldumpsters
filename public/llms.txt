@@ -1,6 +1,7 @@
 ## Pages
 - [- Our Store](/productdetail): No description available
 - [| U-Fill Dumpsters](/resourcedetail): No description available
+- [About Us - U-Fill Dumpsters](/about): Built by DIYers, for DIYers. Learn how U-Fill Dumpsters created a contact-free way to rent compact equipment across the Wasatch Front.
 - [Access Codes - Customer Portal](/accesscodes): View your trailer rental access codes and instructions
 - [Booking Receipt - U-Fill Dumpsters](/receipt): Your U-Fill Dumpsters booking receipt with complete details.
 - [Contact Us - U-Fill Dumpsters](/contact): Get in touch with U-Fill Dumpsters for any questions about our services, bookings, or support. We
@@ -10,6 +11,7 @@
 - [Edge Function Diagnostics - Igloohome Integration](/edgefunctiondiagnostic): No description available
 - [FAQ - U-Fill Dumpsters](/faq): Find answers to frequently asked questions about our dumpster rental services, pricing, allowed materials, and booking process.
 - [Gorilla Heavy-Duty Dump Cart - Product Showcase | U-Fill Dumpsters](/productshowcase): Explore the Gorilla Heavy-Duty Dump Cart - a professional-grade material handling solution with 1,200 lb capacity, patented quick-release dumping system, and all-terrain capability.
+- [How Can We Do Better - U-Fill Dumpsters](/howcanwedobetter): Tell U-Fill Dumpsters how we can serve you better. Share feedback after leaving checkout.
 - [Igloohome OAuth Diagnostic - Admin](/igloohomedebug): No description available
 - [Loading - Customer Portal](/customerportaldashboard): No description available
 - [Resource Library | U-Fill Dumpsters](/resourcelibrary): Access our library of helpful guides, videos, and documents to make your dumpster rental experience seamless.

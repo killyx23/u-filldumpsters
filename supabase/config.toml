@@ -387,6 +387,20 @@ verify_jwt = false
 # but the Authorization header from vault must be present (see migration cron).
 verify_jwt = true
 
+[functions.end-unfinished-checkout]
+# pagehide keepalive beacons use the anon apikey (no user JWT). Deploy with:
+# supabase functions deploy end-unfinished-checkout --no-verify-jwt
+verify_jwt = false
+
+[functions.unsubscribe]
+# Public unsubscribe link from survey email. Deploy with:
+# supabase functions deploy unsubscribe --no-verify-jwt
+verify_jwt = false
+
+[functions.sweep-unfinished-checkouts]
+# Invoked by pg_cron with the service_role Bearer token.
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -14,6 +14,7 @@ import React from 'react';
             'flagged': 'bg-red-500/20 text-red-300',
             'waiting_to_be_returned': 'bg-purple-500/20 text-purple-300',
             'Cancelled': 'bg-gray-500/20 text-gray-300',
+            'booking_not_finished': 'bg-slate-500/20 text-slate-300',
         };
 
         const statusText = {
@@ -27,6 +28,7 @@ import React from 'react';
             'Completed': 'Completed',
             'flagged': 'Flagged for Follow-up',
             'Cancelled': 'Cancelled',
+            'booking_not_finished': 'Booking Not Finished',
         };
 
         const displayStatus = statusText[status] || status.replace(/_/g, ' ');

@@ -39,6 +39,7 @@ export const BookingConfirmation = () => {
   const [pointsAwarded, setPointsAwarded] = useState(0);
   const [referralPendingAward, setReferralPendingAward] = useState(0);
   const [isPortalNavigating, setIsPortalNavigating] = useState(false);
+  const [sentEmailType, setSentEmailType] = useState(null);
 
   const navigate = useNavigate();
   const receiptRef = useRef();
@@ -110,6 +111,39 @@ export const BookingConfirmation = () => {
     }
   };
 
+  const resolveEmailKind = (emailType, booking = bookingDetails) => {
+    if (emailType === 'pending_verification' || emailType === 'pending_review' || emailType === 'confirmation' || emailType === 'refund') {
+      return emailType;
+    }
+    const status = booking?.status;
+    if (status === 'pending_verification') return 'pending_verification';
+    if (status === 'pending_review') return 'pending_review';
+    const skipStillOpen =
+      (booking?.was_verification_skipped || booking?.addons?.wasVerificationSkipped) &&
+      !['Confirmed', 'confirmed', 'Cancelled', 'cancelled', 'Completed', 'completed'].includes(status);
+    if (skipStillOpen) return 'pending_verification';
+    return 'confirmation';
+  };
+
+  const emailToastCopy = (emailKind) => {
+    if (emailKind === 'pending_verification') {
+      return {
+        title: 'Action Required Email Sent',
+        description: 'We emailed instructions to finish your ID, license, and insurance verification.',
+      };
+    }
+    if (emailKind === 'pending_review') {
+      return {
+        title: 'Action Required Email Sent',
+        description: 'We emailed next steps while your booking is on hold.',
+      };
+    }
+    return {
+      title: 'Email Sent',
+      description: 'A confirmation email has been sent to your inbox.',
+    };
+  };
+
   const resendConfirmationEmail = async () => {
     if (!bookingId) return false;
 
@@ -132,11 +166,10 @@ export const BookingConfirmation = () => {
         throw new Error(data?.error || data?.details || 'Failed to resend confirmation email.');
       }
 
+      const emailKind = resolveEmailKind(data?.email_type || data?.emailType);
+      setSentEmailType(emailKind);
       setFinalizeStatus('done');
-      toast({
-        title: 'Email Sent',
-        description: 'A confirmation email has been sent to your inbox.',
-      });
+      toast(emailToastCopy(emailKind));
       return true;
     } catch (err) {
       console.error('[BookingConfirmation] Resend confirmation email error:', err);
@@ -233,12 +266,11 @@ export const BookingConfirmation = () => {
       }
 
       if (data?.emailSent) {
+        const emailKind = resolveEmailKind(data?.emailType, data?.booking || bookingDetails);
+        setSentEmailType(emailKind);
         setFinalizeStatus('done');
-        console.log(`[${timestamp}] [BookingConfirmation] ✓ Confirmation email sent successfully`);
-        toast({
-          title: 'Email Sent',
-          description: 'A confirmation email has been sent to your inbox.',
-        });
+        console.log(`[${timestamp}] [BookingConfirmation] ✓ Booking email sent successfully`, emailKind);
+        toast(emailToastCopy(emailKind));
       } else {
         setFinalizeStatus('email_failed');
         setFinalizeError(data?.emailError || 'Confirmation email could not be sent.');
@@ -598,6 +630,17 @@ export const BookingConfirmation = () => {
   const totalPaid = resolveBookingGrandTotal(bookingDetails);
 
   const bookingFinalized = finalizeStatus === 'done' || finalizeStatus === 'email_failed';
+  const isStillUnconfirmedSkip =
+    (bookingDetails.was_verification_skipped || bookingDetails.addons?.wasVerificationSkipped) &&
+    !['Confirmed', 'confirmed', 'Cancelled', 'cancelled', 'Completed', 'completed'].includes(bookingDetails.status);
+  const isPendingVerification =
+    sentEmailType === 'pending_verification' ||
+    bookingDetails.status === 'pending_verification' ||
+    isStillUnconfirmedSkip;
+  const isPendingReview =
+    sentEmailType === 'pending_review' ||
+    bookingDetails.status === 'pending_review';
+  const isActionRequired = isPendingVerification || isPendingReview;
 
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
@@ -627,12 +670,12 @@ export const BookingConfirmation = () => {
           : 'text-blue-300'
         }`}>
           {finalizeStatus === 'done'
-            ? '✓ Booking Confirmed & Email Sent'
+            ? (isActionRequired ? '✓ Payment Received — Action Email Sent' : '✓ Booking Confirmed & Email Sent')
             : finalizeStatus === 'email_failed'
-            ? '✓ Booking Confirmed — Email Not Sent'
+            ? (isActionRequired ? '✓ Payment Received — Email Not Sent' : '✓ Booking Confirmed — Email Not Sent')
             : finalizeStatus === 'failed'
             ? '⚠ Confirmation Issue'
-            : 'Sending confirmation email...'}
+            : 'Sending your booking email...'}
         </p>
 
         <p className={`text-sm mb-3 ${
@@ -642,12 +685,14 @@ export const BookingConfirmation = () => {
           : 'text-blue-100/80'
         }`}>
           {finalizeStatus === 'done'
-            ? `A confirmation email has been sent to ${bookingDetails.email}. Your booking is secured.`
+            ? (isActionRequired
+              ? `We emailed ${bookingDetails.email} with what you still need to finish before this booking can be confirmed.`
+              : `A confirmation email has been sent to ${bookingDetails.email}. Your booking is secured.`)
             : finalizeStatus === 'email_failed'
-            ? `Your booking is secured, but we could not send the confirmation email${finalizeError ? `: ${finalizeError}` : ''}. You can retry below or use your receipt on this page.`
+            ? `Your payment was received, but we could not send the email${finalizeError ? `: ${finalizeError}` : ''}. You can retry below or use your receipt on this page.`
             : finalizeStatus === 'failed'
             ? `We encountered an issue finalizing your booking: ${finalizeError}. If payment succeeded, check your portal or contact support.`
-            : 'Recording your payment and sending your confirmation email. This only takes a moment.'}
+            : 'Recording your payment and sending your booking email. This only takes a moment.'}
         </p>
 
         {(finalizeStatus === 'email_failed' || finalizeStatus === 'failed') && (
@@ -677,14 +722,24 @@ export const BookingConfirmation = () => {
         <div className="bg-slate-900/80 backdrop-blur-md p-8 rounded-2xl border border-white/20 shadow-2xl max-w-3xl w-full text-center">
 
           <div className="flex justify-center mb-6">
-            <div className="h-24 w-24 bg-green-500/20 rounded-full flex items-center justify-center border-4 border-green-400">
-              <CheckCircle className="w-12 h-12 text-green-400" />
+            <div className={`h-24 w-24 rounded-full flex items-center justify-center border-4 ${
+              isActionRequired
+                ? 'bg-orange-500/20 border-orange-400'
+                : 'bg-green-500/20 border-green-400'
+            }`}>
+              {isActionRequired
+                ? <AlertTriangle className="w-12 h-12 text-orange-400" />
+                : <CheckCircle className="w-12 h-12 text-green-400" />}
             </div>
           </div>
 
-          <h1 className="text-4xl font-bold text-white mb-4">Booking Confirmed!</h1>
+          <h1 className="text-4xl font-bold text-white mb-4">
+            {isActionRequired ? 'Action Required' : 'Booking Confirmed!'}
+          </h1>
           <p className="text-xl text-blue-200 mb-8">
-            Thank you for choosing U-Fill Dumpsters. Your order #{bookingDetails.id} is secured.
+            {isActionRequired
+              ? `Thank you for choosing U-Fill Dumpsters. Payment for order #${bookingDetails.id} was received — finish verification to confirm your booking.`
+              : `Thank you for choosing U-Fill Dumpsters. Your order #${bookingDetails.id} is secured.`}
           </p>
 
           <FinalizeBanner />
@@ -801,9 +856,7 @@ export const BookingConfirmation = () => {
             </div>
           </div>
 
-          {(bookingDetails.was_verification_skipped ||
-            bookingDetails.status === 'pending_verification' ||
-            bookingDetails.addons?.wasVerificationSkipped) && (
+          {isPendingVerification && (
             <div className="bg-orange-900/40 border border-orange-500/50 p-5 rounded-xl mb-6 text-left shadow-lg">
               <h3 className="text-lg font-bold text-orange-300 mb-2 flex items-center">
                 <AlertTriangle className="mr-2 h-5 w-5" />

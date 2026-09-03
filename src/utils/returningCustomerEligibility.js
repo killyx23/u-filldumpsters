@@ -8,6 +8,7 @@ const NON_QUALIFYING_ONLY_STATUSES = new Set([
   'pending_verification',
   'pending_review',
   'rescheduled',
+  'booking_not_finished',
 ]);
 
 /**

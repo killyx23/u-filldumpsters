@@ -35,7 +35,16 @@ import {
   cancelPendingPaymentBookingById,
   clearRememberedPaymentEquipmentHold,
   clearEquipmentHoldFlagWithoutRestock,
+  getRememberedPaymentHoldBookingId,
 } from '@/utils/pendingBookingEquipmentHold';
+import {
+  setPaymentInFlight,
+  wasIdlePromptShownLocal,
+  markIdlePromptShownOnBooking,
+  clearIdlePromptShownLocal,
+  clearCheckoutTeardownDone,
+} from '@/utils/checkoutIdleGuard';
+import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -88,6 +97,7 @@ const CategoryHeader = ({ icon, title }) => (
 const CheckoutForm = ({ 
   onBack,
   bookingId,
+  pendingToken,
   bookingData,
   plan,
   addonsData,
@@ -177,6 +187,7 @@ const CheckoutForm = ({
     }
 
     setIsProcessing(true);
+    setPaymentInFlight(true);
 
     try {
       if (isDeliveryService && delivery_location_verified) {
@@ -216,6 +227,7 @@ const CheckoutForm = ({
           variant: "destructive" 
         });
         setIsProcessing(false);
+        setPaymentInFlight(false);
         return;
       }
 
@@ -223,6 +235,12 @@ const CheckoutForm = ({
 
       // Paid — keep stock allocated; stop treating this as an unpaid hold
       clearRememberedPaymentEquipmentHold();
+      clearIdlePromptShownLocal();
+      publishCheckoutSyncEvent({
+        type: 'completed',
+        pendingId: pendingToken,
+        bookingId,
+      });
       if (bookingId) {
         clearEquipmentHoldFlagWithoutRestock(bookingId).catch((err) => {
           console.warn('[PaymentPage] Could not clear equipment hold flag after payment:', err);
@@ -238,6 +256,7 @@ const CheckoutForm = ({
     } catch (err) {
       console.error(`[${new Date().toISOString()}] [PaymentPage] Unexpected error:`, err);
       setIsProcessing(false);
+      setPaymentInFlight(false);
       setFormError("An error occurred during payment processing.");
       toast({
         title: 'Payment Error',
@@ -671,6 +690,19 @@ export const PaymentPage = ({ onBack }) => {
           return;
         }
 
+        const { data: completion } = await supabase.rpc('get_checkout_completion_status', {
+          p_pending_id: pendingId,
+        });
+        if (completion?.completed && completion.booking_id) {
+          publishCheckoutSyncEvent({
+            type: 'completed',
+            pendingId,
+            bookingId: completion.booking_id,
+          });
+          window.location.href = `${window.location.origin}/confirmation?booking_id=${completion.booking_id}`;
+          return;
+        }
+
         console.log(`[${timestamp}] [PaymentPage] ✓ Retrieved pending customer data:`, pendingRecord);
 
         // Reconstruct booking data from pending_customers
@@ -712,6 +744,35 @@ export const PaymentPage = ({ onBack }) => {
 
     retrieveBookingData();
   }, [searchParams, navigate]);
+
+  // Do not resume a booking already torn down as unfinished
+  useEffect(() => {
+    const rememberedId = getRememberedPaymentHoldBookingId();
+    if (!rememberedId) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('bookings')
+        .select('id, status')
+        .eq('id', rememberedId)
+        .maybeSingle();
+      if (cancelled) return;
+      const status = String(data?.status || '').toLowerCase();
+      if (
+        !data ||
+        status === 'booking_not_finished' ||
+        status === 'cancelled' ||
+        status === 'canceled'
+      ) {
+        clearRememberedPaymentEquipmentHold();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Create actual booking from pending_customers data once pricing is loaded
   useEffect(() => {
@@ -768,6 +829,7 @@ export const PaymentPage = ({ onBack }) => {
           status: 'pending_payment',
           was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
+          pending_customer_id: pendingData.id,
           distance_miles: Number(
             pendingData.addons_data?.oneWayDistanceMiles ||
               pendingData.distance_miles ||
@@ -808,8 +870,23 @@ export const PaymentPage = ({ onBack }) => {
 
         console.log(`[${timestamp}] [PaymentPage] ✓ Booking created with ID: ${data.id}`);
         setBookingId(data.id);
+
+        if (data.already_converted) {
+          publishCheckoutSyncEvent({
+            type: 'completed',
+            pendingId: pendingData.id,
+            bookingId: data.id,
+          });
+          window.location.href = `${window.location.origin}/confirmation?booking_id=${data.id}`;
+          return { already_converted: true, id: data.id };
+        }
+
         // Remember unpaid booking for Leave Booking on ALL services (not only equipment holds)
         rememberPaymentEquipmentHold(data.id);
+        clearCheckoutTeardownDone();
+        if (wasIdlePromptShownLocal()) {
+          void markIdlePromptShownOnBooking(data.id);
+        }
         if (normalizedReferralCode && typeof window !== 'undefined') {
           window.sessionStorage.setItem(`referral_applied_${data.id}`, normalizedReferralCode);
         }
@@ -860,8 +937,9 @@ export const PaymentPage = ({ onBack }) => {
           }
         }
 
-        // Decrement equipment quantities if needed (hold until payment or abandon)
-        if (pendingData.addons_data?.equipment?.length > 0) {
+        // Decrement equipment only for a new hold — reused rows already decremented.
+        const holdAlreadyActive = Boolean(data.reused && data.equipment_hold_active);
+        if (!holdAlreadyActive && pendingData.addons_data?.equipment?.length > 0) {
           console.log(`[${timestamp}] [PaymentPage] Decrementing equipment quantities...`);
           const equipmentToDecrement = pendingData.addons_data.equipment.map(item => ({
             equipment_id: item.dbId || item.equipment_id,
@@ -875,8 +953,11 @@ export const PaymentPage = ({ onBack }) => {
           } else {
             await markEquipmentHoldActive(data.id, bookingPayload.addons);
           }
+        } else if (data.reused) {
+          rememberPaymentEquipmentHold(data.id);
         }
 
+        return { already_converted: false, id: data.id };
       } catch (error) {
         console.error(`[${timestamp}] [PaymentPage] Failed to create booking:`, error);
         throw error;
@@ -918,7 +999,8 @@ export const PaymentPage = ({ onBack }) => {
 
         setValidatedTotal(finalTotal);
         
-        await createActualBooking(bookingData, pendingCustomerData, finalTotal, calcResult);
+        const created = await createActualBooking(bookingData, pendingCustomerData, finalTotal, calcResult);
+        if (created?.already_converted) return;
         setBookingCreated(true);
       } catch (err) {
         console.error(`[${timestamp}] [PaymentPage] Pricing validation/booking creation failed:`, err);
@@ -1320,6 +1402,7 @@ export const PaymentPage = ({ onBack }) => {
         <CheckoutForm 
           onBack={onBack}
           bookingId={bookingId}
+          pendingToken={pendingCustomerData?.id || searchParams.get('bookingId')}
           bookingData={bookingData}
           plan={plan}
           addonsData={addonsData}

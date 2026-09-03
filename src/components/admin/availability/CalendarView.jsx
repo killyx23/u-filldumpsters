@@ -18,6 +18,7 @@ const WeatherIcon = ({ condition }) => {
 
 const getEventColor = (status) => {
     if (status === 'pending_payment') return '#ef4444'; // Red
+    if (status === 'booking_not_finished') return '#64748b'; // Slate
     if (status === 'Confirmed') return '#facc15'; // Yellow
     if (status === 'Completed') return '#22c55e'; // Green
     if (status === 'flagged') return '#f97316'; // Orange

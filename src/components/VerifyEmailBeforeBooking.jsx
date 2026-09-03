@@ -22,6 +22,9 @@ import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
+import { getAppOrigin } from '@/utils/getAppOrigin';
+import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
 
@@ -337,21 +340,30 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         };
     }, [plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, taxOptions]);
 
-    const handleSendCode = async () => {
+    const handleSendCode = async (retryAttempt = 0) => {
         const timestamp = new Date().toISOString();
         console.log(`[${timestamp}] [VerifyEmailBeforeBooking] handleSendCode triggered`);
-        console.log(`[${timestamp}] [VerifyEmailBeforeBooking] Email to send code to:`, bookingData.email);
-        
+        console.log(`[${timestamp}] [VerifyEmailBeforeBooking] Email to send code to:`, bookingData?.email);
+
+        if (!token || !bookingData?.email) {
+            toast({
+                title: 'Not ready yet',
+                description: 'Please wait for your booking details to finish loading, then try again.',
+                variant: 'destructive',
+            });
+            return;
+        }
+
         setStatus('sending');
-        
+
         try {
             console.log(`[${timestamp}] [VerifyEmailBeforeBooking] Invoking send-verification-email function`);
             const { data, error } = await supabase.functions.invoke('send-verification-email', {
                 body: {
                     email: bookingData.email,
-                    name: `${bookingData.firstName} ${bookingData.lastName}`.trim(),
+                    name: `${bookingData.firstName || ''} ${bookingData.lastName || ''}`.trim() || 'Customer',
                     pending_customer_id: token,
-                    site_url: typeof window !== 'undefined' ? window.location.origin : undefined
+                    site_url: getAppOrigin(),
                 }
             });
 
@@ -359,9 +371,11 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] send-verification-email response:`, { data, error });
 
             if (error) {
-                console.error(`[${responseTs}] [VerifyEmailBeforeBooking] Error from send-verification-email:`, error);
-                const errData = await error.context?.json().catch(() => null);
-                throw new Error(errData?.error || error.message || 'Failed to send verification email');
+                const message = await parseEdgeFunctionError(error, data);
+                throw new Error(message);
+            }
+            if (data?.error) {
+                throw new Error(data.error);
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Verification code sent successfully`);
@@ -373,6 +387,12 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         } catch (err) {
             const catchTs = new Date().toISOString();
             console.error(`[${catchTs}] [VerifyEmailBeforeBooking] Exception in handleSendCode:`, err);
+
+            if (retryAttempt < 1) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+                return handleSendCode(retryAttempt + 1);
+            }
+
             setStatus('idle');
             toast({
                 title: 'Failed to send code',
@@ -432,6 +452,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             if (typeof window !== 'undefined') {
                 window.sessionStorage.setItem(`verified_email_${String(bookingData.email || '').toLowerCase()}`, String(Date.now()));
             }
+            publishCheckoutSyncEvent({ type: 'verified', pendingId: token });
             setStatus('verified');
 
             const hydratedPlan = plan || (pendingRecord ? await hydratePlanFromPending(pendingRecord) : null);
@@ -876,6 +897,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                 We need to verify <strong className="text-yellow-300">{bookingData?.email}</strong>{' '}
                                 to secure your booking and send your receipt.
                             </p>
+                            <p className="text-gray-400 text-xs mt-3">
+                                If you confirm from the email, that link may open a new tab. Finish the booking there, then close this tab — leaving it open can start a timeout on this screen.
+                            </p>
                         </div>
 
                         <AnimatePresence mode="wait">
@@ -887,8 +911,9 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                     exit={{ opacity: 0 }}
                                 >
                                     <Button
-                                        onClick={handleSendCode}
-                                        className="w-full py-6 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                                        onClick={() => handleSendCode()}
+                                        disabled={!bookingData?.email || !token}
+                                        className="w-full py-6 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
                                     >
                                         Send Verification Code
                                     </Button>

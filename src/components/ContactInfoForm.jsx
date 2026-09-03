@@ -15,6 +15,7 @@ export const ContactInfoForm = ({
     onSubmit,
     onBack,
     usedReturningCustomerLink = false,
+    isProcessing = false,
 }) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
     const { isReturning, pastBookingsCount, loading: detectingReturning, detectionError } = useReturningCustomerDetection(
@@ -42,9 +43,10 @@ export const ContactInfoForm = ({
         return true;
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        
+        if (isProcessing) return;
+
         const trimmedFirstName = (bookingData.firstName || '').trim();
         const trimmedLastName = (bookingData.lastName || '').trim();
 
@@ -67,7 +69,7 @@ export const ContactInfoForm = ({
 
         if (!validatePhoneNumber()) return;
         
-        onSubmit();
+        await onSubmit();
     };
 
     const handleManualAddressChange = (field, value) => {
@@ -195,8 +197,13 @@ export const ContactInfoForm = ({
                         </div>
 
                         <div className="pt-4">
-                            <Button type="submit" className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50">
-                                Continue to Terms & Conditions <ArrowRight className="ml-2 h-5 w-5" />
+                            <Button
+                                type="submit"
+                                disabled={isProcessing}
+                                className="w-full py-6 text-lg font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg shadow-blue-900/50 disabled:opacity-60"
+                            >
+                                {isProcessing ? 'Saving…' : 'Continue to Terms & Conditions'}
+                                {!isProcessing && <ArrowRight className="ml-2 h-5 w-5" />}
                             </Button>
                             <UiControlGuide
                                 stepTitle="Contact Info"

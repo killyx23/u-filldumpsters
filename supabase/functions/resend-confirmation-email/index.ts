@@ -45,8 +45,9 @@ Deno.serve(async (req)=>{
       console.log(`[${timestamp}] [resend-confirmation-email] SUCCESS: Email resent successfully`);
       return new Response(JSON.stringify({
         success: true,
-        message: "Confirmation email resent successfully",
-        recipient: result.recipient
+        message: result.message || "Confirmation email resent successfully",
+        recipient: result.recipient,
+        email_type: result.email_type || result.emailType || "confirmation",
       }), {
         status: 200,
         headers: {

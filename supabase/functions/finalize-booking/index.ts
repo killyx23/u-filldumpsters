@@ -30,7 +30,11 @@ async function sendBookingConfirmationEmail(bookingId: number | string, siteUrl?
   }
 
   if (response.ok && result.success === true) {
-    return { sent: true as const, recipient: result.recipient ?? null };
+    return {
+      sent: true as const,
+      recipient: result.recipient ?? null,
+      emailType: String(result.email_type || "confirmation"),
+    };
   }
 
   const errorMessage = String(
@@ -131,10 +135,12 @@ Deno.serve(async (req)=>{
 
       await upsertTaxLedgerForBooking(booking);
       let emailError: string | null = null;
+      let emailType: string | null = null;
       const emailResult = await sendBookingConfirmationEmail(booking.id, siteUrl);
       if (emailResult.sent) {
         emailSent = true;
-        log("Confirmation email catch-up sent successfully.");
+        emailType = emailResult.emailType;
+        log("Booking email catch-up sent successfully.", emailType);
       } else {
         emailError = emailResult.error;
       }
@@ -157,6 +163,7 @@ Deno.serve(async (req)=>{
         alreadyProcessed: true,
         emailSent,
         emailError,
+        emailType,
         status: booking.status,
         loyalty: {
           pointsAwarded,
@@ -301,6 +308,21 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to update booking status: ${updateError?.message ?? "unknown"}`);
     }
     log("Booking status updated", finalStatus);
+
+    // If customer saw the idle "still here" prompt and then paid, mark CRM converted
+    if (updatedBooking.addons?.idle_prompt_shown === true) {
+      const { error: convertedError } = await supabase.rpc("upsert_abandoned_checkout_from_booking", {
+        p_booking_id: bookingId,
+        p_status: "converted",
+        p_set_reminder_sent: false,
+      });
+      if (convertedError) {
+        console.error("[finalize-booking] converted abandoned_checkout upsert failed:", convertedError);
+      } else {
+        log("Abandoned checkout marked converted after idle-prompt recovery.");
+      }
+    }
+
     // ----------------------------------------------------------------
     // Step 5b: Loyalty, coupon, and referral side effects
     // ----------------------------------------------------------------
@@ -523,13 +545,15 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     // Step 9: Send confirmation email
     // ----------------------------------------------------------------
-    log("Sending booking confirmation email…");
+    log("Sending booking email…");
     let emailSent = false;
     let emailError: string | null = null;
+    let emailType: string | null = null;
     const emailResult = await sendBookingConfirmationEmail(updatedBooking.id, siteUrl);
     if (emailResult.sent) {
       emailSent = true;
-      log("Confirmation email sent successfully.");
+      emailType = emailResult.emailType;
+      log("Booking email sent successfully.", emailType);
     } else {
       emailError = emailResult.error;
     }
@@ -546,6 +570,7 @@ Deno.serve(async (req)=>{
       status: finalStatus,
       emailSent,
       emailError,
+      emailType,
       booking: updatedBooking,
       loyalty: loyaltyOutcome
     }), {

@@ -55,6 +55,8 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
         case 'Confirmed':
         case 'Rescheduled':
             return { text: 'Scheduled', class: 'badge-scheduled', icon: <Clock className="h-3 w-3" /> };
+        case 'booking_not_finished':
+            return { text: 'Booking Not Finished', class: 'badge-cancelled', icon: <XCircle className="h-3 w-3" /> };
         case 'in_transit':
         case 'Delivered':
         case 'waiting_to_be_returned':

@@ -6,6 +6,7 @@ import { ReturningCustomerEmailGate } from '@/components/ReturningCustomerEmailG
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
 
 export const CheckoutEmailVerificationStep = ({
   email,
@@ -15,6 +16,9 @@ export const CheckoutEmailVerificationStep = ({
   isReturningCustomer = false,
 }) => {
   const handleVerified = ({ email: verifiedEmail, customer }) => {
+    if (pendingToken) {
+      publishCheckoutSyncEvent({ type: 'verified', pendingId: pendingToken });
+    }
     const mapped = customer ? mapCustomerToBookingData(customer, verifiedEmail) : null;
     onVerified?.({
       ...(mapped || {}),
@@ -54,6 +58,9 @@ export const CheckoutEmailVerificationStep = ({
               : 'Please verify the email address for this booking before continuing to driver and vehicle verification.'}
           </p>
         </div>
+        <p className="mb-6 text-xs text-blue-200/90">
+          If you confirm from the email, that link may open a new tab. Finish the booking there, then close this tab — leaving it open can start a timeout on this screen.
+        </p>
 
         <ReturningCustomerEmailGate
           email={email}

@@ -143,7 +143,13 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       pickup_time_slot: bookingData.pickupTimeSlot || null,
       notes: bookingData.notes || null,
       service_id: serviceId,
-      plan_data: null,
+      plan_data: plan
+        ? {
+            id: plan.id,
+            name: plan.name,
+            customer_pickup: plan.customer_pickup ?? null,
+          }
+        : null,
       addons_data: addonsWithFeeSnapshot || null,
       booking_data: {
         ...(bookingData || {}),

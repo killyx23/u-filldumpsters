@@ -251,6 +251,16 @@ export const VerificationManager = ({ customer, bookings = [], onUpdate }) => {
         if (noteError) {
             console.warn('[VerificationManager] customer_notes insert failed:', noteError);
         }
+
+        const siteUrl = typeof window !== 'undefined' ? window.location.origin : undefined;
+        await Promise.all(bookingIds.map(async (id) => {
+            const { error: emailError } = await supabase.functions.invoke('send-booking-confirmation', {
+                body: { bookingId: id, site_url: siteUrl },
+            });
+            if (emailError) {
+                console.warn('[VerificationManager] confirmation email failed for booking', id, emailError);
+            }
+        }));
     };
 
     const performSave = async ({ nextFront, nextBack, nextInsurance, isFirstCompleteSubmit }) => {
@@ -296,7 +306,7 @@ export const VerificationManager = ({ customer, bookings = [], onUpdate }) => {
         toast({
             title: isFirstCompleteSubmit ? 'Verification Complete' : 'Verification Info Updated!',
             description: isFirstCompleteSubmit
-                ? 'Thank you. Your documents have been submitted and your booking verification is complete.'
+                ? 'Thank you. Your documents have been submitted and a booking confirmation email is on the way.'
                 : 'Your information has been submitted for review.',
         });
         if (onUpdate) onUpdate();

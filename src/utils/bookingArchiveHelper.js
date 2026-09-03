@@ -51,6 +51,7 @@ export const ARCHIVED_STATUSES = new Set([
   'flagged',
   'Cancelled',
   'Rescheduled',
+  'booking_not_finished',
 ]);
 
 export const ACTIVE_HISTORY_EXCLUDED_STATUSES = new Set([
@@ -62,6 +63,7 @@ export const ACTIVE_HISTORY_EXCLUDED_STATUSES = new Set([
   'pending_review',
   'pending_payment',
   'cancellation_pending',
+  'booking_not_finished',
 ]);
 
 export function isActiveBookingForHistory(booking) {

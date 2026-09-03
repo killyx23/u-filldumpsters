@@ -3,17 +3,24 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LeaveBookingDialog } from '@/components/LeaveBookingDialog';
+import { StillHereDialog } from '@/components/StillHereDialog';
+import { useCheckoutIdleGuard } from '@/hooks/useCheckoutIdleGuard';
 import {
-  releaseRememberedPaymentEquipmentHold,
-  sendEarlyLeaveFeedbackEmail,
-} from '@/utils/pendingBookingEquipmentHold';
+  endUnfinishedCheckout,
+  clearIdlePromptShownLocal,
+  resolveCheckoutContext,
+  resolveTeardownTarget,
+  BOOKING_FLOW_STORAGE_KEY,
+} from '@/utils/checkoutIdleGuard';
+import { toast } from '@/components/ui/use-toast';
 
-export const BOOKING_FLOW_STORAGE_KEY = 'ufill_booking_flow';
+export { BOOKING_FLOW_STORAGE_KEY };
 
 const defaultFlowMeta = {
   isActive: false,
@@ -53,7 +60,13 @@ export function BookingFlowProvider({ children }) {
   const [flowMeta, setFlowMeta] = useState(() => readStoredFlowMeta());
   const resetCallbackRef = useRef(null);
 
-  const isInBookingFlow = flowMeta.isActive && flowMeta.currentStep > 0;
+  const checkoutContext = useMemo(
+    () => resolveCheckoutContext({ flowMeta }),
+    [flowMeta],
+  );
+
+  const isInBookingFlow =
+    (flowMeta.isActive && flowMeta.currentStep > 0) || checkoutContext.isInCheckoutFlow;
 
   const setFlowMetaState = useCallback((updater) => {
     setFlowMeta((prev) => {
@@ -83,7 +96,7 @@ export function BookingFlowProvider({ children }) {
         pendingToken: pendingToken !== undefined ? pendingToken : prev.pendingToken,
       }));
     },
-    [setFlowMetaState]
+    [setFlowMetaState],
   );
 
   const requestLeaveBooking = useCallback(() => {
@@ -94,29 +107,127 @@ export function BookingFlowProvider({ children }) {
     setDialogOpen(false);
   }, []);
 
-  const confirmLeaveBooking = useCallback(async () => {
-    setDialogOpen(false);
-    let leaveBookingId = null;
-    try {
-      const leaveResult = await releaseRememberedPaymentEquipmentHold({
-        notes: 'Customer left booking before payment completed',
+  const handleTeardownResult = useCallback((result, { idle = false } = {}) => {
+    if (!result || result.beamed) return;
+
+    const failTitle = idle ? 'Could not complete checkout timeout' : 'Could not save your exit';
+    const partialTitle = idle ? 'Checkout timeout recorded' : 'Booking exit recorded';
+    const toastDuration = 12000;
+
+    if (!result.success) {
+      toast({
+        title: failTitle,
+        description:
+          result.error ||
+          (idle
+            ? "We couldn't record that your checkout timed out. Please contact us if you don't receive a follow-up email."
+            : "We couldn't record that you left checkout. Please contact us if you don't receive a follow-up email."),
+        variant: 'destructive',
+        duration: toastDuration,
       });
-      leaveBookingId = leaveResult?.bookingId || null;
-    } catch (err) {
-      console.warn('[BookingFlow] Failed to release payment equipment hold on leave:', err);
+      return;
     }
 
-    if (leaveBookingId) {
-      // Best-effort email — do not block navigation home
-      void sendEarlyLeaveFeedbackEmail(leaveBookingId, window.location.origin);
+    if (result.warning === 'email_not_sent' && !result.skipped && !result.emailSkipped) {
+      toast({
+        title: partialTitle,
+        description:
+          "Your booking was marked as unfinished, but we couldn't send the follow-up email. Please contact us if you need help.",
+        variant: 'destructive',
+        duration: toastDuration,
+      });
     }
+  }, []);
 
+  const resetAndGoHome = useCallback(() => {
     resetCallbackRef.current?.();
     setFlowMetaState(defaultFlowMeta);
     writeStoredFlowMeta(defaultFlowMeta);
+    clearIdlePromptShownLocal();
     navigate('/');
     window.scrollTo(0, 0);
   }, [navigate, setFlowMetaState]);
+
+  const confirmLeaveBooking = useCallback(async () => {
+    setDialogOpen(false);
+    const { bookingId, pendingId } = resolveTeardownTarget({
+      flowMeta,
+      pendingToken: flowMeta.pendingToken,
+      reason: 'left_early',
+    });
+
+    let result = null;
+    try {
+      if (bookingId || pendingId) {
+        result = await endUnfinishedCheckout({
+          bookingId,
+          pendingId,
+          reason: 'left_early',
+          siteUrl: window.location.origin,
+          flowMeta,
+        });
+      }
+    } catch (err) {
+      console.warn('[BookingFlow] Failed to end unfinished checkout on leave:', err);
+      result = {
+        success: false,
+        error:
+          "We couldn't record that you left checkout. Please contact us if you don't receive a follow-up email.",
+      };
+    }
+
+    // Navigate first so the homepage Toaster owns the message (not a remounted checkout toast).
+    resetAndGoHome();
+    window.setTimeout(() => {
+      if (result) {
+        handleTeardownResult(result);
+      }
+    }, 0);
+  }, [flowMeta, resetAndGoHome, handleTeardownResult]);
+
+  const handleIdleTeardownComplete = useCallback(
+    (result) => {
+      if (result?.skippedReason === 'already_converted') {
+        const paidId = result.convertedBookingId || result.bookingId;
+        resetCallbackRef.current?.();
+        setFlowMetaState(defaultFlowMeta);
+        writeStoredFlowMeta(defaultFlowMeta);
+        clearIdlePromptShownLocal();
+        if (paidId) {
+          navigate(`/confirmation?booking_id=${paidId}`);
+        } else {
+          navigate('/');
+        }
+        window.scrollTo(0, 0);
+        return;
+      }
+      resetAndGoHome();
+      window.setTimeout(() => {
+        handleTeardownResult(result, { idle: true });
+      }, 0);
+    },
+    [handleTeardownResult, resetAndGoHome, navigate, setFlowMetaState],
+  );
+
+  const handleCheckoutCompleted = useCallback(
+    ({ bookingId } = {}) => {
+      resetCallbackRef.current?.();
+      setFlowMetaState(defaultFlowMeta);
+      writeStoredFlowMeta(defaultFlowMeta);
+      clearIdlePromptShownLocal();
+      if (bookingId) {
+        navigate(`/confirmation?booking_id=${bookingId}`);
+      } else {
+        toast({
+          title: 'Booking completed',
+          description: 'Your booking was finished in another tab.',
+        });
+        navigate('/');
+      }
+      window.scrollTo(0, 0);
+    },
+    [navigate, setFlowMetaState],
+  );
 
   const handleDialogOpenChange = useCallback((open) => {
     if (!open) {
@@ -131,13 +242,23 @@ export function BookingFlowProvider({ children }) {
     }
   }, []);
 
+  // Step 5+ (Terms onward): contact was saved on leaving step 4, so a pendingToken exists.
+  const idleEnabled = isInBookingFlow && checkoutContext.isProtectedCheckout;
+
+  const { stillHereOpen, countdownRemainingMs, handleNeedMoreTime } = useCheckoutIdleGuard({
+    enabled: idleEnabled,
+    pendingToken: checkoutContext.pendingId || flowMeta.pendingToken,
+    onTeardownComplete: handleIdleTeardownComplete,
+    onCheckoutCompleted: handleCheckoutCompleted,
+  });
+
   const value = {
     flowMeta,
     isInBookingFlow,
     highestStep: flowMeta.highestStep,
     currentStep: flowMeta.currentStep,
     requiresDriverVerification: flowMeta.requiresDriverVerification,
-    pendingToken: flowMeta.pendingToken,
+    pendingToken: checkoutContext.pendingId || flowMeta.pendingToken,
     updateFlowProgress,
     registerResetCallback,
     unregisterResetCallback,
@@ -154,6 +275,11 @@ export function BookingFlowProvider({ children }) {
         onOpenChange={handleDialogOpenChange}
         onConfirm={confirmLeaveBooking}
         onCancel={cancelLeaveBooking}
+      />
+      <StillHereDialog
+        open={stillHereOpen}
+        remainingMs={countdownRemainingMs}
+        onNeedMoreTime={handleNeedMoreTime}
       />
     </BookingFlowContext.Provider>
   );

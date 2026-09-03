@@ -2,9 +2,12 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
 import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
+import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
+
+const VERIFICATION_LEAD_HOURS = 12;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -82,6 +85,49 @@ const isTrailerSelfService = (booking: {
     return true;
   }
   return CUSTOMER_PICKUP_PLAN_IDS.includes(Number(plan.id));
+};
+
+const CONFIRMED_STATUSES = new Set(["Confirmed", "confirmed", "Completed", "completed", "Cancelled", "cancelled"]);
+
+const resolveActionRequiredKind = (booking: {
+  status?: string | null;
+  was_verification_skipped?: boolean | null;
+  addons?: Record<string, unknown> | null;
+}): "pending_verification" | "pending_review" | null => {
+  const status = String(booking.status || "");
+  if (status === "pending_verification") return "pending_verification";
+  if (status === "pending_review") return "pending_review";
+  const skipped = Boolean(
+    booking.was_verification_skipped ||
+    booking.addons?.verificationSkipped ||
+    booking.addons?.wasVerificationSkipped
+  );
+  if (skipped && !CONFIRMED_STATUSES.has(status)) return "pending_verification";
+  return null;
+};
+
+const getVerificationDeadlineInfo = (booking: {
+  drop_off_date?: string | null;
+  drop_off_time_slot?: string | null;
+}) => {
+  const dateStr = booking.drop_off_date ? String(booking.drop_off_date) : "";
+  if (!dateStr) {
+    return { hoursRemaining: null as number | null, isPastDeadline: false };
+  }
+  const window = parseBookingTimeSlot(booking.drop_off_time_slot, 0);
+  const start = window?.start || { hour: 8, minute: 0, second: 0 };
+  const appointmentAt = businessWallTimeToUtc(dateStr, start);
+  if (!appointmentAt) {
+    return { hoursRemaining: null as number | null, isPastDeadline: false };
+  }
+  const deadlineAt = new Date(appointmentAt.getTime() - VERIFICATION_LEAD_HOURS * 60 * 60 * 1000);
+  const now = Date.now();
+  const isPastDeadline = now >= deadlineAt.getTime();
+  if (isPastDeadline) {
+    return { hoursRemaining: 0, isPastDeadline: true };
+  }
+  const hoursRemaining = Math.max(1, Math.ceil((deadlineAt.getTime() - now) / (1000 * 60 * 60)));
+  return { hoursRemaining, isPastDeadline: false };
 };
 
 /** Merge service row into booking.plan when JSON snapshot is missing fields. */
@@ -334,6 +380,166 @@ const generateRefundEmailHTML = (booking) => {
   </div>
 </body>
 </html>`;
+};
+
+const generateActionRequiredEmailHTML = (
+  booking,
+  serviceDetails,
+  insuranceAmount = 0,
+  siteUrl = normalizeSiteUrl(),
+  options: {
+    kind: "pending_verification" | "pending_review";
+    hoursRemaining: number | null;
+    isPastDeadline: boolean;
+  },
+) => {
+  const grandTotal = resolveBookingGrandTotal(booking);
+  const plan = booking.plan || {};
+  const deliveryAddress = booking.delivery_address || booking.contact_address || {};
+  const customerIdText = booking.customers?.customer_id_text || "N/A";
+  const phone = booking.customers?.phone || booking.phone || "N/A";
+  const rawPhone = String(phone).replace(/\D/g, "");
+  const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+  const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
+  const selfService = isTrailerSelfService(booking);
+  const eventNoun = selfService ? "pickup" : "delivery";
+  const customerName = booking.customers?.name || booking.name || `${booking.first_name || ""} ${booking.last_name || ""}`.trim() || "there";
+
+  const pickupScheduleLabel = selfService ? "Pickup By:" : "Drop-off:";
+  const returnScheduleLabel = selfService ? "Return By:" : "Pickup:";
+  const deliveryWindowDropOff = formatDeliveryTimeWindowBetween(booking.drop_off_time_slot);
+  const deliveryWindowPickup = formatDeliveryTimeWindowBetween(booking.pickup_time_slot);
+  const pickupScheduleValue = selfService
+    ? `${formatDate(booking.drop_off_date)} ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
+    : `${formatDate(booking.drop_off_date)} ${deliveryWindowDropOff}`;
+  const returnScheduleValue = selfService
+    ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
+    : `${formatDate(booking.pickup_date)} ${deliveryWindowPickup}`;
+
+  const isVerification = options.kind === "pending_verification";
+  const hoursLabel = options.hoursRemaining === 1 ? "1 hour" : `${options.hoursRemaining} hours`;
+  const deadlineBanner = isVerification
+    ? (options.isPastDeadline
+      ? `Your verification deadline has passed. Complete this immediately or your scheduled ${eventNoun} may be delayed or cancelled.`
+      : options.hoursRemaining != null
+        ? `You have <strong>${hoursLabel}</strong> to finish this, or your scheduled ${eventNoun} may be delayed or you may not be able to receive your equipment.`
+        : `Documents are required at least ${VERIFICATION_LEAD_HOURS} hours before your scheduled ${eventNoun}, or your ${eventNoun} may be delayed or cancelled.`)
+    : "Your booking is on hold until we finish reviewing your address. We will follow up if anything else is needed.";
+
+  const actionTitle = isVerification ? "Action Required — Finish Verification" : "Action Required — Booking On Hold";
+  const actionIntro = isVerification
+    ? "We received your payment, but your booking is <strong>not confirmed yet</strong>. You skipped driver and vehicle verification, so we still need your towing vehicle license plate, driver’s license (front and back), and auto insurance."
+    : "We received your payment, but your booking is <strong>not confirmed yet</strong>. Your address still needs review before we can lock in the reservation.";
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${actionTitle} - U-Fill Dumpsters</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+    <div style="background: linear-gradient(135deg, #9a3412 0%, #f59e0b 100%); padding: 40px 20px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold;">${actionTitle}</h1>
+      <p style="color: #fef3c7; margin: 10px 0 0 0; font-size: 16px;">Booking #${booking.id} is pending — not confirmed yet</p>
+    </div>
+    <div style="padding: 30px 20px;">
+      <div style="background-color: #fef3c7; border-left: 4px solid #d97706; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
+        <p style="margin: 0; color: #92400e; font-weight: bold; font-size: 15px;">⚠ ${deadlineBanner}</p>
+      </div>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">Hi ${customerName},</p>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">${actionIntro}</p>
+      ${isVerification ? `
+      <div style="margin: 20px 0; padding: 16px 18px; background-color: #fff7ed; border: 1px solid #fdba74; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; color: #9a3412; font-weight: bold;">What you need to submit in the Customer Portal:</p>
+        <ul style="margin: 0; padding-left: 20px; color: #7c2d12; line-height: 1.7;">
+          <li>Towing vehicle license plate</li>
+          <li>Driver’s license — front and back</li>
+          <li>Current auto insurance document</li>
+        </ul>
+      </div>
+      ` : ""}
+      <div style="text-align: center; margin: 24px 0;">
+        <a href="${portalUrl}" style="display: inline-block; padding: 14px 28px; background-color: #d97706; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Open Customer Portal</a>
+      </div>
+      <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">
+        Once your information is submitted and approved, we will send the full booking confirmation email with next steps.
+        Until then, your ${eventNoun} is not guaranteed.
+      </p>
+      <div style="text-align: center; margin: 24px 0; padding: 20px; background-color: #f9fafb; border-radius: 8px;">
+        <p style="margin: 0; color: #6b7280; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Booking ID</p>
+        <p style="margin: 5px 0 0 0; color: #9a3412; font-size: 32px; font-weight: bold;">#${booking.id}</p>
+      </div>
+      <div style="margin-bottom: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Customer Information</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Name:</td>
+            <td style="padding: 8px 0; color: #1f2937;">${booking.name || `${booking.first_name} ${booking.last_name}`}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Email:</td>
+            <td style="padding: 8px 0; color: #1f2937;">${booking.email}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Phone:</td>
+            <td style="padding: 8px 0; color: #1f2937;">${booking.phone}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">Address:</td>
+            <td style="padding: 8px 0; color: #1f2937;">${deliveryAddress.street || booking.street}, ${deliveryAddress.city || booking.city}, ${deliveryAddress.state || booking.state} ${deliveryAddress.zip || booking.zip}</td>
+          </tr>
+        </table>
+      </div>
+      <div style="margin-bottom: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #f59e0b; padding-bottom: 10px;">Service Details</h2>
+        <p style="margin: 0 0 10px 0; color: #9a3412; font-weight: bold; font-size: 16px;">${serviceName}</p>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${pickupScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${pickupScheduleValue}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: bold;">${returnScheduleLabel}</td>
+            <td style="padding: 8px 0; color: #1f2937;">${returnScheduleValue}</td>
+          </tr>
+        </table>
+      </div>
+      ${buildPriceSummaryHTML(booking, insuranceAmount)}
+      <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">
+        <p style="margin: 0; color: #6b7280; font-size: 16px;">Amount Paid</p>
+        <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(grandTotal)}</p>
+      </div>
+      <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
+        <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔑 Customer Portal Access</h3>
+        <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Log in to finish verification, view this booking, and track status.</p>
+        <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
+          <tr>
+            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+              <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Portal ID</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${customerIdText}</p>
+            </td>
+            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+              <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Phone Number</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${phone}</p>
+            </td>
+          </tr>
+        </table>
+        <div style="text-align: center;">
+          <a href="${portalUrl}" style="display: inline-block; padding: 14px 28px; background-color: #d97706; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">Go to Customer Portal</a>
+        </div>
+      </div>
+    </div>
+    <div style="background-color: #1f2937; padding: 20px; text-align: center;">
+      <p style="margin: 0; color: #9ca3af; font-size: 14px;">© 2026 U-Fill Dumpsters LLC. All rights reserved.</p>
+      <p style="margin: 10px 0 0 0; color: #9ca3af; font-size: 12px;">This is an automated notification. Please do not reply.</p>
+    </div>
+  </div>
+</body>
+</html>
+  `;
 };
 
 const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
@@ -1030,26 +1236,46 @@ Deno.serve(async (req)=>{
     const isCancelledRefund =
       booking.status === "Cancelled" &&
       (booking.refund_details || booking.cancellation_details);
+    const actionRequiredKind = isCancelledRefund ? null : resolveActionRequiredKind(booking);
+    const deadlineInfo = actionRequiredKind === "pending_verification"
+      ? getVerificationDeadlineInfo(booking)
+      : { hoursRemaining: null as number | null, isPastDeadline: false };
+    const emailKind = isCancelledRefund
+      ? "refund"
+      : actionRequiredKind || "confirmation";
     const emailHTML = isCancelledRefund
       ? generateRefundEmailHTML(booking)
-      : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
+      : actionRequiredKind
+        ? generateActionRequiredEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl, {
+          kind: actionRequiredKind,
+          hoursRemaining: deadlineInfo.hoursRemaining,
+          isPastDeadline: deadlineInfo.isPastDeadline,
+        })
+        : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
     const subject = isCancelledRefund
       ? `Refund Confirmation #${booking.id} — U-Fill Dumpsters`
-      : `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
-    console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail} (type=${isCancelledRefund ? "refund" : "confirmation"})`);
+      : actionRequiredKind === "pending_verification"
+        ? `Action Required: Finish verification for Booking #${booking.id} — U-Fill Dumpsters`
+        : actionRequiredKind === "pending_review"
+          ? `Action Required: Booking #${booking.id} is on hold — U-Fill Dumpsters`
+          : `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
+    console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail} (type=${emailKind})`);
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
     if (emailResult.success) {
       console.log(`[${timestamp}] [send-booking-confirmation] SUCCESS: Email sent via ${emailResult.provider}`);
-      const referrerEmailResult = isCancelledRefund
-        ? { skipped: true, reason: "cancelled_refund" }
+      const referrerEmailResult = isCancelledRefund || actionRequiredKind
+        ? { skipped: true, reason: isCancelledRefund ? "cancelled_refund" : "action_required" }
         : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
       return new Response(JSON.stringify({
         success: true,
         message: isCancelledRefund
           ? "Refund confirmation email sent successfully"
-          : "Confirmation email sent successfully",
+          : actionRequiredKind
+            ? "Action-required email sent successfully"
+            : "Confirmation email sent successfully",
         provider: emailResult.provider,
         recipient: recipientEmail,
+        email_type: emailKind,
         referrerThankYou: referrerEmailResult,
       }), {
         status: 200,

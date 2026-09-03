@@ -37,6 +37,7 @@ import {
 } from '@/config/diyEquipmentMachines';
 import { fetchServiceById } from '@/utils/servicePlan';
 import { setStoredReferralCode } from '@/utils/referralCodeStorage';
+import { clearRememberedPaymentEquipmentHold } from '@/utils/pendingBookingEquipmentHold';
 
 const INITIAL_BOOKING_DATA = {
   firstName: '',
@@ -107,6 +108,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   }, [currentStep, showInlineEmailStep, skipEmailVerification, requiresDriverVerification]);
 
   const resetBookingState = useCallback(() => {
+    clearRememberedPaymentEquipmentHold();
     setCurrentStep(0);
     setHighestStep(0);
     setSelectedPlan(null);
@@ -336,6 +338,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       return;
     }
     setShowDiyEquipmentSelection(false);
+    clearRememberedPaymentEquipmentHold();
     setSelectedPlan(plan);
     setCurrentStep(1);
     window.scrollTo(0, 0);
@@ -358,6 +361,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       }
       setSelectedPlan(data);
       setShowDiyEquipmentSelection(false);
+      clearRememberedPaymentEquipmentHold();
       setCurrentStep(1);
       window.scrollTo(0, 0);
     } catch (err) {
@@ -411,9 +415,61 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     window.scrollTo(0, 0);
   };
 
-  const handleContactSubmit = () => {
-    setCurrentStep(5);
-    window.scrollTo(0, 0);
+  const handleContactSubmit = async () => {
+    // Persist contact + booking draft as soon as they leave step 4 so unfinished-checkout
+    // tracking (idle / leave / survey) can start on Terms & Conditions (step 5).
+    const contactPayload = {
+      ...bookingData,
+      firstName: (bookingData.firstName || '').trim(),
+      lastName: (bookingData.lastName || '').trim(),
+    };
+
+    setIsProcessing(true);
+    try {
+      const result = await storePendingBooking(contactPayload, selectedPlan, addonsData, {
+        totalPrice: finalPrice,
+        basePrice: basePrice,
+        deliveryService: deliveryService,
+        agreementFeeSnapshot,
+        existingToken: contactPayload.pendingToken,
+      });
+
+      if (!result.success) {
+        toast({
+          title: 'Error',
+          description: result.error || 'Failed to save your contact information. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const token = result.token;
+      const nextHighest = Math.max(highestStep, 5);
+      setBookingData((prev) => ({
+        ...prev,
+        firstName: contactPayload.firstName,
+        lastName: contactPayload.lastName,
+        pendingToken: token,
+      }));
+      setHighestStep(nextHighest);
+      updateFlowProgress({
+        currentStep: 5,
+        highestStep: nextHighest,
+        requiresDriverVerification,
+        pendingToken: token,
+      });
+      setCurrentStep(5);
+      window.scrollTo(0, 0);
+    } catch (error) {
+      console.error('[BookingJourney] Exception storing pending booking on contact submit:', error);
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleTermsAccept = () => {
@@ -740,6 +796,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             usedReturningCustomerLink={Boolean(bookingData.usedReturningCustomerLink)}
             onSubmit={handleContactSubmit}
             onBack={goBackOneStep}
+            isProcessing={isProcessing}
           />
         );
       case 5:

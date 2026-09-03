@@ -164,11 +164,13 @@ export const AbandonedCheckoutsManager = () => {
             Did Not Finalize
           </CardTitle>
           <CardDescription className="text-gray-400">
-            Customers who reached payment but did not complete checkout across all services.
-            Statuses: <strong className="text-purple-300">Left early</strong> (clicked Leave
-            booking), <strong className="text-blue-300">Reminded</strong> (~1h unpaid),{' '}
-            <strong className="text-orange-300">Expired</strong> (~2h timeout). Filter by status
-            or search service tags like dump-trailer / dumpster.
+            Customers who started checkout (from contact info / Terms onward) but did not finish payment.
+            Statuses: <strong className="text-purple-300">Left early</strong> (closed tab or left
+            booking), <strong className="text-blue-300">Reminded</strong> (no response to the
+            still-here prompt), <strong className="text-orange-300">Expired</strong> (30-minute
+            idle ceiling), <strong className="text-green-300">Converted</strong> (paid after being
+            prompted), <strong className="text-gray-300">Unsubscribed</strong>. Filter by status or
+            search service tags like dump-trailer / dumpster.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

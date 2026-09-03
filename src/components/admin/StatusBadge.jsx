@@ -21,6 +21,7 @@ export const StatusBadge = ({ status, booking = null }) => {
         'waiting_to_be_returned': 'bg-purple-500/20 text-purple-300',
         'Cancelled': 'bg-gray-500/20 text-gray-300',
         'cancellation_pending': 'bg-amber-500/20 text-amber-300',
+        'booking_not_finished': 'bg-slate-500/20 text-slate-300',
     };
 
     const statusText = {
@@ -36,6 +37,7 @@ export const StatusBadge = ({ status, booking = null }) => {
         'flagged': 'Flagged for Follow-up',
         'Cancelled': 'Cancelled',
         'cancellation_pending': 'Cancellation Pending',
+        'booking_not_finished': 'Booking Not Finished',
     };
 
     // Timestamp-driven overrides for self-pickup when status is still Confirmed

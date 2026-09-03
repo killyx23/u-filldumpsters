@@ -615,7 +615,7 @@ export const CustomerPortal = () => {
 
     // Get last 3 completed bookings for quick reorder
     const recentCompletedBookings = bookings
-        .filter(b => b.status && !['cancelled', 'pending_payment'].includes(b.status.toLowerCase()))
+        .filter(b => b.status && !['cancelled', 'pending_payment', 'booking_not_finished'].includes(b.status.toLowerCase()))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 3);
 
