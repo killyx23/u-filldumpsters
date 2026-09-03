@@ -23,7 +23,7 @@ Deno.serve(async (req)=>{
     });
   }
   try {
-    const { email, name, pending_customer_id, token, site_url } = await req.json();
+    const { email, name, pending_customer_id, token, site_url, purpose } = await req.json();
     if (!email) {
       return new Response(JSON.stringify({
         error: "Email is required"
@@ -91,11 +91,23 @@ Deno.serve(async (req)=>{
     const siteUrl = normalizeSiteUrl(site_url);
     const pendingToken = String(pending_customer_id ?? token ?? "").trim();
     const emailLower = email.toLowerCase();
-    const verifyPath = pendingToken
-      ? `/verify-email?token=${encodeURIComponent(pendingToken)}&code=${encodeURIComponent(verificationCode)}`
-      : `/customer-login?code=${encodeURIComponent(verificationCode)}&email=${encodeURIComponent(emailLower)}&recover=1`;
+    const normalizedPurpose = String(purpose || "").trim().toLowerCase();
+    // checkout (pending booking) → /verify-email
+    // portal (forgot login) → /customer-login recovery
+    // returning (default when no pending token) → homepage returning-customer flow
+    let verifyPath;
+    if (pendingToken || normalizedPurpose === "checkout") {
+      const tokenQuery = pendingToken
+        ? `token=${encodeURIComponent(pendingToken)}&`
+        : "";
+      verifyPath = `/verify-email?${tokenQuery}code=${encodeURIComponent(verificationCode)}`;
+    } else if (normalizedPurpose === "portal") {
+      verifyPath = `/customer-login?code=${encodeURIComponent(verificationCode)}&email=${encodeURIComponent(emailLower)}&recover=1`;
+    } else {
+      verifyPath = `/?email=${encodeURIComponent(emailLower)}&code=${encodeURIComponent(verificationCode)}&flow=returning`;
+    }
     const verifyLink = `${siteUrl}${verifyPath}`;
-    console.log("[send-verification-email] Verification link:", verifyLink);
+    console.log("[send-verification-email] Verification link:", verifyLink, "purpose:", normalizedPurpose || (pendingToken ? "checkout" : "returning"));
     // Send email via Brevo
     const emailHtml = generateEmailTemplate(verificationCode, verifyLink, name || "Customer", siteUrl);
     const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {

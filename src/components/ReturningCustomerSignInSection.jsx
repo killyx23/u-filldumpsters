@@ -44,7 +44,9 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
         body: {
           email: email.toLowerCase().trim(),
           name: 'Valued Customer',
-          pending_customer_id: null
+          pending_customer_id: null,
+          purpose: 'returning',
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
         }
       });
 

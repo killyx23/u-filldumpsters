@@ -11,6 +11,8 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { getAppOrigin } from '@/utils/getAppOrigin';
+import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 
 const formatPhoneDigits = (rawDigits) => {
     const input = String(rawDigits || '').replace(/\D/g, '');
@@ -65,7 +67,7 @@ const ForgotLoginDialog = ({ open, onOpenChange, onRecoveryComplete, initialCode
             }
 
             const { data, error } = await supabase.functions.invoke('send-verification-email', {
-                body: { email, site_url: getAppOrigin() }
+                body: { email, purpose: 'portal', site_url: getAppOrigin() }
             });
             
             if (error) {
@@ -110,7 +112,7 @@ const ForgotLoginDialog = ({ open, onOpenChange, onRecoveryComplete, initialCode
 
             onOpenChange(false);
             resetDialog();
-            await onRecoveryComplete(verifyData.customer);
+            await onRecoveryComplete(verifyData.customer, email);
 
         } catch (error) {
             console.error("[CustomerLogin] Verify code error:", error);
@@ -293,13 +295,43 @@ export const CustomerLogin = () => {
         return true;
     }, [navigate]);
 
-    const completePortalRecovery = useCallback(async (customer) => {
+    const redirectToReturningCustomerFlow = useCallback((customer, email) => {
+        const normalizedEmail = String(email || customer?.email || '').trim().toLowerCase();
+        if (normalizedEmail) {
+            markVerifiedEmailSession(normalizedEmail);
+        }
+
+        const mapped = mapCustomerToBookingData(customer, normalizedEmail);
+        toast({
+            title: 'Email Verified',
+            description: 'Taking you to your returning customer options…',
+        });
+        // Already verified — apply profile via location state (do not re-open OTP via flow=returning).
+        navigate('/', {
+            replace: true,
+            state: {
+                returningCustomerProfile: {
+                    customer: {
+                        id: mapped.contactAddress?.customerId || customer?.id || null,
+                        first_name: mapped.firstName || customer?.first_name || '',
+                        last_name: mapped.lastName || customer?.last_name || '',
+                        email: normalizedEmail,
+                        phone: mapped.phone || customer?.phone || '',
+                        street: mapped.contactAddress?.street || customer?.street || '',
+                        city: mapped.contactAddress?.city || customer?.city || '',
+                        state: mapped.contactAddress?.state || customer?.state || '',
+                        zip: mapped.contactAddress?.zip || customer?.zip || '',
+                    },
+                    email: normalizedEmail,
+                },
+            },
+        });
+    }, [navigate]);
+
+    const completePortalRecovery = useCallback(async (customer, verifiedEmail = '') => {
         if (!customer?.customer_id_text || !customer?.phone) {
-            toast({
-                title: 'Account Not Found',
-                description: 'No customer portal account was found for this email. Please contact support.',
-                variant: 'destructive',
-            });
+            // Old returning-customer email links landed here; send them home instead of "invalid login".
+            redirectToReturningCustomerFlow(customer, verifiedEmail || customer?.email);
             return;
         }
 
@@ -310,7 +342,18 @@ export const CustomerLogin = () => {
         try {
             await attemptPortalLogin(cid, rawPhone);
         } catch (error) {
-            console.error('[CustomerLogin] Recovery auto-login failed, pre-filling credentials:', error);
+            console.error('[CustomerLogin] Recovery auto-login failed; falling back to returning-customer flow:', error);
+            const message = String(error?.message || '').toLowerCase();
+            const looksLikeInvalidPortal =
+                message.includes('invalid customer id') ||
+                message.includes('invalid phone') ||
+                message.includes('could not verify');
+
+            if (looksLikeInvalidPortal) {
+                redirectToReturningCustomerFlow(customer, verifiedEmail || customer?.email);
+                return;
+            }
+
             applyCredentials(cid, rawPhone);
             toast({
                 title: 'Credentials Ready',
@@ -319,7 +362,7 @@ export const CustomerLogin = () => {
         } finally {
             setLoading(false);
         }
-    }, [attemptPortalLogin, applyCredentials]);
+    }, [attemptPortalLogin, applyCredentials, redirectToReturningCustomerFlow]);
 
     useEffect(() => {
         const cid = searchParams.get('cid');
@@ -356,9 +399,18 @@ export const CustomerLogin = () => {
                         throw new Error(verifyData.error || 'Invalid verification code');
                     }
 
-                    await completePortalRecovery(verifyData.customer);
+                    await completePortalRecovery(verifyData.customer, email);
                 } catch (error) {
                     console.error('[CustomerLogin] URL recovery error:', error);
+                    // Prefer returning-customer home flow over "Forgot login / invalid login"
+                    // when this looks like an old returning-customer email button link.
+                    const recoverFlag = searchParams.get('recover');
+                    if (recoverFlag === '1' && email) {
+                        navigate(`/?email=${encodeURIComponent(email)}&code=${encodeURIComponent(code)}&flow=returning`, {
+                            replace: true,
+                        });
+                        return;
+                    }
                     toast({
                         title: 'Verification Failed',
                         description: error.message || 'Could not verify your email link. Please try again.',

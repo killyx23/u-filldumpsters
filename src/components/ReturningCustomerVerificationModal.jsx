@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,8 @@ export const ReturningCustomerVerificationModal = ({
   onCustomerVerified,
   mode = 'full',
   initialEmail = '',
+  initialCode = '',
+  onUrlFlowHandled,
 }) => {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -30,14 +32,9 @@ export const ReturningCustomerVerificationModal = ({
   const [step, setStep] = useState('email'); // email | code | bookings
   const [error, setError] = useState('');
   const isVerifyOnly = mode === 'verifyOnly';
+  const autoVerifyStarted = useRef(false);
 
-  React.useEffect(() => {
-    if (isOpen && initialEmail) {
-      setEmail(initialEmail);
-    }
-  }, [isOpen, initialEmail]);
-
-  const resetState = () => {
+  const resetState = useCallback(() => {
     setEmail('');
     setCode('');
     setBookings([]);
@@ -45,12 +42,152 @@ export const ReturningCustomerVerificationModal = ({
     setPointsBalance(0);
     setStep('email');
     setError('');
-  };
+    autoVerifyStarted.current = false;
+  }, []);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     resetState();
     onClose();
-  };
+  }, [onClose, resetState]);
+
+  const applyVerifySuccess = useCallback(async (verifyData, normalizedEmail) => {
+    if (typeof window !== 'undefined') {
+      markVerifiedEmailSession(normalizedEmail);
+    }
+
+    const data = verifyData.bookings || [];
+    if (verifyData.customer) {
+      setCustomerProfile(verifyData.customer);
+    }
+
+    if (isVerifyOnly) {
+      const mapped = mapCustomerToBookingData(verifyData.customer, normalizedEmail);
+      if (onCustomerVerified) {
+        onCustomerVerified({
+          ...mapped,
+          returningCustomerVerified: true,
+          usedReturningCustomerLink: true,
+        });
+      }
+      toast({
+        title: 'Verified',
+        description: 'Your email is verified. You can continue with your booking.',
+      });
+      handleClose();
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setBookings([]);
+    }
+
+    const planIds = [...new Set((data || []).map((row) => row.plan_id).filter(Boolean))];
+    let plansById = {};
+    if (planIds.length > 0) {
+      const { data: planRows, error: planError } = await supabase
+        .from('plans')
+        .select('id, name')
+        .in('id', planIds);
+
+      if (planError) {
+        console.warn('[ReturningCustomerVerificationModal] Could not load plan names:', planError);
+      } else {
+        plansById = (planRows || []).reduce((acc, row) => {
+          acc[row.id] = row;
+          return acc;
+        }, {});
+      }
+    }
+
+    const enrichedBookings = (data || []).map((row) => ({
+      ...row,
+      plan: plansById[row.plan_id] || row.plan || null,
+    }));
+
+    try {
+      const { data: rewardsData, error: rewardsError } = await supabase.functions.invoke('get-returning-customer-rewards', {
+        body: { email: normalizedEmail },
+      });
+
+      if (rewardsError) {
+        console.warn('[ReturningCustomerVerificationModal] Rewards lookup error:', rewardsError);
+      } else if (rewardsData?.success) {
+        setPointsBalance(Number(rewardsData.pointsBalance || 0));
+        if (!verifyData.customer && rewardsData.customer) {
+          setCustomerProfile(rewardsData.customer);
+        }
+      }
+    } catch (rewardsErr) {
+      console.warn('[ReturningCustomerVerificationModal] Rewards lookup exception:', rewardsErr);
+    }
+
+    setBookings(enrichedBookings);
+    setStep('bookings');
+    toast({
+      title: 'Welcome Back!',
+      description: 'Your email is verified. Choose a past booking or start a new one.',
+    });
+  }, [handleClose, isVerifyOnly, onCustomerVerified]);
+
+  const handleVerifyCode = useCallback(async (e, overrideEmail, overrideCode) => {
+    e?.preventDefault();
+
+    const normalizedEmail = String(overrideEmail ?? email).toLowerCase().trim();
+    const trimmedCode = String(overrideCode ?? code).trim();
+
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    if (!trimmedCode || trimmedCode.length !== 6) {
+      setError('Please enter the complete 6-digit verification code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
+        body: { email: normalizedEmail, code: trimmedCode },
+      });
+
+      if (verifyError) {
+        throw new Error(await parseEdgeFunctionError(verifyError, verifyData));
+      }
+      if (!verifyData?.success) {
+        throw new Error(verifyData?.error || 'Invalid verification code');
+      }
+
+      await applyVerifySuccess(verifyData, normalizedEmail);
+      onUrlFlowHandled?.();
+    } catch (err) {
+      console.error('[ReturningCustomerVerificationModal] Verify error:', err);
+      setError(err.message || 'Verification failed. Please try again.');
+      setStep('code');
+      onUrlFlowHandled?.();
+    } finally {
+      setLoading(false);
+    }
+  }, [applyVerifySuccess, code, email, onUrlFlowHandled]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const seededEmail = String(initialEmail || '').trim().toLowerCase();
+    const seededCode = String(initialCode || '').replace(/\D/g, '').slice(0, 6);
+
+    if (seededEmail) setEmail(seededEmail);
+    if (seededCode) setCode(seededCode);
+
+    if (seededEmail && /^\d{6}$/.test(seededCode) && !autoVerifyStarted.current) {
+      autoVerifyStarted.current = true;
+      setStep('code');
+      handleVerifyCode(null, seededEmail, seededCode);
+    } else if (seededEmail && !seededCode) {
+      setStep('email');
+    }
+  }, [isOpen, initialEmail, initialCode, handleVerifyCode]);
 
   const handleSendCode = async (e) => {
     e?.preventDefault();
@@ -70,6 +207,8 @@ export const ReturningCustomerVerificationModal = ({
           email: normalizedEmail,
           name: 'Valued Customer',
           pending_customer_id: null,
+          purpose: 'returning',
+          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
         },
       });
 
@@ -86,112 +225,6 @@ export const ReturningCustomerVerificationModal = ({
     } catch (err) {
       console.error('[ReturningCustomerVerificationModal] Send code error:', err);
       setError(err.message || 'Failed to send verification code. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyCode = async (e) => {
-    e?.preventDefault();
-
-    const trimmedCode = code.trim();
-    if (!trimmedCode || trimmedCode.length !== 6) {
-      setError('Please enter the complete 6-digit verification code');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const normalizedEmail = email.toLowerCase().trim();
-
-      const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-email-code', {
-        body: { email: normalizedEmail, code: trimmedCode },
-      });
-
-      if (verifyError) {
-        throw new Error(await parseEdgeFunctionError(verifyError, verifyData));
-      }
-      if (!verifyData?.success) {
-        throw new Error(verifyData?.error || 'Invalid verification code');
-      }
-
-      if (typeof window !== 'undefined') {
-        markVerifiedEmailSession(normalizedEmail);
-      }
-
-      const data = verifyData.bookings || [];
-      if (verifyData.customer) {
-        setCustomerProfile(verifyData.customer);
-      }
-
-      if (isVerifyOnly) {
-        const mapped = mapCustomerToBookingData(verifyData.customer, normalizedEmail);
-        if (onCustomerVerified) {
-          onCustomerVerified({
-            ...mapped,
-            returningCustomerVerified: true,
-            usedReturningCustomerLink: true,
-          });
-        }
-        toast({
-          title: 'Verified',
-          description: 'Your email is verified. You can continue with your booking.',
-        });
-        handleClose();
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        setBookings([]);
-      }
-
-      const planIds = [...new Set((data || []).map((row) => row.plan_id).filter(Boolean))];
-      let plansById = {};
-      if (planIds.length > 0) {
-        const { data: planRows, error: planError } = await supabase
-          .from('plans')
-          .select('id, name')
-          .in('id', planIds);
-
-        if (planError) {
-          console.warn('[ReturningCustomerVerificationModal] Could not load plan names:', planError);
-        } else {
-          plansById = (planRows || []).reduce((acc, row) => {
-            acc[row.id] = row;
-            return acc;
-          }, {});
-        }
-      }
-
-      const enrichedBookings = (data || []).map((row) => ({
-        ...row,
-        plan: plansById[row.plan_id] || row.plan || null,
-      }));
-
-      try {
-        const { data: rewardsData, error: rewardsError } = await supabase.functions.invoke('get-returning-customer-rewards', {
-          body: { email: normalizedEmail },
-        });
-
-        if (rewardsError) {
-          console.warn('[ReturningCustomerVerificationModal] Rewards lookup error:', rewardsError);
-        } else if (rewardsData?.success) {
-          setPointsBalance(Number(rewardsData.pointsBalance || 0));
-          if (!verifyData.customer && rewardsData.customer) {
-            setCustomerProfile(rewardsData.customer);
-          }
-        }
-      } catch (rewardsErr) {
-        console.warn('[ReturningCustomerVerificationModal] Rewards lookup exception:', rewardsErr);
-      }
-
-      setBookings(enrichedBookings);
-      setStep('bookings');
-    } catch (err) {
-      console.error('[ReturningCustomerVerificationModal] Verify error:', err);
-      setError(err.message || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -271,7 +304,7 @@ export const ReturningCustomerVerificationModal = ({
         <DialogHeader>
           <DialogTitle className="text-2xl">
             {step === 'email' && 'Welcome Back!'}
-            {step === 'code' && 'Verify Your Email'}
+            {step === 'code' && (loading ? 'Verifying Your Email...' : 'Verify Your Email')}
             {step === 'bookings' && 'Your Previous Bookings'}
           </DialogTitle>
           <DialogDescription>
@@ -279,7 +312,10 @@ export const ReturningCustomerVerificationModal = ({
               (isVerifyOnly
                 ? 'Verify your email to confirm your returning customer account for this booking.'
                 : 'Enter your email to receive a verification code and access your booking history.')}
-            {step === 'code' && `Enter the code we sent to ${email}.`}
+            {step === 'code' &&
+              (loading
+                ? `Verifying the code sent to ${email}...`
+                : `Enter the code we sent to ${email}.`)}
             {step === 'bookings' && 'Reorder a past booking or start a new booking with your profile pre-filled.'}
           </DialogDescription>
         </DialogHeader>
@@ -327,56 +363,56 @@ export const ReturningCustomerVerificationModal = ({
 
         {step === 'code' && (
           <form onSubmit={handleVerifyCode} className="space-y-4 mt-4">
-            <div className="space-y-2">
-              <Label htmlFor="verification-code">Verification Code</Label>
-              <Input
-                id="verification-code"
-                type="text"
-                maxLength={6}
-                placeholder="123456"
-                value={code}
-                onChange={(e) => {
-                  setCode(e.target.value.replace(/\D/g, ''));
-                  setError('');
-                }}
-                className="text-center text-2xl tracking-[0.5em] font-mono"
-                autoFocus
-              />
-            </div>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <Loader2 className="h-10 w-10 animate-spin text-green-400" />
+                <p className="text-sm text-muted-foreground">Verifying your email link...</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="verification-code">Verification Code</Label>
+                  <Input
+                    id="verification-code"
+                    type="text"
+                    maxLength={6}
+                    placeholder="123456"
+                    value={code}
+                    onChange={(e) => {
+                      setCode(e.target.value.replace(/\D/g, ''));
+                      setError('');
+                    }}
+                    className="text-center text-2xl tracking-[0.5em] font-mono"
+                    autoFocus
+                  />
+                </div>
 
-            {error && <ErrorBanner message={error} />}
+                {error && <ErrorBanner message={error} />}
 
-            <div className="flex gap-3 pt-4">
-              <Button type="button" variant="outline" onClick={handleBack} className="flex-1">
-                Back
-              </Button>
-              <Button
-                type="submit"
-                disabled={loading || code.trim().length !== 6}
-                className="flex-1 bg-green-600 hover:bg-green-700"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Verifying...
-                  </>
-                ) : isVerifyOnly ? (
-                  'Verify Email'
-                ) : (
-                  'Verify & View Bookings'
-                )}
-              </Button>
-            </div>
+                <div className="flex gap-3 pt-4">
+                  <Button type="button" variant="outline" onClick={handleBack} className="flex-1">
+                    Back
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={loading || code.trim().length !== 6}
+                    className="flex-1 bg-green-600 hover:bg-green-700"
+                  >
+                    {isVerifyOnly ? 'Verify Email' : 'Verify & View Bookings'}
+                  </Button>
+                </div>
 
-            <Button
-              type="button"
-              variant="link"
-              onClick={handleSendCode}
-              disabled={loading}
-              className="w-full text-sm"
-            >
-              Resend code
-            </Button>
+                <Button
+                  type="button"
+                  variant="link"
+                  onClick={handleSendCode}
+                  disabled={loading}
+                  className="w-full text-sm"
+                >
+                  Resend code
+                </Button>
+              </>
+            )}
           </form>
         )}
 

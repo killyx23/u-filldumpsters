@@ -1,7 +1,6 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { LogIn, LogOut, MessageSquare, HelpCircle, Menu, RotateCcw, Users } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
 import { Button } from '@/components/ui/button';
@@ -11,11 +10,42 @@ import { siteImages } from '@/config/siteImages';
 
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const bookingFlow = useBookingFlowOptional();
   const { user, isAdmin, signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
+  const [returningInitialEmail, setReturningInitialEmail] = useState('');
+  const [returningInitialCode, setReturningInitialCode] = useState('');
+  const returningUrlHandled = useRef(false);
   const isCustomer = user && !isAdmin;
+
+  const clearReturningUrlParams = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    let changed = false;
+    ['flow', 'email', 'code'].forEach((key) => {
+      if (next.has(key)) {
+        next.delete(key);
+        changed = true;
+      }
+    });
+    if (changed) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    const flow = searchParams.get('flow');
+    const email = searchParams.get('email')?.trim().toLowerCase() ?? '';
+    const code = (searchParams.get('code') || '').replace(/\D/g, '').slice(0, 6);
+
+    if (flow !== 'returning' || !email || returningUrlHandled.current) return;
+
+    returningUrlHandled.current = true;
+    setReturningInitialEmail(email);
+    setReturningInitialCode(/^\d{6}$/.test(code) ? code : '');
+    setIsReturningCustomerModalOpen(true);
+  }, [searchParams]);
 
   const handleAdminClick = () => {
     navigate('/admin');
@@ -141,6 +171,8 @@ export const Header = ({ onReorderSelect }) => {
                       <button
                         onClick={() => {
                           closeMenu();
+                          setReturningInitialEmail('');
+                          setReturningInitialCode('');
                           setIsReturningCustomerModalOpen(true);
                         }}
                         className="flex items-center space-x-3 text-lg hover:text-yellow-400 transition-colors tap-target text-left"
@@ -175,7 +207,14 @@ export const Header = ({ onReorderSelect }) => {
 
       <ReturningCustomerVerificationModal
         isOpen={isReturningCustomerModalOpen}
-        onClose={() => setIsReturningCustomerModalOpen(false)}
+        onClose={() => {
+          setIsReturningCustomerModalOpen(false);
+          setReturningInitialEmail('');
+          setReturningInitialCode('');
+        }}
+        initialEmail={returningInitialEmail}
+        initialCode={returningInitialCode}
+        onUrlFlowHandled={clearReturningUrlParams}
         onReorderSelect={(booking) => {
           onReorderSelect?.(booking);
           navigate('/');
@@ -200,6 +239,8 @@ export const Header = ({ onReorderSelect }) => {
             },
           });
           setIsReturningCustomerModalOpen(false);
+          setReturningInitialEmail('');
+          setReturningInitialCode('');
         }}
       />
     </>
