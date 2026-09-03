@@ -44,12 +44,19 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
   const [secret, setSecret] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [enrollDisabled, setEnrollDisabled] = useState(false);
   const [starting, setStarting] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   const startEnrollment = useCallback(async () => {
     setStarting(true);
     setError('');
+    setEnrollDisabled(false);
+    setFactorId('');
+    setQr('');
+    setSecret('');
+    setCode('');
     try {
       const existing = await getVerifiedTotpFactors(supabase);
       if (existing.length > 0) {
@@ -66,7 +73,11 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
       return data;
     } catch (err) {
       console.error('[AdminMfa] Enroll failed:', err);
-      setError(err.message || 'Could not start authenticator setup.');
+      const message = err.message || 'Could not start authenticator setup.';
+      setError(message);
+      if (/mfa enroll is disabled for totp/i.test(message)) {
+        setEnrollDisabled(true);
+      }
       setStarting(false);
       return null;
     }
@@ -87,7 +98,7 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
     return () => {
       cancelled = true;
     };
-  }, [startEnrollment]);
+  }, [startEnrollment, retryKey]);
 
   const copySecret = async () => {
     if (!secret) return;
@@ -129,6 +140,50 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
       <div className="flex flex-col items-center py-8">
         <Loader2 className="h-10 w-10 animate-spin text-yellow-400 mb-3" />
         <p className="text-blue-200">Preparing authenticator setup…</p>
+      </div>
+    );
+  }
+
+  if (enrollDisabled || !factorId) {
+    return (
+      <div className="space-y-5 text-center">
+        <div className="space-y-2">
+          <h2 className="text-xl font-semibold text-white">Authenticator setup blocked</h2>
+          <p className="text-sm text-red-300">{error || 'Could not start authenticator setup.'}</p>
+        </div>
+
+        {enrollDisabled ? (
+          <div className="text-left text-sm text-blue-100 bg-black/30 border border-white/10 rounded-xl p-4 space-y-3">
+            <p className="font-semibold text-yellow-300">What this means in plain English</p>
+            <p className="text-blue-200">
+              Your Google Authenticator app is fine. The <em>server</em> that checks codes currently
+              has authenticator setup turned off, so it will not show a QR code.
+            </p>
+            <p className="text-blue-200">
+              On this machine we enable it with one command (from the project folder), then click
+              the button below:
+            </p>
+            <pre className="text-xs bg-black/40 text-yellow-100 p-2 rounded overflow-x-auto">
+{`bash tools/enable-local-totp-mfa.sh`}
+            </pre>
+            <p className="text-blue-200 text-xs">
+              Or fully recreate local Auth:{' '}
+              <code className="text-yellow-200">npx supabase stop && npx supabase start</code>
+              — then confirm{' '}
+              <code className="text-yellow-200">GOTRUE_MFA_TOTP_ENROLL_ENABLED=true</code> inside
+              the auth container. Hosted projects: Dashboard → Authentication → Multi-Factor →
+              enable App Authenticator (TOTP).
+            </p>
+          </div>
+        ) : null}
+
+        <Button
+          type="button"
+          className="w-full text-lg bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
+          onClick={() => setRetryKey((n) => n + 1)}
+        >
+          Try setup again
+        </Button>
       </div>
     );
   }
@@ -181,7 +236,7 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
       <Button
         type="submit"
         className="w-full text-lg bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"
-        disabled={submitting || code.length !== 6}
+        disabled={submitting || code.length !== 6 || !factorId}
       >
         {submitting ? (
           <>
