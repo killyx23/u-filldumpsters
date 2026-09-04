@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 import { getAppOrigin } from '@/utils/getAppOrigin';
+import { saveVerificationDeadline } from '@/utils/verificationCodeWindow';
 
 export const ReturningCustomerEmailGate = ({
   email: initialEmail,
@@ -43,6 +44,9 @@ export const ReturningCustomerEmailGate = ({
       });
       if (fnError) throw new Error(await parseEdgeFunctionError(fnError, data));
       if (data?.error) throw new Error(data.error);
+      if (pendingToken) {
+        saveVerificationDeadline(pendingToken, data?.expiresAt);
+      }
       setStep('code');
       toast({ title: 'Code Sent', description: `We sent a verification code to ${normalizedEmail}.` });
     } catch (err) {
@@ -74,7 +78,7 @@ export const ReturningCustomerEmailGate = ({
       if (verifyError) throw new Error(await parseEdgeFunctionError(verifyError, verifyData));
       if (!verifyData?.success) throw new Error(verifyData?.error || 'Invalid verification code');
 
-      markVerifiedEmailSession(normalizedEmail);
+      markVerifiedEmailSession(normalizedEmail, pendingToken || null);
       toast({ title: 'Email Verified', description: 'You can now confirm your driver and vehicle documents.' });
       onVerified?.({ email: normalizedEmail, customer: verifyData.customer || null });
     } catch (err) {

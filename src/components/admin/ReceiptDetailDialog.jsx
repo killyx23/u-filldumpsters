@@ -9,6 +9,15 @@ import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
 import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
+import {
+    splitAddonEquipmentList,
+    splitBookingEquipmentRows,
+    resolveEquipmentId,
+    getEquipmentReturnDisplay,
+    formatReturnIssueStatus,
+    EQUIPMENT_FRIENDLY_LABELS,
+} from '@/utils/equipmentReturnDisplay';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -41,6 +50,10 @@ import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelf
         const showOneWayDistance = !bookingIsCompanyDelivery(booking);
         const showTimeWindow = shouldShowTimeWindow(plan, isDelivery);
         const isSelfService = isSelfServiceTrailer(plan, isDelivery);
+        const isPickup = isCustomerPickupService(plan, addons || {});
+        const pickedUpAt = isPickup
+            ? (booking.rented_out_at || booking.picked_up_at)
+            : (booking.picked_up_at || booking.rented_out_at);
         const timeOptions = {
             isWindow: showTimeWindow,
             isSelfService,
@@ -106,8 +119,8 @@ import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelf
                             )}
                             <DetailRow icon={<Clock />} label={isSelfService ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} ${formatTime(drop_off_time_slot, { isReturnBy: false })}`} />
                             <DetailRow icon={<Clock />} label={isSelfService ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} ${formatTime(pickup_time_slot, { isReturnBy: isSelfService })}`} />
-                            {booking.rented_out_at && <DetailRow icon={<Clock />} label="Actual Rented Out" value={format(parseISO(booking.rented_out_at), 'Pp')} />}
-                            {booking.returned_at && <DetailRow icon={<Clock />} label="Actual Returned" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                            {pickedUpAt && <DetailRow icon={<Clock />} label="Picked Up On" value={format(parseISO(pickedUpAt), 'Pp')} />}
+                            {booking.returned_at && <DetailRow icon={<Clock />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
                         </section>
 
                         {rescheduleApproval && (
@@ -131,23 +144,84 @@ import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelf
                             {offersDrivewayProtection && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
                             {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                             
-                            {addons.equipment && addons.equipment.length > 0 && (
-                                <div className="pt-2">
-                                    <p className="font-semibold text-blue-200 flex items-center"><ShoppingBag className="mr-2 h-5 w-5"/>Equipment</p>
-                                    <ul className="list-disc list-inside pl-8 text-white">
-                                        {addons.equipment.map(item => {
-                                            const meta = equipmentMeta.find(e => e.id === item.id);
-                                            const issue = return_issues ? return_issues[meta?.label] : null;
-                                            return (
-                                                <li key={item.id}>
-                                                    {meta?.label || item.id} (x{item.quantity})
-                                                    {issue && <span className="text-red-400 font-bold ml-2">({issue.status.replace(/_/g, ' ')})</span>}
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                </div>
-                            )}
+                            {addons.equipment && addons.equipment.length > 0 && (() => {
+                                const { rentals, purchases } = splitAddonEquipmentList(addons.equipment);
+                                const bookingEqRows = (equipment || []).filter((e) => e.booking_id === booking.id);
+                                const { rentals: rentalRows } = splitBookingEquipmentRows(bookingEqRows);
+                                const returnedAtById = new Map(
+                                    rentalRows.map((row) => [
+                                        Number(row.equipment_id || row.equipment?.id),
+                                        row.returned_at,
+                                    ])
+                                );
+                                const dbNameById = new Map(
+                                    rentalRows.map((row) => [
+                                        Number(row.equipment_id || row.equipment?.id),
+                                        row.equipment?.name,
+                                    ])
+                                );
+
+                                return (
+                                    <div className="pt-2 space-y-3">
+                                        {rentals.length > 0 && (
+                                            <div>
+                                                <p className="font-semibold text-blue-200 flex items-center"><ShoppingBag className="mr-2 h-5 w-5"/>Equipment Included</p>
+                                                <ul className="list-disc list-inside pl-8 text-white">
+                                                    {rentals.map((item) => {
+                                                        const equipmentId = resolveEquipmentId(item);
+                                                        const meta = equipmentMeta.find((e) => e.id === item.id);
+                                                        const label =
+                                                            dbNameById.get(equipmentId) ||
+                                                            meta?.label ||
+                                                            EQUIPMENT_FRIENDLY_LABELS[equipmentId] ||
+                                                            item.id;
+                                                        const display = getEquipmentReturnDisplay({
+                                                            equipmentId,
+                                                            equipmentName: dbNameById.get(equipmentId),
+                                                            friendlyName: meta?.label || EQUIPMENT_FRIENDLY_LABELS[equipmentId],
+                                                            returnedAt: returnedAtById.get(equipmentId),
+                                                            returnIssues: return_issues,
+                                                            bookingStatus: booking.status,
+                                                        });
+                                                        const toneClass =
+                                                            display.tone === 'green'
+                                                                ? 'text-green-300'
+                                                                : display.tone === 'red'
+                                                                  ? 'text-red-400 font-bold'
+                                                                  : 'text-orange-300';
+                                                        return (
+                                                            <li key={item.id || equipmentId}>
+                                                                {label} (x{item.quantity}) —{' '}
+                                                                <span className={toneClass}>{display.label}</span>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {purchases.length > 0 && (
+                                            <div>
+                                                <p className="font-semibold text-blue-200 flex items-center"><ShoppingBag className="mr-2 h-5 w-5"/>Purchased Items</p>
+                                                <ul className="list-disc list-inside pl-8 text-white">
+                                                    {purchases.map((item) => {
+                                                        const equipmentId = resolveEquipmentId(item);
+                                                        const meta = equipmentMeta.find((e) => e.id === item.id);
+                                                        const label =
+                                                            meta?.label ||
+                                                            EQUIPMENT_FRIENDLY_LABELS[equipmentId] ||
+                                                            item.id;
+                                                        return (
+                                                            <li key={item.id || equipmentId}>
+                                                                {label} (x{item.quantity})
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </section>
 
                         {notes && (
@@ -161,7 +235,7 @@ import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelf
                             <section>
                                 <h4 className="font-bold text-lg text-red-400 mt-4 mb-2">Issues & Additional Fees</h4>
                                 {return_issues && Object.entries(return_issues).map(([key, value]) => (
-                                    <DetailRow key={key} icon={<AlertTriangle />} label={`Issue: ${key.replace(/_/g, ' ')}`} value={value.status.replace(/_/g, ' ')} className="capitalize" />
+                                    <DetailRow key={key} icon={<AlertTriangle />} label={`Issue: ${key.replace(/_/g, ' ')}`} value={formatReturnIssueStatus(value.status)} className="capitalize" />
                                 ))}
                                 {fees && Object.entries(fees).map(([key, value]) => (
                                     <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`$${parseFloat(value.amount).toFixed(2)}`} />

@@ -37,7 +37,8 @@ Deno.serve(async (req)=>{
       },
       body: JSON.stringify({
         bookingId: booking_id,
-        site_url
+        site_url,
+        force: true,
       })
     });
     const result = await response.json();

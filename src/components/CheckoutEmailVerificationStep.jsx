@@ -17,7 +17,11 @@ export const CheckoutEmailVerificationStep = ({
 }) => {
   const handleVerified = ({ email: verifiedEmail, customer }) => {
     if (pendingToken) {
-      publishCheckoutSyncEvent({ type: 'verified', pendingId: pendingToken });
+      publishCheckoutSyncEvent({
+        type: 'verified',
+        pendingId: pendingToken,
+        email: verifiedEmail || null,
+      });
     }
     const mapped = customer ? mapCustomerToBookingData(customer, verifiedEmail) : null;
     onVerified?.({
@@ -26,6 +30,9 @@ export const CheckoutEmailVerificationStep = ({
       email: verifiedEmail,
     });
   };
+
+  // When another tab verifies via the email link, BookingFlowContext stands this
+  // tab down to the homepage (idle guard). Local typed verify still continues here.
 
   return (
     <motion.div
@@ -58,9 +65,6 @@ export const CheckoutEmailVerificationStep = ({
               : 'Please verify the email address for this booking before continuing to driver and vehicle verification.'}
           </p>
         </div>
-        <p className="mb-6 text-xs text-blue-200/90">
-          If you confirm from the email, that link may open a new tab. Finish the booking there, then close this tab — leaving it open can start a timeout on this screen.
-        </p>
 
         <ReturningCustomerEmailGate
           email={email}

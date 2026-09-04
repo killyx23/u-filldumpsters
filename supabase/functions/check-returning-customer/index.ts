@@ -40,11 +40,13 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const { data: customer, error: customerError } = await supabase
+    // Historic data can hold more than one row per email (differing case), so
+    // read them all and treat them as the same person rather than erroring.
+    const { data: customerMatches, error: customerError } = await supabase
       .from('customers')
       .select('id, email, first_name, last_name')
       .ilike('email', normalizedEmail)
-      .maybeSingle();
+      .order('id', { ascending: true });
 
     if (customerError) {
       console.error('[check-returning-customer] customer lookup error:', customerError);
@@ -53,6 +55,9 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    const customer = customerMatches?.[0] ?? null;
+    const customerIds = (customerMatches || []).map((row) => row.id);
 
     if (!customer) {
       return new Response(
@@ -69,7 +74,7 @@ Deno.serve(async (req) => {
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
       .select('id, created_at, status, returned_at')
-      .eq('customer_id', customer.id)
+      .in('customer_id', customerIds)
       .order('created_at', { ascending: false });
 
     if (bookingsError) {

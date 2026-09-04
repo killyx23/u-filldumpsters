@@ -21,11 +21,27 @@ import {
   subscribeCheckoutSyncEvents,
   isCheckoutCompletedElsewhere,
   markCheckoutCompletedElsewhere,
+  clearCheckoutCompletedElsewhere,
 } from '@/utils/checkoutTabSync';
+import { hasVerifiedEmailSession, markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 
 /** Poll often enough to catch idle even when setTimeout is throttled in background tabs. */
 const IDLE_CHECK_MS = 5 * 1000;
 const COMPLETION_POLL_MS = 10 * 1000;
+
+/** Server view of a checkout: converted yet, and verified yet (any device). */
+async function readCheckoutProgress(pendingId) {
+  if (!pendingId) return null;
+  try {
+    const { data } = await supabase.rpc('get_checkout_completion_status', {
+      p_pending_id: pendingId,
+    });
+    return data || null;
+  } catch {
+    // Network failure must not block teardown — fall through to the normal path.
+    return null;
+  }
+}
 
 /**
  * Idle / unload guard for booking flow from step 5 onward (after contact is saved).
@@ -38,8 +54,16 @@ const COMPLETION_POLL_MS = 10 * 1000;
  * @param {string|null} options.pendingToken
  * @param {(result: object) => void} options.onTeardownComplete — reset flow + navigate home
  * @param {(payload: { bookingId?: number|null, pendingId?: string|null }) => void} [options.onCheckoutCompleted]
+ * @param {(payload?: { pendingId?: string|null, email?: string|null }) => void} [options.onCheckoutVerified]
+ *   — email verified in another tab; this tab stands down to home (no teardown)
  */
-export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete, onCheckoutCompleted }) {
+export function useCheckoutIdleGuard({
+  enabled,
+  pendingToken,
+  onTeardownComplete,
+  onCheckoutCompleted,
+  onCheckoutVerified,
+}) {
   const [stillHereOpen, setStillHereOpen] = useState(false);
   const [countdownRemainingMs, setCountdownRemainingMs] = useState(COUNTDOWN_MS);
 
@@ -56,13 +80,17 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
   const pendingTokenRef = useRef(pendingToken);
   const onTeardownCompleteRef = useRef(onTeardownComplete);
   const onCheckoutCompletedRef = useRef(onCheckoutCompleted);
+  const onCheckoutVerifiedRef = useRef(onCheckoutVerified);
   const startCountdownRef = useRef(() => {});
   const runTeardownRef = useRef(async () => {});
   const checkIdleStateRef = useRef(() => {});
   const handleOtherTabProgressRef = useRef(() => {});
   const handleOtherTabCompletedRef = useRef(() => {});
+  const notifyEmailVerifiedElsewhereRef = useRef(() => {});
   const completionPollRef = useRef(null);
   const completedHandledRef = useRef(false);
+  const verifiedAdvanceHandledRef = useRef(false);
+  const teardownInFlightRef = useRef(false);
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -79,6 +107,10 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
   useEffect(() => {
     onCheckoutCompletedRef.current = onCheckoutCompleted;
   }, [onCheckoutCompleted]);
+
+  useEffect(() => {
+    onCheckoutVerifiedRef.current = onCheckoutVerified;
+  }, [onCheckoutVerified]);
 
   useEffect(() => {
     stillHereOpenRef.current = stillHereOpen;
@@ -153,6 +185,24 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
     stillHereOpenRef.current = false;
   }, [markActivity, clearCountdownTick]);
 
+  const notifyEmailVerifiedElsewhere = useCallback(
+    ({ pendingId = null, email = null } = {}) => {
+      if (verifiedAdvanceHandledRef.current || tearingDownRef.current) return;
+      verifiedAdvanceHandledRef.current = true;
+      // Latch before home navigate so pagehide cannot beacon left_early while
+      // the email-link tab continues the booking.
+      tearingDownRef.current = true;
+      clearAllTimers();
+      setStillHereOpen(false);
+      stillHereOpenRef.current = false;
+      onCheckoutVerifiedRef.current?.({
+        pendingId: pendingId || pendingTokenRef.current,
+        email,
+      });
+    },
+    [clearAllTimers],
+  );
+
   useEffect(() => {
     handleOtherTabCompletedRef.current = handleOtherTabCompleted;
   }, [handleOtherTabCompleted]);
@@ -161,11 +211,16 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
     handleOtherTabProgressRef.current = handleOtherTabProgress;
   }, [handleOtherTabProgress]);
 
+  useEffect(() => {
+    notifyEmailVerifiedElsewhereRef.current = notifyEmailVerifiedElsewhere;
+  }, [notifyEmailVerifiedElsewhere]);
+
   const runTeardown = useCallback(
     async (reason, { beacon = false } = {}) => {
       const ids = resolveIds(reason);
       if (
         tearingDownRef.current ||
+        teardownInFlightRef.current ||
         isCheckoutCompletedElsewhere(ids) ||
         isCheckoutTeardownDone({
           reason,
@@ -179,50 +234,96 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
       const { bookingId, pendingId } = ids;
       if (!bookingId && !pendingId) return null;
 
-      tearingDownRef.current = true;
-      clearAllTimers();
-      setStillHereOpen(false);
-      stillHereOpenRef.current = false;
-
       const siteUrl = typeof window !== 'undefined' ? window.location.origin : null;
 
       if (beacon) {
+        tearingDownRef.current = true;
+        clearAllTimers();
+        setStillHereOpen(false);
+        stillHereOpenRef.current = false;
         beaconEndUnfinishedCheckout({ bookingId, pendingId, reason, siteUrl });
         onTeardownCompleteRef.current?.({ success: true, beamed: true, reason });
         return { success: true, beamed: true, reason };
       }
 
-      let result = null;
-      try {
-        result = await endUnfinishedCheckout({
-          bookingId,
-          pendingId,
-          reason,
-          siteUrl,
-        });
-      } catch (err) {
-        console.warn('[useCheckoutIdleGuard] teardown failed:', err);
-        result = {
-          success: false,
-          error: err?.message || String(err),
-          reason,
-          emailSent: false,
-          crmUpdated: false,
-        };
-      } finally {
-        if (result?.skippedReason === 'already_converted') {
-          handleOtherTabCompletedRef.current?.({
-            bookingId: result.convertedBookingId || result.bookingId,
-            pendingId,
-          });
-        } else {
-          onTeardownCompleteRef.current?.(result);
-        }
-      }
+      // Held across the awaits below so a concurrent idle tick cannot start a
+      // second teardown before tearingDownRef is set.
+      teardownInFlightRef.current = true;
 
-      return result;
+      try {
+        // The customer may be finishing this same booking on another device,
+        // where no cross-tab event can reach us. Ask the server before cancelling.
+        if (pendingId) {
+          const progress = await readCheckoutProgress(pendingId);
+          if (progress?.completed) {
+            handleOtherTabCompletedRef.current?.({
+              bookingId: progress.booking_id,
+              pendingId,
+            });
+            return { success: true, skipped: true, skippedReason: 'already_converted', reason };
+          }
+          // Email verified in another tab (usually the emailed link): stand this
+          // tab down to home — do not cancel and do not open a second checkout.
+          if (
+            !bookingId &&
+            progress?.email_verified &&
+            !hasVerifiedEmailSession(progress.email, pendingId)
+          ) {
+            if (progress.email) {
+              markVerifiedEmailSession(progress.email, pendingId);
+            }
+            notifyEmailVerifiedElsewhere({
+              pendingId,
+              email: progress.email || null,
+            });
+            return {
+              success: true,
+              skipped: true,
+              skippedReason: 'email_verified_elsewhere',
+              reason,
+            };
+          }
+        }
+
+        tearingDownRef.current = true;
+        clearAllTimers();
+        setStillHereOpen(false);
+        stillHereOpenRef.current = false;
+
+        let result = null;
+        try {
+          result = await endUnfinishedCheckout({
+            bookingId,
+            pendingId,
+            reason,
+            siteUrl,
+          });
+        } catch (err) {
+          console.warn('[useCheckoutIdleGuard] teardown failed:', err);
+          result = {
+            success: false,
+            error: err?.message || String(err),
+            reason,
+            emailSent: false,
+            crmUpdated: false,
+          };
+        } finally {
+          if (result?.skippedReason === 'already_converted') {
+            handleOtherTabCompletedRef.current?.({
+              bookingId: result.convertedBookingId || result.bookingId,
+              pendingId,
+            });
+          } else {
+            onTeardownCompleteRef.current?.(result);
+          }
+        }
+
+        return result;
+      } finally {
+        teardownInFlightRef.current = false;
+      }
     },
-    [clearAllTimers, resolveIds],
+    [clearAllTimers, resolveIds, notifyEmailVerifiedElsewhere],
   );
 
   const startCountdown = useCallback(() => {
@@ -357,6 +458,8 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
       sequenceStartedAtRef.current = null;
       tearingDownRef.current = false;
       completedHandledRef.current = false;
+      verifiedAdvanceHandledRef.current = false;
+      teardownInFlightRef.current = false;
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
         heartbeatRef.current = null;
@@ -370,6 +473,8 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
 
     tearingDownRef.current = false;
     completedHandledRef.current = false;
+    verifiedAdvanceHandledRef.current = false;
+    teardownInFlightRef.current = false;
     sequenceStartedAtRef.current = null;
     moreTimeEndsAtRef.current = null;
     countdownEndsAtRef.current = null;
@@ -416,18 +521,37 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
     const pollCompletion = async () => {
       const pendingId = pendingTokenRef.current;
       if (!pendingId || tearingDownRef.current) return;
+      // Paying tab: PaymentPage owns the confirmation redirect.
+      if (isPaymentInFlight()) return;
       if (isCheckoutCompletedElsewhere({ pendingId })) {
-        handleOtherTabCompletedRef.current?.({ pendingId });
-        return;
+        const progress = await readCheckoutProgress(pendingId);
+        if (progress?.completed) {
+          handleOtherTabCompletedRef.current?.({
+            bookingId: progress.booking_id,
+            pendingId,
+          });
+          return;
+        }
+        clearCheckoutCompletedElsewhere(); // stale marker from a previous checkout
       }
       try {
-        const { data } = await supabase.rpc('get_checkout_completion_status', {
-          p_pending_id: pendingId,
-        });
-        if (data?.completed) {
+        const progress = await readCheckoutProgress(pendingId);
+        if (progress?.completed) {
           handleOtherTabCompletedRef.current?.({
-            bookingId: data.booking_id,
+            bookingId: progress.booking_id,
             pendingId,
+          });
+          return;
+        }
+        if (
+          progress?.email_verified &&
+          progress.email &&
+          !hasVerifiedEmailSession(progress.email, pendingId)
+        ) {
+          markVerifiedEmailSession(progress.email, pendingId);
+          notifyEmailVerifiedElsewhereRef.current?.({
+            pendingId,
+            email: progress.email,
           });
         }
       } catch {
@@ -441,10 +565,17 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
       const localPending = pendingTokenRef.current;
       if (event.pendingId && localPending && event.pendingId !== localPending) return;
       if (event.type === 'verified') {
-        handleOtherTabProgressRef.current?.();
+        // Email-link tab owns checkout; this tab stands down to homepage.
+        notifyEmailVerifiedElsewhereRef.current?.({
+          pendingId: event.pendingId || localPending,
+          email: event.email || null,
+        });
         return;
       }
+      // tab_claimed is unused for verify (original tab stays primary). Ignore.
       if (event.type === 'completed' || event.type === 'paid') {
+        // Paying tab keeps payment-in-flight until redirect; skip so PaymentPage owns nav.
+        if (isPaymentInFlight()) return;
         handleOtherTabCompletedRef.current?.({
           bookingId: event.bookingId,
           pendingId: event.pendingId || localPending,
@@ -468,17 +599,17 @@ export function useCheckoutIdleGuard({ enabled, pendingToken, onTeardownComplete
       if (!enabledRef.current || tearingDownRef.current) return;
       if (isPaymentInFlight()) return;
       if (isCheckoutCompletedElsewhere({ pendingId: pendingTokenRef.current })) return;
-      const { bookingId } = resolveTeardownTarget({
+      const { bookingId, pendingId } = resolveTeardownTarget({
         pendingToken: pendingTokenRef.current,
         reason: 'left_early',
       });
-      // Only beacon left_early once a pending_payment booking exists (payment step).
-      // Steps 5–8 are covered by idle reminded/expired + manual leave dialog.
-      if (!bookingId) return;
+      // Immediate left_early for steps 5–8 (pendingId) and payment (bookingId).
+      if (!bookingId && !pendingId) return;
       if (
         isCheckoutTeardownDone({
           reason: 'left_early',
           bookingId,
+          pendingId,
         })
       ) {
         return;

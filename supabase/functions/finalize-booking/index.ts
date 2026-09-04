@@ -32,6 +32,7 @@ async function sendBookingConfirmationEmail(bookingId: number | string, siteUrl?
   if (response.ok && result.success === true) {
     return {
       sent: true as const,
+      alreadySent: result.already_sent === true,
       recipient: result.recipient ?? null,
       emailType: String(result.email_type || "confirmation"),
     };
@@ -136,13 +137,23 @@ Deno.serve(async (req)=>{
       await upsertTaxLedgerForBooking(booking);
       let emailError: string | null = null;
       let emailType: string | null = null;
-      const emailResult = await sendBookingConfirmationEmail(booking.id, siteUrl);
-      if (emailResult.sent) {
+      if (booking.confirmation_email_sent_at) {
         emailSent = true;
-        emailType = emailResult.emailType;
-        log("Booking email catch-up sent successfully.", emailType);
+        emailType = "confirmation";
+        log("Skipping confirmation email catch-up; already sent.");
       } else {
-        emailError = emailResult.error;
+        const emailResult = await sendBookingConfirmationEmail(booking.id, siteUrl);
+        if (emailResult.sent) {
+          emailSent = true;
+          emailType = emailResult.emailType;
+          if (emailResult.alreadySent) {
+            log("Booking email catch-up skipped (already claimed).", emailType);
+          } else {
+            log("Booking email catch-up sent successfully.", emailType);
+          }
+        } else {
+          emailError = emailResult.error;
+        }
       }
 
       if (booking.customer_id && !booking.customers?.user_id) {

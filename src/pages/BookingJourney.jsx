@@ -27,7 +27,8 @@ import {
 } from '@/utils/bookingDataPersistence';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
-import { isCheckoutEmailVerified, isCheckoutEmailVerifiedSync } from '@/utils/checkoutEmailVerification';
+import { isCheckoutEmailVerified, isCheckoutEmailVerifiedSync, clearVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { clearCheckoutCompletedElsewhere } from '@/utils/checkoutTabSync';
 import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
@@ -108,6 +109,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   }, [currentStep, showInlineEmailStep, skipEmailVerification, requiresDriverVerification]);
 
   const resetBookingState = useCallback(() => {
+    clearCheckoutCompletedElsewhere();
+    if (bookingData?.email) {
+      clearVerifiedEmailSession(bookingData.email, bookingData.pendingToken || null);
+    }
     clearRememberedPaymentEquipmentHold();
     setCurrentStep(0);
     setHighestStep(0);
@@ -120,7 +125,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     setIsProcessing(false);
     setDeliveryService(false);
     setAgreementFeeSnapshot([]);
-  }, []);
+  }, [bookingData?.email, bookingData?.pendingToken]);
 
   useEffect(() => {
     registerResetCallback(resetBookingState);
@@ -503,7 +508,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
   };
 
   const proceedAfterPendingStore = async (token) => {
-    const verified = await isCheckoutEmailVerified(bookingData.email, bookingData);
+    const verified = await isCheckoutEmailVerified(bookingData.email, {
+      ...bookingData,
+      pendingToken: token,
+    });
     if (verified) {
       navigateToPayment(token);
     } else {

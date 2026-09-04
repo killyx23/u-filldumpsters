@@ -3,6 +3,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
 const DEFAULT_SITE_URL = "https://u-filldumpsters.com";
+/** Checkout codes hold a date/time slot, so they expire quickly. */
+const CHECKOUT_CODE_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function normalizeSiteUrl(url?: string | null) {
   const fallback = Deno.env.get("SITE_URL") || DEFAULT_SITE_URL;
@@ -65,7 +68,13 @@ Deno.serve(async (req)=>{
     const supabase = createClient(supabaseUrl, supabaseKey);
     // Generate 6-digit verification code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const pendingToken = String(pending_customer_id ?? token ?? "").trim();
+    const normalizedPurpose = String(purpose || "").trim().toLowerCase();
+    const isCheckoutVerification = Boolean(pendingToken) || normalizedPurpose === "checkout";
+    // Checkout codes hold the customer's date/time, so that window stays short.
+    const expiresAt = new Date(
+      Date.now() + (isCheckoutVerification ? CHECKOUT_CODE_TTL_MS : DEFAULT_CODE_TTL_MS),
+    );
     const emailLowerForStore = email.toLowerCase();
     console.log("[send-verification-email] Generating code for:", email);
     // Preserve prior verification so checkout save still works if a new code is resent
@@ -89,14 +98,12 @@ Deno.serve(async (req)=>{
       throw new Error("Failed to store verification code");
     }
     const siteUrl = normalizeSiteUrl(site_url);
-    const pendingToken = String(pending_customer_id ?? token ?? "").trim();
     const emailLower = email.toLowerCase();
-    const normalizedPurpose = String(purpose || "").trim().toLowerCase();
     // checkout (pending booking) → /verify-email
     // portal (forgot login) → /customer-login recovery
     // returning (default when no pending token) → homepage returning-customer flow
     let verifyPath;
-    if (pendingToken || normalizedPurpose === "checkout") {
+    if (isCheckoutVerification) {
       const tokenQuery = pendingToken
         ? `token=${encodeURIComponent(pendingToken)}&`
         : "";
@@ -109,7 +116,13 @@ Deno.serve(async (req)=>{
     const verifyLink = `${siteUrl}${verifyPath}`;
     console.log("[send-verification-email] Verification link:", verifyLink, "purpose:", normalizedPurpose || (pendingToken ? "checkout" : "returning"));
     // Send email via Brevo
-    const emailHtml = generateEmailTemplate(verificationCode, verifyLink, name || "Customer", siteUrl);
+    const emailHtml = generateEmailTemplate(
+      verificationCode,
+      verifyLink,
+      name || "Customer",
+      siteUrl,
+      isCheckoutVerification,
+    );
     const brevoResponse = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
@@ -161,8 +174,14 @@ Deno.serve(async (req)=>{
     });
   }
 });
-function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_URL) {
+function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_URL, isCheckoutVerification = false) {
   const currentYear = new Date().getFullYear();
+  const expiryNotice = isCheckoutVerification
+    ? `This verification code and link expire in 15 minutes. While you verify, we hold your
+       selected date and time so that no one else can book it. Keeping that hold short prevents the
+       same slot from being double-booked and gives other customers who are waiting a fair chance at
+       it. If your code expires, you are welcome to start a new booking at any time.`
+    : "This verification code and link will expire in 24 hours for your security.";
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -310,7 +329,7 @@ function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_UR
           </div>
           
           <div class="notice">
-            <strong>Note:</strong> This verification code and link will expire in 24 hours for your security.
+            <strong>Note:</strong> ${expiryNotice}
           </div>
         </div>
         

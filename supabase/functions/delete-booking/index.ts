@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     const adminAuth = await requireAdminCaller(req, corsHeaders);
     if (adminAuth.error) return adminAuth.error;
 
-    const { bookingId, password } = await req.json();
+    const { bookingId, password, verifyOnly } = await req.json();
 
     const configuredPassword = String(ADMIN_DELETE_PASSWORD || '').trim();
     if (configuredPassword) {
@@ -94,6 +94,16 @@ Deno.serve(async (req) => {
           401,
         );
       }
+    }
+
+    // Password-only check for other admin permanent-delete actions (e.g. damage photos).
+    if (verifyOnly === true) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
     }
 
     if (!bookingId) {

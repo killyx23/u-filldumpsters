@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { format, parseISO, isValid } from 'date-fns';
 import { Plus, Edit, Trash2, Save, X, Loader2, Package, Wrench, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +12,12 @@ import { toast } from '@/components/ui/use-toast';
 import { EquipmentIdValidation } from './EquipmentIdValidation';
 import { updateEquipmentPrice } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import {
+    groupLiveEquipmentAssignments,
+    findReturnIssueForEquipment,
+    formatReturnIssueStatus,
+} from '@/utils/equipmentReturnDisplay';
 
 const EQUIPMENT_CATEGORIES = {
   rental: { 
@@ -32,8 +40,20 @@ const EQUIPMENT_CATEGORIES = {
   }
 };
 
+function formatScheduleDate(value) {
+    if (!value) return 'N/A';
+    try {
+        const d = typeof value === 'string' ? parseISO(value) : new Date(value);
+        if (!isValid(d)) return String(value);
+        return format(d, 'MMM d, yyyy');
+    } catch {
+        return String(value);
+    }
+}
+
 export const EquipmentManager = () => {
     const [equipment, setEquipment] = useState([]);
+    const [assignmentsByEquipmentId, setAssignmentsByEquipmentId] = useState(() => new Map());
     const [loading, setLoading] = useState(true);
     const [editingId, setEditingId] = useState(null);
     const [addingNew, setAddingNew] = useState(false);
@@ -49,15 +69,42 @@ export const EquipmentManager = () => {
     const fetchEquipment = useCallback(async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('equipment')
-                .select('*')
-                .in('type', ['rental', 'consumable', 'service'])
-                .order('type', { ascending: true })
-                .order('name', { ascending: true });
+            const [equipmentRes, assignmentsRes] = await Promise.all([
+                supabase
+                    .from('equipment')
+                    .select('*')
+                    .in('type', ['rental', 'consumable', 'service'])
+                    .order('type', { ascending: true })
+                    .order('name', { ascending: true }),
+                supabase
+                    .from('booking_equipment')
+                    .select(`
+                        id,
+                        equipment_id,
+                        quantity,
+                        returned_at,
+                        booking_id,
+                        equipment ( name ),
+                        bookings (
+                            id,
+                            status,
+                            drop_off_date,
+                            pickup_date,
+                            customer_id,
+                            plan,
+                            return_issues,
+                            name,
+                            customers ( id, name )
+                        )
+                    `)
+                    .is('returned_at', null),
+            ]);
 
-            if (error) throw error;
-            setEquipment(data || []);
+            if (equipmentRes.error) throw equipmentRes.error;
+            if (assignmentsRes.error) throw assignmentsRes.error;
+
+            setEquipment(equipmentRes.data || []);
+            setAssignmentsByEquipmentId(groupLiveEquipmentAssignments(assignmentsRes.data || []));
         } catch (error) {
             console.error('Error fetching equipment:', error);
             toast({
@@ -191,10 +238,10 @@ export const EquipmentManager = () => {
         setFormData({ ...formData, type: categoryType });
     };
 
-    const groupedEquipment = Object.keys(EQUIPMENT_CATEGORIES).reduce((acc, category) => {
+    const groupedEquipment = useMemo(() => Object.keys(EQUIPMENT_CATEGORIES).reduce((acc, category) => {
         acc[category] = equipment.filter(item => (item.type || 'rental') === category);
         return acc;
-    }, {});
+    }, {}), [equipment]);
 
     if (loading) {
         return (
@@ -302,6 +349,12 @@ export const EquipmentManager = () => {
                                                             onEdit={() => handleEdit(item)}
                                                             onDelete={() => handleDelete(item.id)}
                                                             category={category}
+                                                            assignments={
+                                                                categoryKey === 'rental'
+                                                                    ? (assignmentsByEquipmentId.get(Number(item.id)) || [])
+                                                                    : []
+                                                            }
+                                                            showAssignmentStatus={categoryKey === 'rental'}
                                                         />
                                                     )
                                                 ))
@@ -377,7 +430,106 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew, categor
     </div>
 );
 
-const EquipmentItem = ({ item, onEdit, onDelete, category }) => (
+const RentalAssignmentStatus = ({ item, assignments = [] }) => {
+    const outCount = assignments.reduce((sum, a) => sum + (Number(a.quantity) || 1), 0);
+    const isRented = assignments.length > 0;
+
+    return (
+        <div className="mt-3 pt-3 border-t border-gray-700 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs text-gray-400">Status</p>
+                {isRented ? (
+                    <>
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            Rented
+                        </span>
+                        <span className="text-xs text-gray-400">Out: {outCount}</span>
+                    </>
+                ) : (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-500/20 text-green-300 border border-green-500/40">
+                        Available
+                    </span>
+                )}
+            </div>
+
+            {isRented && (
+                <div className="space-y-2">
+                    {assignments.map((assignment) => {
+                        const serviceName =
+                            formatCustomerFacingPlanName(assignment.plan?.name) ||
+                            assignment.plan?.name ||
+                            'service';
+                        const issue = findReturnIssueForEquipment({
+                            equipmentId: assignment.equipmentId || item.id,
+                            equipmentName: assignment.equipmentName || item.name,
+                            returnIssues: assignment.returnIssues,
+                        });
+                        const issueIsProblem =
+                            issue?.status === 'damaged' ||
+                            issue?.status === 'lost_stolen' ||
+                            issue?.status === 'not_returned' ||
+                            issue?.status === 'not_returned_fee_charged';
+
+                        return (
+                            <div
+                                key={assignment.bookingEquipmentId || `${assignment.bookingId}-${assignment.equipmentId}`}
+                                className="bg-gray-900/50 border border-gray-700 rounded-lg p-3 text-sm space-y-1.5"
+                            >
+                                <p className="text-white">
+                                    <span className="text-gray-400">Booking ID:</span>{' '}
+                                    {assignment.customerId ? (
+                                        <Link
+                                            to={`/admin/customer/${assignment.customerId}`}
+                                            className="text-cyan-300 hover:text-cyan-200 underline font-semibold"
+                                        >
+                                            #{assignment.bookingId}
+                                        </Link>
+                                    ) : (
+                                        <span className="font-semibold">#{assignment.bookingId}</span>
+                                    )}
+                                </p>
+                                <p className="text-white">
+                                    <span className="text-gray-400">Customer:</span>{' '}
+                                    {assignment.customerId ? (
+                                        <Link
+                                            to={`/admin/customer/${assignment.customerId}`}
+                                            className="text-cyan-300 hover:text-cyan-200 underline"
+                                        >
+                                            {assignment.customerName}
+                                        </Link>
+                                    ) : (
+                                        assignment.customerName
+                                    )}
+                                </p>
+                                <p className="text-white">
+                                    <span className="text-gray-400">Why:</span>{' '}
+                                    Rental add-on on {serviceName}
+                                </p>
+                                {issueIsProblem ? (
+                                    <p className="text-red-300 font-semibold">
+                                        Return status: {formatReturnIssueStatus(issue.status)}
+                                    </p>
+                                ) : (
+                                    <p className="text-white">
+                                        <span className="text-gray-400">Scheduled:</span>{' '}
+                                        {formatScheduleDate(assignment.dropOffDate)}
+                                        {' → '}
+                                        {formatScheduleDate(assignment.pickupDate)}
+                                    </p>
+                                )}
+                                {assignment.quantity > 1 && (
+                                    <p className="text-xs text-gray-400">Qty on this booking: {assignment.quantity}</p>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const EquipmentItem = ({ item, onEdit, onDelete, category, assignments = [], showAssignmentStatus = false }) => (
     <div className={`equipment-item-card category-${category.color}`}>
         <div className="flex items-center justify-between">
             <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -422,6 +574,9 @@ const EquipmentItem = ({ item, onEdit, onDelete, category }) => (
         </div>
         {item.description && (
             <p className="text-sm text-gray-400 mt-3 pt-3 border-t border-gray-700">{item.description}</p>
+        )}
+        {showAssignmentStatus && (
+            <RentalAssignmentStatus item={item} assignments={assignments} />
         )}
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
             <span>ID: {item.id}</span>

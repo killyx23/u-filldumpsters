@@ -4,15 +4,22 @@ import { Link } from 'react-router-dom';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import { ResolveFollowUpDialog } from '@/components/admin/ResolveFollowUpDialog';
 import { Button } from '@/components/ui/button';
-import { CheckCircle, Clock, DollarSign, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink } from 'lucide-react';
+import { CheckCircle, Clock, DollarSign, AlertTriangle, Image, XCircle, Calendar, Hash, MapPin, ExternalLink, Loader2 } from 'lucide-react';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import {
     getFollowUpReasonLabel,
     isFollowUpHold,
     reasonClosesFlag,
 } from '@/utils/followUpResolution';
+import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import {
+    splitBookingEquipmentRows,
+    getEquipmentReturnDisplay,
+} from '@/utils/equipmentReturnDisplay';
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -30,6 +37,75 @@ const IssueItem = ({ title, details }) => (
         <p className="text-sm text-red-200">{details}</p>
     </div>
 );
+
+const DamagePhotosLinks = ({ photos = [] }) => {
+    const [preview, setPreview] = React.useState(null);
+    const [previewUrl, setPreviewUrl] = React.useState(null);
+    const [loading, setLoading] = React.useState(false);
+
+    const openPreview = async (photo, index) => {
+        setPreview({ ...photo, index });
+        setPreviewUrl(null);
+        setLoading(true);
+        try {
+            const url = await resolveCustomerUploadSignedUrl(photo);
+            setPreviewUrl(url);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <>
+            <div className="flex flex-wrap gap-2 mt-2">
+                {photos.map((photo, i) => (
+                    <button
+                        type="button"
+                        key={photo.path || i}
+                        onClick={() => openPreview(photo, i)}
+                        className="text-cyan-300 hover:text-cyan-200 underline text-sm"
+                    >
+                        {photo.name || `Photo ${i + 1}`}
+                    </button>
+                ))}
+            </div>
+            <Dialog
+                open={!!preview}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPreview(null);
+                        setPreviewUrl(null);
+                    }
+                }}
+            >
+                <DialogContent className="bg-gray-900 text-white border-cyan-500 max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle>{preview?.name || `Photo ${(preview?.index ?? 0) + 1}`}</DialogTitle>
+                        <DialogDescription>In-app preview (signed URL).</DialogDescription>
+                    </DialogHeader>
+                    <div className="min-h-[200px] flex items-center justify-center bg-black/40 rounded-md overflow-hidden">
+                        {loading ? (
+                            <Loader2 className="h-8 w-8 animate-spin text-cyan-300" />
+                        ) : previewUrl ? (
+                            <img
+                                src={previewUrl}
+                                alt={preview?.name || 'Damage photo'}
+                                className="max-h-[70vh] max-w-full object-contain"
+                            />
+                        ) : (
+                            <p className="text-red-300 text-sm">Could not load photo preview.</p>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setPreview(null)}>
+                            Close
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
+};
 
 const DistanceWarning = ({ booking }) => {
     const [distance, setDistance] = React.useState(booking.addons?.distanceInfo?.miles || null);
@@ -132,6 +208,8 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
             <h3 className="text-2xl font-bold text-yellow-400">Completed & Cancelled Rentals</h3>
             {bookings.map(booking => {
                  const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
+                 const { rentals: rentalEquipment, purchases: purchasedEquipment } =
+                     splitBookingEquipmentRows(relevantEquipment);
                  const returnIssues = booking.return_issues || {};
                  const fees = booking.fees || {};
                  const refundDetails = booking.refund_details || null;
@@ -187,7 +265,20 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                              <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
-                             {booking.picked_up_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Picked Up On" value={format(parseISO(booking.picked_up_at), 'Pp')} />}
+                             {(() => {
+                                 const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
+                                 const pickedUpAt = isPickup
+                                     ? (booking.rented_out_at || booking.picked_up_at)
+                                     : (booking.picked_up_at || booking.rented_out_at);
+                                 if (!pickedUpAt) return null;
+                                 return (
+                                     <DetailItem
+                                         icon={<CheckCircle className="text-green-400" />}
+                                         label="Picked Up On"
+                                         value={format(parseISO(pickedUpAt), 'Pp')}
+                                     />
+                                 );
+                             })()}
                         </div>
 
                         <div className="mt-4 bg-black/20 border border-white/10 rounded-lg p-3 text-xs text-gray-200">
@@ -204,12 +295,48 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                             </div>
                         </div>
 
-                        {relevantEquipment.length > 0 && (
-                            <div className="mt-4">
-                                <p className="font-semibold text-blue-100">Equipment Included:</p>
-                                <ul className="list-disc list-inside text-white pl-4">
-                                    {relevantEquipment.map(e => <li key={e.id}>{e.equipment.name} (x{e.quantity})</li>)}
-                                </ul>
+                        {(rentalEquipment.length > 0 || purchasedEquipment.length > 0) && (
+                            <div className="mt-4 space-y-3">
+                                {rentalEquipment.length > 0 && (
+                                    <div>
+                                        <p className="font-semibold text-blue-100">Equipment Included:</p>
+                                        <ul className="list-disc list-inside text-white pl-4">
+                                            {rentalEquipment.map((e) => {
+                                                const display = getEquipmentReturnDisplay({
+                                                    equipmentId: e.equipment_id || e.equipment?.id,
+                                                    equipmentName: e.equipment?.name,
+                                                    returnedAt: e.returned_at,
+                                                    returnIssues,
+                                                    bookingStatus: booking.status,
+                                                });
+                                                const toneClass =
+                                                    display.tone === 'green'
+                                                        ? 'text-green-300'
+                                                        : display.tone === 'red'
+                                                          ? 'text-red-400 font-bold'
+                                                          : 'text-orange-300';
+                                                return (
+                                                    <li key={e.id}>
+                                                        {e.equipment?.name || 'Equipment'} (x{e.quantity}) —{' '}
+                                                        <span className={toneClass}>{display.label}</span>
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    </div>
+                                )}
+                                {purchasedEquipment.length > 0 && (
+                                    <div>
+                                        <p className="font-semibold text-blue-100">Purchased Items:</p>
+                                        <ul className="list-disc list-inside text-white pl-4">
+                                            {purchasedEquipment.map((e) => (
+                                                <li key={e.id}>
+                                                    {e.equipment?.name || 'Item'} (x{e.quantity})
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -273,8 +400,18 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                                 {Object.entries(returnIssues).map(([key, value]) => {
                                     if (value.status === 'not_returned') return <IssueItem key={key} title={`Unreturned Item: ${key}`} details="Customer was charged for this item." />;
                                     if (value.status === 'not_returned_fee_charged') return <IssueItem key={key} title={`Unreturned Item: ${key}`} details="Fee charged for unreturned item." />;
+                                    if (value.status === 'lost_stolen') return <IssueItem key={key} title={`Lost / Stolen: ${key}`} details="Item was not returned. Replacement fee applied." />;
                                     if (value.status === 'not_clean') return <IssueItem key={key} title="Not Cleaned" details="A cleaning fee was applied." />;
-                                    if (value.status === 'damaged') return <IssueItem key={key} title="Damage Reported" details="Damage fees were applied. See photos below." />;
+                                    if (value.status === 'damaged') {
+                                        const isTrailer = key === 'no_damage';
+                                        return (
+                                            <IssueItem
+                                                key={key}
+                                                title={isTrailer ? 'Damage Reported (Trailer / Dumpster)' : `Damaged: ${key}`}
+                                                details={isTrailer ? 'Damage fees were applied. See photos below.' : 'Damage fee applied; item was not restocked.'}
+                                            />
+                                        );
+                                    }
                                     return null;
                                 })}
                             </div>
@@ -287,11 +424,7 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                         {booking.damage_photos && booking.damage_photos.length > 0 && (
                              <div className="mt-4">
                                 <h5 className="font-bold text-blue-100 flex items-center"><Image className="mr-2 h-5 w-5" />Damage Photos</h5>
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                    {booking.damage_photos.map((photo, i) => (
-                                        <a href={photo.url} target="_blank" rel="noopener noreferrer" key={i} className="text-cyan-300 hover:text-cyan-200 underline text-sm">Photo {i+1}</a>
-                                    ))}
-                                </div>
+                                <DamagePhotosLinks photos={booking.damage_photos} />
                              </div>
                         )}
 

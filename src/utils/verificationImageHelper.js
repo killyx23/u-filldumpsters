@@ -638,3 +638,49 @@ export const updateVerificationStatus = async (customerId, status, verifiedBy) =
   }
   return data;
 };
+
+const CUSTOMER_UPLOADS_BUCKET = 'customer-uploads';
+const CUSTOMER_UPLOAD_SIGNED_TTL_SECONDS = 3600;
+
+/**
+ * Resolve a private customer-uploads object to a browser-reachable signed URL.
+ * Accepts `{ path, url }` from damage_photos JSON or a raw path/url string.
+ */
+export async function resolveCustomerUploadSignedUrl(photoOrPath) {
+  const pathValue =
+    typeof photoOrPath === 'string'
+      ? photoOrPath
+      : photoOrPath?.path || null;
+  const urlValue =
+    typeof photoOrPath === 'string'
+      ? null
+      : photoOrPath?.url || null;
+
+  let path = pathValue;
+  if (!path && urlValue) {
+    const markers = [
+      `/object/public/${CUSTOMER_UPLOADS_BUCKET}/`,
+      `/object/sign/${CUSTOMER_UPLOADS_BUCKET}/`,
+      `/object/authenticated/${CUSTOMER_UPLOADS_BUCKET}/`,
+    ];
+    for (const marker of markers) {
+      const idx = String(urlValue).indexOf(marker);
+      if (idx >= 0) {
+        path = String(urlValue).slice(idx + marker.length).split('?')[0];
+        break;
+      }
+    }
+  }
+
+  if (path) {
+    const { data, error } = await supabase.storage
+      .from(CUSTOMER_UPLOADS_BUCKET)
+      .createSignedUrl(path, CUSTOMER_UPLOAD_SIGNED_TTL_SECONDS);
+    if (!error && data?.signedUrl) {
+      return rewriteStorageUrlForCurrentOrigin(data.signedUrl);
+    }
+  }
+
+  if (urlValue) return rewriteStorageUrlForCurrentOrigin(urlValue);
+  return null;
+}

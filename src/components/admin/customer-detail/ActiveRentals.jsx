@@ -4,6 +4,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import { toast } from '@/components/ui/use-toast';
 import { StatusBadge } from '@/components/admin/StatusBadge';
+import { AppointmentCountdown } from '@/components/admin/customer-detail/AppointmentCountdown';
 import { format, parseISO } from 'date-fns';
 import { Clock, Hash, DollarSign, AlertTriangle, CheckCircle, Truck, Package, Loader2, Trash2, MapPin, UploadCloud, Calendar, ChevronsUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { SecureDeleteDialog } from '@/components/admin/SecureDeleteDialog';
+import { SecureDeleteDialog, SecureDamagePhotoDeleteDialog } from '@/components/admin/SecureDeleteDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
@@ -19,6 +20,87 @@ import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
+
+/** Rental add-ons that must be checked back into inventory (not purchases like gloves). */
+const RENTAL_EQUIPMENT_IDS = new Set([1, 2]);
+const ADDON_ID_LABELS = {
+    1: 'Wheelbarrow',
+    2: 'Hand Truck',
+    wheelbarrow: 'Wheelbarrow',
+    handTruck: 'Hand Truck',
+};
+const DAMAGE_PHOTOS_BUCKET = 'customer-uploads';
+
+const EQUIPMENT_DISPOSITIONS = {
+    good: 'good',
+    damaged: 'damaged',
+    lost_stolen: 'lost_stolen',
+};
+
+function feeKeyFor(feeType, itemName = 'general') {
+    return `${feeType}_${String(itemName || 'general').replace(/ /g, '_')}`;
+}
+
+/**
+ * Collect returnable rental add-ons from booking_equipment rows and/or addons.equipment.
+ * Gloves (id 3) and disposal SKUs are excluded.
+ * `name` matches equipment.table / return_issues keys used in history.
+ */
+function collectReturnableEquipment(booking, equipmentRows = []) {
+    const byEquipmentId = new Map();
+
+    for (const row of equipmentRows || []) {
+        const equipmentId = Number(row.equipment_id || row.equipment?.id);
+        if (!Number.isFinite(equipmentId) || equipmentId <= 0) continue;
+        const isRental =
+            RENTAL_EQUIPMENT_IDS.has(equipmentId) ||
+            String(row.equipment?.type || '').toLowerCase() === 'rental';
+        if (!isRental) continue;
+
+        const dbName = row.equipment?.name || null;
+        const displayLabel = ADDON_ID_LABELS[equipmentId] || dbName || `Equipment #${equipmentId}`;
+        byEquipmentId.set(equipmentId, {
+            key: `eq-${equipmentId}`,
+            bookingEquipmentId: row.id || null,
+            equipmentId,
+            name: dbName || displayLabel,
+            displayLabel,
+            quantity: Number(row.quantity || 1) || 1,
+            returnedAt: row.returned_at || null,
+        });
+    }
+
+    const addonList = Array.isArray(booking?.addons?.equipment) ? booking.addons.equipment : [];
+    for (const item of addonList) {
+        const equipmentId = Number(item.dbId || item.equipment_id || item.id);
+        if (!Number.isFinite(equipmentId) || equipmentId <= 0) continue;
+        if (!RENTAL_EQUIPMENT_IDS.has(equipmentId)) continue;
+        if (byEquipmentId.has(equipmentId)) continue;
+
+        const displayLabel =
+            ADDON_ID_LABELS[equipmentId] ||
+            ADDON_ID_LABELS[item.id] ||
+            item.label ||
+            item.name ||
+            `Equipment #${equipmentId}`;
+        byEquipmentId.set(equipmentId, {
+            key: `eq-${equipmentId}`,
+            bookingEquipmentId: null,
+            equipmentId,
+            name: displayLabel,
+            displayLabel,
+            quantity: Number(item.quantity || 1) || 1,
+            returnedAt: null,
+        });
+    }
+
+    return Array.from(byEquipmentId.values());
+}
+
+async function resolveDamagePhotoUrl(photo) {
+    return resolveCustomerUploadSignedUrl(photo);
+}
 
 const DetailItem = ({ icon, label, value, className = '' }) => (
     <div className={`flex items-start space-x-3 ${className}`}>
@@ -71,10 +153,23 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
     const [description, setDescription] = useState('');
     const [isCharging, setIsCharging] = useState(false);
 
+    const itemLabel = itemDetails?.displayLabel || itemDetails?.name || '';
     const feeDefaults = {
-        unreturned_item: { title: "Charge for Unreturned Item", defaultDescription: `Fee for unreturned rental item: ${itemDetails?.name || ''}` },
-        cleaning: { title: "Charge Cleaning Fee", defaultDescription: "Standard cleaning fee for dump trailer.", defaultAmount: "20.00" },
-        damage: { title: "Charge for Damages", defaultDescription: "Cost of repairs for damages incurred during rental." }
+        unreturned_item: {
+            title: 'Charge Replacement (Not Returned)',
+            defaultDescription: `Replacement fee for unreturned rental item: ${itemLabel}`,
+        },
+        cleaning: {
+            title: 'Charge Cleaning Fee',
+            defaultDescription: 'Standard cleaning fee for dump trailer.',
+            defaultAmount: '20.00',
+        },
+        damage: {
+            title: itemLabel ? `Charge Damage: ${itemLabel}` : 'Charge for Damages',
+            defaultDescription: itemLabel
+                ? `Cost of repairs for damaged rental item: ${itemLabel}`
+                : 'Cost of repairs for damages incurred during rental.',
+        },
     };
 
     const currentFee = feeDefaults[feeType] || {};
@@ -99,7 +194,7 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
                     amount: parseFloat(amount),
                     description,
                     bookingId: booking.id,
-                    feeType: `${feeType}_${itemDetails?.name || 'general'}`.replace(/ /g, '_')
+                    feeType: feeKeyFor(feeType, itemDetails?.name || 'general'),
                 }
             });
 
@@ -144,88 +239,189 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
     );
 };
 
+const DamagePhotoPreviewDialog = ({ open, onOpenChange, photo, signedUrl, loading }) => (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="bg-gray-900 text-white border-cyan-500 max-w-3xl">
+            <DialogHeader>
+                <DialogTitle>{photo?.name || 'Damage Photo'}</DialogTitle>
+                <DialogDescription>In-app preview (signed URL).</DialogDescription>
+            </DialogHeader>
+            <div className="min-h-[200px] flex items-center justify-center bg-black/40 rounded-md overflow-hidden">
+                {loading ? (
+                    <Loader2 className="h-8 w-8 animate-spin text-cyan-300" />
+                ) : signedUrl ? (
+                    <img src={signedUrl} alt={photo?.name || 'Damage photo'} className="max-h-[70vh] max-w-full object-contain" />
+                ) : (
+                    <p className="text-red-300 text-sm">Could not load photo preview.</p>
+                )}
+            </div>
+            <DialogFooter>
+                <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+);
+
 const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) => {
-    const returnableEquipment = equipment.filter(item => item.equipment?.name === 'Wheelbarrow' || item.equipment?.name === 'Hand Truck');
-    
-    const [checklist, setChecklist] = useState(() => {
-        const initialState = { dump_loader_clean: false, no_damage: false };
-        returnableEquipment.forEach(item => {
-            if (item.equipment?.name) initialState[item.equipment.name] = false;
-        });
-        return initialState;
-    });
+    const returnableEquipment = React.useMemo(
+        () => collectReturnableEquipment(booking, equipment),
+        [booking, equipment]
+    );
+
+    const [trailerChecks, setTrailerChecks] = useState({ dump_loader_clean: false, no_damage: false });
+    const [dispositions, setDispositions] = useState({});
     const [damagePhotos, setDamagePhotos] = useState(booking.damage_photos || []);
     const [isUploading, setIsUploading] = useState(false);
+    const [isFinalizing, setIsFinalizing] = useState(false);
     const [showFeeDialog, setShowFeeDialog] = useState(false);
     const [currentFeeType, setCurrentFeeType] = useState(null);
     const [currentItemDetails, setCurrentItemDetails] = useState(null);
-    const [isFinalizeDisabled, setIsFinalizeDisabled] = useState(true);
+    const [previewPhoto, setPreviewPhoto] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [photoPendingDelete, setPhotoPendingDelete] = useState(null);
     const fileInputRef = React.useRef(null);
 
     const isChecklistReady = booking.status === 'pending_checklist';
-
-    const allChecklistItems = [
-        ...returnableEquipment.map(item => ({ id: item.equipment?.name, feeType: 'unreturned_item', details: { name: item.equipment?.name, equipment_id: item.equipment_id } })),
-        ...(booking.plan?.id === 2 ? [
-            { id: 'dump_loader_clean', feeType: 'cleaning', details: null },
-            { id: 'no_damage', feeType: 'damage', details: null }
-        ] : [])
-    ].filter(item => item.id);
+    const isDumpTrailer = booking.plan?.id === 2;
+    const fees = booking.fees || {};
 
     useEffect(() => {
-        const checkFinalizeStatus = () => {
-            if (!isChecklistReady) {
-                setIsFinalizeDisabled(true);
-                return;
+        setDamagePhotos(booking.damage_photos || []);
+    }, [booking.damage_photos]);
+
+    useEffect(() => {
+        setDispositions((prev) => {
+            const next = { ...prev };
+            for (const item of returnableEquipment) {
+                if (next[item.key]) continue;
+                if (item.returnedAt) next[item.key] = EQUIPMENT_DISPOSITIONS.good;
             }
-            const isAllHandled = allChecklistItems.every(item => {
-                if (checklist[item.id]) return true;
-                const feeKey = `${item.feeType}_${item.details?.name || 'general'}`.replace(/ /g, '_');
-                return booking.fees && Object.keys(booking.fees).includes(feeKey);
-            });
-            setIsFinalizeDisabled(!isAllHandled);
-        };
-        checkFinalizeStatus();
-    }, [checklist, booking.fees, allChecklistItems, isChecklistReady]);
+            return next;
+        });
+    }, [returnableEquipment]);
+
+    const hasFee = (feeType, itemName = 'general') =>
+        Object.prototype.hasOwnProperty.call(fees, feeKeyFor(feeType, itemName));
+
+    const hasTrailerDamageFee = () =>
+        Object.keys(fees).some((k) => k === 'damage_general' || (k.startsWith('damage_') && !returnableEquipment.some((eq) => feeKeyFor('damage', eq.name) === k)));
+
+    const isEquipmentHandled = (item) => {
+        const disposition = dispositions[item.key];
+        if (disposition === EQUIPMENT_DISPOSITIONS.good) return true;
+        if (disposition === EQUIPMENT_DISPOSITIONS.damaged) return hasFee('damage', item.name);
+        if (disposition === EQUIPMENT_DISPOSITIONS.lost_stolen) return hasFee('unreturned_item', item.name);
+        return false;
+    };
+
+    const isTrailerHandled = () => {
+        if (!isDumpTrailer) return true;
+        const cleanOk = trailerChecks.dump_loader_clean || hasFee('cleaning', 'general');
+        const damageOk = trailerChecks.no_damage || hasTrailerDamageFee() || hasFee('damage', 'general');
+        return cleanOk && damageOk;
+    };
+
+    const isFinalizeDisabled =
+        !isChecklistReady ||
+        isFinalizing ||
+        !returnableEquipment.every(isEquipmentHandled) ||
+        !isTrailerHandled();
 
     if (!isChecklistReady) return null;
 
-    const handleCheckChange = (id, checked) => setChecklist(prev => ({ ...prev, [id]: checked }));
+    const setDisposition = (itemKey, value) => {
+        setDispositions((prev) => ({ ...prev, [itemKey]: value }));
+    };
+
+    const handleChargeClick = (feeType, itemDetails = null) => {
+        setCurrentFeeType(feeType);
+        setCurrentItemDetails(itemDetails);
+        setShowFeeDialog(true);
+    };
+
+    const openPhotoPreview = async (photo) => {
+        setPreviewPhoto(photo);
+        setPreviewUrl(null);
+        setPreviewLoading(true);
+        try {
+            const url = await resolveDamagePhotoUrl(photo);
+            setPreviewUrl(url);
+            if (!url) {
+                toast({ title: 'Preview failed', description: 'Could not create a signed URL for this photo.', variant: 'destructive' });
+            }
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
 
     const handleFinalize = async () => {
+        setIsFinalizing(true);
         let finalStatus = 'Completed';
         const returnIssues = {};
         const equipmentToRestock = [];
+        const returnedAtIds = [];
 
-        returnableEquipment.forEach(item => {
-            if (!item.equipment?.name) return;
-            const feeKey = `unreturned_item_${item.equipment.name.replace(/ /g, '_')}`;
-            const feeCharged = booking.fees && Object.keys(booking.fees).includes(feeKey);
-
-            if (checklist[item.equipment.name]) {
-                equipmentToRestock.push({ equipment_id: item.equipment_id, quantity: 1 });
-            } else if (feeCharged) {
-                returnIssues[item.equipment.name] = { status: 'not_returned_fee_charged' };
+        for (const item of returnableEquipment) {
+            const disposition = dispositions[item.key];
+            if (disposition === EQUIPMENT_DISPOSITIONS.good) {
+                equipmentToRestock.push({
+                    equipment_id: item.equipmentId,
+                    quantity: item.quantity || 1,
+                });
+                if (item.bookingEquipmentId) returnedAtIds.push(item.bookingEquipmentId);
+            } else if (disposition === EQUIPMENT_DISPOSITIONS.damaged) {
+                returnIssues[item.name] = { status: 'damaged' };
                 finalStatus = 'flagged';
-            } else {
-                returnIssues[item.equipment.name] = { status: 'not_returned' };
+            } else if (disposition === EQUIPMENT_DISPOSITIONS.lost_stolen) {
+                returnIssues[item.name] = { status: 'lost_stolen' };
                 finalStatus = 'flagged';
             }
-        });
+        }
 
         if (equipmentToRestock.length > 0) {
-            const { error: rpcError } = await supabase.rpc('increment_equipment_quantities', { items_to_increment: equipmentToRestock });
-            if (rpcError) return toast({ title: 'Error updating equipment inventory', description: rpcError.message, variant: 'destructive' });
+            const { error: rpcError } = await supabase.rpc('increment_equipment_quantities', {
+                items_to_increment: equipmentToRestock,
+            });
+            if (rpcError) {
+                setIsFinalizing(false);
+                return toast({
+                    title: 'Error updating equipment inventory',
+                    description: rpcError.message,
+                    variant: 'destructive',
+                });
+            }
         }
 
-        if (booking.plan?.id === 2) {
-            if (checklist['dump_loader_clean'] === false) { returnIssues['dump_loader_clean'] = { status: 'not_clean' }; finalStatus = 'flagged'; }
-            if (checklist['no_damage'] === false) { returnIssues['no_damage'] = { status: 'damaged', photos: damagePhotos }; finalStatus = 'flagged'; }
+        if (returnedAtIds.length > 0) {
+            const { error: returnedError } = await supabase
+                .from('booking_equipment')
+                .update({ returned_at: new Date().toISOString() })
+                .in('id', returnedAtIds);
+            if (returnedError) {
+                console.warn('[PostRentalChecklist] returned_at update failed:', returnedError);
+            }
         }
 
-        const { error } = await supabase.from('bookings').update({ status: finalStatus, return_issues: returnIssues, damage_photos: damagePhotos }).eq('id', booking.id);
-        if (error) toast({ title: "Error finalizing checklist", description: error.message, variant: "destructive" });
-        else {
+        if (isDumpTrailer) {
+            if (!trailerChecks.dump_loader_clean) {
+                returnIssues.dump_loader_clean = { status: 'not_clean' };
+                finalStatus = 'flagged';
+            }
+            if (!trailerChecks.no_damage) {
+                returnIssues.no_damage = { status: 'damaged', photos: damagePhotos };
+                finalStatus = 'flagged';
+            }
+        }
+
+        const { error } = await supabase
+            .from('bookings')
+            .update({ status: finalStatus, return_issues: returnIssues, damage_photos: damagePhotos })
+            .eq('id', booking.id);
+
+        if (error) {
+            toast({ title: 'Error finalizing checklist', description: error.message, variant: 'destructive' });
+        } else {
             try {
                 await ensureBookingMileage(
                     { ...booking, status: finalStatus },
@@ -234,99 +430,267 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
             } catch (mileageErr) {
                 console.warn('[ActiveRentals] mileage log on finalize failed:', mileageErr);
             }
-            toast({ title: "Checklist finalized and status updated!" });
+            toast({ title: 'Checklist finalized and status updated!' });
             onUpdate();
         }
+        setIsFinalizing(false);
     };
-    
+
     const handlePhotoUpload = async (e) => {
-        const file = e.target.files[0];
+        const file = e.target.files?.[0];
         if (!file) return;
 
         setIsUploading(true);
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
+        if (!user?.id) {
+            setIsUploading(false);
+            return toast({ title: 'Upload Failed', description: 'You must be signed in to upload.', variant: 'destructive' });
+        }
 
         const filePath = `${user.id}/damage_reports/${booking.id}-${Date.now()}-${file.name}`;
-        const { error: uploadError } = await supabase.storage.from('customer-uploads').upload(filePath, file);
+        const { error: uploadError } = await supabase.storage.from(DAMAGE_PHOTOS_BUCKET).upload(filePath, file);
 
-        if (uploadError) toast({ title: "Upload Failed", description: uploadError.message, variant: "destructive" });
-        else {
-            const { data: { publicUrl } } = supabase.storage.from('customer-uploads').getPublicUrl(filePath);
-            const newDamagePhotos = [...damagePhotos, { url: publicUrl, path: filePath, name: file.name }];
+        if (uploadError) {
+            toast({ title: 'Upload Failed', description: uploadError.message, variant: 'destructive' });
+        } else {
+            const signed = await resolveDamagePhotoUrl({ path: filePath });
+            const newDamagePhotos = [
+                ...damagePhotos,
+                { path: filePath, name: file.name, ...(signed ? { url: signed } : {}) },
+            ];
             setDamagePhotos(newDamagePhotos);
             await supabase.from('bookings').update({ damage_photos: newDamagePhotos }).eq('id', booking.id);
-            toast({ title: "Photo uploaded successfully!" });
+            toast({ title: 'Photo uploaded successfully!' });
         }
         setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
     };
-    
-    const handlePhotoDelete = async (photoToDelete) => {
-        const { error: storageError } = await supabase.storage.from('customer-uploads').remove([photoToDelete.path]);
-        if(storageError) return toast({ title: "Deletion Failed", description: storageError.message, variant: "destructive" });
-        const newDamagePhotos = damagePhotos.filter(p => p.path !== photoToDelete.path);
+
+    const handlePhotoDeleteRequest = (photoToDelete) => {
+        setPhotoPendingDelete(photoToDelete);
+    };
+
+    const handlePhotoDeleteConfirmed = async (photoToDelete) => {
+        if (!photoToDelete) return;
+        if (photoToDelete.path) {
+            const { error: storageError } = await supabase.storage.from(DAMAGE_PHOTOS_BUCKET).remove([photoToDelete.path]);
+            if (storageError) {
+                throw new Error(storageError.message || 'Storage deletion failed.');
+            }
+        }
+        const newDamagePhotos = damagePhotos.filter((p) => p.path !== photoToDelete.path);
         setDamagePhotos(newDamagePhotos);
-        await supabase.from('bookings').update({ damage_photos: newDamagePhotos }).eq('id', booking.id);
-        toast({title: "Photo deleted successfully!"});
+        const { error: updateError } = await supabase
+            .from('bookings')
+            .update({ damage_photos: newDamagePhotos })
+            .eq('id', booking.id);
+        if (updateError) {
+            throw new Error(updateError.message || 'Failed to update booking photos.');
+        }
+        setPhotoPendingDelete(null);
     };
 
-    const handleChargeClick = (feeType, itemDetails = null) => {
-        setCurrentFeeType(feeType); setCurrentItemDetails(itemDetails); setShowFeeDialog(true);
-    };
-
-    const renderChecklistItem = (id, label, feeType, itemDetails) => {
-        const isChecked = checklist[id];
-        const feeKey = `${feeType}_${itemDetails?.name || 'general'}`.replace(/ /g, '_');
-        const feeCharged = booking.fees && Object.keys(booking.fees).includes(feeKey);
+    const renderEquipmentRow = (item) => {
+        const disposition = dispositions[item.key] || '';
+        const damageCharged = hasFee('damage', item.name);
+        const replacementCharged = hasFee('unreturned_item', item.name);
 
         return (
-            <div className="flex items-center justify-between bg-white/5 p-3 rounded-md">
-                <div className="flex items-center">
-                    <Checkbox id={id} checked={isChecked} onCheckedChange={(c) => handleCheckChange(id, c)} />
-                    <label htmlFor={id} className="ml-3 text-base">{label}</label>
+            <div key={item.key} className="bg-white/5 p-3 rounded-md space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                    <p className="text-base font-semibold text-white">
+                        {item.displayLabel}
+                        {item.quantity > 1 ? ` (x${item.quantity})` : ''}
+                    </p>
+                    {disposition === EQUIPMENT_DISPOSITIONS.good && (
+                        <span className="text-green-400 text-sm flex items-center">
+                            <CheckCircle className="mr-1 h-4 w-4" /> Will restock
+                        </span>
+                    )}
                 </div>
-                {!isChecked && (
-                    feeCharged ? <div className="flex items-center text-green-400 text-sm"><CheckCircle className="mr-2 h-4 w-4" /> Fee Charged</div>
-                    : <Button size="sm" variant="destructive" onClick={() => handleChargeClick(feeType, itemDetails)}><AlertTriangle className="mr-2 h-4 w-4" /> Charge Fee</Button>
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-4 text-sm">
+                    {[
+                        { value: EQUIPMENT_DISPOSITIONS.good, label: 'Received, no damage' },
+                        { value: EQUIPMENT_DISPOSITIONS.damaged, label: 'Damaged' },
+                        { value: EQUIPMENT_DISPOSITIONS.lost_stolen, label: 'Not returned (lost / stolen)' },
+                    ].map((option) => (
+                        <label key={option.value} className="inline-flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="radio"
+                                name={`disposition-${item.key}`}
+                                value={option.value}
+                                checked={disposition === option.value}
+                                onChange={() => setDisposition(item.key, option.value)}
+                                className="h-4 w-4 accent-yellow-400"
+                            />
+                            <span>{option.label}</span>
+                        </label>
+                    ))}
+                </div>
+                {disposition === EQUIPMENT_DISPOSITIONS.damaged && (
+                    <div className="flex justify-end">
+                        {damageCharged ? (
+                            <div className="flex items-center text-green-400 text-sm">
+                                <CheckCircle className="mr-2 h-4 w-4" /> Damage fee charged
+                            </div>
+                        ) : (
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                    handleChargeClick('damage', {
+                                        name: item.name,
+                                        displayLabel: item.displayLabel,
+                                        equipment_id: item.equipmentId,
+                                    })
+                                }
+                            >
+                                <AlertTriangle className="mr-2 h-4 w-4" /> Charge damage
+                            </Button>
+                        )}
+                    </div>
                 )}
+                {disposition === EQUIPMENT_DISPOSITIONS.lost_stolen && (
+                    <div className="flex justify-end">
+                        {replacementCharged ? (
+                            <div className="flex items-center text-green-400 text-sm">
+                                <CheckCircle className="mr-2 h-4 w-4" /> Replacement fee charged
+                            </div>
+                        ) : (
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() =>
+                                    handleChargeClick('unreturned_item', {
+                                        name: item.name,
+                                        displayLabel: item.displayLabel,
+                                        equipment_id: item.equipmentId,
+                                    })
+                                }
+                            >
+                                <AlertTriangle className="mr-2 h-4 w-4" /> Charge replacement
+                            </Button>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const renderTrailerCheck = (id, label, feeType) => {
+        const isChecked = !!trailerChecks[id];
+        const feeCharged =
+            feeType === 'damage' ? hasTrailerDamageFee() || hasFee('damage', 'general') : hasFee(feeType, 'general');
+
+        return (
+            <div className="flex items-center justify-between bg-white/5 p-3 rounded-md gap-3">
+                <div className="flex items-center">
+                    <Checkbox
+                        id={id}
+                        checked={isChecked}
+                        onCheckedChange={(c) => setTrailerChecks((prev) => ({ ...prev, [id]: !!c }))}
+                    />
+                    <label htmlFor={id} className="ml-3 text-base">
+                        {label}
+                    </label>
+                </div>
+                {!isChecked &&
+                    (feeCharged ? (
+                        <div className="flex items-center text-green-400 text-sm">
+                            <CheckCircle className="mr-2 h-4 w-4" /> Fee Charged
+                        </div>
+                    ) : (
+                        <Button size="sm" variant="destructive" onClick={() => handleChargeClick(feeType, null)}>
+                            <AlertTriangle className="mr-2 h-4 w-4" /> Charge Fee
+                        </Button>
+                    ))}
             </div>
         );
     };
 
     return (
         <div className="mt-6 bg-gray-800/50 p-6 rounded-lg">
-            <FeeChargeDialog open={showFeeDialog} onOpenChange={setShowFeeDialog} booking={booking} feeType={currentFeeType} itemDetails={currentItemDetails} onSuccessfulCharge={onUpdate} />
+            <FeeChargeDialog
+                open={showFeeDialog}
+                onOpenChange={setShowFeeDialog}
+                booking={booking}
+                feeType={currentFeeType}
+                itemDetails={currentItemDetails}
+                onSuccessfulCharge={onUpdate}
+            />
+            <DamagePhotoPreviewDialog
+                open={!!previewPhoto}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setPreviewPhoto(null);
+                        setPreviewUrl(null);
+                    }
+                }}
+                photo={previewPhoto}
+                signedUrl={previewUrl}
+                loading={previewLoading}
+            />
+            <SecureDamagePhotoDeleteDialog
+                open={!!photoPendingDelete}
+                photo={photoPendingDelete}
+                onClose={() => setPhotoPendingDelete(null)}
+                onConfirmDelete={handlePhotoDeleteConfirmed}
+            />
             <h4 className="text-lg font-bold text-yellow-400 mb-4">Post-Rental Checklist</h4>
             <div className="space-y-3">
-                {returnableEquipment.map(item => item.equipment?.name && renderChecklistItem(item.equipment.name, `${item.equipment.name} Returned`, 'unreturned_item', { name: item.equipment.name, equipment_id: item.equipment.id }))}
-                {booking.plan?.id === 2 && (
+                {returnableEquipment.length === 0 ? (
+                    <p className="text-sm text-blue-200">No rental add-on equipment on this booking.</p>
+                ) : (
+                    returnableEquipment.map(renderEquipmentRow)
+                )}
+                {isDumpTrailer && (
                     <>
-                        {renderChecklistItem('dump_loader_clean', 'Dump Trailer Clean', 'cleaning', null)}
-                        <div className="flex items-center justify-between bg-white/5 p-3 rounded-md">
-                            <div className="flex items-center">
-                                <Checkbox id="no_damage" checked={checklist['no_damage']} onCheckedChange={(c) => handleCheckChange('no_damage', c)} />
-                                <label htmlFor="no_damage" className="ml-3 text-base">No Damage</label>
-                            </div>
-                            {!checklist['no_damage'] && (
-                                booking.fees && Object.keys(booking.fees).some(k => k.startsWith('damage_')) ? 
-                                    <div className="flex items-center text-green-400 text-sm"><CheckCircle className="mr-2 h-4 w-4" /> Damage Reported & Charged</div>
-                                : <Button size="sm" variant="destructive" onClick={() => handleChargeClick('damage', null)}><AlertTriangle className="mr-2 h-4 w-4" /> Report Damage & Charge</Button>
-                            )}
-                        </div>
+                        {renderTrailerCheck('dump_loader_clean', 'Dump Trailer Clean', 'cleaning')}
+                        {renderTrailerCheck(
+                            'no_damage',
+                            'No Damage (Sure Track Trailer & Dumpster)',
+                            'damage'
+                        )}
                     </>
                 )}
             </div>
-            {!checklist['no_damage'] && (
-                <div className="mt-4 pl-8">
+            {isDumpTrailer && !trailerChecks.no_damage && (
+                <div className="mt-4 pl-2 sm:pl-8">
                     <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
                         <UploadCloud className="mr-2 h-5 w-5" />
                         {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Upload Damage Photo'}
                     </Button>
-                    <Input ref={fileInputRef} id="damage-photo-upload" type="file" className="hidden" onChange={handlePhotoUpload} disabled={isUploading} accept="image/*" />
+                    <Input
+                        ref={fileInputRef}
+                        id="damage-photo-upload"
+                        type="file"
+                        className="hidden"
+                        onChange={handlePhotoUpload}
+                        disabled={isUploading}
+                        accept="image/*"
+                    />
                     <div className="mt-2 space-y-2">
                         {damagePhotos.map((photo, index) => (
-                            <div key={index} className="text-sm text-green-400 flex items-center justify-between">
-                                <div className="flex items-center"><CheckCircle className="h-4 w-4 mr-2" /><a href={photo.url} target="_blank" rel="noopener noreferrer" className="underline">{photo.name}</a></div>
-                                <Button size="icon" variant="ghost" className="h-6 w-6 text-red-400 hover:bg-red-500/20" onClick={() => handlePhotoDelete(photo)}><Trash2 className="h-4 w-4" /></Button>
+                            <div key={photo.path || index} className="text-sm text-green-400 flex items-center justify-between gap-2">
+                                <button
+                                    type="button"
+                                    className="flex items-center underline text-left hover:text-green-300"
+                                    onClick={() => openPhotoPreview(photo)}
+                                >
+                                    <CheckCircle className="h-4 w-4 mr-2 shrink-0" />
+                                    {photo.name || `Photo ${index + 1}`}
+                                </button>
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-6 w-6 text-red-400 hover:bg-red-500/20"
+                                    title="Admin delete this photo (password required)"
+                                    onClick={() => handlePhotoDeleteRequest(photo)}
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
                             </div>
                         ))}
                     </div>
@@ -334,7 +698,12 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
             )}
             <div className="mt-6 flex justify-end">
                 <Button onClick={handleFinalize} disabled={isFinalizeDisabled}>
-                    <CheckCircle className="mr-2 h-4 w-4" /> Finalize & Complete
+                    {isFinalizing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                    )}
+                    Finalize & Complete
                 </Button>
             </div>
         </div>
@@ -392,18 +761,39 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
         }
     };
 
+    const STATUS_UPDATE_SELECT =
+        'id, status, rented_out_at, delivered_at, returned_at, picked_up_at';
+
     const handleStatusUpdate = async (bookingId, newStatus, timestampField) => {
         let updates = { status: newStatus };
         if (timestampField) updates[timestampField] = new Date().toISOString();
-        const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
-        if (error) toast({ title: `Failed to mark as ${newStatus}`, variant: 'destructive' });
-        else {
-            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
-                await syncMileageAfterStatus(bookingId, 'booking_complete');
-            }
-            toast({ title: `Booking marked as ${newStatus}!` });
-            onUpdate();
+        const { data, error } = await supabase
+            .from('bookings')
+            .update(updates)
+            .eq('id', bookingId)
+            .select(STATUS_UPDATE_SELECT)
+            .maybeSingle();
+        if (error) {
+            toast({
+                title: `Failed to mark as ${newStatus}`,
+                description: error.message,
+                variant: 'destructive',
+            });
+            return;
         }
+        if (!data) {
+            toast({
+                title: `Failed to mark as ${newStatus}`,
+                description: 'Update was blocked (no row returned). Check admin MFA/session permissions.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+            await syncMileageAfterStatus(bookingId, 'booking_complete');
+        }
+        toast({ title: `Booking marked as ${newStatus}!` });
+        onUpdate();
     };
     
     const handleManualStatusChange = async (bookingId, newStatus) => {
@@ -415,9 +805,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null }; break;
             case 'Delivered':
                  updates = { ...updates, picked_up_at: null, returned_at: null };
-                 const booking = bookings.find(b => b.id === bookingId);
-                 const timestampField = isCustomerPickupService(booking?.plan, booking?.addons || {}) ? 'rented_out_at' : 'delivered_at';
-                 if (!booking?.[timestampField]) updates[timestampField] = new Date().toISOString();
+                 const bookingForDelivered = bookings.find(b => b.id === bookingId);
+                 const timestampField = isCustomerPickupService(bookingForDelivered?.plan, bookingForDelivered?.addons || {}) ? 'rented_out_at' : 'delivered_at';
+                 if (!bookingForDelivered?.[timestampField]) updates[timestampField] = new Date().toISOString();
                 break;
             case 'pending_checklist':
                  const bookingToComplete = bookings.find(b => b.id === bookingId);
@@ -431,18 +821,32 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
             Object.assign(updates, reinstatePinTrackingPatch(previousStatus, 'Confirmed'));
         }
 
-        const { error } = await supabase.from('bookings').update(updates).eq('id', bookingId);
-        if (error) toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
-        else {
-            if (newStatus === 'Confirmed' && previousStatus === 'pending_review') {
-                await expireActiveRentalAccessCodesForOrder(bookingId);
-            }
-            if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
-                await syncMileageAfterStatus(bookingId, 'booking_complete');
-            }
-            toast({ title: 'Booking status updated successfully!' });
-            onUpdate();
+        const { data, error } = await supabase
+            .from('bookings')
+            .update(updates)
+            .eq('id', bookingId)
+            .select(STATUS_UPDATE_SELECT)
+            .maybeSingle();
+        if (error) {
+            toast({ title: 'Failed to update status', description: error.message, variant: 'destructive' });
+            return;
         }
+        if (!data) {
+            toast({
+                title: 'Failed to update status',
+                description: 'Update was blocked (no row returned). Check admin MFA/session permissions.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        if (newStatus === 'Confirmed' && previousStatus === 'pending_review') {
+            await expireActiveRentalAccessCodesForOrder(bookingId);
+        }
+        if (['pending_checklist', 'Completed', 'flagged'].includes(newStatus)) {
+            await syncMileageAfterStatus(bookingId, 'booking_complete');
+        }
+        toast({ title: 'Booking status updated successfully!' });
+        onUpdate();
     };
 
     return (
@@ -480,7 +884,10 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 <h3 className="text-2xl font-bold text-white">Active Rental Details</h3>
                                 <p className="text-blue-200">Booking ID: {booking.id}</p>
                             </div>
-                            <StatusBadge status={booking.status} booking={booking} />
+                            <div className="flex flex-col items-end">
+                                <StatusBadge status={booking.status} booking={booking} />
+                                <AppointmentCountdown booking={booking} />
+                            </div>
                         </div>
 
                         {isPickup && booking.pin_generated_at && pinStatusByOrder[booking.id] && !pinStatusByOrder[booking.id].lock_confirmed_at && (

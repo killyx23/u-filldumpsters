@@ -10,8 +10,19 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 
 /**
  * Controlled password + confirm delete flow. Used standalone and from BookingRemovalDialog.
+ * mode: 'booking' deletes the booking; 'verify' only checks ADMIN_DELETE_PASSWORD then calls onDeleted.
  */
-export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
+export const SecureDeleteFlow = ({
+    open,
+    bookingId,
+    onClose,
+    onDeleted,
+    mode = 'booking',
+    title = 'Admin Authorization Required',
+    description = 'To proceed with deleting this booking, please enter the admin deletion password.',
+    confirmDescription,
+    successToast,
+}) => {
     const [step, setStep] = useState('password');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -23,7 +34,7 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
             setPassword('');
             setError('');
         }
-    }, [open, bookingId]);
+    }, [open, bookingId, mode]);
 
     const handleClose = () => {
         setStep('password');
@@ -41,12 +52,23 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
         setStep('confirm');
     };
 
+    const resolvedConfirmDescription =
+        confirmDescription ||
+        (mode === 'verify'
+            ? 'This action cannot be undone. This will permanently remove this record from our servers.'
+            : `This action cannot be undone. This will permanently delete booking #${bookingId} and all of its associated data from our servers.`);
+
     const handleConfirmDelete = async () => {
         setIsLoading(true);
         setError('');
 
+        const body =
+            mode === 'verify'
+                ? { password, verifyOnly: true }
+                : { bookingId, password };
+
         const { data, error: functionError } = await supabase.functions.invoke('delete-booking', {
-            body: { bookingId, password },
+            body,
         });
 
         setIsLoading(false);
@@ -60,11 +82,31 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
             } else {
                 handleClose();
             }
-        } else {
-            toast({ title: 'Booking Deleted', description: `Booking #${bookingId} has been permanently removed.` });
-            onDeleted?.();
-            handleClose();
+            return;
         }
+
+        if (successToast) {
+            toast(successToast);
+        } else if (mode === 'booking') {
+            toast({
+                title: 'Booking Deleted',
+                description: `Booking #${bookingId} has been permanently removed.`,
+            });
+        }
+
+        try {
+            await onDeleted?.();
+        } catch (err) {
+            toast({
+                title: 'Deletion Failed',
+                description: err?.message || 'Authorized, but the delete action failed.',
+                variant: 'destructive',
+            });
+            handleClose();
+            return;
+        }
+
+        handleClose();
     };
 
     return (
@@ -73,10 +115,8 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
                 {step === 'password' && (
                     <>
                         <DialogHeader>
-                            <DialogTitle>Admin Authorization Required</DialogTitle>
-                            <DialogDescription>
-                                To proceed with deleting this booking, please enter the admin deletion password.
-                            </DialogDescription>
+                            <DialogTitle>{title}</DialogTitle>
+                            <DialogDescription>{description}</DialogDescription>
                         </DialogHeader>
                         <div className="py-4">
                             <Label htmlFor="secure-delete-password">Deletion Password</Label>
@@ -107,9 +147,7 @@ export const SecureDeleteFlow = ({ open, bookingId, onClose, onDeleted }) => {
                             <DialogTitle className="flex items-center text-red-400">
                                 <AlertTriangle className="mr-2 h-6 w-6" /> Are you absolutely sure?
                             </DialogTitle>
-                            <DialogDescription>
-                                This action cannot be undone. This will permanently delete booking #{bookingId} and all of its associated data from our servers.
-                            </DialogDescription>
+                            <DialogDescription>{resolvedConfirmDescription}</DialogDescription>
                         </DialogHeader>
                         <DialogFooter>
                             <Button variant="ghost" onClick={() => setStep('password')}>Back</Button>
@@ -131,13 +169,91 @@ export const SecureDeleteDialog = ({ bookingId, onDeleted }) => {
     return (
         <>
             <Button size="sm" variant="destructive" onClick={() => setOpen(true)}>
-                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                <Trash2 className="mr-2 h-4 w-4" /> Admin Delete
             </Button>
             <SecureDeleteFlow
                 open={open}
                 bookingId={bookingId}
                 onClose={() => setOpen(false)}
                 onDeleted={onDeleted}
+            />
+        </>
+    );
+};
+
+/**
+ * Just-Delete-only gate for damage photos (History & Receipts style, without Cancel/Reschedule).
+ * After password confirm, calls onConfirmDelete(photo) to remove storage + booking JSON.
+ */
+export const SecureDamagePhotoDeleteDialog = ({ open, photo, onClose, onConfirmDelete }) => {
+    const [step, setStep] = useState('reason');
+    const [justDeleteSelected, setJustDeleteSelected] = useState(true);
+
+    useEffect(() => {
+        if (open) {
+            setStep('reason');
+            setJustDeleteSelected(true);
+        }
+    }, [open, photo?.path, photo?.name]);
+
+    const handleClose = () => {
+        setStep('reason');
+        setJustDeleteSelected(true);
+        onClose?.();
+    };
+
+    const handleReasonContinue = () => {
+        if (!justDeleteSelected) return;
+        setStep('secure');
+    };
+
+    const photoLabel = photo?.name || 'this damage photo';
+
+    return (
+        <>
+            <Dialog open={open && step === 'reason'} onOpenChange={(isOpen) => { if (!isOpen) handleClose(); }}>
+                <DialogContent className="bg-gray-900 text-white border-yellow-400">
+                    <DialogHeader>
+                        <DialogTitle className="text-yellow-400">Remove Damage Photo</DialogTitle>
+                        <DialogDescription className="text-gray-300">
+                            Why is this photo being removed?
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-4">
+                        <Button
+                            variant="outline"
+                            className={`w-full justify-start h-auto py-3 ${justDeleteSelected ? 'border-red-700 bg-red-900/20' : 'border-gray-600'}`}
+                            onClick={() => setJustDeleteSelected(true)}
+                        >
+                            <Trash2 className="mr-3 h-5 w-5 text-red-500 flex-shrink-0" />
+                            <div className="text-left">
+                                <p className="font-semibold text-white">Just Delete</p>
+                                <p className="text-xs text-gray-400">Permanently remove all records (password required)</p>
+                            </div>
+                        </Button>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+                        <Button onClick={handleReasonContinue} disabled={!justDeleteSelected}>Continue</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <SecureDeleteFlow
+                open={open && step === 'secure'}
+                mode="verify"
+                title="Admin Authorization Required"
+                description="To permanently delete this damage photo, please enter the admin deletion password."
+                confirmDescription={`This action cannot be undone. This will permanently delete "${photoLabel}" from storage and remove it from all booking records.`}
+                successToast={null}
+                onClose={handleClose}
+                onDeleted={async () => {
+                    await onConfirmDelete?.(photo);
+                    toast({
+                        title: 'Photo Deleted',
+                        description: `"${photoLabel}" has been permanently removed.`,
+                    });
+                }}
             />
         </>
     );

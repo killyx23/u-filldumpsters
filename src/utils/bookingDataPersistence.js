@@ -6,7 +6,8 @@ import {
   getServiceIdFromBooking,
   resolveServiceIdForBooking,
 } from '@/utils/servicePlan';
-import { isCheckoutEmailVerified } from '@/utils/checkoutEmailVerification';
+import { isCheckoutEmailVerified, clearVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { clearCheckoutCompletedElsewhere } from '@/utils/checkoutTabSync';
 
 function serializeDateForRpc(value) {
   if (!value) return null;
@@ -123,7 +124,14 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
       ? { ...addonsWithReferral, agreementFeeSnapshot }
       : addonsWithReferral;
 
-    const emailPreverified = await isCheckoutEmailVerified(email, bookingData);
+    const pendingForVerify =
+      options.existingToken || bookingData?.pendingToken || bookingData?.pending_token || null;
+    // Legacy bare email session must not pre-verify a new/reused pending checkout.
+    clearVerifiedEmailSession(email);
+    const emailPreverified = await isCheckoutEmailVerified(email, {
+      ...bookingData,
+      pendingToken: pendingForVerify,
+    });
 
     const payload = {
       email,
@@ -213,6 +221,8 @@ export async function storePendingBooking(bookingData, plan, addonsData, options
     }
 
     console.log(`[${timestamp}] [storePendingBooking] ✓ Saved pending booking:`, token);
+    // Pending UUID is reused per email — drop any prior cross-tab completed marker.
+    clearCheckoutCompletedElsewhere();
     // #region agent log
     fetch('http://127.0.0.1:7835/ingest/6fb2fea7-763c-4173-aa65-46eca4ec1d86',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1ac4c4'},body:JSON.stringify({sessionId:'1ac4c4',runId,hypothesisId:'H4',location:'bookingDataPersistence.js:storePendingBooking:success',message:'store_pending_booking RPC succeeded',data:{tokenPresent:Boolean(token),tokenType:typeof token},timestamp:Date.now()})}).catch(()=>{});
     // #endregion

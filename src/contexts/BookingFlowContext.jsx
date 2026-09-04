@@ -16,8 +16,10 @@ import {
   clearIdlePromptShownLocal,
   resolveCheckoutContext,
   resolveTeardownTarget,
+  isPaymentInFlight,
   BOOKING_FLOW_STORAGE_KEY,
 } from '@/utils/checkoutIdleGuard';
+import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 import { toast } from '@/components/ui/use-toast';
 
 export { BOOKING_FLOW_STORAGE_KEY };
@@ -215,6 +217,11 @@ export function BookingFlowProvider({ children }) {
       setFlowMetaState(defaultFlowMeta);
       writeStoredFlowMeta(defaultFlowMeta);
       clearIdlePromptShownLocal();
+      // Paying tab owns redirect via PaymentPage (with payment_intent). Skip SPA
+      // navigate here so we do not finalize twice before the hard redirect.
+      if (isPaymentInFlight()) {
+        return;
+      }
       if (bookingId) {
         navigate(`/confirmation?booking_id=${bookingId}`);
       } else {
@@ -228,6 +235,31 @@ export function BookingFlowProvider({ children }) {
     },
     [navigate, setFlowMetaState],
   );
+
+  /**
+   * Email verified in another tab (usually the emailed link). That tab owns
+   * checkout now — stand this tab down to the homepage with no left_early
+   * teardown (idle guard already latched tearingDownRef before this runs).
+   */
+  const handleCheckoutVerified = useCallback(({ email, pendingId } = {}) => {
+    if (email && pendingId) {
+      markVerifiedEmailSession(email, pendingId);
+    }
+
+    resetCallbackRef.current?.();
+    setFlowMetaState(defaultFlowMeta);
+    writeStoredFlowMeta(defaultFlowMeta);
+    clearIdlePromptShownLocal();
+
+    toast({
+      title: 'Continuing in your other window',
+      description:
+        'Your email was verified in another window. Finish your booking there — this screen is back at the homepage.',
+    });
+
+    navigate('/');
+    window.scrollTo(0, 0);
+  }, [navigate, setFlowMetaState]);
 
   const handleDialogOpenChange = useCallback((open) => {
     if (!open) {
@@ -245,12 +277,14 @@ export function BookingFlowProvider({ children }) {
   // Step 5+ (Terms onward): contact was saved on leaving step 4, so a pendingToken exists.
   const idleEnabled = isInBookingFlow && checkoutContext.isProtectedCheckout;
 
-  const { stillHereOpen, countdownRemainingMs, handleNeedMoreTime } = useCheckoutIdleGuard({
-    enabled: idleEnabled,
-    pendingToken: checkoutContext.pendingId || flowMeta.pendingToken,
-    onTeardownComplete: handleIdleTeardownComplete,
-    onCheckoutCompleted: handleCheckoutCompleted,
-  });
+  const { stillHereOpen, countdownRemainingMs, handleNeedMoreTime, runTeardown } =
+    useCheckoutIdleGuard({
+      enabled: idleEnabled,
+      pendingToken: checkoutContext.pendingId || flowMeta.pendingToken,
+      onTeardownComplete: handleIdleTeardownComplete,
+      onCheckoutCompleted: handleCheckoutCompleted,
+      onCheckoutVerified: handleCheckoutVerified,
+    });
 
   const value = {
     flowMeta,
@@ -265,6 +299,7 @@ export function BookingFlowProvider({ children }) {
     requestLeaveBooking,
     confirmLeaveBooking,
     cancelLeaveBooking,
+    runCheckoutTeardown: runTeardown,
   };
 
   return (

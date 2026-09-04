@@ -1,18 +1,60 @@
 const CHANNEL_NAME = 'ufill-checkout-sync';
 const STORAGE_KEY = 'ufill_checkout_sync_event';
+const TAB_ID_KEY = 'ufill_checkout_tab_id';
 export const CHECKOUT_COMPLETED_KEY = 'ufill_checkout_completed';
+/** Ignore completed markers older than this so a long-lived tab cannot be haunted. */
+const CHECKOUT_COMPLETED_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
- * Cross-tab checkout events: email verified or payment completed.
- * BroadcastChannel is primary; localStorage is the fallback for older browsers.
+ * Cross-tab checkout events: email verified, payment completed, or another tab
+ * claiming the checkout. BroadcastChannel is primary; localStorage is the
+ * fallback for older browsers.
  */
+
+let cachedTabId = null;
+
+/** Stable id for this tab, so a tab never reacts to its own broadcast. */
+export function getCheckoutTabId() {
+  if (cachedTabId) return cachedTabId;
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const stored = window.sessionStorage.getItem(TAB_ID_KEY);
+    if (stored) {
+      cachedTabId = stored;
+      return cachedTabId;
+    }
+  } catch {
+    // sessionStorage unavailable — fall through to an in-memory id
+  }
+
+  const generated =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  cachedTabId = generated;
+  try {
+    window.sessionStorage.setItem(TAB_ID_KEY, generated);
+  } catch {
+    // ignore
+  }
+  return cachedTabId;
+}
 
 export function readCheckoutCompletedRecord() {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.sessionStorage.getItem(CHECKOUT_COMPLETED_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const record = JSON.parse(raw);
+    if (!record || typeof record !== 'object') return null;
+    const at = typeof record.at === 'number' ? record.at : 0;
+    if (!at || Date.now() - at > CHECKOUT_COMPLETED_TTL_MS) {
+      clearCheckoutCompletedElsewhere();
+      return null;
+    }
+    return record;
   } catch (err) {
     return null;
   }
@@ -49,7 +91,8 @@ export function isCheckoutCompletedElsewhere(options) {
   ) {
     return true;
   }
-  if (!pendingId && !bookingId) return true;
+  // No ids supplied — nothing to match; do not treat any leftover record as a hit.
+  if (!pendingId && !bookingId) return false;
   return false;
 }
 
@@ -73,6 +116,8 @@ export function publishCheckoutSyncEvent(options) {
     type: type,
     pendingId: pendingId || null,
     bookingId: bookingId ? Number(bookingId) : null,
+    email: options && options.email ? String(options.email).toLowerCase() : null,
+    tabId: getCheckoutTabId(),
     at: Date.now(),
   };
 
@@ -98,6 +143,15 @@ export function publishCheckoutSyncEvent(options) {
   }
 }
 
+/**
+ * Announce that this tab has taken over the checkout (legacy helper).
+ * Verify-email no longer uses this — Option B keeps the original tab primary.
+ */
+export function publishCheckoutTabClaim(options) {
+  const pendingId = options && options.pendingId ? options.pendingId : null;
+  publishCheckoutSyncEvent({ type: 'tab_claimed', pendingId: pendingId });
+}
+
 export function subscribeCheckoutSyncEvents(handler, options) {
   const pendingId = options && options.pendingId ? options.pendingId : null;
   if (typeof window === 'undefined' || typeof handler !== 'function') {
@@ -107,6 +161,7 @@ export function subscribeCheckoutSyncEvents(handler, options) {
   var channel = null;
   function deliver(event) {
     if (!event || typeof event !== 'object') return;
+    if (event.tabId && event.tabId === getCheckoutTabId()) return;
     if (pendingId && event.pendingId && event.pendingId !== pendingId) return;
     handler(event);
   }

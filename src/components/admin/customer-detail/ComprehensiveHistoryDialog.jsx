@@ -10,6 +10,13 @@ import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/Cha
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
+import {
+    splitBookingEquipmentRows,
+    getEquipmentReturnDisplay,
+    formatReturnIssueStatus,
+    isRentalEquipmentId,
+} from '@/utils/equipmentReturnDisplay';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -75,7 +82,10 @@ export const ComprehensiveHistoryDialog = ({
     const customerSince = formatDistanceToNow(parseISO(customer.created_at), { addSuffix: true });
 
     const equipmentRentalCount = equipment.reduce((acc, item) => {
-        acc[item.equipment.name] = (acc[item.equipment.name] || 0) + item.quantity;
+        const id = item.equipment_id || item.equipment?.id;
+        if (!isRentalEquipmentId(id)) return acc;
+        const name = item.equipment?.name || `Equipment #${id}`;
+        acc[name] = (acc[name] || 0) + item.quantity;
         return acc;
     }, {});
 
@@ -211,6 +221,8 @@ export const ComprehensiveHistoryDialog = ({
                         {bookings.map((booking) => {
                             const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
                             const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
+                            const { rentals: rentalEquipment, purchases: purchasedEquipment } =
+                                splitBookingEquipmentRows(relevantEquipment);
                             const rescheduleApproval = getLatestRescheduleApproval(booking);
                             return (
                                 <div key={booking.id} className="bg-white/5 p-4 rounded-lg border-l-4 border-blue-500">
@@ -232,7 +244,26 @@ export const ComprehensiveHistoryDialog = ({
                                             />
                                         )}
                                         <DetailItem icon={<DollarSign />} label="Base Price" value={`$${booking.total_price.toFixed(2)}`} />
-                                        <DetailItem icon={<CheckCircle className={booking.returned_at || booking.picked_up_at ? "text-green-400" : "text-gray-500"} />} label="Returned/Picked Up" value={booking.returned_at ? format(parseISO(booking.returned_at), 'Pp') : booking.picked_up_at ? format(parseISO(booking.picked_up_at), 'Pp') : 'N/A'} />
+                                        {(() => {
+                                            const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
+                                            const pickedUpAt = isPickup
+                                                ? (booking.rented_out_at || booking.picked_up_at)
+                                                : (booking.picked_up_at || booking.rented_out_at);
+                                            return (
+                                                <>
+                                                    <DetailItem
+                                                        icon={<CheckCircle className={pickedUpAt ? 'text-green-400' : 'text-gray-500'} />}
+                                                        label="Picked Up On"
+                                                        value={pickedUpAt ? format(parseISO(pickedUpAt), 'Pp') : 'N/A'}
+                                                    />
+                                                    <DetailItem
+                                                        icon={<CheckCircle className={booking.returned_at ? 'text-green-400' : 'text-gray-500'} />}
+                                                        label="Returned On"
+                                                        value={booking.returned_at ? format(parseISO(booking.returned_at), 'Pp') : 'N/A'}
+                                                    />
+                                                </>
+                                            );
+                                        })()}
                                     </Section>
 
                                     <Section title="Booking-Specific Payment IDs" icon={<Hash className="mr-2 h-5 w-5"/>}>
@@ -263,13 +294,26 @@ export const ComprehensiveHistoryDialog = ({
                                         )}
                                         <div className="md:col-span-2">
                                             <DetailItem icon={<Package />} label="Rented Equipment" value={
-                                                relevantEquipment.length > 0 ? (
+                                                rentalEquipment.length > 0 ? (
                                                     <ul className="list-disc list-inside">
-                                                        {relevantEquipment.map(item => {
-                                                            const issue = booking.return_issues ? booking.return_issues[item.equipment.name] : null;
+                                                        {rentalEquipment.map(item => {
+                                                            const display = getEquipmentReturnDisplay({
+                                                                equipmentId: item.equipment_id || item.equipment?.id,
+                                                                equipmentName: item.equipment?.name,
+                                                                returnedAt: item.returned_at,
+                                                                returnIssues: booking.return_issues,
+                                                                bookingStatus: booking.status,
+                                                            });
+                                                            const toneClass =
+                                                                display.tone === 'green'
+                                                                    ? 'text-green-300'
+                                                                    : display.tone === 'red'
+                                                                      ? 'text-red-400 font-bold'
+                                                                      : 'text-orange-300';
                                                             return (
                                                                 <li key={item.id}>
-                                                                    {item.equipment.name} (x{item.quantity}) - {issue ? <span className="text-red-400 font-bold">{issue.status.replace(/_/g, ' ')}</span> : item.returned_at ? <span className="text-green-300">Returned</span> : <span className="text-orange-300">Pending Return</span>}
+                                                                    {item.equipment?.name} (x{item.quantity}) -{' '}
+                                                                    <span className={toneClass}>{display.label}</span>
                                                                 </li>
                                                             );
                                                         })}
@@ -277,6 +321,19 @@ export const ComprehensiveHistoryDialog = ({
                                                 ) : "None"
                                             } />
                                         </div>
+                                        {purchasedEquipment.length > 0 && (
+                                            <div className="md:col-span-2">
+                                                <DetailItem icon={<Package />} label="Purchased Items" value={
+                                                    <ul className="list-disc list-inside">
+                                                        {purchasedEquipment.map(item => (
+                                                            <li key={item.id}>
+                                                                {item.equipment?.name} (x{item.quantity})
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                } />
+                                            </div>
+                                        )}
                                     </Section>
 
                                     {(booking.fees && Object.keys(booking.fees).length > 0) || (booking.return_issues && Object.keys(booking.return_issues).length > 0) ? (
@@ -285,7 +342,7 @@ export const ComprehensiveHistoryDialog = ({
                                                 <DetailItem key={`fee-${i}`} icon={<DollarSign className="text-orange-400"/>} label={`Fee: ${fee.description}`} value={`$${fee.amount.toFixed(2)}`} />
                                             ))}
                                             {booking.return_issues && Object.keys(booking.return_issues).map((issue, i) => (
-                                                <DetailItem key={`issue-${i}`} icon={<AlertTriangle className="text-red-400"/>} label={`Issue: ${issue.replace(/_/g, ' ')}`} value={booking.return_issues[issue].status.replace(/_/g, ' ')} className="capitalize" />
+                                                <DetailItem key={`issue-${i}`} icon={<AlertTriangle className="text-red-400"/>} label={`Issue: ${issue.replace(/_/g, ' ')}`} value={formatReturnIssueStatus(booking.return_issues[issue].status)} className="capitalize" />
                                             ))}
                                         </Section>
                                     ) : null}

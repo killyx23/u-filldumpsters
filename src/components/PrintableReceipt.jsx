@@ -16,6 +16,7 @@ import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
+import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equipmentReturnDisplay';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -567,12 +568,28 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                         <td colSpan="2" className="py-2 px-3 font-bold">🚚 Rent Equipment</td>
                                     </tr>
                                     {equipmentBreakdown.filter(e => !e.isPurchase).map((item, idx) => {
-                                        const issue = return_issues ? return_issues[item.name] : null;
+                                        const display = getEquipmentReturnDisplay({
+                                            equipmentId: item.id,
+                                            equipmentName: item.dbName || item.name,
+                                            friendlyName: item.name,
+                                            returnIssues: return_issues,
+                                            bookingStatus: bookingStatus,
+                                        });
+                                        const statusSuffix =
+                                            display.kind === 'issue'
+                                                ? ` (${display.label})`
+                                                : display.kind === 'returned'
+                                                  ? ' (Returned)'
+                                                  : '';
                                         return (
                                             <tr key={idx} className="border-b">
                                                 <td className="py-1 px-6">
                                                     {item.name} (x{item.quantity})
-                                                    {issue && <span className="text-red-600 font-bold ml-2">({issue.status.replace(/_/g, ' ')})</span>}
+                                                    {statusSuffix && (
+                                                        <span className={`font-bold ml-2 ${display.kind === 'issue' ? 'text-red-600' : 'text-green-700'}`}>
+                                                            {statusSuffix}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="text-right py-1 pr-3">${item.total.toFixed(2)}</td>
                                             </tr>
@@ -783,7 +800,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
                             <h4 className="font-bold text-lg mb-2 text-red-800 flex items-center">Post-Rental Issues</h4>
                             <ul className="list-disc list-inside text-red-700">
-                                {Object.entries(return_issues).map(([key, value]) => <li key={key} className="capitalize">{key.replace(/_/g, ' ')}: {value.status.replace(/_/g, ' ')}</li>)}
+                                {Object.entries(return_issues).map(([key, value]) => <li key={key} className="capitalize">{key.replace(/_/g, ' ')}: {formatReturnIssueStatus(value.status)}</li>)}
                             </ul>
                         </div>
                     )}

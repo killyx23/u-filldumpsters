@@ -116,6 +116,7 @@ const CheckoutForm = ({
   const [formError, setFormError] = useState(null);
   const [isPaymentElementReady, setIsPaymentElementReady] = useState(false);
   const [paymentElementError, setPaymentElementError] = useState(null);
+  const confirmationRedirectTimeoutRef = useRef(null);
 
   // PaymentElement only becomes interactive after Stripe.js and Elements finish loading.
   useEffect(() => {
@@ -133,6 +134,15 @@ const CheckoutForm = ({
     }, 20000);
     return () => window.clearTimeout(timeoutId);
   }, [isPaymentElementReady, paymentElementError]);
+
+  useEffect(() => {
+    return () => {
+      if (confirmationRedirectTimeoutRef.current) {
+        window.clearTimeout(confirmationRedirectTimeoutRef.current);
+        confirmationRedirectTimeoutRef.current = null;
+      }
+    };
+  }, []);
   
   const isDelivery = plan?.id === 2 && deliveryService;
   const currentPlan = isDelivery ? { ...plan, name: "Dump Trailer with Delivery" } : (plan || {});
@@ -248,8 +258,12 @@ const CheckoutForm = ({
       }
       
       const confirmationUrl = `${window.location.origin}/confirmation?booking_id=${bookingId}&payment_intent=${paymentIntent?.id}`;
-      
-      setTimeout(() => {
+
+      if (confirmationRedirectTimeoutRef.current) {
+        window.clearTimeout(confirmationRedirectTimeoutRef.current);
+      }
+      confirmationRedirectTimeoutRef.current = window.setTimeout(() => {
+        confirmationRedirectTimeoutRef.current = null;
         window.location.href = confirmationUrl;
       }, 1500);
 

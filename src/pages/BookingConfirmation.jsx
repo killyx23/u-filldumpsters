@@ -38,6 +38,7 @@ export const BookingConfirmation = () => {
   const [errorMsg, setErrorMsg] = useState(null);
   const [pointsAwarded, setPointsAwarded] = useState(0);
   const [referralPendingAward, setReferralPendingAward] = useState(0);
+  const finalizeOnceRef = useRef(false);
   const [isPortalNavigating, setIsPortalNavigating] = useState(false);
   const [sentEmailType, setSentEmailType] = useState(null);
 
@@ -192,6 +193,14 @@ export const BookingConfirmation = () => {
       return;
     }
 
+    if (!isRetry) {
+      if (finalizeOnceRef.current) {
+        console.log('[BookingConfirmation] Finalize already started for this mount; skipping');
+        return;
+      }
+      finalizeOnceRef.current = true;
+    }
+
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BookingConfirmation] Starting finalization`, {
       bookingId,
@@ -322,6 +331,8 @@ export const BookingConfirmation = () => {
       setLoading(false);
       return;
     }
+
+    finalizeOnceRef.current = false;
 
     console.log('[BookingConfirmation] Initializing with params:', {
       bookingId,

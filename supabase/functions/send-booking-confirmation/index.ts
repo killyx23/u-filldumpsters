@@ -50,6 +50,19 @@ const resolveEquipmentLabel = (item: { id?: string | number; dbId?: number; labe
   if (byDb) return byDb;
   return "Equipment";
 };
+
+/** Gloves and other buy-once add-ons (not inventory-returned). */
+const isPurchaseEquipmentItem = (item: {
+  id?: string | number;
+  dbId?: number;
+  equipment_id?: number;
+  type?: string;
+}) => {
+  if (String(item.type || "").toLowerCase() === "purchase") return true;
+  if (String(item.id || "").toLowerCase() === "gloves") return true;
+  const numericId = Number(item.dbId ?? item.equipment_id ?? item.id);
+  return Number.isFinite(numericId) && numericId === 3;
+};
 /** Dump Loader customer pickup (plan 2, no delivery) — matches src/utils/customerPickupService.js */
 const CUSTOMER_PICKUP_PLAN_IDS = [2];
 
@@ -555,21 +568,6 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   console.log(`portal URL: ${portalUrl}`);
   const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
-  let equipmentHTML = "";
-  if (addons.equipment && addons.equipment.length > 0) {
-    equipmentHTML = `
-      <div style="margin-top: 20px;">
-        <h3 style="color: #1e40af; margin-bottom: 10px;">Equipment Rental:</h3>
-        <ul style="list-style: none; padding: 0;">
-          ${addons.equipment.map((item)=>`
-            <li style="padding: 5px 0; border-bottom: 1px solid #e5e7eb;">
-              ${resolveEquipmentLabel(item)} (Quantity: ${item.quantity})
-            </li>
-          `).join("")}
-        </ul>
-      </div>
-    `;
-  }
   let addonsHTML = "";
   if (addons.insurance === "accept") {
     addonsHTML += `<li style="padding: 5px 0;">✓ Rental Insurance</li>`;
@@ -592,6 +590,47 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const returnScheduleValue = selfService
     ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
     : `${formatDate(booking.pickup_date)} ${deliveryWindowPickup}`;
+
+  let equipmentHTML = "";
+  const equipmentList = Array.isArray(addons.equipment) ? addons.equipment : [];
+  if (equipmentList.length > 0) {
+    const rentalItems = equipmentList.filter((item) => !isPurchaseEquipmentItem(item));
+    const purchaseItems = equipmentList.filter((item) => isPurchaseEquipmentItem(item));
+    const sections: string[] = [];
+
+    if (rentalItems.length > 0) {
+      sections.push(`
+      <div style="margin-top: 20px;">
+        <h3 style="color: #1e40af; margin-bottom: 10px;">Equipment Rental:</h3>
+        <ul style="list-style: none; padding: 0;">
+          ${rentalItems.map((item) => `
+            <li style="padding: 8px 0; border-bottom: 1px solid #e5e7eb;">
+              <div style="color: #1f2937; font-weight: bold;">${resolveEquipmentLabel(item)} (Quantity: ${item.quantity})</div>
+              <div style="margin-top: 4px; color: #6b7280; font-size: 14px;">
+                <strong>Must be returned by:</strong> ${returnScheduleValue}
+              </div>
+            </li>
+          `).join("")}
+        </ul>
+      </div>`);
+    }
+
+    if (purchaseItems.length > 0) {
+      sections.push(`
+      <div style="margin-top: 20px;">
+        <h3 style="color: #1e40af; margin-bottom: 10px;">Purchased Items:</h3>
+        <ul style="list-style: none; padding: 0;">
+          ${purchaseItems.map((item) => `
+            <li style="padding: 5px 0; border-bottom: 1px solid #e5e7eb;">
+              ${resolveEquipmentLabel(item)} (Quantity: ${item.quantity})
+            </li>
+          `).join("")}
+        </ul>
+      </div>`);
+    }
+
+    equipmentHTML = sections.join("");
+  }
 
   const pickupDateFormatted = formatDate(booking.drop_off_date);
   const pickupStartTimeFormatted = formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false });
@@ -1024,7 +1063,8 @@ Deno.serve(async (req)=>{
     const bookingId = body.bookingId ?? body.booking_id;
     const email = body.email;
     const siteUrl = normalizeSiteUrl(body.site_url);
-    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}`);
+    const force = body.force === true || body.force_resend === true;
+    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}, force: ${force}`);
     if (!bookingId) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: Missing bookingId`);
       return new Response(JSON.stringify({
@@ -1243,6 +1283,47 @@ Deno.serve(async (req)=>{
     const emailKind = isCancelledRefund
       ? "refund"
       : actionRequiredKind || "confirmation";
+
+    // Send-once claim for normal confirmation emails (not pin/refund/action-required).
+    // force=true (explicit resend) bypasses the claim.
+    let confirmationClaimAt: string | null = null;
+    if (emailKind === "confirmation" && !force) {
+      confirmationClaimAt = new Date().toISOString();
+      const { data: claimed, error: claimError } = await supabase
+        .from("bookings")
+        .update({ confirmation_email_sent_at: confirmationClaimAt })
+        .eq("id", booking.id)
+        .is("confirmation_email_sent_at", null)
+        .select("id")
+        .maybeSingle();
+
+      if (claimError) {
+        console.error(`[${timestamp}] [send-booking-confirmation] Claim failed:`, claimError);
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to claim confirmation email send",
+          details: claimError.message,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!claimed) {
+        console.log(`[${timestamp}] [send-booking-confirmation] Already sent for booking #${booking.id}; skipping`);
+        return new Response(JSON.stringify({
+          success: true,
+          already_sent: true,
+          message: "Confirmation email already sent",
+          recipient: recipientEmail,
+          email_type: "confirmation",
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const emailHTML = isCancelledRefund
       ? generateRefundEmailHTML(booking)
       : actionRequiredKind
@@ -1263,6 +1344,12 @@ Deno.serve(async (req)=>{
     const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
     if (emailResult.success) {
       console.log(`[${timestamp}] [send-booking-confirmation] SUCCESS: Email sent via ${emailResult.provider}`);
+      if (emailKind === "confirmation" && force) {
+        await supabase
+          .from("bookings")
+          .update({ confirmation_email_sent_at: new Date().toISOString() })
+          .eq("id", booking.id);
+      }
       const referrerEmailResult = isCancelledRefund || actionRequiredKind
         ? { skipped: true, reason: isCancelledRefund ? "cancelled_refund" : "action_required" }
         : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
@@ -1285,6 +1372,13 @@ Deno.serve(async (req)=>{
         }
       });
     } else {
+      if (confirmationClaimAt) {
+        await supabase
+          .from("bookings")
+          .update({ confirmation_email_sent_at: null })
+          .eq("id", booking.id)
+          .eq("confirmation_email_sent_at", confirmationClaimAt);
+      }
       console.error(`[${timestamp}] [send-booking-confirmation] FAILED: All email attempts failed:`, emailResult.error);
       return new Response(JSON.stringify({
         success: false,

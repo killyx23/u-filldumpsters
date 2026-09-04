@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package, Receipt, AlertTriangle, XCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Mail, ShieldCheck, Loader2, CheckCircle2, Calendar, MapPin, Package, Receipt, AlertTriangle, XCircle, RefreshCw, Info, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { format, isValid } from 'date-fns';
@@ -25,8 +26,62 @@ import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { getAppOrigin } from '@/utils/getAppOrigin';
 import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
+import { useBookingFlowOptional } from '@/contexts/BookingFlowContext';
+import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { clearCheckoutTeardownDone } from '@/utils/checkoutIdleGuard';
+import {
+    saveVerificationDeadline,
+    readVerificationDeadline,
+    clearVerificationDeadline,
+    formatCountdown,
+} from '@/utils/verificationCodeWindow';
 
 const LOADING_TIMEOUT_MS = 30000; // 30 seconds timeout
+
+const CodeWindowNotice = ({ remainingMs }) => (
+    <div className="mt-3 rounded-lg border border-yellow-400/30 bg-yellow-400/10 px-3 py-2 text-left">
+        <div className="flex items-start gap-2">
+            <Clock className="h-4 w-4 shrink-0 text-yellow-300 mt-0.5" aria-hidden />
+            <p className="text-xs text-yellow-100 leading-relaxed">
+                Your verification code is good for 15 minutes. Once it expires, the code will no
+                longer work and your booking will be released, so you would need to start again.
+                {remainingMs != null && remainingMs > 0 && (
+                    <span className="block mt-1 font-semibold text-white">
+                        Code expires in {formatCountdown(remainingMs)}
+                    </span>
+                )}
+            </p>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-yellow-300 hover:text-white hover:bg-white/10"
+                        aria-label="Why codes expire in 15 minutes"
+                    >
+                        <Info className="h-4 w-4" />
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                    align="end"
+                    className="w-80 bg-gray-950 border-white/15 text-white p-4 shadow-xl"
+                >
+                    <p className="font-semibold text-sm text-blue-200 mb-2">
+                        Why codes expire in 15 minutes
+                    </p>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                        While you verify your email, we hold your selected date and time so that no
+                        one else can book it. Keeping that hold short prevents the same slot from
+                        being double-booked and gives other customers who are waiting a fair chance
+                        at it if you decide not to continue. If your code expires, you are welcome to
+                        start a new booking at any time.
+                    </p>
+                </PopoverContent>
+            </Popover>
+        </div>
+    </div>
+);
 
 function buildVerificationAttachPayload(addons, email, pendingToken, customerId = null) {
     if (!email || addons?.wasVerificationSkipped) return null;
@@ -77,10 +132,35 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     });
     const [error, setError] = useState('');
     const [retryCount, setRetryCount] = useState(0);
+    const [codeDeadline, setCodeDeadline] = useState(null);
+    const [codeRemainingMs, setCodeRemainingMs] = useState(null);
+    const emailLinkArrivalRef = useRef(/^\d{6}$/.test(String(codeFromUrl || '').trim()));
+    const verifiedLocallyRef = useRef(false);
+    const continueStartedRef = useRef(false);
+    const autoVerifyStartedRef = useRef(false);
+    const codeExpiredHandledRef = useRef(false);
+    const bookingFlow = useBookingFlowOptional();
+    const bookingDataRef = useRef(null);
+    const pendingRecordRef = useRef(null);
+    const planRef = useRef(null);
+    const addonsDataRef = useRef(null);
 
     const isDelivery = plan?.id === 2 && addonsData?.deliveryService;
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     const { insurancePrice, taxOptions, drivewayPrice, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
+
+    useEffect(() => {
+        bookingDataRef.current = bookingData;
+    }, [bookingData]);
+    useEffect(() => {
+        pendingRecordRef.current = pendingRecord;
+    }, [pendingRecord]);
+    useEffect(() => {
+        planRef.current = plan;
+    }, [plan]);
+    useEffect(() => {
+        addonsDataRef.current = addonsData;
+    }, [addonsData]);
 
     // Cleanup timeouts on unmount
     useEffect(() => {
@@ -181,7 +261,52 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         if (!/^\d{6}$/.test(prefetchedCode)) return;
         setCode(prefetchedCode);
         setStatus('sent');
+        // Email-link arrival: verify in this tab, then tell the original tab to continue.
+        emailLinkArrivalRef.current = true;
     }, [status, codeFromUrl]);
+
+    // Deadline is written by whichever tab requested the code, so read it from
+    // shared storage (this tab may have been opened straight from the email).
+    useEffect(() => {
+        if (!token) return;
+        setCodeDeadline(readVerificationDeadline(token));
+    }, [token, status]);
+
+    useEffect(() => {
+        if (!codeDeadline || status === 'verified' || status === 'verified_return' || status === 'error') {
+            setCodeRemainingMs(null);
+            return undefined;
+        }
+
+        const tick = () => setCodeRemainingMs(Math.max(0, codeDeadline - Date.now()));
+        tick();
+        const interval = setInterval(tick, 1000);
+        return () => clearInterval(interval);
+    }, [codeDeadline, status]);
+
+    // Window closed without verifying: treat it exactly like an idle timeout so
+    // the customer gets the follow-up email and the slot is released.
+    useEffect(() => {
+        if (codeRemainingMs == null || codeRemainingMs > 0) return;
+        if (status === 'verified' || status === 'verified_return' || status === 'verifying') return;
+        if (codeExpiredHandledRef.current) return;
+
+        codeExpiredHandledRef.current = true;
+        clearVerificationDeadline(token);
+
+        void (async () => {
+            const result = await bookingFlow?.runCheckoutTeardown?.('reminded');
+            // Verified on another device, or already paid — the booking lives on.
+            if (result?.skipped) return;
+            toast({
+                title: 'Verification code expired',
+                description:
+                    'Your 15-minute window ended, so the booking hold was released. You can start a new booking at any time.',
+                variant: 'destructive',
+                duration: 12000,
+            });
+        })();
+    }, [codeRemainingMs, status, token, bookingFlow]);
 
     // Load equipment prices with error handling
     useEffect(() => {
@@ -379,6 +504,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Verification code sent successfully`);
+            codeExpiredHandledRef.current = false;
+            setCodeDeadline(saveVerificationDeadline(token, data?.expiresAt));
             setStatus('sent');
             toast({
                 title: 'Code Sent',
@@ -400,6 +527,62 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 variant: 'destructive'
             });
         }
+    };
+
+    const continueAfterVerify = async (customerId = null) => {
+        if (continueStartedRef.current) return;
+        continueStartedRef.current = true;
+        // Helper tab may have suppressed teardown; clear so this path can idle/leave normally.
+        clearCheckoutTeardownDone();
+
+        const currentBooking = bookingDataRef.current;
+        const currentPending = pendingRecordRef.current;
+        const currentPlan = planRef.current;
+        const currentAddons = addonsDataRef.current;
+
+        const hydratedPlan =
+            currentPlan || (currentPending ? await hydratePlanFromPending(currentPending) : null);
+        const mapped = currentPending
+            ? mapPendingToBookingState(currentPending, hydratedPlan)
+            : null;
+        const addons = currentPending?.addons_data || currentAddons || {};
+        const needsDriverStep =
+            mapped?.requiresDriverVerification && !isDriverVerificationComplete(addons);
+
+        if (!needsDriverStep) {
+            const attachPayload = buildVerificationAttachPayload(
+                addons,
+                currentBooking?.email,
+                token,
+                customerId,
+            );
+            if (attachPayload) {
+                try {
+                    await attachCheckoutVerificationDocuments(attachPayload);
+                } catch (attachError) {
+                    console.error(
+                        '[VerifyEmailBeforeBooking] Failed to attach verification documents:',
+                        attachError,
+                    );
+                }
+            }
+        }
+
+        setStatus('verified');
+        toast({
+            title: 'Email Verified!',
+            description: needsDriverStep
+                ? 'Returning to driver verification...'
+                : 'Redirecting to payment...',
+        });
+
+        setTimeout(() => {
+            if (needsDriverStep) {
+                navigate('/', { state: { resumeStep: 8, token } });
+            } else {
+                navigate(`/payment?bookingId=${token}`);
+            }
+        }, 800);
     };
 
     const handleVerify = async () => {
@@ -449,54 +632,27 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             }
 
             console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Email verified successfully!`);
-            if (typeof window !== 'undefined') {
-                window.sessionStorage.setItem(`verified_email_${String(bookingData.email || '').toLowerCase()}`, String(Date.now()));
-            }
-            publishCheckoutSyncEvent({ type: 'verified', pendingId: token });
-            setStatus('verified');
-
-            const hydratedPlan = plan || (pendingRecord ? await hydratePlanFromPending(pendingRecord) : null);
-            const mapped = pendingRecord
-                ? mapPendingToBookingState(pendingRecord, hydratedPlan)
-                : null;
-            const addons = pendingRecord?.addons_data || addonsData || {};
-            const needsDriverStep =
-                mapped?.requiresDriverVerification && !isDriverVerificationComplete(addons);
-
-            if (!needsDriverStep) {
-                const attachPayload = buildVerificationAttachPayload(
-                    addons,
-                    bookingData.email,
-                    token,
-                    data.customer?.id ?? null,
-                );
-                if (attachPayload) {
-                    try {
-                        await attachCheckoutVerificationDocuments(attachPayload);
-                        console.log(`[${responseTs}] [VerifyEmailBeforeBooking] Attached pending verification documents`);
-                    } catch (attachError) {
-                        console.error(`[${responseTs}] [VerifyEmailBeforeBooking] Failed to attach verification documents:`, attachError);
-                    }
-                }
-            }
-
-            toast({
-                title: 'Email Verified!',
-                description: needsDriverStep
-                    ? 'Returning to driver verification...'
-                    : 'Redirecting to payment...',
+            verifiedLocallyRef.current = true;
+            markVerifiedEmailSession(bookingData.email, token);
+            publishCheckoutSyncEvent({
+                type: 'verified',
+                pendingId: token,
+                email: bookingData.email || null,
             });
+            clearVerificationDeadline(token);
+            setCodeDeadline(null);
 
-            setTimeout(() => {
-                if (needsDriverStep) {
-                    console.log(`[${new Date().toISOString()}] [VerifyEmailBeforeBooking] Resuming booking at driver step with token:`, token);
-                    navigate('/', { state: { resumeStep: 8, token } });
-                } else {
-                    console.log(`[${new Date().toISOString()}] [VerifyEmailBeforeBooking] Navigating to payment page with bookingId:`, token);
-                    navigate(`/payment?bookingId=${token}`);
-                }
-            }, 1500);
+            // Email-link tab owns checkout after verify; original tab stands down.
+            if (emailLinkArrivalRef.current) {
+                setStatus('verified_return');
+                toast({
+                    title: 'Email Verified!',
+                    description: 'Continue here to finish your booking. Your other window will return to the homepage.',
+                });
+                return;
+            }
 
+            await continueAfterVerify(data.customer?.id ?? null);
         } catch (err) {
             clearTimeout(verificationTimeoutRef.current);
             const catchTs = new Date().toISOString();
@@ -510,6 +666,16 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             });
         }
     };
+
+    // Auto-verify when the emailed link supplied a 6-digit code.
+    useEffect(() => {
+        if (status !== 'sent' || !emailLinkArrivalRef.current) return;
+        if (autoVerifyStartedRef.current) return;
+        if (!/^\d{6}$/.test(String(code || '').trim()) || !bookingData?.email) return;
+        autoVerifyStartedRef.current = true;
+        void handleVerify();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when code is ready from the email link
+    }, [status, code, bookingData?.email]);
 
     const handleRetry = () => {
         const timestamp = new Date().toISOString();
@@ -728,7 +894,11 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                             variant="ghost"
                             size="icon"
                             className="mr-4 text-white hover:bg-white/20"
-                            disabled={status === 'verifying' || status === 'verified'}
+                            disabled={
+                                status === 'verifying' ||
+                                status === 'verified' ||
+                                status === 'verified_return'
+                            }
                         >
                             <ArrowLeft />
                         </Button>
@@ -897,9 +1067,10 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                 We need to verify <strong className="text-yellow-300">{bookingData?.email}</strong>{' '}
                                 to secure your booking and send your receipt.
                             </p>
-                            <p className="text-gray-400 text-xs mt-3">
-                                If you confirm from the email, that link may open a new tab. Finish the booking there, then close this tab — leaving it open can start a timeout on this screen.
-                            </p>
+                            {status !== 'verified' &&
+                                status !== 'verified_return' && (
+                                    <CodeWindowNotice remainingMs={codeRemainingMs} />
+                                )}
                         </div>
 
                         <AnimatePresence mode="wait">
@@ -997,6 +1168,28 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                                         Continuing...
                                     </p>
+                                </motion.div>
+                            )}
+
+                            {status === 'verified_return' && (
+                                <motion.div
+                                    key="verified-return"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="flex flex-col items-center justify-center p-6 space-y-4"
+                                >
+                                    <CheckCircle2 className="h-12 w-12 text-green-400" />
+                                    <h3 className="text-xl font-bold text-white">Email Verified!</h3>
+                                    <p className="text-gray-300 text-center text-sm max-w-sm">
+                                        Continue here to finish your booking. Your other window will
+                                        return to the homepage on its own.
+                                    </p>
+                                    <Button
+                                        onClick={() => void continueAfterVerify(null)}
+                                        className="w-full py-6 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        Continue booking
+                                    </Button>
                                 </motion.div>
                             )}
                         </AnimatePresence>
