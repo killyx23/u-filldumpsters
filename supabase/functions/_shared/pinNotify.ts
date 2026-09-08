@@ -3,7 +3,10 @@
  *
  * First message (pin_update) is claimed on bookings.pin_notification_sent_at.
  * 1-hour reminder (pin_reminder) is claimed on bookings.pin_reminder_sent_at.
+ * Delivery bookings never get PIN mail (see deliveryBooking.ts).
  */
+
+import { isDeliveryBooking } from "./deliveryBooking.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -38,6 +41,7 @@ export async function notifyPinReady(
   startTime: string,
   endTime: string,
 ): Promise<void> {
+  if (isDeliveryBooking(booking)) return;
   const bookingId = booking.id;
   if (bookingId == null) return;
 
@@ -82,6 +86,7 @@ export async function notifyPinReminder(
   startTime: string,
   endTime: string,
 ): Promise<void> {
+  if (isDeliveryBooking(booking)) return;
   const bookingId = booking.id;
   if (bookingId == null) return;
   if (!booking.pin_notification_sent_at) return;

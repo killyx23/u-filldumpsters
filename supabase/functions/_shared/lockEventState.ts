@@ -6,6 +6,7 @@
  */
 
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "./pinTiming.ts";
+import { isDeliveryBooking } from "./deliveryBooking.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -18,9 +19,8 @@ export type LockEventInput = {
 };
 
 function isCustomerPickupBooking(booking: Record<string, unknown>): boolean {
+  if (isDeliveryBooking(booking)) return false;
   const plan = (booking.plan || {}) as Record<string, unknown>;
-  const addons = (booking.addons || {}) as Record<string, unknown>;
-  if (addons.isDelivery || addons.deliveryService) return false;
   if (plan.customer_pickup === true) return true;
   const id = Number(plan.id);
   return id === 2 || id === 5;

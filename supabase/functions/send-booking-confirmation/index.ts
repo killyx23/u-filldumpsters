@@ -6,6 +6,7 @@ import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBoo
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
+import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 
 const VERIFICATION_LEAD_HOURS = 12;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -90,10 +91,8 @@ const isTrailerSelfService = (booking: {
   addons?: { isDelivery?: boolean; deliveryService?: boolean };
   delivery_type?: string | null;
 }) => {
+  if (isDeliveryBooking(booking as Record<string, unknown>)) return false;
   const plan = booking.plan || {};
-  const addons = booking.addons || {};
-  const isDelivery = addons.isDelivery || addons.deliveryService;
-  if (isDelivery) return false;
   if (booking.delivery_type === "self_service_trailer" || booking.delivery_type === "self_pickup") {
     return true;
   }
@@ -1116,8 +1115,25 @@ Deno.serve(async (req)=>{
       });
     }
 
-    // PIN delivery email (issued ~12h before pickup). Uses appointment times only — no grace hour.
+    // PIN email (issued ~12h before pickup). Delivery bookings never get a padlock code.
     const emailType = body.email_type || body.emailType || "confirmation";
+    if (emailType === "pin_update" || emailType === "pin_reminder") {
+      if (isDeliveryBooking(booking)) {
+        console.log(`[${timestamp}] [send-booking-confirmation] Skipping ${emailType} for delivery booking #${booking.id}`);
+        return new Response(JSON.stringify({
+          success: true,
+          skipped: true,
+          skippedReason: "delivery",
+          email_type: emailType,
+        }), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          },
+        });
+      }
+    }
     if (emailType === "pin_update") {
       const pin = body.pin || body.access_pin;
       if (!pin) {

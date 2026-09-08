@@ -17,6 +17,7 @@ import {
 } from "../_shared/pinTiming.ts";
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
+import { bookingNeedsYardLockPin, isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 function makeJsonResponse(corsHeaders) {
   return (body, status = 200) => new Response(JSON.stringify(body), {
@@ -63,6 +64,10 @@ function sleep(ms) {
 }
 
 async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+  if (isDeliveryBooking(booking)) {
+    console.log(`[generate-daily-pins] Skipping notification for booking #${booking.id} — delivery`);
+    return;
+  }
   if (booking.pin_notification_sent_at) {
     console.log(`[generate-daily-pins] Skipping notification for booking #${booking.id} — already sent`);
     return;
@@ -286,9 +291,7 @@ async function generatePinWithFallback(accessToken, lockId, bridgeId, supabase, 
   };
 }
 function isTrailerRental(booking) {
-  const planName = booking.plan?.name ?? booking.service_name ?? "";
-  const serviceType = booking.plan?.service_type ?? booking.service_type ?? "";
-  return serviceType === "trailer_rental" || planName.toLowerCase().includes("dump loader") || planName.toLowerCase().includes("dump trailer") || planName.toLowerCase().includes("trailer");
+  return bookingNeedsYardLockPin(booking);
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
