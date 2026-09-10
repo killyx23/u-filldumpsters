@@ -208,22 +208,26 @@ Deno.serve(async (req) => {
       const dayOfWeek = date.getDay();
       const rule = specificRulesMap.get(dateStr) || weeklyRulesMap.get(dayOfWeek);
       let isAvailable = rule ? rule.is_available !== false : false;
+      // Independent of yard hours: a closed Sunday can still be occupied overnight.
+      let inventoryAvailable = true;
 
-      if (isAvailable) {
-        for (const requiredItem of dayGranularItems) {
-          const item = requiredItem.inventory_items;
-          if (!item) {
-            console.log(`  ⚠️  inventory_items join is null for rule service_id=${requiredItem.service_id}, item_id=${requiredItem.inventory_item_id} — SKIPPING`);
-            continue;
-          }
-          const used = dayUsage(reservationIndex, item.id, dateStr);
-          const wouldExceed = used + requiredItem.quantity_required > item.total_quantity;
-          if (wouldExceed) {
-            console.log(`  [${dateStr}] "${item.name}" full: ${used} + ${requiredItem.quantity_required} > ${item.total_quantity}`);
-            isAvailable = false;
-            break;
-          }
+      for (const requiredItem of dayGranularItems) {
+        const item = requiredItem.inventory_items;
+        if (!item) {
+          console.log(`  ⚠️  inventory_items join is null for rule service_id=${requiredItem.service_id}, item_id=${requiredItem.inventory_item_id} — SKIPPING`);
+          continue;
         }
+        const used = dayUsage(reservationIndex, item.id, dateStr);
+        const wouldExceed = used + requiredItem.quantity_required > item.total_quantity;
+        if (wouldExceed) {
+          console.log(`  [${dateStr}] "${item.name}" full: ${used} + ${requiredItem.quantity_required} > ${item.total_quantity}`);
+          inventoryAvailable = false;
+          break;
+        }
+      }
+
+      if (isAvailable && !inventoryAvailable) {
+        isAvailable = false;
       }
 
       // Delivery-window services (16-yard dumpster, delivered trailer) have a distinct
@@ -257,6 +261,7 @@ Deno.serve(async (req) => {
 
       availability[dateStr] = {
         available: isAvailable,
+        inventoryAvailable,
         deliverySlots: annotatedDeliverySlots,
         pickupSlots: annotatedPickupSlots,
         returnSlots,

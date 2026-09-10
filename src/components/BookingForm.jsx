@@ -21,7 +21,7 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
-import { isMonthFullyUnavailable } from '@/utils/calendarAvailabilityHints';
+import { isMonthFullyUnavailable, isPickupDateBlockedByRange, rangeHasBlockedOccupancyNight } from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
@@ -444,7 +444,7 @@ export const BookingForm = ({
     fetchExactTimes();
   }, [bookingData.dropOffDate, bookingData.pickupDate, currentPlan, isDelivery, setBookingData]);
   
-  const disabledDates = useMemo(() => {
+  const dropOffDisabledDates = useMemo(() => {
     const dates = [{ before: startOfDay(addDays(new Date(), 1)) }];
     for (const dateStr in availability) {
       if (!availability[dateStr].available) {
@@ -453,6 +453,16 @@ export const BookingForm = ({
     }
     return dates;
   }, [availability]);
+
+  const pickupDisabledDates = useMemo(() => {
+    const dropOff = bookingData.dropOffDate ? startOfDay(bookingData.dropOffDate) : null;
+    const dates = [...dropOffDisabledDates];
+    if (dropOff) {
+      dates.push({ before: dropOff });
+      dates.push((date) => isPickupDateBlockedByRange(dropOff, date, availability));
+    }
+    return dates;
+  }, [dropOffDisabledDates, bookingData.dropOffDate, availability]);
 
   const showNextMonthHint = useMemo(
     () => isMonthFullyUnavailable(currentMonth, availability, { loading: loadingAvailability }),
@@ -503,6 +513,19 @@ export const BookingForm = ({
         setIsModalOpen(true);
         return;
       }
+      if (
+        field === 'pickupDate' &&
+        bookingData.dropOffDate &&
+        isPickupDateBlockedByRange(bookingData.dropOffDate, newDate, availability)
+      ) {
+        toast({
+          title: 'Dates Unavailable',
+          description:
+            'A night between those dates is already booked. Please pick a return date that does not include a full day.',
+          variant: 'destructive',
+        });
+        return;
+      }
       console.log('[BookingForm] Date selected:', field, dateStr);
     }
     
@@ -538,7 +561,11 @@ export const BookingForm = ({
           }
         }
       } else if (field === 'dropOffDate' && newDate && currentPlan?.id !== 3 && currentPlan?.id !== 4) {
-        if (!prev.pickupDate || isBefore(startOfDay(prev.pickupDate), newDate)) {
+        if (
+          !prev.pickupDate ||
+          isBefore(startOfDay(prev.pickupDate), newDate) ||
+          isPickupDateBlockedByRange(newDate, prev.pickupDate, availability)
+        ) {
           state.pickupDate = newDate;
           if (currentPlan?.id !== 2 || isDelivery) {
              state.pickupTimeSlot = '';
@@ -581,9 +608,27 @@ export const BookingForm = ({
           description: "Your selected end date is no longer available.",
           variant: "destructive"
         });
+      } else if (
+        bookingData.dropOffDate &&
+        rangeHasBlockedOccupancyNight(bookingData.dropOffDate, bookingData.pickupDate, availability)
+      ) {
+        console.warn('[BookingForm] Pickup range includes a booked night');
+        const sameDayAllowed = currentPlan?.id !== 3 && currentPlan?.id !== 4;
+        setBookingData((prev) => ({
+          ...prev,
+          pickupDate: sameDayAllowed ? startOfDay(prev.dropOffDate) : null,
+          pickupTimeSlot: sameDayAllowed && currentPlan?.id === 2 && !isDelivery ? prev.pickupTimeSlot : '',
+        }));
+        toast({
+          title: 'Dates Unavailable',
+          description: sameDayAllowed
+            ? 'A night between your dates is already booked. The return date was reset to your start date.'
+            : 'A night between your dates is already booked. Please choose different dates.',
+          variant: 'destructive',
+        });
       }
     }
-  }, [availability, bookingData.dropOffDate, bookingData.pickupDate, setBookingData]);
+  }, [availability, bookingData.dropOffDate, bookingData.pickupDate, setBookingData, currentPlan, isDelivery]);
   
   useEffect(() => {
     if (!currentPlan) return;
@@ -642,16 +687,37 @@ export const BookingForm = ({
         pickupValid = false;
       }
     }
+
+    if (
+      bookingData.dropOffDate &&
+      bookingData.pickupDate &&
+      rangeHasBlockedOccupancyNight(bookingData.dropOffDate, bookingData.pickupDate, availability)
+    ) {
+      pickupValid = false;
+    }
     
     const cAddress = bookingData.contactAddress;
     const addressValid = cAddress?.street && cAddress?.city && cAddress?.state && cAddress?.zip;
     return baseValid && pickupValid && addressValid;
-  }, [bookingData, currentPlan]);
+  }, [bookingData, currentPlan, availability]);
   
   const handleFormSubmit = async e => {
     e.preventDefault();
     console.log('[BookingForm] Form submission initiated');
     
+    if (
+      bookingData.dropOffDate &&
+      bookingData.pickupDate &&
+      rangeHasBlockedOccupancyNight(bookingData.dropOffDate, bookingData.pickupDate, availability)
+    ) {
+      toast({
+        title: 'Dates Unavailable',
+        description: 'A night between those dates is already booked. Please pick a shorter stay or different dates.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (!isFormValid) {
       console.warn('[BookingForm] Form validation failed');
       toast({
@@ -1200,7 +1266,7 @@ export const BookingForm = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
-                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={dropOffDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                   {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                       <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.dropOffDate)} />
                   ) : (
@@ -1211,7 +1277,7 @@ export const BookingForm = ({
                   )}
                   
                   {currentPlan?.id !== 3 && <>
-                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={disabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={pickupDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
                           {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                               <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.pickupDate)} />
                           ) : (
