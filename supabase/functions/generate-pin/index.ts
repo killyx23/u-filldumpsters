@@ -11,6 +11,7 @@ import {
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 import { getJwtAal } from "../_shared/jwtAal.ts";
+import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
 /** Statuses eligible for customer portal + daily pin jobs */
@@ -67,6 +68,7 @@ function generateRandomPin() {
 }
 
 async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+  if (isDeliveryBooking(booking)) return;
   if (booking.pin_notification_sent_at) return;
   const { error } = await supabase.functions.invoke("send-booking-confirmation", {
     body: {
@@ -403,6 +405,15 @@ Deno.serve(async (req)=>{
         success: false,
         error: "Booking not found or not eligible for PIN generation"
       }, 404);
+    }
+
+    if (isDeliveryBooking(booking)) {
+      return jsonResponse({
+        success: false,
+        skipped: true,
+        skippedReason: "delivery",
+        error: "Delivery bookings do not use a yard padlock PIN.",
+      }, 400);
     }
 
     if (callerType === "customer") {

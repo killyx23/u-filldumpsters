@@ -28,6 +28,7 @@ import {
 import { ensurePinOnLock, pollJob } from "../_shared/lockPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 import { notifyPinReady, notifyPinReminder } from "../_shared/pinNotify.ts";
+import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { BUSINESS_TIME_ZONE } from "../_shared/parseBookingTimeSlot.ts";
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
@@ -71,19 +72,7 @@ function sleep(ms: number) {
 }
 
 function isTrailerRental(booking: Record<string, unknown>): boolean {
-  const plan = (booking.plan as Record<string, unknown>) || {};
-  const planName = String(plan.name ?? booking.service_name ?? "");
-  const serviceType = String(plan.service_type ?? booking.service_type ?? "");
-  const name = planName.toLowerCase();
-  return (
-    serviceType === "trailer_rental" ||
-    Number(plan.id) === 2 ||
-    Number(plan.id) === 5 ||
-    name.includes("dump loader") ||
-    name.includes("dump trailer") ||
-    name.includes("trailer") ||
-    plan.customer_pickup === true
-  );
+  return bookingNeedsYardLockPin(booking);
 }
 
 async function runPinNotifyPass(

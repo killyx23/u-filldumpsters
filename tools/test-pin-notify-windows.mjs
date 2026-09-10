@@ -72,3 +72,43 @@ test("1h reminder opens at drop-off minus 1 hour", () => {
   assert.equal(isDueForPinReminder(dropOff, at10minAfter), true);
   assert.equal(isDueForPinReminder(dropOff, at20minAfter), false);
 });
+
+function asRecord(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  return {};
+}
+
+function isDeliveryBooking(booking) {
+  if (!booking) return false;
+  const addons = asRecord(booking.addons);
+  const plan = asRecord(booking.plan);
+  if (addons.isDelivery === true || addons.deliveryService === true) return true;
+  if (booking.delivery_service === true) return true;
+  if (String(booking.delivery_type || "").toLowerCase() === "delivery") return true;
+  return [1, 4].includes(Number(plan.id));
+}
+
+function bookingNeedsYardLockPin(booking) {
+  if (!booking || isDeliveryBooking(booking)) return false;
+  const plan = asRecord(booking.plan);
+  const name = String(plan.name ?? "").toLowerCase();
+  return Number(plan.id) === 2 || name.includes("dump trailer") || name.includes("trailer");
+}
+
+test("delivery dump trailer (#1324 shape) does not get a yard PIN", () => {
+  const booking1324 = {
+    plan: { id: 4, name: "Dump Trailer with Delivery" },
+    addons: { isDelivery: true },
+  };
+  assert.equal(isDeliveryBooking(booking1324), true);
+  assert.equal(bookingNeedsYardLockPin(booking1324), false);
+});
+
+test("self-pickup dump trailer still gets a yard PIN", () => {
+  const pickup = {
+    plan: { id: 2, name: "Dump Trailer Rental Service" },
+    addons: { isDelivery: false },
+  };
+  assert.equal(isDeliveryBooking(pickup), false);
+  assert.equal(bookingNeedsYardLockPin(pickup), true);
+});

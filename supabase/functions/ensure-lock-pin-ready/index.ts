@@ -16,6 +16,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { bookingNeedsYardLockPin, isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 
 const IGLOO_API = "https://api.igloodeveloper.co/igloohome";
 const PIN_LEAD_MS = 12 * 60 * 60 * 1000;
@@ -119,6 +120,7 @@ async function notifyPinReady(
   startTime: string,
   endTime: string,
 ) {
+  if (isDeliveryBooking(booking)) return;
   if (booking.pin_notification_sent_at) return;
   await supabase.functions.invoke("send-booking-confirmation", {
     body: {
@@ -218,16 +220,7 @@ Deno.serve(async (req) => {
     const results: Array<Record<string, unknown>> = [];
 
     for (const booking of bookings || []) {
-      const plan = booking.plan || {};
-      const name = String(plan.name || "").toLowerCase();
-      const isTrailer =
-        Number(plan.id) === 2 ||
-        Number(plan.id) === 5 ||
-        name.includes("trailer") ||
-        name.includes("dump loader") ||
-        name.includes("dump trailer") ||
-        plan.customer_pickup === true;
-      if (!isTrailer) continue;
+      if (!bookingNeedsYardLockPin(booking)) continue;
 
       const orderId = Number(booking.id);
       const { data: activePin } = await supabase

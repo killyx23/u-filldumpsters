@@ -11,7 +11,6 @@ import {
     endOfMonth,
     addMonths,
     formatISO,
-    eachDayOfInterval,
     isBefore,
 } from 'date-fns';
 import { CalendarX, CalendarCheck, Clock, Loader2 } from 'lucide-react';
@@ -21,18 +20,14 @@ import { safeExtractString } from '@/utils/stringExtractors';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import {
+    isDateVisitUnavailable,
+    isPickupDateBlockedByRange,
+    rangeHasBlockedOccupancyNight,
+} from '@/utils/calendarAvailabilityHints';
 
 const isDateUnavailable = (date, availability) => {
-    const dateStr = format(date, 'yyyy-MM-dd');
-    return availability[dateStr]?.available === false;
-};
-
-const rangeHasUnavailableDay = (from, to, availability) => {
-    if (!from || !to) return false;
-    const start = startOfDay(from);
-    const end = startOfDay(to);
-    if (isBefore(end, start)) return false;
-    return eachDayOfInterval({ start, end }).some((day) => isDateUnavailable(day, availability));
+    return isDateVisitUnavailable(availability[format(date, 'yyyy-MM-dd')]);
 };
 
 export const RescheduleDateTimeSelector = ({
@@ -246,11 +241,16 @@ export const RescheduleDateTimeSelector = ({
         const day = startOfDay(date);
         const minBookable = startOfDay(addDays(new Date(), 1));
         if (isBefore(day, minBookable)) return true;
-        const dateStr = format(day, 'yyyy-MM-dd');
-        if (availability[dateStr]?.available === false) return true;
-        // While loading or before a month is fetched, only past/today are blocked
+        if (isDateVisitUnavailable(availability[format(day, 'yyyy-MM-dd')])) return true;
+        if (
+            serviceId !== 3 &&
+            newDropOffDate &&
+            isPickupDateBlockedByRange(newDropOffDate, day, availability)
+        ) {
+            return true;
+        }
         return false;
-    }, [availability]);
+    }, [availability, newDropOffDate, serviceId]);
 
     const handleRangeSelect = (rangeOrDate) => {
         if (serviceId === 3) {
@@ -287,10 +287,10 @@ export const RescheduleDateTimeSelector = ({
             });
             return;
         }
-        if (from && to && rangeHasUnavailableDay(from, to, availability)) {
+        if (from && to && rangeHasBlockedOccupancyNight(from, to, availability)) {
             toast({
                 title: 'Date Range Unavailable',
-                description: 'Your selected range includes a day that is fully booked or closed. Please choose different dates.',
+                description: 'A night between those dates is already booked. Please choose a shorter stay or different dates.',
                 variant: 'destructive',
             });
             return;
@@ -504,15 +504,23 @@ export async function verifyRescheduleDatesAvailable({
     }
 
     const avail = data?.availability || {};
-    const days = eachDayOfInterval({ start, end });
-    for (const day of days) {
-        const key = format(day, 'yyyy-MM-dd');
-        if (avail[key]?.available === false) {
-            return {
-                ok: false,
-                message: `${format(day, 'MMM d, yyyy')} is no longer available. Please choose different dates.`,
-            };
-        }
+    if (avail[startDate]?.available === false) {
+        return {
+            ok: false,
+            message: `${format(start, 'MMM d, yyyy')} is no longer available. Please choose different dates.`,
+        };
+    }
+    if (pickupDate && avail[endDate]?.available === false) {
+        return {
+            ok: false,
+            message: `${format(end, 'MMM d, yyyy')} is no longer available. Please choose different dates.`,
+        };
+    }
+    if (rangeHasBlockedOccupancyNight(start, end, avail)) {
+        return {
+            ok: false,
+            message: 'A night between those dates is already booked. Please choose a shorter stay or different dates.',
+        };
     }
 
     return { ok: true };
