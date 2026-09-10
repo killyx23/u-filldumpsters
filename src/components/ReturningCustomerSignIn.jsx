@@ -111,7 +111,6 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
       toast({
         title: 'Welcome Back!',
         description: 'Your account has been verified.',
-        duration: 3000
       });
 
     } catch (err) {

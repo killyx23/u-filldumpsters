@@ -114,7 +114,6 @@ export function BookingFlowProvider({ children }) {
 
     const failTitle = idle ? 'Could not complete checkout timeout' : 'Could not save your exit';
     const partialTitle = idle ? 'Checkout timeout recorded' : 'Booking exit recorded';
-    const toastDuration = 12000;
 
     if (!result.success) {
       toast({
@@ -125,7 +124,6 @@ export function BookingFlowProvider({ children }) {
             ? "We couldn't record that your checkout timed out. Please contact us if you don't receive a follow-up email."
             : "We couldn't record that you left checkout. Please contact us if you don't receive a follow-up email."),
         variant: 'destructive',
-        duration: toastDuration,
       });
       return;
     }
@@ -136,7 +134,6 @@ export function BookingFlowProvider({ children }) {
         description:
           "Your booking was marked as unfinished, but we couldn't send the follow-up email. Please contact us if you need help.",
         variant: 'destructive',
-        duration: toastDuration,
       });
     }
   }, []);

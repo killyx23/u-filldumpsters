@@ -9,6 +9,22 @@ export function decideAdminMfaView({ currentAal, verifiedTotpCount }) {
   return 'enroll';
 }
 
+/**
+ * Authenticator issuer label — distinct for local vs production so Google
+ * Authenticator entries are not confused when both environments are enrolled.
+ */
+export function getTotpIssuer() {
+  const isDev = Boolean(import.meta.env?.DEV);
+  return isDev ? 'U-Fill Dumpsters (Local)' : 'U-Fill Dumpsters';
+}
+
+/** Friendly name stored on the MFA factor (also helps distinguish environments). */
+export function getTotpFriendlyName(suffix = '') {
+  const isDev = Boolean(import.meta.env?.DEV);
+  const base = isDev ? 'U-Fill Local' : 'U-Fill Prod';
+  return suffix ? `${base} ${suffix}` : base;
+}
+
 /** Decode the AAL claim from a Supabase access token. Missing/invalid → aal1. */
 export function parseJwtAal(accessToken) {
   if (!accessToken || typeof accessToken !== 'string') return 'aal1';

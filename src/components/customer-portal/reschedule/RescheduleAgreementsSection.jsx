@@ -16,6 +16,7 @@ export const RescheduleAgreementsSection = ({
     booking 
 }) => {
     const { fee } = useChargesAndFees();
+    const advanceReschedulePct = formatPercent(fee('advance_reschedule_percentage'));
     const lateReschedulePct = formatPercent(fee('late_reschedule_percentage'));
     // Safety check: provide default empty function if callback not provided
     const handleAgreementsUpdate = setAgreementsAccepted || (() => {
@@ -78,7 +79,14 @@ export const RescheduleAgreementsSection = ({
                                     <CreditCard className="w-5 h-5 mr-2 text-yellow-500" /> Fees & Pricing Changes
                                 </h4>
                                 <p className="leading-relaxed text-gray-400 text-sm">
-                                    Requests made within 24 hours of the original scheduled appointment will incur a <span className="text-red-400 font-semibold">{lateReschedulePct}% rescheduling fee</span> based on the original base total. Pricing for new services is recalculated dynamically based on our current base rates, daily rates, and mileage fees. Any differences in price will be charged or credited accordingly.
+                                    Requests made more than 24 hours before the original scheduled appointment may incur
+                                    a <span className="text-yellow-400 font-semibold">{advanceReschedulePct}% rescheduling fee</span>{' '}
+                                    based on the original base total. Requests made within 24 hours of the original
+                                    scheduled appointment will incur a{' '}
+                                    <span className="text-red-400 font-semibold">{lateReschedulePct}% rescheduling fee</span>{' '}
+                                    based on the original base total. Pricing for new services is recalculated
+                                    dynamically based on our current base rates, daily rates, and mileage fees. Any
+                                    differences in price will be charged or credited accordingly.
                                 </p>
                             </div>
 

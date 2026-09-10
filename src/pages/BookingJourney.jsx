@@ -319,7 +319,6 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       toast({
         title: 'Booking Pre-filled',
         description: 'Your previous booking details have been loaded. Please select new dates to continue.',
-        duration: 5000,
       });
 
       window.scrollTo(0, 0);

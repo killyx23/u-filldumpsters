@@ -770,14 +770,24 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                         <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
                             <p className="font-bold text-sm text-blue-800">Cancellation update</p>
                             <p className="text-xs text-blue-900 mt-1">
-                                {`We're sorry to see you go. Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${
-                                    (() => {
-                                        const feeAmt = booking.cancellation_details?.fee_amount != null
-                                            ? Number(booking.cancellation_details.fee_amount)
-                                            : Math.max(0, calculatedTotal - Number(refund_details?.amount || 0));
-                                        return feeAmt > 0 ? ` (cancellation fee: $${feeAmt.toFixed(2)})` : '';
-                                    })()
-                                }. Per our rental agreement, refunds are typically processed within 1–2 business days and usually appear on your original payment method within 5–10 business days (rarely up to 30). We hope that in the future you'll be able to provide the proper verification information so we can welcome you back.`}
+                                {(() => {
+                                    const cd = booking.cancellation_details || {};
+                                    const cancelSource = cd.cancel_source;
+                                    const reasonText = String(cd.reason || refund_details?.reason || '').toLowerCase();
+                                    const isVerificationCancel =
+                                        cancelSource === 'verification' ||
+                                        (cancelSource !== 'customer_portal' &&
+                                            cancelSource !== 'admin' &&
+                                            /verificat/.test(reasonText));
+                                    const feeAmt = cd.fee_amount != null
+                                        ? Number(cd.fee_amount)
+                                        : Math.max(0, calculatedTotal - Number(refund_details?.amount || 0));
+                                    const feeClause = feeAmt > 0 ? ` (cancellation fee: $${feeAmt.toFixed(2)})` : '';
+                                    const welcomeBack = isVerificationCancel
+                                        ? "We hope that in the future you'll be able to provide the proper verification information so we can welcome you back."
+                                        : "We'd love to welcome you back anytime.";
+                                    return `We're sorry to see you go. Your cancellation for Booking #${booking.id} has been approved. A refund of $${Number(refund_details?.amount || 0).toFixed(2)} has been processed${feeClause}. Per our rental agreement, refunds are typically processed within 1–2 business days and usually appear on your original payment method within 5–10 business days (rarely up to 30). ${welcomeBack}`;
+                                })()}
                             </p>
                         </div>
                     ) : (pointsEarned > 0 || referralPending > 0 || referralActivated > 0) && (

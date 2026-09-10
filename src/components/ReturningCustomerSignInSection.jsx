@@ -62,7 +62,6 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
       toast({
         title: 'Code Sent',
         description: `We sent a verification code to ${email}.`,
-        duration: 3000
       });
 
     } catch (err) {
@@ -121,7 +120,6 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
       toast({
         title: 'Verified!',
         description: `Welcome back${customer?.first_name ? ', ' + customer.first_name : ''}!`,
-        duration: 3000
       });
 
     } catch (err) {
@@ -148,7 +146,6 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
     toast({
       title: 'Order Pre-filled',
       description: 'Your previous booking details have been loaded.',
-      duration: 3000
     });
   };
 

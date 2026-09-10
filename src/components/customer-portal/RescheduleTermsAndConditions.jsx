@@ -4,8 +4,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ShieldAlert, AlertTriangle, FileText, Info } from 'lucide-react';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatPercent } from '@/utils/chargesAndFeesConfig';
 
 export const RescheduleTermsAndConditions = ({ serviceId, agreed, onAgreedChange }) => {
+    const { fee } = useChargesAndFees();
+    const advanceReschedulePct = formatPercent(fee('advance_reschedule_percentage'));
+    const lateReschedulePct = formatPercent(fee('late_reschedule_percentage'));
     
     const getServiceSpecificTerms = () => {
         if (serviceId === 1 || serviceId === 4) {
@@ -54,7 +59,14 @@ export const RescheduleTermsAndConditions = ({ serviceId, agreed, onAgreedChange
                             <Info className="w-5 h-5 text-gray-400 shrink-0 mt-0.5" />
                             <div>
                                 <h4 className="font-bold text-white text-sm">Modification & Cancellation Policy</h4>
-                                <p className="text-gray-400 text-xs mt-1">Changes made within 24 hours of the original appointment incur a 5% rescheduling fee. Your original dates will be immediately released to the public upon confirmation. If you cancel this new booking later, cancellation fees will be calculated based on the original booking creation date, not the modification date.</p>
+                                <p className="text-gray-400 text-xs mt-1">
+                                    Changes made more than 24 hours before the original appointment may incur a{' '}
+                                    {advanceReschedulePct}% rescheduling fee. Changes made within 24 hours of the
+                                    original appointment may incur a {lateReschedulePct}% rescheduling fee. Your
+                                    original dates will be immediately released to the public upon confirmation. If you
+                                    cancel this new booking later, cancellation fees will be calculated based on the
+                                    original booking creation date, not the modification date.
+                                </p>
                             </div>
                         </div>
 

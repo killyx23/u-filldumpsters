@@ -291,6 +291,17 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
       </div>`;
 };
 
+/** True when cancel was due to missing/improper verification (vs customer portal cancel). */
+const isVerificationCancel = (cancellationDetails = {}, refundDetails = {}) => {
+  const source = cancellationDetails.cancel_source;
+  if (source === "verification") return true;
+  if (source === "customer_portal" || source === "admin") return false;
+  const reason = String(
+    cancellationDetails.reason || refundDetails.reason || "",
+  ).toLowerCase();
+  return /verificat/.test(reason);
+};
+
 const generateRefundEmailHTML = (booking) => {
   const customerName = booking.customers?.name || booking.name || "there";
   const refundDetails = booking.refund_details || {};
@@ -321,6 +332,16 @@ const generateRefundEmailHTML = (booking) => {
     cancellationDetails.reason ||
     refundDetails.reason ||
     null;
+  const verificationCancel = isVerificationCancel(
+    cancellationDetails,
+    refundDetails,
+  );
+  const goodbyeBody = verificationCancel
+    ? `We're sorry to see you go. We truly miss your business and hope that in the future you'll be able to provide the proper verification information so we can welcome you back to purchase with us again.`
+    : `We're sorry to see you go. We truly miss your business and hope you'll choose U-Fill Dumpsters again whenever you need us.`;
+  const goodbyeFooter = verificationCancel
+    ? `Thank you for considering U-Fill Dumpsters. We hope to serve you again soon with complete verification on file.`
+    : `Thank you for considering U-Fill Dumpsters. We'd love to welcome you back anytime.`;
 
   return `
 <!DOCTYPE html>
@@ -344,7 +365,7 @@ const generateRefundEmailHTML = (booking) => {
         Hi ${customerName},
       </p>
       <p style="color: #374151; font-size: 15px; line-height: 1.6;">
-        We're sorry to see you go. We truly miss your business and hope that in the future you'll be able to provide the proper verification information so we can welcome you back to purchase with us again.
+        ${goodbyeBody}
         Your cancellation for Booking #${booking.id} has been approved, and a refund of
         <strong>${formatCurrency(refundAmount)}</strong> has been processed
         ${feeAmount > 0 ? ` (cancellation fee: <strong>${formatCurrency(feeAmount)}</strong>)` : ""}.
@@ -388,7 +409,109 @@ const generateRefundEmailHTML = (booking) => {
       </p>
     </div>
     <div style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
-      <p style="margin: 0; color: #6b7280; font-size: 13px;">Thank you for considering U-Fill Dumpsters. We hope to serve you again soon with complete verification on file.</p>
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">${goodbyeFooter}</p>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+const generateCancellationUnderReviewEmailHTML = (booking, feeInfo = {}) => {
+  const customerName = booking.customers?.name || booking.name || "there";
+  const feeType = feeInfo.fee_type || null;
+  const feePct =
+    feeInfo.fee_percentage != null ? Number(feeInfo.fee_percentage) : null;
+  const maxFee =
+    feeInfo.max_fee_amount != null || feeInfo.fee_amount != null
+      ? Number(feeInfo.max_fee_amount ?? feeInfo.fee_amount)
+      : null;
+  const hoursRaw = feeInfo.hours_before_appointment;
+  const hours =
+    hoursRaw != null && hoursRaw !== ""
+      ? Math.max(0, Math.round(Number(hoursRaw)))
+      : null;
+  const isLate = feeType === "late" || (hours != null && hours <= 24);
+  const feeTypeLabel = isLate
+    ? "Late cancellation (within 24 hours)"
+    : "Advance cancellation (more than 24 hours)";
+  const hasEstimate = feePct != null || maxFee != null;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cancellation Request Under Review - U-Fill Dumpsters</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); padding: 40px 20px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: bold;">Cancellation Request Under Review</h1>
+      <p style="color: #e0f2fe; margin: 10px 0 0 0; font-size: 16px;">Booking #${booking.id}</p>
+    </div>
+    <div style="padding: 30px 20px;">
+      <div style="background-color: #fef3c7; border-left: 4px solid #d97706; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
+        <p style="margin: 0; color: #92400e; font-weight: bold;">We've received your cancellation request and it is currently under review.</p>
+      </div>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        Hi ${customerName},
+      </p>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        We're sorry to see you go. Our team is reviewing your request to cancel Booking #${booking.id}
+        and will process any applicable refund once it is approved.
+      </p>
+      <div style="margin-top: 22px; padding: 16px 18px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; color: #1e3a8a; font-weight: bold; font-size: 15px;">Why cancellation fees may apply</p>
+        <p style="margin: 0 0 12px 0; color: #374151; font-size: 14px; line-height: 1.6;">
+          When a booking is cancelled—especially within 24 hours of the appointment—that reserved day often
+          cannot be filled by another customer in time. Customers who needed that date may have to look elsewhere,
+          and we lose the opportunity to rent the equipment on short notice.
+        </p>
+        <p style="margin: 0 0 12px 0; color: #374151; font-size: 14px; line-height: 1.6;">
+          To keep scheduling fair for everyone and account for that loss of business, a cancellation fee may apply
+          under our rental agreement. Last-minute cancellations are treated more strictly for this reason.
+        </p>
+        <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.6;">
+          If you only need a different date, <strong>rescheduling fees are substantially lower</strong> than cancelling,
+          because it reduces that loss of business. You can request a reschedule anytime from your Customer Portal.
+        </p>
+      </div>
+      ${hasEstimate ? `
+      <div style="margin-top: 22px;">
+        <h2 style="color: #1f2937; font-size: 18px; margin-bottom: 12px; border-bottom: 2px solid #3b82f6; padding-bottom: 8px;">Estimated fee for this request</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Fee category</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${feeTypeLabel}</td>
+          </tr>
+          ${hours != null ? `
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Hours before appointment</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${hours} hours</td>
+          </tr>` : ""}
+          ${feePct != null ? `
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Estimated fee</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">Up to ${feePct}%</td>
+          </tr>` : ""}
+          ${maxFee != null ? `
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Maximum estimated fee</td>
+            <td style="padding: 8px 0; color: #b91c1c; text-align: right;">${formatCurrency(maxFee)}</td>
+          </tr>` : ""}
+        </table>
+        <p style="margin: 10px 0 0 0; color: #6b7280; font-size: 12px; line-height: 1.5;">
+          Final fees are confirmed when our team completes the review.
+        </p>
+      </div>` : ""}
+      <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-top: 25px;">
+        You'll receive another email once your cancellation is approved and any refund has been processed.
+        If you have questions, reply to this email or message us through your Customer Portal.
+      </p>
+    </div>
+    <div style="background-color: #f9fafb; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+      <p style="margin: 0; color: #6b7280; font-size: 13px;">Thank you for considering U-Fill Dumpsters. We hope to serve you again soon.</p>
     </div>
   </div>
 </body>
@@ -1256,6 +1379,67 @@ Deno.serve(async (req)=>{
         recipient: recipientEmail,
         email_type: "pin_reminder",
         sms: smsResult,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (emailType === "cancellation_under_review") {
+      let feeInfo = body.fee_info || body.feeInfo || null;
+      if (!feeInfo || typeof feeInfo !== "object") {
+        const { data: pendingLog } = await supabase
+          .from("reschedule_history_logs")
+          .select(
+            "fee_type, fee_percentage, fee_amount, hours_before_appointment",
+          )
+          .eq("booking_id", bookingId)
+          .eq("request_type", "cancellation")
+          .eq("request_status", "pending")
+          .order("reschedule_request_time", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (pendingLog) {
+          feeInfo = {
+            fee_type: pendingLog.fee_type,
+            fee_percentage: pendingLog.fee_percentage,
+            max_fee_amount: pendingLog.fee_amount,
+            hours_before_appointment: pendingLog.hours_before_appointment,
+          };
+        } else {
+          feeInfo = {};
+        }
+      }
+      const underReviewHtml = generateCancellationUnderReviewEmailHTML(
+        booking,
+        feeInfo,
+      );
+      const underReviewSubject =
+        `Cancellation Request Under Review #${booking.id} — U-Fill Dumpsters`;
+      console.log(
+        `[${timestamp}] [send-booking-confirmation] Sending cancellation_under_review to ${recipientEmail}`,
+      );
+      const underReviewResult = await sendEmailWithRetry(
+        recipientEmail,
+        underReviewSubject,
+        underReviewHtml,
+      );
+      if (!underReviewResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send cancellation under review email",
+          details: underReviewResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Cancellation under review email sent successfully",
+        provider: underReviewResult.provider,
+        recipient: recipientEmail,
+        email_type: "cancellation_under_review",
       }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

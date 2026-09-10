@@ -48,7 +48,7 @@ export const buildTermsSections = (fee) => [
   {
     id: 'general',
     title: 'General Terms & Cancellation Policy',
-    summary: 'Cancellation fees, refunds, and general rental conditions.',
+    summary: 'Cancellation and rescheduling fees, refunds, and general rental conditions.',
     content: (
       <>
         <p>
@@ -60,6 +60,16 @@ export const buildTermsSections = (fee) => [
           <strong>Cancellations 24 hours or less before scheduled delivery:</strong> Up to{' '}
           {formatPercent(fee('late_cancel_percentage'))}% of the order total charged, plus a{' '}
           {formatPercent(fee('advance_cancel_percentage'))}% cancellation fee of the order total retained.
+        </p>
+        <p>
+          <strong>Rescheduling more than 24 hours before the appointment:</strong> A rescheduling fee of{' '}
+          {formatPercent(fee('advance_reschedule_percentage'))}% of the original booking total may apply.
+        </p>
+        <p>
+          <strong>Rescheduling 24 hours or less before the appointment:</strong> A rescheduling fee of{' '}
+          {formatPercent(fee('late_reschedule_percentage'))}% of the original booking total may apply. Rescheduling
+          fees are substantially lower than cancelling when you only need a different date, because it reduces loss of
+          business compared with a full cancellation.
         </p>
         <p>
           No-shows or refusal of equipment at delivery may result in full rental charges. Refunds are processed within

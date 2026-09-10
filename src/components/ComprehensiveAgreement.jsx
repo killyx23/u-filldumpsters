@@ -121,7 +121,7 @@ const AgreementText = ({ fees }) => {
         </li>
       </ul>
 
-      <h3 className="text-lg text-yellow-300">SECTION 3: BASE FEES, OVERWEIGHT CHARGES, &amp; CANCELLATIONS</h3>
+      <h3 className="text-lg text-yellow-300">SECTION 3: BASE FEES, OVERWEIGHT CHARGES, CANCELLATIONS, &amp; RESCHEDULING</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
           <strong>Payment &amp; Deposits:</strong> Full payment, including taxes and any applicable security deposits or
@@ -164,6 +164,16 @@ const AgreementText = ({ fees }) => {
           business days and typically reflect in accounts within 5 to 10 business days. In rare cases, banking
           institutions may take up to 30 days. The Customer may request their Acquirer Reference Number (ARN) through
           the customer portal, which will be provided within 1 to 2 business days upon request.
+        </li>
+        <li>
+          <strong>Rescheduling:</strong> Rescheduling more than 24 hours before the scheduled appointment may incur a
+          fee of {formatPercent(fee('advance_reschedule_percentage'))}% of the original booking total. Rescheduling
+          24 hours or less before the appointment may incur a fee of{' '}
+          {formatPercent(fee('late_reschedule_percentage'))}% of the original booking total. Rescheduling fees are
+          substantially lower than cancellation fees when the Customer only needs a different date, because releasing
+          and rebooking a date reduces loss of business compared with a full cancellation. Upon confirmation of a
+          reschedule, original dates may be released to other customers. If a rescheduled booking is later cancelled,
+          cancellation fees are calculated according to the Cancellation &amp; Refunds policy above.
         </li>
       </ul>
 
@@ -447,12 +457,27 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
   const [agreedToSummary, setAgreedToSummary] = useState(false);
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
   const [error, setError] = useState('');
+  const [missingFields, setMissingFields] = useState(() => new Set());
   const [fees, setFees] = useState(DEFAULT_FEES);
   const [feeRows, setFeeRows] = useState([]);
 
   const agreementViewportRef = useRef(null);
+  const agreementScrollSectionRef = useRef(null);
+  const summarySectionRef = useRef(null);
+  const termsSectionRef = useRef(null);
+  const signatureSectionRef = useRef(null);
+  const dateSectionRef = useRef(null);
 
   const expectedName = `${bookingData.firstName || ''} ${bookingData.lastName || ''}`.trim();
+
+  const clearMissingField = (field) => {
+    setMissingFields((prev) => {
+      if (!prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.delete(field);
+      return next;
+    });
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -485,6 +510,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     const noScrollNeeded = element.scrollHeight <= element.clientHeight + 2;
     if (atBottom || noScrollNeeded) {
       setHasScrolledToBottom(true);
+      clearMissingField('scroll');
     }
   };
 
@@ -503,34 +529,66 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     };
   }, []);
 
-  const isButtonDisabled = useMemo(
+  const isFormComplete = useMemo(
     () =>
-      !signature.trim() ||
-      !signatureDate.trim() ||
-      !agreedToTerms ||
-      !hasScrolledToBottom ||
-      !agreedToSummary ||
-      isProcessing,
-    [signature, signatureDate, agreedToTerms, hasScrolledToBottom, agreedToSummary, isProcessing],
+      Boolean(signature.trim()) &&
+      Boolean(signatureDate.trim()) &&
+      agreedToTerms &&
+      hasScrolledToBottom &&
+      agreedToSummary &&
+      signature.trim().toLowerCase() === expectedName.toLowerCase(),
+    [signature, signatureDate, agreedToTerms, hasScrolledToBottom, agreedToSummary, expectedName],
   );
 
+  const highlightClass = 'ring-2 ring-red-600 ring-offset-2 ring-offset-transparent';
+
   const handleSubmit = () => {
+    if (isProcessing) return;
+
     const trimmedSignature = signature.trim();
+    const trimmedDate = signatureDate.trim();
+    const missing = new Set();
+    const messages = [];
 
-    if (trimmedSignature.toLowerCase() !== expectedName.toLowerCase()) {
-      setError(`Signature must exactly match the name on the booking: ${expectedName}`);
-      return;
+    if (!hasScrolledToBottom) {
+      missing.add('scroll');
+      messages.push('Scroll to the bottom of the Master Agreement');
     }
-
+    if (!agreedToSummary) {
+      missing.add('summary');
+      messages.push('Check the Important Rental Terms Summary box');
+    }
     if (!agreedToTerms) {
-      setError('You must check the box to agree to the entire Rental Agreement.');
-      return;
+      missing.add('terms');
+      messages.push('Check the box to agree to the Rental Agreement');
+    }
+    if (!trimmedSignature) {
+      missing.add('signature');
+      messages.push('Type your full name as your e-signature');
+    } else if (trimmedSignature.toLowerCase() !== expectedName.toLowerCase()) {
+      missing.add('signature');
+      messages.push(`Signature must exactly match: ${expectedName}`);
+    }
+    if (!trimmedDate) {
+      missing.add('date');
+      messages.push('Enter the signature date');
     }
 
-    if (!hasScrolledToBottom || !agreedToSummary) {
-      setError(
-        'Please scroll through the full agreement and acknowledge the Important Rental Terms Summary.',
-      );
+    if (missing.size > 0) {
+      setMissingFields(missing);
+      setError(`Please complete the highlighted items: ${messages.join('; ')}.`);
+
+      const refOrder = [
+        ['scroll', agreementScrollSectionRef],
+        ['summary', summarySectionRef],
+        ['terms', termsSectionRef],
+        ['signature', signatureSectionRef],
+        ['date', dateSectionRef],
+      ];
+      const first = refOrder.find(([key]) => missing.has(key));
+      if (first?.[1]?.current) {
+        first[1].current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       return;
     }
 
@@ -544,11 +602,12 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
       source: 'agreement_step6_acceptance',
     }));
 
+    setMissingFields(new Set());
     setError('');
     onAccept({
       agreementFeeSnapshot,
       agreementSignature: trimmedSignature,
-      agreementSignatureDate: signatureDate.trim(),
+      agreementSignatureDate: trimmedDate,
     });
   };
 
@@ -572,21 +631,42 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
           Please read the following agreement carefully. Your electronic signature is required to proceed.
         </p>
 
-        <ScrollArea
-          className="h-[40vh] w-full rounded-md border border-white/30 bg-black/20 p-4 mb-6"
-          viewportRef={agreementViewportRef}
+        <div
+          ref={agreementScrollSectionRef}
+          className={`rounded-md mb-6 transition-shadow ${missingFields.has('scroll') ? highlightClass : ''}`}
         >
-          <AgreementText fees={fees} />
-        </ScrollArea>
+          <ScrollArea
+            className={`h-[40vh] w-full rounded-md border p-4 ${
+              missingFields.has('scroll')
+                ? 'border-red-600 bg-red-950/30'
+                : 'border-white/30 bg-black/20'
+            }`}
+            viewportRef={agreementViewportRef}
+          >
+            <AgreementText fees={fees} />
+          </ScrollArea>
+          {missingFields.has('scroll') && (
+            <p className="text-xs mt-2 font-bold text-red-300">
+              Scroll all the way to the bottom of this agreement to continue.
+            </p>
+          )}
+        </div>
 
         <div className="space-y-4">
           <div
-            className="rental-terms-summary-container"
+            ref={summarySectionRef}
+            className={`rental-terms-summary-container transition-shadow ${
+              missingFields.has('scroll') || missingFields.has('summary') ? highlightClass : ''
+            }`}
             style={{
               marginTop: '30px',
               padding: '20px',
-              border: '2px solid #ff9900',
-              backgroundColor: '#fff9f0',
+              border:
+                missingFields.has('scroll') || missingFields.has('summary')
+                  ? '2px solid #dc2626'
+                  : '2px solid #ff9900',
+              backgroundColor:
+                missingFields.has('scroll') || missingFields.has('summary') ? '#fee2e2' : '#fff9f0',
               borderRadius: '8px',
             }}
           >
@@ -615,6 +695,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 checked={agreedToSummary}
                 onChange={(e) => {
                   setAgreedToSummary(e.target.checked);
+                  if (e.target.checked) clearMissingField('summary');
                   if (error) setError('');
                 }}
                 style={{ marginRight: '10px', transform: 'scale(1.2)', marginTop: '3px' }}
@@ -628,8 +709,13 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
               </label>
             </div>
             {!hasScrolledToBottom && (
-              <p className="text-xs mt-2" style={{ color: '#8a4b00' }}>
+              <p className="text-xs mt-2 font-bold" style={{ color: '#7f1d1d' }}>
                 Scroll to the bottom of the Master Agreement to enable this checkbox.
+              </p>
+            )}
+            {hasScrolledToBottom && missingFields.has('summary') && (
+              <p className="text-xs mt-2 font-bold" style={{ color: '#7f1d1d' }}>
+                Check this box to acknowledge the Important Rental Terms Summary.
               </p>
             )}
           </div>
@@ -662,15 +748,24 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 pt-2">
+          <div
+            ref={termsSectionRef}
+            className={`flex items-center space-x-3 pt-2 rounded-md p-2 transition-shadow ${
+              missingFields.has('terms') ? `${highlightClass} bg-red-950/40` : ''
+            }`}
+          >
             <Checkbox
               id="terms-agree"
               checked={agreedToTerms}
               onCheckedChange={(checked) => {
-                setAgreedToTerms(Boolean(checked));
+                const next = Boolean(checked);
+                setAgreedToTerms(next);
+                if (next) clearMissingField('terms');
                 if (error) setError('');
               }}
-              className="border-white/50 data-[state=checked]:bg-yellow-400 h-6 w-6"
+              className={`h-6 w-6 data-[state=checked]:bg-yellow-400 ${
+                missingFields.has('terms') ? 'border-red-500' : 'border-white/50'
+              }`}
             />
             <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
               By checking this box and typing my name below, I agree that I have read, understood, and legally bind
@@ -678,7 +773,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
             </Label>
           </div>
 
-          <div>
+          <div ref={signatureSectionRef}>
             <Label htmlFor="signature" className="text-lg font-semibold text-white flex items-center mb-2">
               <Signature className="mr-2 h-5 w-5 text-yellow-400" />
               E-Signature
@@ -694,12 +789,24 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 placeholder="Type your full name here"
                 value={signature}
                 onChange={(e) => {
-                  setSignature(e.target.value);
+                  const value = e.target.value;
+                  setSignature(value);
+                  const trimmed = value.trim();
+                  if (
+                    trimmed &&
+                    trimmed.toLowerCase() === expectedName.toLowerCase()
+                  ) {
+                    clearMissingField('signature');
+                  }
                   if (error) setError('');
                 }}
-                className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400 flex-1"
+                className={`bg-white/10 text-white placeholder-blue-200 focus:ring-yellow-400 flex-1 ${
+                  missingFields.has('signature')
+                    ? 'border-red-500 ring-2 ring-red-600'
+                    : 'border-white/30'
+                }`}
               />
-              <div className="w-full sm:w-48 shrink-0">
+              <div ref={dateSectionRef} className="w-full sm:w-48 shrink-0">
                 <Label htmlFor="signatureDate" className="text-xs text-blue-200 mb-1 block">
                   Date
                 </Label>
@@ -709,10 +816,16 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                   placeholder="MMM d, yyyy"
                   value={signatureDate}
                   onChange={(e) => {
-                    setSignatureDate(e.target.value);
+                    const value = e.target.value;
+                    setSignatureDate(value);
+                    if (value.trim()) clearMissingField('date');
                     if (error) setError('');
                   }}
-                  className="bg-white/10 border-white/30 text-white placeholder-blue-200 focus:ring-yellow-400"
+                  className={`bg-white/10 text-white placeholder-blue-200 focus:ring-yellow-400 ${
+                    missingFields.has('date')
+                      ? 'border-red-500 ring-2 ring-red-600'
+                      : 'border-white/30'
+                  }`}
                 />
               </div>
             </div>
@@ -722,20 +835,22 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
             <motion.div
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="flex items-center text-red-400 text-sm bg-red-900/50 p-3 rounded-md border border-red-500/30"
+              className="flex items-start text-red-300 text-sm bg-red-900/50 p-3 rounded-md border border-red-500/50"
             >
-              <AlertTriangle className="h-4 w-4 mr-2 shrink-0" />
-              {error}
+              <AlertTriangle className="h-4 w-4 mr-2 shrink-0 mt-0.5" />
+              <span>{error}</span>
             </motion.div>
           )}
 
           <Button
             onClick={handleSubmit}
-            disabled={isButtonDisabled}
+            disabled={isProcessing}
             className={`w-full py-6 text-xl font-bold transition-all duration-300 transform active:scale-[0.98] ${
-              isButtonDisabled
+              isProcessing
                 ? 'bg-white/10 text-white/30 cursor-not-allowed border border-white/10'
-                : 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-xl shadow-green-900/40 border border-green-400/30'
+                : isFormComplete
+                  ? 'bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 text-white shadow-xl shadow-green-900/40 border border-green-400/30'
+                  : 'bg-gradient-to-r from-green-500/70 to-teal-600/70 hover:from-green-600 hover:to-teal-700 text-white border border-green-400/20'
             }`}
           >
             {isProcessing ? <Loader2 className="mr-2 h-6 w-6 animate-spin" /> : null}
