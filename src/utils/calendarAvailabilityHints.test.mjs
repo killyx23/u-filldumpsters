@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { format } from 'date-fns';
 import {
   isDateInventoryAvailable,
+  isMinimumPickupBlocked,
+  isMinimumPickupDate,
   isPickupDateBlockedByRange,
+  minimumPickupDate,
   rangeHasBlockedOccupancyNight,
   rangeHasUnavailableDay,
 } from './calendarAvailabilityHints.js';
@@ -51,6 +55,14 @@ test('legacy payloads without inventoryAvailable still block a fully unavailable
   };
   assert.equal(isDateInventoryAvailable(legacy['2026-09-12']), false);
   assert.equal(isPickupDateBlockedByRange(d(2026, 9, 11), d(2026, 9, 13), legacy), true);
+});
+
+test('minimum pickup helpers for 24-hour delivery services', () => {
+  assert.equal(format(minimumPickupDate(d(2026, 9, 11)), 'yyyy-MM-dd'), '2026-09-12');
+  assert.equal(isMinimumPickupDate(d(2026, 9, 11), d(2026, 9, 12)), true);
+  assert.equal(isMinimumPickupDate(d(2026, 9, 11), d(2026, 9, 13)), false);
+  assert.equal(isMinimumPickupBlocked(d(2026, 9, 11), diySeptember), true);
+  assert.equal(isMinimumPickupBlocked(d(2026, 9, 13), diySeptember), false);
 });
 
 test('missing days are not treated as inventory-full', () => {

@@ -21,7 +21,14 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { isValidEquipmentId, logEquipmentIdQuery } from '@/utils/equipmentIdValidator';
 import { formatCurrency } from '@/api/EcommerceApi';
-import { isMonthFullyUnavailable, isPickupDateBlockedByRange, rangeHasBlockedOccupancyNight } from '@/utils/calendarAvailabilityHints';
+import {
+  isMinimumPickupBlocked,
+  isMinimumPickupDate,
+  isMonthFullyUnavailable,
+  isPickupDateBlockedByRange,
+  minimumPickupDate,
+  rangeHasBlockedOccupancyNight,
+} from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
 import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
@@ -528,6 +535,9 @@ export const BookingForm = ({
       }
       console.log('[BookingForm] Date selected:', field, dateStr);
     }
+
+    let defaultPickupUnavailable = false;
+    let defaultPickupDate = null;
     
     setBookingData(prev => {
       const state = {
@@ -539,14 +549,21 @@ export const BookingForm = ({
       };
 
       if (field === 'dropOffDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
-        const nextDay = addDays(newDate, 1);
-        state.pickupDate = nextDay;
-        state.pickupTimeSlot = '';
-        
-        console.log('[BookingForm] 24-hour rental: pickup date set to next day', {
-          deliveryDate: format(newDate, 'yyyy-MM-dd'),
-          pickupDate: format(nextDay, 'yyyy-MM-dd')
-        });
+        const nextDay = minimumPickupDate(newDate);
+        if (isMinimumPickupBlocked(newDate, availability)) {
+          state.pickupDate = null;
+          state.pickupTimeSlot = '';
+          defaultPickupUnavailable = true;
+          defaultPickupDate = nextDay;
+          console.warn('[BookingForm] Default return date unavailable:', format(nextDay, 'yyyy-MM-dd'));
+        } else {
+          state.pickupDate = nextDay;
+          state.pickupTimeSlot = '';
+          console.log('[BookingForm] 24-hour rental: pickup date set to next day', {
+            deliveryDate: format(newDate, 'yyyy-MM-dd'),
+            pickupDate: format(nextDay, 'yyyy-MM-dd')
+          });
+        }
       } else if (field === 'pickupDate' && newDate && (currentPlan?.id === 3 || currentPlan?.id === 4)) {
         if (prev.dropOffDate) {
           const minPickupDate = addDays(startOfDay(prev.dropOffDate), 1);
@@ -575,6 +592,14 @@ export const BookingForm = ({
       
       return state;
     });
+
+    if (defaultPickupUnavailable && defaultPickupDate) {
+      toast({
+        title: 'Return Date Needed',
+        description: `${format(defaultPickupDate, 'MMM d, yyyy')} isn't available for pickup. Please choose a return date at least one day after delivery.`,
+        variant: 'destructive',
+      });
+    }
   };
   
   useEffect(() => {
@@ -596,6 +621,9 @@ export const BookingForm = ({
     }
     if (bookingData.pickupDate) {
       const pickupStr = format(bookingData.pickupDate, 'yyyy-MM-dd');
+      const isDefaultPickup =
+        (currentPlan?.id === 3 || currentPlan?.id === 4) &&
+        isMinimumPickupDate(bookingData.dropOffDate, bookingData.pickupDate);
       if (availability[pickupStr] && !availability[pickupStr].available) {
         console.warn('[BookingForm] Pickup date became unavailable:', pickupStr);
         setBookingData(prev => ({
@@ -604,9 +632,11 @@ export const BookingForm = ({
           pickupTimeSlot: ''
         }));
         toast({
-          title: "Date Unavailable",
-          description: "Your selected end date is no longer available.",
-          variant: "destructive"
+          title: isDefaultPickup ? 'Return Date Needed' : 'Date Unavailable',
+          description: isDefaultPickup
+            ? `${format(bookingData.pickupDate, 'MMM d, yyyy')} isn't available for pickup. Please choose a later return date.`
+            : 'Your selected return date is no longer available.',
+          variant: 'destructive',
         });
       } else if (
         bookingData.dropOffDate &&

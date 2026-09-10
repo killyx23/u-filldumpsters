@@ -83,3 +83,24 @@ export function isPickupDateBlockedByRange(dropOff, candidatePickup, availabilit
   if (isBefore(end, start)) return false;
   return rangeHasBlockedOccupancyNight(start, end, availability);
 }
+
+/** Earliest allowed pickup for 24-hour-minimum delivery services (plan 3/4). */
+export function minimumPickupDate(dropOff) {
+  if (!dropOff) return null;
+  return addDays(startOfDay(dropOff), 1);
+}
+
+export function isMinimumPickupDate(dropOff, pickup) {
+  const minPickup = minimumPickupDate(dropOff);
+  if (!minPickup || !pickup) return false;
+  return format(startOfDay(pickup), 'yyyy-MM-dd') === format(minPickup, 'yyyy-MM-dd');
+}
+
+/** True when the default next-day return cannot be booked (closed day or inventory full). */
+export function isMinimumPickupBlocked(dropOff, availability = {}) {
+  const minPickup = minimumPickupDate(dropOff);
+  if (!minPickup) return false;
+  const key = format(minPickup, 'yyyy-MM-dd');
+  if (availability[key]?.available === false) return true;
+  return isPickupDateBlockedByRange(dropOff, minPickup, availability);
+}
