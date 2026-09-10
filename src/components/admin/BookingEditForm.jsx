@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -29,4 +29,32 @@ export const BookingEditForm = ({ editedBooking, onInputChange, onDateChange, on
     </div>
 );
 
-const EditDateInput = ({ label, date, onDateChange }) => (<div><label className="block text-sm font-medium text-blue-200 mb-1">{label}</label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4"/>{format(date, 'PPP')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white"><Calendar mode="single" selected={date} onSelect={onDateChange} initialFocus /></PopoverContent></Popover></div>);
+const EditDateInput = ({ label, date, onDateChange }) => {
+    const [open, setOpen] = useState(false);
+
+    const handleSelect = (nextDate) => {
+        if (!nextDate) {
+            setOpen(false);
+            return;
+        }
+        onDateChange(nextDate);
+        setOpen(false);
+    };
+
+    return (
+        <div>
+            <label className="block text-sm font-medium text-blue-200 mb-1">{label}</label>
+            <Popover open={open} onOpenChange={setOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white">
+                        <CalendarIcon className="mr-2 h-4 w-4"/>
+                        {format(date, 'PPP')}
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white" align="start">
+                    <Calendar mode="single" selected={date} onSelect={handleSelect} required initialFocus />
+                </PopoverContent>
+            </Popover>
+        </div>
+    );
+};

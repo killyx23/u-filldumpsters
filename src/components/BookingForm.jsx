@@ -1372,23 +1372,44 @@ const DatePickerField = ({
   disabledDates,
   onMonthChange,
   showNextMonthHint = false
-}) => <div className="md:col-span-1">
-    <label className="text-sm font-medium text-white mb-2 block">{label}</label>
-    <Popover>
-      <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white"><CalendarIcon className="mr-2 h-4 w-4" />{date ? format(date, 'PPP') : <span>Pick a date</span>}</Button></PopoverTrigger>
-      <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white">
-        <Calendar
-          mode="single"
-          selected={date}
-          onSelect={setDate}
-          disabled={disabledDates}
-          initialFocus
-          onMonthChange={onMonthChange}
-          components={showNextMonthHint ? { Footer: CalendarNextMonthHint } : undefined}
-        />
-      </PopoverContent>
-    </Popover>
-  </div>;
+}) => {
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (nextDate) => {
+    if (!nextDate) {
+      setOpen(false);
+      return;
+    }
+    setDate(nextDate);
+    setOpen(false);
+  };
+
+  return (
+    <div className="md:col-span-1">
+      <label className="text-sm font-medium text-white mb-2 block">{label}</label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white">
+            <CalendarIcon className="mr-2 h-4 w-4" />
+            {date ? format(date, 'PPP') : <span>Pick a date</span>}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0 bg-gray-800 border-gray-700 text-white" align="start">
+          <Calendar
+            mode="single"
+            selected={date}
+            onSelect={handleSelect}
+            disabled={disabledDates}
+            required
+            initialFocus
+            onMonthChange={onMonthChange}
+            components={showNextMonthHint ? { Footer: CalendarNextMonthHint } : undefined}
+          />
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+};
 
 const TimeSlotPicker = ({
   label,

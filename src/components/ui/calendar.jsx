@@ -31,18 +31,19 @@ function Calendar({
         head_cell:
           "text-stone-500 rounded-md w-9 font-normal text-[0.8rem] dark:text-stone-400",
         row: "flex w-full mt-2",
-        cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected])]:bg-stone-100 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20 dark:[&:has([aria-selected])]:bg-stone-800",
+        cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-yellow-500/10 [&:has([aria-selected])]:bg-yellow-500/15 first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
         day: cn(
           buttonVariants({ variant: "ghost" }),
           "h-9 w-9 p-0 font-normal aria-selected:opacity-100"
         ),
         day_selected:
-          "bg-yellow-500 text-black hover:bg-yellow-600 hover:text-black focus:bg-yellow-600 focus:text-black dark:bg-yellow-400 dark:text-black dark:hover:bg-yellow-500 dark:hover:text-black dark:focus:bg-yellow-500 dark:focus:text-black",
-        day_today: "bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-50",
+          "!bg-yellow-500 !text-black hover:!bg-yellow-600 hover:!text-black focus:!bg-yellow-500 focus:!text-black",
+        day_today:
+          "bg-transparent !text-yellow-300 font-semibold ring-1 ring-inset ring-yellow-400/90 aria-selected:!text-black",
         day_outside: "text-stone-500 opacity-50 dark:text-stone-400",
         day_disabled: "text-stone-500 opacity-50 dark:text-stone-400",
         day_range_middle:
-          "aria-selected:bg-stone-100 aria-selected:text-stone-900 dark:aria-selected:bg-stone-800 dark:aria-selected:text-stone-50",
+          "aria-selected:!bg-yellow-500/30 aria-selected:!text-white",
         day_hidden: "invisible",
         ...classNames,
       }}
