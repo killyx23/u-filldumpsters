@@ -1,0 +1,78 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "test-lock-lifecycle",
+  "entrypoint_path": "functions/test-lock-lifecycle/index.ts",
+  "verify_jwt": true,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/cors.ts",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/deliveryBooking.ts",
+      "bytes": 2208
+    },
+    {
+      "name": "functions/_shared/iglooActivity.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/iglooActivity.ts",
+      "bytes": 16261
+    },
+    {
+      "name": "functions/_shared/iglooAuth.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/iglooAuth.ts",
+      "bytes": 11615
+    },
+    {
+      "name": "functions/_shared/jwtAal.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/jwtAal.ts",
+      "bytes": 784
+    },
+    {
+      "name": "functions/_shared/lockAlerts.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockAlerts.ts",
+      "bytes": 2681
+    },
+    {
+      "name": "functions/_shared/lockDeviceState.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockDeviceState.ts",
+      "bytes": 6179
+    },
+    {
+      "name": "functions/_shared/lockEventState.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockEventState.ts",
+      "bytes": 8557
+    },
+    {
+      "name": "functions/_shared/lockPin.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockPin.ts",
+      "bytes": 11160
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/notify.ts",
+      "bytes": 7044
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/parseBookingTimeSlot.ts",
+      "bytes": 5568
+    },
+    {
+      "name": "functions/_shared/pinTiming.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/pinTiming.ts",
+      "bytes": 9256
+    },
+    {
+      "name": "functions/test-lock-lifecycle/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/test-lock-lifecycle/cors.ts",
+      "bytes": 53
+    },
+    {
+      "name": "functions/test-lock-lifecycle/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/test-lock-lifecycle/index.ts",
+      "bytes": 56696
+    }
+  ]
+}

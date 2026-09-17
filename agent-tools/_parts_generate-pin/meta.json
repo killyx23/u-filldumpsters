@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "generate-pin", "entrypoint_path": "functions/generate-pin/index.ts", "verify_jwt": true}

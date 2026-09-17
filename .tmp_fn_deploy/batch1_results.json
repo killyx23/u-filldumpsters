@@ -1,0 +1,21 @@
+{
+  "ok": [
+    "customer-portal-login",
+    "extend-rental",
+    "generate-receipt-pdf",
+    "get-distance-fee",
+    "get-session-status",
+    "lookup-tax-rate",
+    "refund-booking-difference",
+    "save-checkout-verification-docs",
+    "send-customer-id",
+    "send-return-confirmation",
+    "verify-address"
+  ],
+  "fail": [
+    {
+      "name": "sync-lock-activity",
+      "error": "CallDynamicTool full-payload embed failed (~75KB / 10 files). Stub/LOAD_FROM attempts correctly rejected by bundler; remote still ACTIVE v5 (pre-batch, old code). Exact payload ready at /tmp/fn_deploy/sync-lock-activity.json \u2014 retry deploy_edge_function with exact JSON args (project_id, name, entrypoint_path, verify_jwt, files)."
+    }
+  ]
+}

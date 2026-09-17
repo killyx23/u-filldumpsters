@@ -9,7 +9,48 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import BackButton from '@/components/BackButton';
-import { Check, Loader2, MessageCircle, Phone, StickyNote } from 'lucide-react';
+import { Check, Loader2, StickyNote } from 'lucide-react';
+
+function contactPrefillHref(customer) {
+  const params = new URLSearchParams();
+  const email = customer?.email?.trim();
+  const name =
+    customer?.name?.trim() ||
+    customer?.first_name?.trim() ||
+    '';
+  if (email) params.set('email', email);
+  if (name) params.set('name', name);
+  params.set('from', 'feedback');
+  return `/contact?${params.toString()}`;
+}
+
+function SurveyThankYou({ firstName, contactHref }) {
+  return (
+    <div className="space-y-6 text-center">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-400/20 text-amber-300">
+        <Check className="h-7 w-7" strokeWidth={2.5} />
+      </div>
+      <div className="space-y-2">
+        <h2 className="text-2xl font-bold text-white">Thanks, {firstName}</h2>
+        <p className="mx-auto max-w-md text-sm leading-relaxed text-blue-100/90 md:text-base">
+          Your answers are saved. If you want to talk more, contact us and we’ll follow up by email.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+        <Button asChild className="bg-amber-400 text-slate-900 hover:bg-amber-300">
+          <Link to={contactHref}>Contact us</Link>
+        </Button>
+        <Button
+          asChild
+          variant="outline"
+          className="border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white"
+        >
+          <Link to="/">Back to home</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export const HowCanWeDoBetterPage = () => {
   const { toast } = useToast();
@@ -22,7 +63,7 @@ export const HowCanWeDoBetterPage = () => {
   const [form, setForm] = useState(null);
   const [answers, setAnswers] = useState({});
   const [comments, setComments] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  const [mode, setMode] = useState('form'); // form | done
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +95,8 @@ export const HowCanWeDoBetterPage = () => {
       }
 
       setForm(data);
+      // Treat legacy "chat" as done (migration returns "done").
+      setMode(data.mode === 'form' ? 'form' : 'done');
       setError('');
       setLoading(false);
     };
@@ -66,6 +109,7 @@ export const HowCanWeDoBetterPage = () => {
 
   const questions = useMemo(() => form?.questions || [], [form]);
   const firstName = form?.customer?.first_name || 'there';
+  const contactHref = useMemo(() => contactPrefillHref(form?.customer), [form?.customer]);
 
   const setAnswer = (fieldKey, value) => {
     setAnswers((prev) => ({ ...prev, [fieldKey]: value }));
@@ -113,10 +157,10 @@ export const HowCanWeDoBetterPage = () => {
       return;
     }
 
-    setSubmitted(true);
+    setMode('done');
     toast({
       title: 'Thank you',
-      description: 'Your feedback was saved. We appreciate you taking the time.',
+      description: 'Your feedback was saved.',
     });
   };
 
@@ -151,8 +195,9 @@ export const HowCanWeDoBetterPage = () => {
                 How can we do better?
               </h1>
               <p className="mx-auto max-w-md text-sm leading-relaxed text-blue-100/90 md:text-base">
-                We love hearing your opinions. Tell us what would help you get the job done —
-                or why you decided not to book with us today.
+                {mode === 'done'
+                  ? 'We appreciate you taking the time to share your thoughts.'
+                  : 'We love hearing your opinions. Tell us what would help you get the job done — or why you decided not to book with us today.'}
               </p>
             </div>
 
@@ -168,30 +213,8 @@ export const HowCanWeDoBetterPage = () => {
                     <Link to="/contact">Contact us instead</Link>
                   </Button>
                 </div>
-              ) : submitted ? (
-                <div className="space-y-5 text-center">
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-amber-300/40 bg-amber-400/15">
-                    <MessageCircle className="h-7 w-7 text-amber-300" />
-                  </div>
-                  <p className="text-lg text-white">
-                    Thanks, {firstName}. Your answers are in our system and our team can follow up
-                    from your customer chat.
-                  </p>
-                  <div className="rounded-xl border border-blue-400/30 bg-blue-950/40 p-5">
-                    <p className="mb-3 text-blue-100">
-                      Want a phone call back on a timeline that works for you?
-                    </p>
-                    <Button asChild className="bg-amber-400 text-slate-900 hover:bg-amber-300">
-                      <Link to="/contact">
-                        <Phone className="mr-2 h-4 w-4" />
-                        Go to Contact page
-                      </Link>
-                    </Button>
-                  </div>
-                  <Button asChild variant="outline" className="border-white/30 text-white hover:bg-white/10">
-                    <Link to="/">Back to home</Link>
-                  </Button>
-                </div>
+              ) : mode === 'done' ? (
+                <SurveyThankYou firstName={firstName} contactHref={contactHref} />
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5">
                   <p className="text-sm text-blue-200">
@@ -280,11 +303,11 @@ export const HowCanWeDoBetterPage = () => {
                   </section>
 
                   <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4 text-sm text-blue-100">
-                    Prefer talking it through? After you submit, or anytime, use our{' '}
-                    <Link to="/contact" className="font-semibold text-amber-300 hover:underline">
+                    Prefer to talk with us another way? Use our{' '}
+                    <Link to={contactHref} className="font-semibold text-amber-300 hover:underline">
                       Contact page
-                    </Link>{' '}
-                    to request a phone call back.
+                    </Link>
+                    .
                   </div>
 
                   <Button

@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "send-reschedule-confirmation-email", "entrypoint_path": "functions/send-reschedule-confirmation-email/index.ts", "verify_jwt": true}

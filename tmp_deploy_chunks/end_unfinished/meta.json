@@ -1,0 +1,44 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "end-unfinished-checkout",
+  "entrypoint_path": "functions/end-unfinished-checkout/index.ts",
+  "verify_jwt": false,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/00_functions___shared__cors.ts",
+      "sha256": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/earlyLeaveEmail.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/01_functions___shared__earlyLeaveEmail.ts",
+      "sha256": "6d01f9a0816d5fff73ec758eded595b29b84ecb62762c03f1d46ceaff9c9c7b1",
+      "bytes": 3258
+    },
+    {
+      "name": "functions/_shared/normalizeSiteUrl.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/02_functions___shared__normalizeSiteUrl.ts",
+      "sha256": "4ea17e07275d16332762f595c9c0aa3e2824bc714ddd7ceff53c43ae88bd8d15",
+      "bytes": 2330
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/03_functions___shared__notify.ts",
+      "sha256": "8cddfe6e10192c03f62a93881ddfd197bcc6f6d4a8de565b59918048ceddcc79",
+      "bytes": 7044
+    },
+    {
+      "name": "functions/end-unfinished-checkout/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/04_functions__end-unfinished-checkout__cors.ts",
+      "sha256": "04e33f69fff4a8fa4c71ddadad0b2723d3bda39cc79754c6e37089d510fba34c",
+      "bytes": 53
+    },
+    {
+      "name": "functions/end-unfinished-checkout/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/tmp_deploy_chunks/end_unfinished/05_functions__end-unfinished-checkout__index.ts",
+      "sha256": "6cce748025427117351fc2cdd711671b9ced9372a89c89629c7505536db8fe7a",
+      "bytes": 16058
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "send-booking-confirmation",
+  "entrypoint_path": "functions/send-booking-confirmation/index.ts",
+  "verify_jwt": true,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/cors.ts",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/deliveryBooking.ts",
+      "bytes": 2208
+    },
+    {
+      "name": "functions/_shared/displayPlanName.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/displayPlanName.ts",
+      "bytes": 1400
+    },
+    {
+      "name": "functions/_shared/formatBookingTime.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/formatBookingTime.ts",
+      "bytes": 3940
+    },
+    {
+      "name": "functions/_shared/normalizeSiteUrl.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/normalizeSiteUrl.ts",
+      "bytes": 2330
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/notify.ts",
+      "bytes": 7044
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/parseBookingTimeSlot.ts",
+      "bytes": 5568
+    },
+    {
+      "name": "functions/_shared/resolveBookingGrandTotal.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/resolveBookingGrandTotal.ts",
+      "bytes": 526
+    },
+    {
+      "name": "functions/send-booking-confirmation/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/send-booking-confirmation/cors.ts",
+      "bytes": 53
+    },
+    {
+      "name": "functions/send-booking-confirmation/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/send-booking-confirmation/index.ts",
+      "bytes": 80890
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "end-unfinished-checkout",
+  "entrypoint_path": "functions/end-unfinished-checkout/index.ts",
+  "verify_jwt": false,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/cors.ts",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/earlyLeaveEmail.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/earlyLeaveEmail.ts",
+      "bytes": 3258
+    },
+    {
+      "name": "functions/_shared/normalizeSiteUrl.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/normalizeSiteUrl.ts",
+      "bytes": 2330
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/notify.ts",
+      "bytes": 7044
+    },
+    {
+      "name": "functions/end-unfinished-checkout/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/end-unfinished-checkout/cors.ts",
+      "bytes": 53
+    },
+    {
+      "name": "functions/end-unfinished-checkout/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/end-unfinished-checkout/index.ts",
+      "bytes": 16058
+    }
+  ]
+}

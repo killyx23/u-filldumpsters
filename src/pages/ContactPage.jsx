@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
@@ -11,10 +12,19 @@ import BackButton from '@/components/BackButton';
 
 export const ContactPage = () => {
     const { toast } = useToast();
+    const [searchParams] = useSearchParams();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [message, setMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const fromFeedback = searchParams.get('from') === 'feedback';
+
+    useEffect(() => {
+        const prefillEmail = searchParams.get('email');
+        const prefillName = searchParams.get('name');
+        if (prefillEmail) setEmail(prefillEmail);
+        if (prefillName) setName(prefillName);
+    }, [searchParams]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -63,6 +73,11 @@ export const ContactPage = () => {
                         <div className="text-center mb-8">
                             <h1 className="text-4xl font-bold text-yellow-400 mb-2">Contact Us</h1>
                             <p className="text-lg text-blue-200">Have a question? We'd love to hear from you.</p>
+                            {fromFeedback ? (
+                                <p className="text-sm text-amber-100/90 mt-4 bg-amber-950/40 border border-amber-400/25 p-3 rounded-lg">
+                                    Continuing from your feedback survey — use the same email so we can match your message to your file.
+                                </p>
+                            ) : null}
                              <p className="text-sm text-blue-300 mt-4 bg-blue-900/30 p-3 rounded-lg">
                                For the fastest response, please use the contact form below. This ensures your message is logged in our system. If you prefer, you can email <a href="mailto:support@u-filldumpsters.com" className="font-bold text-yellow-300 hover:underline">support@u-filldumpsters.com</a> directly, but please note that response times may take up to 48 hours.
                             </p>
