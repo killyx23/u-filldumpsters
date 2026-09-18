@@ -3,10 +3,15 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { createFeeLookup, DEFAULT_FEES, mapFeeRowsToConfig } from '@/utils/chargesAndFeesConfig';
 
 const DEFAULT_FEE_META = {
+  advance_reschedule_percentage: {
+    fee_name: 'Advance Reschedule Fee (%)',
+    fee_description:
+      'Percentage of the original booking total charged when a reschedule is requested more than 24 hours before the original appointment. Typically lower than a late reschedule fee.',
+  },
   late_reschedule_percentage: {
     fee_name: 'Late Reschedule Fee (%)',
     fee_description:
-      'Percentage of the original booking total charged when a reschedule is requested within 24 hours of the original appointment. Scheduling may waive this fee when more than 24 hours remain.',
+      'Percentage of the original booking total charged when a reschedule is requested within 24 hours of the original appointment. Higher than the advance reschedule fee because last-minute date changes often cannot be filled by another customer.',
   },
 };
 

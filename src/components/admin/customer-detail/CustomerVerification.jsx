@@ -191,6 +191,18 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
             if (refundError) throw refundError;
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
 
+            const fee = parseFloat(cancellationFee) || 0;
+            const refund = parseFloat(refundAmount) || 0;
+            await supabase.from('bookings').update({
+                cancellation_details: {
+                    fee_amount: fee,
+                    refund_amount: refund,
+                    reason,
+                    cancel_source: 'verification',
+                    approved_at: new Date().toISOString(),
+                },
+            }).eq('id', booking.id);
+
             const refundMessage =
                 `Your booking #${booking.id} has been cancelled. ` +
                 `A refund of $${refundAmount} has been processed. Reason: ${reason}`;
@@ -230,7 +242,18 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <div className="hidden">
-                 <PrintableReceipt ref={receiptRef} booking={{...booking, customers: customer, status: 'Cancelled', refund_details: {amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString()}}} />
+                 <PrintableReceipt ref={receiptRef} booking={{
+                    ...booking,
+                    customers: customer,
+                    status: 'Cancelled',
+                    refund_details: {amount: parseFloat(refundAmount), reason, created_at: new Date().toISOString()},
+                    cancellation_details: {
+                        fee_amount: parseFloat(cancellationFee) || 0,
+                        refund_amount: parseFloat(refundAmount) || 0,
+                        reason,
+                        cancel_source: 'verification',
+                    },
+                 }} />
             </div>
             <DialogContent className="bg-gray-900 border-red-500 text-white">
                 <DialogHeader>
@@ -571,6 +594,7 @@ const CancellationApprovalDialog = ({ booking, customer, open, onOpenChange, onU
                     fee_amount: fee,
                     refund_amount: refund,
                     reason: reasonText,
+                    cancel_source: 'customer_portal',
                     approved_at: now,
                     requested_at: cancellationLog?.reschedule_request_time || null,
                     hours_before_appointment: summary.hours,
@@ -650,6 +674,7 @@ const CancellationApprovalDialog = ({ booking, customer, open, onOpenChange, onU
                         fee_amount: parseFloat(cancellationFee) || 0,
                         refund_amount: refundAmount,
                         reason: description || DEFAULT_CANCELLATION_DESCRIPTION,
+                        cancel_source: 'customer_portal',
                         hours_before_appointment: summary.hours,
                     },
                 }} />

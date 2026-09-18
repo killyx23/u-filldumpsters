@@ -271,11 +271,11 @@ export const DriverVehicleVerification = ({
         e.preventDefault();
         
         if (isSkipping && !verificationNotes) {
-            toast({ title: 'Reason Required', description: 'Please provide a reason for skipping verification.', variant: 'destructive', duration: 15000});
+            toast({ title: 'Reason Required', description: 'Please provide a reason for skipping verification.', variant: 'destructive'});
             return;
         }
         if (!isSkipping && plateError) {
-             toast({ title: 'Invalid License Plate', description: 'Please correct the license plate format before submitting.', variant: 'destructive', duration: 15000});
+             toast({ title: 'Invalid License Plate', description: 'Please correct the license plate format before submitting.', variant: 'destructive'});
             return;
         }
 
@@ -359,14 +359,12 @@ export const DriverVehicleVerification = ({
                     title: 'Email Already in System', 
                     description: 'This email is already in our system. You can log in with your existing account or use a different email to continue.',
                     variant: 'info',
-                    duration: 6000
                 });
             } else {
                 toast({ 
                     title: 'Upload Failed', 
                     description: error.message || 'Failed to upload verification documents.', 
                     variant: 'destructive', 
-                    duration: 15000 
                 });
             }
         } finally {

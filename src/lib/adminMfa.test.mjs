@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { decideAdminMfaView, isInvalidSessionError, parseJwtAal, toQrImageSrc } from './adminMfa.js';
+import {
+  decideAdminMfaView,
+  getTotpFriendlyName,
+  getTotpIssuer,
+  isInvalidSessionError,
+  parseJwtAal,
+  toQrImageSrc,
+} from './adminMfa.js';
 
 test('aal1 with no verified TOTP shows enroll QR', () => {
   assert.equal(decideAdminMfaView({ currentAal: 'aal1', verifiedTotpCount: 0 }), 'enroll');
@@ -32,4 +39,13 @@ test('isInvalidSessionError detects stale Supabase sessions', () => {
     true,
   );
   assert.equal(isInvalidSessionError(new Error('Invalid login credentials')), false);
+});
+
+test('getTotpIssuer defaults to production label outside Vite DEV', () => {
+  assert.equal(getTotpIssuer(), 'U-Fill Dumpsters');
+});
+
+test('getTotpFriendlyName defaults to U-Fill Prod outside Vite DEV', () => {
+  assert.equal(getTotpFriendlyName(), 'U-Fill Prod');
+  assert.equal(getTotpFriendlyName('2026-09-05'), 'U-Fill Prod 2026-09-05');
 });

@@ -117,7 +117,7 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
         const { error } = await supabase.storage.from('customer-uploads').upload(filePath, file);
 
         if (error) {
-            toast({ title: `Upload Failed for ${file.name}`, description: error.message, variant: "destructive", duration: 15000 });
+            toast({ title: `Upload Failed for ${file.name}`, description: error.message, variant: "destructive" });
             return null;
         }
         
@@ -129,12 +129,12 @@ export const VerificationDialog = ({ open, onOpenChange, onVerifiedSubmit }) => 
         e.preventDefault();
         
         if (isSkipping && !verificationNotes) {
-            toast({ title: 'Reason Required', description: 'Please provide a reason for skipping verification.', variant: 'destructive', duration: 15000});
+            toast({ title: 'Reason Required', description: 'Please provide a reason for skipping verification.', variant: 'destructive'});
             return;
         }
 
         if (!isSkipping && plateError) {
-             toast({ title: 'Invalid License Plate', description: 'Please correct the license plate format before submitting.', variant: 'destructive', duration: 15000});
+             toast({ title: 'Invalid License Plate', description: 'Please correct the license plate format before submitting.', variant: 'destructive'});
             return;
         }
 
