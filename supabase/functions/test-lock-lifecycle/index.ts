@@ -16,7 +16,7 @@
  *                       without HTTP self-fetch (avoids edge-runtime deadlock)
  *   sync              — pull real activity logs from the Wi-Fi bridge
  *   probe             — raw jobType 15 response (payload discovery)
- *   algopin           — offline one-time AlgoPIN (no bridge)
+ *   algopin           — offline duration (hourly) AlgoPIN (no bridge)
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -24,7 +24,7 @@ import { getCorsHeaders } from "./cors.ts";
 import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
 import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import { alertBreakInAttempt } from "../_shared/lockAlerts.ts";
-import { getBookingWindow, clampIgloohomeStart } from "../_shared/pinTiming.ts";
+import { getBookingWindow, clampIgloohomeStart, formatAlgoPinEndIso } from "../_shared/pinTiming.ts";
 import {
   fetchDeviceActivityRows,
   mergeActivityEvents,
@@ -34,6 +34,7 @@ import {
   type LockActivityEvent,
 } from "../_shared/iglooActivity.ts";
 import { ensurePinOnLock, clearKnownPins } from "../_shared/lockPin.ts";
+import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { isAdminWithMfa } from "../_shared/jwtAal.ts";
 import {
   getOAuthToken,
@@ -274,38 +275,33 @@ async function fetchDevicesSummary(
 
 /**
  * AlgoPIN codes are computed by the lock itself, so they work with no bridge and
- * no connectivity at the padlock. startDate must be hour-aligned.
+ * no connectivity at the padlock. startDate/endDate must be hour-aligned.
  */
-async function createOneTimeAlgoPin(
+async function createHourlyAlgoPinForTest(
   accessToken: string,
   lockId: string,
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  booking: Record<string, unknown>,
   startDate: string,
-  variance: number,
-  accessName: string,
+  endDate: string,
 ) {
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/algopin/onetime`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
+  return createAlgoPinWithVariance({
+    supabase,
+    accessToken,
+    lockId,
+    startDate,
+    endDate,
+    accessName: `TEST AlgoPIN - Order #${booking.id}`,
+    insertRow: {
+      order_id: booking.id,
+      customer_email: booking.email,
+      customer_phone: booking.phone || "",
+      status: "active",
+      lock_confirmed_at: new Date().toISOString(),
+      confirm_attempts: 0,
     },
-    body: JSON.stringify({ variance, startDate, accessName }),
   });
-  const body = await readResponse(res);
-  if (!res.ok && res.status !== 201) {
-    return { success: false as const, error: `AlgoPIN failed (HTTP ${res.status})`, raw: body.json ?? body.text };
-  }
-  const pin = String(body.json?.pin || body.json?.access_code || body.json?.code || "");
-  if (!pin) {
-    return { success: false as const, error: "AlgoPIN succeeded but no PIN in response", raw: body.json };
-  }
-  return {
-    success: true as const,
-    pin,
-    pinId: String(body.json?.pinId || body.json?.id || ""),
-    raw: body.json,
-  };
 }
 
 /** Floor an ISO timestamp to the top of its UTC hour (AlgoPIN requires zeroed minutes). */
@@ -957,17 +953,17 @@ Deno.serve(async (req) => {
         .eq("status", "active");
 
       const startIso = floorToHourIso();
-      const endIso = isoPlusMinutes(durationMinutes);
-      const variance = Math.min(24, Math.max(1, Math.ceil(durationMinutes / 60)));
-      const algo = await createOneTimeAlgoPin(
+      const endIso = formatAlgoPinEndIso(isoPlusMinutes(Math.max(durationMinutes, 60)));
+      const algo = await createHourlyAlgoPinForTest(
         oauth.token,
         lockId,
+        supabase,
+        booking,
         startIso,
-        variance,
-        `TEST AlgoPIN - Order #${bookingId}`,
+        endIso,
       );
       if (!algo.success) {
-        return jsonResponse({ success: false, error: algo.error, raw: algo.raw }, 502);
+        return jsonResponse({ success: false, error: algo.error }, 502);
       }
 
       const now = new Date().toISOString();
@@ -992,27 +988,13 @@ Deno.serve(async (req) => {
         })
         .eq("id", bookingId);
 
-      await supabase.from("rental_access_codes").insert({
-        order_id: bookingId,
-        customer_email: booking.email,
-        customer_phone: booking.phone || "",
-        access_pin: algo.pin,
-        pin_id: algo.pinId,
-        pin_type: "algopin",
-        lock_id: lockId,
-        start_time: startIso,
-        end_time: endIso,
-        status: "active",
-        lock_confirmed_at: now,
-        confirm_attempts: 0,
-      });
       await supabase.from("rental_tracking_logs").insert({
         order_id: bookingId,
         event_type: "admin_override",
         event_timestamp: now,
         notes:
-          `TEST algopin: one-time AlgoPIN ${algo.pin} (no bridge), ` +
-          `${durationMinutes}min window from ${startIso}`,
+          `TEST algopin: hourly AlgoPIN ${algo.pin} (no bridge, variance ${algo.variance}), ` +
+          `${durationMinutes}min requested window ${algo.startDate}→${algo.endDate}`,
       });
 
       const after = await fetchBookingStatus(supabase, bookingId);
@@ -1025,9 +1007,9 @@ Deno.serve(async (req) => {
         lockJobState: "completed",
         needsConfirm: false,
         instructions: [
-          `One-time AlgoPIN ${algo.pin} works offline — no bridge needed.`,
+          `Hourly AlgoPIN ${algo.pin} works offline — no bridge needed.`,
           "Enter it on the padlock followed by the unlock key to open.",
-          "It is single-use: after unlocking, use Simulate Lock (or lock physically + Sync) to finish.",
+          "It is valid for the whole test window (repeat unlocks ok).",
           "Click Restore Dates when finished.",
         ],
       });

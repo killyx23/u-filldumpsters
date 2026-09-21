@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { getJwtAal } from "../_shared/jwtAal.ts";
+import { deletePinVerified } from "../_shared/lockPin.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 function makeJsonResponse(corsHeaders) {
@@ -51,42 +52,6 @@ async function getOAuthToken(clientId, clientSecret) {
     return null;
   }
   return body.json.access_token;
-}
-async function deletePinFromLock(accessToken, lockId, bridgeId, pin) {
-  const url = `${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`;
-  const payload = {
-    jobType: 5,
-    jobData: {
-      pin
-    }
-  };
-  console.log("[delete-pin] Sending delete job to lock:", {
-    url,
-    pin
-  });
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-  const body = await readResponse(res);
-  console.log("[delete-pin] Lock delete response:", {
-    status: res.status,
-    body: body.json
-  });
-  if (!res.ok && res.status !== 201) {
-    return {
-      success: false,
-      error: `Lock delete failed with status ${res.status}: ${body.json?.error ?? body.text}`
-    };
-  }
-  return {
-    success: true
-  };
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
@@ -253,8 +218,8 @@ Deno.serve(async (req)=>{
         message: "PIN expired in DB. Lock deletion will be retried on the next cron run."
       });
     }
-    const lockResult = await deletePinFromLock(accessToken, lockId, bridgeId, activePin.access_pin);
-    if (lockResult.success) {
+    const lockResult = await deletePinVerified(accessToken, lockId, bridgeId, activePin.access_pin);
+    if (lockResult.ok) {
       // Mark lock deletion confirmed
       await supabase.from("rental_access_codes").update({
         lock_deleted_at: now

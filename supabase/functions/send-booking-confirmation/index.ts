@@ -1269,10 +1269,9 @@ Deno.serve(async (req)=>{
       const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
       const returnDateLabel = formatDate(booking.pickup_date);
       const returnTimeLabel = formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot || "";
-      // Activation is 5 minutes before the scheduled pickup (matches getPinActivationStart).
       const activationLabel = pickupTimeLabel
-        ? `${pickupDateLabel} at ${pickupTimeLabel} (code works 5 minutes early)`
-        : `${pickupDateLabel} (code works 5 minutes early)`;
+        ? `${pickupDateLabel} at ${pickupTimeLabel}`
+        : pickupDateLabel;
       const pinHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">

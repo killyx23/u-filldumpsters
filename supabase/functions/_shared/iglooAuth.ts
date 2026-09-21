@@ -19,10 +19,13 @@ export const BRIDGE_PIN_SCOPES = [
 ] as const;
 
 /** Scopes used by generate-pin / AlgoPIN production path. */
+export const ALGOPIN_HOURLY_SCOPE = "igloohomeapi/algopin-hourly";
+
 export const GENERATE_PIN_SCOPES = [
   "igloohomeapi/create-pin-bridge-proxied-job",
   "igloohomeapi/get-devices",
   "igloohomeapi/get-job-status",
+  ALGOPIN_HOURLY_SCOPE,
   "igloohomeapi/algopin-onetime",
   "igloohomeapi/store-device-activity",
 ] as const;
@@ -244,10 +247,18 @@ export async function getOAuthToken(
     if (retry.token) return retry;
   }
 
-  // Prefer a grant that explicitly includes algopin when the caller asked for it,
-  // without the unauthorized create-bridge-proxied-job scope.
-  if (scopes.includes("igloohomeapi/algopin-onetime")) {
+  // Prefer a grant that explicitly includes hourly AlgoPIN when the caller asked
+  // for it, without the unauthorized create-bridge-proxied-job scope.
+  if (scopes.includes(ALGOPIN_HOURLY_SCOPE) || scopes.includes("igloohomeapi/algopin-onetime")) {
+    const hourlyOnly = [
+      ALGOPIN_HOURLY_SCOPE,
+      "igloohomeapi/get-devices",
+      "igloohomeapi/get-job-status",
+    ];
+    const hourly = await requestOAuthToken(clientId, clientSecret, hourlyOnly);
+    if (hourly.token) return hourly;
     const algoOnly = [
+      ALGOPIN_HOURLY_SCOPE,
       "igloohomeapi/algopin-onetime",
       "igloohomeapi/get-devices",
       "igloohomeapi/get-job-status",
@@ -286,6 +297,7 @@ export async function diagnoseOAuth(
         "igloohomeapi/get-devices",
       ],
     },
+    { label: `only ${ALGOPIN_HOURLY_SCOPE}`, scopes: [ALGOPIN_HOURLY_SCOPE] },
     { label: "only igloohomeapi/algopin-onetime", scopes: ["igloohomeapi/algopin-onetime"] },
     { label: `only ${ACTIVITY_SYNC_SCOPE}`, scopes: [ACTIVITY_SYNC_SCOPE] },
     { label: `only ${DEVICE_ACTIVITY_SCOPE}`, scopes: [DEVICE_ACTIVITY_SCOPE] },

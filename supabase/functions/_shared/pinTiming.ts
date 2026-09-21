@@ -10,9 +10,16 @@ export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
 /** Extra hour the padlock PIN stays valid after the scheduled booking end. */
 export const RETURN_GRACE_MS = 60 * 60 * 1000;
 /** Activate the PIN this many ms before drop-off so it works the instant they arrive. */
-export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
+export const PIN_EARLY_ACTIVATION_MS = 30 * 60 * 1000;
 /** Second customer PIN message this many ms before drop-off. */
 export const PIN_REMINDER_LEAD_MS = 60 * 60 * 1000;
+/** Hourly AlgoPIN duration bounds (Igloohome). */
+export const ALGOPIN_HOURLY_MIN_HOURS = 1;
+export const ALGOPIN_HOURLY_MAX_HOURS = 672;
+/** Igloohome will not delete an AlgoPIN whose start is more than 256 hours away. */
+export const ALGOPIN_DELETE_LEAD_MS = 256 * 60 * 60 * 1000;
+/** Booking statuses that must expire portal PIN access and retry lock delete. */
+export const PIN_REVOKE_STATUSES = ["Cancelled", "cancellation_pending", "pending_review"] as const;
 
 /** Calendar YYYY-MM-DD in the yard timezone. */
 export function denverCalendarDate(now: Date = new Date()): string {
@@ -132,11 +139,25 @@ export function addGraceHour(isoDate: string): string {
 
 /**
  * AlgoPIN rejects starts that aren't whole-hour and rejects the JS `.000Z` suffix.
- * Required shape: `YYYY-MM-DDTHH:00:00+00:00` (see Igloohome onetime AlgoPIN docs).
+ * Required shape: `YYYY-MM-DDTHH:00:00+00:00`.
  */
 export function formatAlgoPinStartIso(isoDate: string): string {
   const d = new Date(isoDate);
   if (Number.isNaN(d.getTime())) return isoDate;
+  d.setUTCMinutes(0, 0, 0);
+  return d.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+/**
+ * Hourly AlgoPIN end: ceil to the next UTC hour so a partial hour is not cut short.
+ * Already-on-the-hour values are left alone.
+ */
+export function formatAlgoPinEndIso(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  if (d.getUTCMinutes() !== 0 || d.getUTCSeconds() !== 0 || d.getUTCMilliseconds() !== 0) {
+    d.setUTCHours(d.getUTCHours() + 1);
+  }
   d.setUTCMinutes(0, 0, 0);
   return d.toISOString().replace(/\.\d{3}Z$/, "+00:00");
 }
@@ -194,7 +215,7 @@ export function getBookingWindow(booking: BookingWindowFields) {
 }
 
 /**
- * PIN start sent to Igloohome: booking drop-off minus 5 minutes, clamped to the
+ * PIN start sent to Igloohome: booking drop-off minus 30 minutes, clamped to the
  * current hour so Igloohome accepts it. Customers still see the appointment time.
  */
 export function getPinActivationStart(
@@ -203,6 +224,17 @@ export function getPinActivationStart(
 ): string {
   const { activationIso } = getBookingWindow(booking);
   return clampIgloohomeStart(activationIso, now);
+}
+
+/** Hour-aligned hourly AlgoPIN window: activation start → return + grace, ceiled. */
+export function getHourlyAlgoPinWindow(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): { startDate: string; endDate: string } {
+  const startDate = formatAlgoPinStartIso(getPinActivationStart(booking, now));
+  const { graceEndIso } = getBookingWindow(booking);
+  const endDate = formatAlgoPinEndIso(graceEndIso);
+  return { startDate, endDate };
 }
 
 /** Scheduled return time with no grace — for all customer-facing copy. */
@@ -219,6 +251,24 @@ export function isWithinPinGenerationWindow(
   if (!Number.isFinite(pinEligibleFromMs) || !Number.isFinite(graceEndMs)) return false;
   const nowMs = now.getTime();
   return nowMs >= pinEligibleFromMs && nowMs < graceEndMs;
+}
+
+/**
+ * Hourly AlgoPIN may be minted only inside the 12h issue window, and never when
+ * startDate is more than 256 hours away (Igloohome cannot delete those codes).
+ */
+export function canIssueHourlyAlgoPin(
+  booking: BookingWindowFields,
+  now: Date = new Date(),
+): boolean {
+  if (!isWithinPinGenerationWindow(booking, now)) return false;
+  const { startDate, endDate } = getHourlyAlgoPinWindow(booking, now);
+  const startMs = new Date(startDate).getTime();
+  const endMs = new Date(endDate).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return false;
+  if (startMs - now.getTime() > ALGOPIN_DELETE_LEAD_MS) return false;
+  const hours = (endMs - startMs) / (60 * 60 * 1000);
+  return hours >= ALGOPIN_HOURLY_MIN_HOURS && hours <= ALGOPIN_HOURLY_MAX_HOURS;
 }
 
 export function isBookingEnded(

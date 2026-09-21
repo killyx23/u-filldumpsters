@@ -301,6 +301,35 @@ export const BookingAccessCodeSection = ({ booking }) => {
     );
   }
 
+  if (!pinWindowOpen) {
+    return (
+      <div className="bg-black/20 p-4 rounded-lg border border-white/5">
+        <div className="flex items-start gap-3">
+          <Clock className="h-5 w-5 text-blue-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-white">Access Code Not Yet Available</p>
+            <p className="text-sm text-gray-300 mt-2 leading-relaxed">
+              Your access code will be available 12 hours before your scheduled pickup
+              {Number.isFinite(pinEligibleFrom.getTime()) ? (
+                <>
+                  {' '}
+                  on{' '}
+                  <span className="text-white font-medium">
+                    {format(pinEligibleFrom, 'MMM dd, yyyy')} at {format(pinEligibleFrom, 'h:mm a')}
+                  </span>
+                </>
+              ) : null}
+              . Please come back when it is within 12 hours of your rental pickup time.
+            </p>
+            <p className="text-xs text-gray-400 mt-2">
+              Scheduled pickup: {visibleStartLabel}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (pinReady) {
     return (
       <div className="space-y-3">
@@ -329,35 +358,6 @@ export const BookingAccessCodeSection = ({ booking }) => {
           </p>
         </div>
         <BookingLockStatusSection bookingId={bookingId} />
-      </div>
-    );
-  }
-
-  if (!pinWindowOpen) {
-    return (
-      <div className="bg-black/20 p-4 rounded-lg border border-white/5">
-        <div className="flex items-start gap-3">
-          <Clock className="h-5 w-5 text-blue-400 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-white">Access Code Not Yet Available</p>
-            <p className="text-sm text-gray-300 mt-2 leading-relaxed">
-              Your access code will be available 12 hours before your scheduled pickup
-              {Number.isFinite(pinEligibleFrom.getTime()) ? (
-                <>
-                  {' '}
-                  on{' '}
-                  <span className="text-white font-medium">
-                    {format(pinEligibleFrom, 'MMM dd, yyyy')} at {format(pinEligibleFrom, 'h:mm a')}
-                  </span>
-                </>
-              ) : null}
-              . Please come back when it is within 12 hours of your rental pickup time.
-            </p>
-            <p className="text-xs text-gray-400 mt-2">
-              Scheduled pickup: {visibleStartLabel}
-            </p>
-          </div>
-        </div>
       </div>
     );
   }

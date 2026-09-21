@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
+import { deletePinVerified } from "../_shared/lockPin.ts";
+import { PIN_REVOKE_STATUSES } from "../_shared/pinTiming.ts";
 const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
-const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 function makeJsonResponse(corsHeaders) {
   return (body, status = 200) => new Response(JSON.stringify(body), {
     status,
@@ -54,36 +55,6 @@ async function getOAuthToken(clientId, clientSecret) {
   }
   return body.json.access_token;
 }
-async function deletePinFromLock(accessToken, lockId, bridgeId, pin) {
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify({
-      jobType: 5,
-      jobData: {
-        pin
-      }
-    })
-  });
-  const body = await readResponse(res);
-  console.log("[cleanup-pins] Delete PIN response:", {
-    status: res.status,
-    body: body.json
-  });
-  if (!res.ok && res.status !== 201) {
-    return {
-      success: false,
-      error: `Delete failed with status ${res.status}`
-    };
-  }
-  return {
-    success: true
-  };
-}
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
   const jsonResponse = makeJsonResponse(corsHeaders);
@@ -123,7 +94,7 @@ Deno.serve(async (req)=>{
     // Keep the newest, delete the rest from the lock and expire in DB
     // ================================================================
     console.log("[cleanup-pins] === STEP 1: DUPLICATE CLEANUP ===");
-    const { data: allActivePins, error: activePinsError } = await supabase.from("rental_access_codes").select("id, order_id, access_pin, created_at").eq("status", "active").order("order_id", {
+    const { data: allActivePins, error: activePinsError } = await supabase.from("rental_access_codes").select("id, order_id, access_pin, pin_type, created_at").eq("status", "active").order("order_id", {
       ascending: true
     }).order("created_at", {
       ascending: false
@@ -151,22 +122,38 @@ Deno.serve(async (req)=>{
       jobIndex++;
       console.log(`[cleanup-pins] Deleting duplicate for order #${dup.order_id} (pin: ${dup.access_pin}, created: ${dup.created_at})`);
       try {
-        const deleteResult = await deletePinFromLock(accessToken, lockId, bridgeId, dup.access_pin);
-        if (!deleteResult.success) {
+        if (dup.pin_type === "algopin") {
+          await supabase.from("rental_access_codes").update({
+            status: "expired",
+            notified_at: now
+          }).eq("id", dup.id);
+          console.log(`[cleanup-pins] ✓ Duplicate AlgoPIN expired in DB for order #${dup.order_id} (lock code remains until natural end)`);
+          results.push({
+            orderId: dup.order_id,
+            recordId: dup.id,
+            lockDeleted: false,
+            dbExpired: true
+          });
+          continue;
+        }
+        const deleteResult = await deletePinVerified(accessToken, lockId, bridgeId, dup.access_pin);
+        if (!deleteResult.ok) {
           // Lock deletion failed — PIN may already be gone from the device.
           // Still expire in DB so the portal never shows it.
           console.warn(`[cleanup-pins] Lock delete failed for order #${dup.order_id} (may already be removed): ${deleteResult.error}`);
         }
         // Always expire in DB regardless of lock result
-        await supabase.from("rental_access_codes").update({
+        const dupUpdate = {
           status: "expired",
           notified_at: now
-        }).eq("id", dup.id);
+        };
+        if (deleteResult.ok) dupUpdate.lock_deleted_at = now;
+        await supabase.from("rental_access_codes").update(dupUpdate).eq("id", dup.id);
         console.log(`[cleanup-pins] ✓ Duplicate expired for order #${dup.order_id}`);
         results.push({
           orderId: dup.order_id,
           recordId: dup.id,
-          lockDeleted: deleteResult.success,
+          lockDeleted: deleteResult.ok,
           dbExpired: true
         });
       } catch (err) {
@@ -185,9 +172,8 @@ Deno.serve(async (req)=>{
     // that the cron may have missed
     // ================================================================
     console.log("[cleanup-pins] === STEP 2: CANCELLED BOOKING CLEANUP ===");
-    const { data: cancelledPins, error: cancelledError } = await supabase.from("rental_access_codes").select("id, order_id, access_pin, bookings!inner(id, status)").eq("status", "active").in("bookings.status", [
-      "Cancelled",
-      "pending_review"
+    const { data: cancelledPins, error: cancelledError } = await supabase.from("rental_access_codes").select("id, order_id, access_pin, pin_type, bookings!inner(id, status)").eq("status", "active").in("bookings.status", [
+      ...PIN_REVOKE_STATUSES
     ]);
     if (cancelledError) {
       console.error("[cleanup-pins] Failed to query cancelled PINs:", cancelledError.message);
@@ -201,18 +187,33 @@ Deno.serve(async (req)=>{
       jobIndex++;
       console.log(`[cleanup-pins] Deleting cancelled PIN for order #${record.order_id} (pin: ${record.access_pin})`);
       try {
-        const deleteResult = await deletePinFromLock(accessToken, lockId, bridgeId, record.access_pin);
-        if (!deleteResult.success) {
+        if (record.pin_type === "algopin") {
+          await supabase.from("rental_access_codes").update({
+            status: "expired",
+            notified_at: now
+          }).eq("id", record.id);
+          console.log(`[cleanup-pins] ✓ AlgoPIN expired in DB for order #${record.order_id} (lock code remains until natural end)`);
+          cancelResults.push({
+            orderId: record.order_id,
+            lockDeleted: false,
+            dbExpired: true
+          });
+          continue;
+        }
+        const deleteResult = await deletePinVerified(accessToken, lockId, bridgeId, record.access_pin);
+        if (!deleteResult.ok) {
           console.warn(`[cleanup-pins] Lock delete failed for cancelled order #${record.order_id}: ${deleteResult.error}`);
         }
-        await supabase.from("rental_access_codes").update({
+        const update = {
           status: "expired",
           notified_at: now
-        }).eq("id", record.id);
+        };
+        if (deleteResult.ok) update.lock_deleted_at = now;
+        await supabase.from("rental_access_codes").update(update).eq("id", record.id);
         console.log(`[cleanup-pins] ✓ Cancelled PIN expired for order #${record.order_id}`);
         cancelResults.push({
           orderId: record.order_id,
-          lockDeleted: deleteResult.success,
+          lockDeleted: deleteResult.ok,
           dbExpired: true
         });
       } catch (err) {
