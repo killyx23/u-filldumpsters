@@ -24,7 +24,7 @@ export const StepIndicator = ({
   ];
 
   const isStepSkipped = (stepNumber) =>
-    (stepNumber === 7 && skipEmailVerification) ||
+    (stepNumber === 7 && (!requiresDriverVerification || !showInlineEmailStep || skipEmailVerification)) ||
     (stepNumber === 8 && !requiresDriverVerification);
 
   return (
