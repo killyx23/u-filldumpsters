@@ -827,22 +827,30 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     // Error first — never let secondary loaders (prices/tax) mask a failed retrieve.
     if (status === 'error') {
+        const isTimeout = /timeout|too long/i.test(error || '');
+        const isMissingBooking = !isTimeout;
+        const errorTitle = isTimeout ? 'Loading Timeout' : 'Verification Link Expired';
+        const errorBody = isMissingBooking
+            ? 'This email link is no longer valid. The booking hold for that link was already released (expired, cleared, or replaced by a newer booking). Retry cannot reopen it — start a new booking and use the new verification email.'
+            : error;
         return (
             <div className="container mx-auto py-16 px-4">
                 <div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-8 rounded-lg shadow-lg">
                     <div className="flex items-center text-red-200 font-bold text-2xl mb-6">
                         <XCircle className="h-10 w-10 mr-3 text-red-400" />
-                        {error.includes('timeout') || error.includes('too long') ? 'Loading Timeout' : 'Booking Not Found'}
+                        {errorTitle}
                     </div>
-                    <p className="text-red-100 mb-8 text-lg">{error}</p>
+                    <p className="text-red-100 mb-8 text-lg">{errorBody}</p>
                     <div className="flex flex-col sm:flex-row gap-4">
-                        <Button
-                            onClick={handleRetry}
-                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                        >
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Retry
-                        </Button>
+                        {isTimeout && (
+                            <Button
+                                onClick={handleRetry}
+                                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                            >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Retry
+                            </Button>
+                        )}
                         <Button
                             onClick={() => navigate('/')}
                             className="flex-1 bg-green-600 hover:bg-green-700 text-white"
