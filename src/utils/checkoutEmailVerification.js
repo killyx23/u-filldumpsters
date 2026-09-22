@@ -82,11 +82,11 @@ export function clearVerifiedEmailSession(email, pendingId = null) {
 }
 
 /**
- * Synchronous check: pending-scoped session storage only.
- * Returning-customer homepage OTP and bare email-only portal flags do NOT
- * skip checkout Verify Email for a new booking.
+ * Synchronous check: booking flag or pending-scoped session storage.
+ * Bare email-only portal flags do NOT count for checkout skip.
  */
 export function isCheckoutEmailVerifiedSync(email, bookingData = {}) {
+  if (bookingData?.returningCustomerVerified === true) return true;
   const pendingId =
     bookingData?.pendingToken ||
     bookingData?.pending_token ||
