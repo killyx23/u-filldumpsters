@@ -125,7 +125,8 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const [addonsData, setAddonsData] = useState(null);
     const [pendingRecord, setPendingRecord] = useState(null);
     const [equipmentPrices, setEquipmentPrices] = useState({});
-    const [loadingPrices, setLoadingPrices] = useState(true);
+    // false until idle so retrieve failures cannot leave the spinner stuck forever
+    const [loadingPrices, setLoadingPrices] = useState(false);
     const [availabilityTimes, setAvailabilityTimes] = useState({
         pickupStartTime: 'Time not specified',
         returnByTime: 'Time not specified'
@@ -184,6 +185,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             if (!token) {
                 const errMsg = 'Verification link is invalid or expired. Please start a new booking.';
                 console.error(`[${timestamp}] [VerifyEmailBeforeBooking] No token provided`);
+                setLoadingPrices(false);
                 setStatus('error');
                 setError(errMsg);
                 return;
@@ -193,6 +195,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
             loadingTimeoutRef.current = setTimeout(() => {
                 const timeoutTs = new Date().toISOString();
                 console.error(`[${timeoutTs}] [VerifyEmailBeforeBooking] Loading timeout exceeded (${LOADING_TIMEOUT_MS}ms)`);
+                setLoadingPrices(false);
                 setStatus('error');
                 setError('Loading took too long. Please refresh the page or try again.');
             }, LOADING_TIMEOUT_MS);
@@ -207,6 +210,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 if (!result.success) {
                     console.error(`[${resultTs}] [VerifyEmailBeforeBooking] Failed to retrieve booking:`, result.error);
                     clearTimeout(loadingTimeoutRef.current);
+                    setLoadingPrices(false);
                     setStatus('error');
                     setError(result.error || 'Could not retrieve your booking details. The link may have expired.');
                     return;
@@ -247,6 +251,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 const catchTs = new Date().toISOString();
                 console.error(`[${catchTs}] [VerifyEmailBeforeBooking] Exception during loadPendingBooking:`, error);
                 clearTimeout(loadingTimeoutRef.current);
+                setLoadingPrices(false);
                 setStatus('error');
                 setError(`Failed to load booking details: ${error.message}`);
             }
@@ -820,26 +825,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
         return formatTimeWindow(timeSlot, timeOptions);
     };
 
-    // Loading state with proper spinner
-    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingTaxOptions) {
-        return (
-            <div className="container mx-auto py-16 px-4">
-                <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
-                    <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="flex flex-col items-center justify-center gap-4 py-20"
-                    >
-                        <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
-                        <span className="text-white text-lg font-medium">Loading your booking details...</span>
-                        <p className="text-gray-300 text-sm">This should only take a few seconds</p>
-                    </motion.div>
-                </div>
-            </div>
-        );
-    }
-
-    // Error state with retry
+    // Error first — never let secondary loaders (prices/tax) mask a failed retrieve.
     if (status === 'error') {
         return (
             <div className="container mx-auto py-16 px-4">
@@ -873,6 +859,25 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                             </Button>
                         )}
                     </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Loading state with proper spinner (only while retrieving or loading secondary data)
+    if (status === 'loading' || loadingPrices || loadingTaxRate || loadingTaxOptions) {
+        return (
+            <div className="container mx-auto py-16 px-4">
+                <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="flex flex-col items-center justify-center gap-4 py-20"
+                    >
+                        <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
+                        <span className="text-white text-lg font-medium">Loading your booking details...</span>
+                        <p className="text-gray-300 text-sm">This should only take a few seconds</p>
+                    </motion.div>
                 </div>
             </div>
         );
