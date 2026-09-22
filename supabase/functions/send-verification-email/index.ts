@@ -1,22 +1,17 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
-const DEFAULT_SITE_URL = "https://u-filldumpsters.com";
+const DEFAULT_SITE_URL = "https://www.u-filldumpsters.com";
 /** Checkout codes hold a date/time slot, so they expire quickly. */
 const CHECKOUT_CODE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function normalizeSiteUrl(url?: string | null) {
-  const fallback = Deno.env.get("SITE_URL") || DEFAULT_SITE_URL;
-  const candidate = url && url.trim().length > 0 ? url : fallback;
-
-  try {
-    const parsed = new URL(candidate);
-    return `${parsed.origin}`.replace(/\/$/, "");
-  } catch {
-    return DEFAULT_SITE_URL;
-  }
+/** Escape & in href so email clients do not truncate query strings. */
+function escapeHref(url: string): string {
+  return String(url).replace(/&/g, "&amp;");
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
@@ -97,7 +92,7 @@ Deno.serve(async (req)=>{
       console.error("[send-verification-email] Database error:", dbError);
       throw new Error("Failed to store verification code");
     }
-    const siteUrl = normalizeSiteUrl(site_url);
+    const siteUrl = resolvePublicSiteUrl(site_url);
     const emailLower = email.toLowerCase();
     // checkout (pending booking) → /verify-email
     // portal (forgot login) → /customer-login recovery
@@ -181,7 +176,9 @@ function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_UR
        selected date and time so that no one else can book it. Keeping that hold short prevents the
        same slot from being double-booked and gives other customers who are waiting a fair chance at
        it. If your code expires, you are welcome to start a new booking at any time.`
-    : "This verification code and link will expire in 24 hours for your security.";
+    : "This verification code and link will expire in 24 hours for your security. You can finish your booking on the device that opens this link.";
+  const safeVerifyHref = escapeHref(verifyLink);
+  const safeSiteUrl = escapeHref(siteUrl);
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -325,7 +322,7 @@ function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_UR
           <p style="text-align: center; font-weight: 600; color: #475569;">Or verify instantly by clicking the button below:</p>
           
           <div class="btn-container">
-            <a href="${verifyLink}" class="btn">Verify Email Address</a>
+            <a href="${safeVerifyHref}" class="btn">Verify Email Address</a>
           </div>
           
           <div class="notice">
@@ -336,7 +333,7 @@ function generateEmailTemplate(code, verifyLink, name, siteUrl = DEFAULT_SITE_UR
         <div class="footer">
           <p>&copy; ${currentYear} U-Fill Dumpsters LLC. All rights reserved.</p>
           <p>If you did not request this verification, you can safely ignore this email.</p>
-          <p><a href="${siteUrl}/contact">Contact Support</a> | <a href="${siteUrl}/faqs">FAQ</a></p>
+          <p><a href="${safeSiteUrl}/contact">Contact Support</a> | <a href="${safeSiteUrl}/faqs">FAQ</a></p>
         </div>
       </div>
     </body>
