@@ -12,6 +12,25 @@ BACKUP_DIR="supabase/backups"
 DB_BACKUP_DIR="supabase/backups/db"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 
+WITH_DATA=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-data) WITH_DATA=true ;;
+    -h|--help)
+      echo "Usage: ./supabase/backup.sh [--with-data]"
+      echo ""
+      echo "  (default)     Dump schema + edge functions"
+      echo "  --with-data   Also dump production row data to supabase/backups/db/seed.sql"
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      echo "Usage: ./supabase/backup.sh [--with-data]" >&2
+      exit 1
+      ;;
+  esac
+done
+
 #please run this from command line before running this script at root directory of the project:
 #npx supabase login
 #npx supabase link --project-ref <PROJECT_REF> see .env for PROJECT_REF
@@ -22,6 +41,9 @@ DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$DB_BACKUP_DIR"
 echo "🚀 Starting Supabase backup for project: $PROJECT_REF"
+if [ "$WITH_DATA" = true ]; then
+  echo "📦 Data dump enabled (--with-data)"
+fi
 
 rm -rf supabase/.temp
 npx supabase link --project-ref "$PROJECT_REF"
@@ -46,6 +68,31 @@ if [ ! -s "$DB_BACKUP_DIR/schema_$DATE.sql" ]; then
   exit 1
 fi
 echo "✅ Database schema saved."
+
+# ---------------------------------------------------------------------------
+# Database data dump (opt-in via --with-data)
+# Writes to backups/db/ — NEVER to supabase/seed.sql (auto-loaded on db reset)
+# ---------------------------------------------------------------------------
+if [ "$WITH_DATA" = true ]; then
+  echo "🗄 Dumping production database data..."
+  for attempt in 1 2 3 4 5 ; do
+    npx supabase db dump --data-only --linked > "$DB_BACKUP_DIR/seed_$DATE.sql" && break
+    echo "⚠ Data dump attempt $attempt failed, retrying..."
+    sleep 3
+  done
+
+  if [ ! -s "$DB_BACKUP_DIR/seed_$DATE.sql" ]; then
+    echo "❌ Data dump produced an empty file. Cleaning up and aborting."
+    rm -f "$DB_BACKUP_DIR/seed_$DATE.sql"
+    exit 1
+  fi
+
+  cp "$DB_BACKUP_DIR/seed_$DATE.sql" "$DB_BACKUP_DIR/seed.sql"
+  echo "✅ Database data saved to $DB_BACKUP_DIR/seed.sql (and seed_$DATE.sql)"
+  echo "⚠ WARNING: This file contains production PII. It is gitignored."
+  echo "⚠ Do NOT copy it to supabase/seed.sql unless you intentionally want"
+  echo "   local db reset/start to load production data (that caused prior issues)."
+fi
 
 # ---------------------------------------------------------------------------
 # Edge Functions — download in parallel

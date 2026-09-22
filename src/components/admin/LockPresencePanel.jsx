@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide-react';
 import { format } from 'date-fns';
+import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
 
 const PRESENCE = {
   on_premises: {
@@ -86,6 +87,21 @@ export default function LockPresencePanel() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
+        <RemoteBridgeControls
+          bridgeOnline={
+            devices.length === 0
+              ? null
+              : devices.some((d) => d.bridge_online === true)
+                ? true
+                : devices.every((d) => d.bridge_online === false)
+                  ? false
+                  : null
+          }
+          onSuccess={() => {
+            setTimeout(load, 1500);
+          }}
+        />
+
         {error && (
           <p className="text-sm text-red-300">
             Could not load lock status: {error}

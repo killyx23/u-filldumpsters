@@ -13,6 +13,8 @@ import {
   decideAdminMfaView,
   getVerifiedTotpFactors,
   toQrImageSrc,
+  getTotpFriendlyName,
+  getTotpIssuer,
   unenrollUnverifiedTotpFactors,
 } from '@/lib/adminMfa';
 
@@ -66,8 +68,8 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
       await unenrollUnverifiedTotpFactors(supabase);
       const { data, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: 'totp',
-        issuer: 'U-Fill Dumpsters',
-        friendlyName: 'Authenticator',
+        issuer: getTotpIssuer(),
+        friendlyName: getTotpFriendlyName(),
       });
       if (enrollError) throw enrollError;
       return data;
@@ -194,7 +196,9 @@ function EnrollMfa({ onEnrolled, onAlreadyEnrolled }) {
         <h2 className="text-xl font-semibold text-white">Set up an authenticator app</h2>
         <p className="text-sm text-blue-200">
           Scan the QR code with Google Authenticator, Microsoft Authenticator, Authy, 1Password,
-          or any app that supports TOTP.
+          or any app that supports TOTP. Rename the new entry to{' '}
+          <span className="text-yellow-300">{import.meta.env.DEV ? 'U-Fill Local' : 'U-Fill Prod'}</span>
+          {' '}so it stays distinct from the other environment.
         </p>
       </div>
 

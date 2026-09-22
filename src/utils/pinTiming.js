@@ -9,7 +9,7 @@ export const PIN_LEAD_TIME_MS = 12 * 60 * 60 * 1000;
 /** Extra hour the padlock PIN stays valid after the scheduled booking end. */
 export const RETURN_GRACE_MS = 60 * 60 * 1000;
 /** Activate the PIN this many ms before drop-off so it works the instant they arrive. */
-export const PIN_EARLY_ACTIVATION_MS = 5 * 60 * 1000;
+export const PIN_EARLY_ACTIVATION_MS = 30 * 60 * 1000;
 
 /**
  * Fallbacks for bookings with no usable time, in business-local hours. The previous version used

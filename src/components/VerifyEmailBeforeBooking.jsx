@@ -303,7 +303,6 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                 description:
                     'Your 15-minute window ended, so the booking hold was released. You can start a new booking at any time.',
                 variant: 'destructive',
-                duration: 12000,
             });
         })();
     }, [codeRemainingMs, status, token, bookingFlow]);

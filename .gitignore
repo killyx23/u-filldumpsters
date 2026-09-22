@@ -5,8 +5,11 @@ supabase/.temp/
 dist/
 .idea/workspace.xml
 
-# Full remote dumps contain PII; keep seed local-only
+# Full remote dumps contain PII; never commit. backups/db/seed* is production
+# data kept outside supabase/seed.sql so local db reset does not auto-load it.
 supabase/seed.sql
+supabase/backups/db/seed.sql
+supabase/backups/db/seed_*.sql
 
 # Env / secrets — never commit real values (.env.example is the only exception)
 .env

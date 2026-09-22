@@ -107,6 +107,22 @@ export const CancelDialog = ({ booking, isOpen, onOpenChange, onUpdate }) => {
                 is_read: false,
             });
 
+            const { error: emailError } = await supabase.functions.invoke('send-booking-confirmation', {
+                body: {
+                    bookingId: booking.id,
+                    email_type: 'cancellation_under_review',
+                    fee_info: {
+                        fee_type: feeInfo?.fee_type || 'advance',
+                        fee_percentage: feeInfo?.fee_percentage ?? 0,
+                        max_fee_amount: feeInfo?.max_fee_amount ?? 0,
+                        hours_before_appointment: feeInfo?.hours_before_appointment ?? null,
+                    },
+                },
+            });
+            if (emailError) {
+                console.warn('[CancelDialog] cancellation under review email failed for booking', booking.id, emailError);
+            }
+
             toast({ title: 'Cancellation Request Submitted', description: 'Your request has been sent for review.' });
             if (onUpdate) onUpdate();
             onOpenChange(false);

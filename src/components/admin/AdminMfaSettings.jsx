@@ -10,6 +10,8 @@ import {
   challengeAndVerifyTotp,
   getVerifiedTotpFactors,
   toQrImageSrc,
+  getTotpFriendlyName,
+  getTotpIssuer,
   unenrollUnverifiedTotpFactors,
 } from '@/lib/adminMfa';
 
@@ -56,8 +58,8 @@ export const AdminMfaSettings = () => {
       await unenrollUnverifiedTotpFactors(supabase);
       const { data, error: enrollError } = await supabase.auth.mfa.enroll({
         factorType: 'totp',
-        issuer: 'U-Fill Dumpsters',
-        friendlyName: `Authenticator ${new Date().toISOString().slice(0, 10)}`,
+        issuer: getTotpIssuer(),
+        friendlyName: getTotpFriendlyName(new Date().toISOString().slice(0, 10)),
       });
       if (enrollError) throw enrollError;
       setFactorId(data.id);
@@ -155,6 +157,7 @@ export const AdminMfaSettings = () => {
       </h2>
       <p className="text-sm text-gray-400 mb-4">
         Admin access requires a TOTP app such as Google Authenticator or Microsoft Authenticator.
+        Local and production use separate secrets — keep two labeled entries (U-Fill Local / U-Fill Prod).
         {factors.length > 0
           ? ' A device is enrolled on this account.'
           : ' No authenticator is enrolled yet — you will be asked to set one up at sign-in.'}

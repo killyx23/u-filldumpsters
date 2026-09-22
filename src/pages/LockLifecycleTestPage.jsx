@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,79 +22,10 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import LockPresencePanel from '@/components/admin/LockPresencePanel';
-
-async function formatInvokeError(error, data) {
-  if (data?.success === false && data?.error) {
-    return String(data.error);
-  }
-
-  let status = null;
-  let bodyText = '';
-  let bodyJson = null;
-
-  try {
-    const ctx = error?.context;
-    if (ctx) {
-      status = ctx.status ?? ctx.statusCode ?? null;
-      if (typeof ctx.json === 'function') {
-        bodyJson = await ctx.json().catch(() => null);
-      } else if (typeof ctx.text === 'function') {
-        bodyText = await ctx.text().catch(() => '');
-      }
-    }
-  } catch {
-    // ignore parse failures
-  }
-
-  const nestedError =
-    bodyJson?.error ||
-    bodyJson?.message ||
-    bodyJson?.msg ||
-    (typeof bodyJson === 'string' ? bodyJson : null) ||
-    bodyText ||
-    null;
-
-  if (status === 404) {
-    // Prefer the function's own error body (e.g. booking not found) over a
-    // misleading "function missing / wrong project-ref" guess.
-    if (nestedError) {
-      return status ? `HTTP ${status}: ${nestedError}` : String(nestedError);
-    }
-    return (
-      'Function not found (HTTP 404). Local: restart with ' +
-      '`npx --yes supabase@2.98.2 functions serve --env-file supabase/functions/.env`. ' +
-      'You are still on localhost — the project-ref in older toasts was only deploy help text.'
-    );
-  }
-
-  if (nestedError) {
-    return status ? `HTTP ${status}: ${nestedError}` : String(nestedError);
-  }
-
-  const base = error?.message || 'Edge function error';
-  if (base.includes('non-2xx') && status) {
-    return `HTTP ${status}: ${base}`;
-  }
-  return base;
-}
-
-async function invokeTest(action, bookingId, extra = {}) {
-  const { data, error } = await supabase.functions.invoke('test-lock-lifecycle', {
-    body: { action, bookingId: Number(bookingId), ...extra },
-  });
-  if (error) {
-    const message = await formatInvokeError(error, data);
-    const err = new Error(message);
-    err.payload = data || null;
-    throw err;
-  }
-  if (data?.success === false) {
-    const err = new Error(data.error || 'Request failed');
-    err.payload = data;
-    throw err;
-  }
-  return data;
-}
+import {
+  BOOKING_OPTIONAL_ACTIONS,
+  invokeLockLifecycle,
+} from '@/lib/lockLifecycleInvoke';
 
 export default function LockLifecycleTestPage() {
   const [bookingId, setBookingId] = useState('');
@@ -105,13 +35,13 @@ export default function LockLifecycleTestPage() {
   const confirmPollRef = React.useRef(0);
 
   const run = useCallback(async (action, extra = {}) => {
-    if (!bookingId) {
+    if (!BOOKING_OPTIONAL_ACTIONS.has(action) && !bookingId) {
       toast({ title: 'Enter a booking ID', variant: 'destructive' });
       return;
     }
     setBusy(action);
     try {
-      const data = await invokeTest(action, bookingId, extra);
+      const data = await invokeLockLifecycle(action, { bookingId, ...extra });
       setResult(data);
       const pinText = typeof data.pin === 'string' ? data.pin : data.pin?.access_pin || null;
       let description = data.result || data.action || 'Done';
@@ -209,11 +139,7 @@ export default function LockLifecycleTestPage() {
   const runDiagnose = useCallback(async () => {
     setBusy('oauth_diagnose');
     try {
-      const { data, error } = await supabase.functions.invoke('test-lock-lifecycle', {
-        body: { action: 'oauth_diagnose' },
-      });
-      if (error) throw new Error(await formatInvokeError(error, data));
-      if (data?.success === false) throw new Error(data.error || 'Request failed');
+      const data = await invokeLockLifecycle('oauth_diagnose');
       setResult(data);
       const working = (data.results || []).filter((r) => r.ok).map((r) => r.scopes);
       toast({
