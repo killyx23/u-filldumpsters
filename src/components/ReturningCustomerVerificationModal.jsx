@@ -12,6 +12,7 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
 export const ReturningCustomerVerificationModal = ({
   isOpen,
@@ -198,8 +199,17 @@ export const ReturningCustomerVerificationModal = ({
       return;
     }
 
-    setLoading(true);
     setError('');
+
+    // Legacy email links may seed a code without email — verify that code instead of sending a new one.
+    const existingCode = String(code).replace(/\D/g, '').slice(0, 6);
+    if (/^\d{6}$/.test(existingCode)) {
+      setStep('code');
+      await handleVerifyCode(null, normalizedEmail, existingCode);
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('send-verification-email', {
@@ -208,7 +218,7 @@ export const ReturningCustomerVerificationModal = ({
           name: 'Valued Customer',
           pending_customer_id: null,
           purpose: 'returning',
-          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+          site_url: getAppOrigin(),
         },
       });
 

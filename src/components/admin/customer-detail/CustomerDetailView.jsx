@@ -23,6 +23,7 @@ import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
 import { hasPaymentDelta } from '@/utils/paymentDelta';
+import AdminRemoteLockBar from '@/components/admin/AdminRemoteLockBar';
 
 export const CustomerDetailView = () => {
     const { user } = useAuth();
@@ -212,7 +213,8 @@ export const CustomerDetailView = () => {
     const { activeBookings, completedBookings, verificationBookings, cancelledBookings, rescheduledBookings, pendingAddressBookings, historyActiveBookings } = useMemo(() => {
         if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], rescheduledBookings: [], pendingAddressBookings: [], historyActiveBookings: [] };
         const pendingAddr = bookings.filter(b => b.pending_address_verification);
-        const active = bookings.filter(b => !b.pending_address_verification && b.status !== 'Completed' && b.status !== 'flagged' && b.status !== 'Cancelled' && b.status !== 'Rescheduled' && b.status !== 'pending_verification' && b.status !== 'pending_review' && b.status !== 'pending_payment');
+        // Same helper as History — excludes booking_not_finished (Did Not Finalize), pending_*, etc.
+        const active = bookings.filter(isActiveBookingForHistory);
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
         const verification = bookings.filter(b => !b.pending_address_verification && (
             b.status === 'pending_verification' ||
@@ -222,7 +224,7 @@ export const CustomerDetailView = () => {
         ));
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
         const rescheduled = bookings.filter(b => b.status === 'Rescheduled');
-        const historyActive = bookings.filter(isActiveBookingForHistory);
+        const historyActive = active;
         return { activeBookings: active, completedBookings: completed, verificationBookings: verification, cancelledBookings: cancelled, rescheduledBookings: rescheduled, pendingAddressBookings: pendingAddr, historyActiveBookings: historyActive };
     }, [bookings]);
     
@@ -262,10 +264,13 @@ export const CustomerDetailView = () => {
             transition={{ duration: 0.5 }}
             className="container mx-auto py-8 px-4"
         >
-            <Link to="/admin?tab=customers" className="inline-flex items-center mb-6 text-yellow-400 hover:text-yellow-300 transition-colors">
-                <ArrowLeft className="mr-2 h-5 w-5" />
-                Back to Customers
-            </Link>
+            <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+                <Link to="/admin?tab=customers" className="inline-flex items-center text-yellow-400 hover:text-yellow-300 transition-colors">
+                    <ArrowLeft className="mr-2 h-5 w-5" />
+                    Back to Customers
+                </Link>
+                <AdminRemoteLockBar />
+            </div>
 
             <CustomerProfileHeader customer={customer} bookingsCount={bookings.length} />
 

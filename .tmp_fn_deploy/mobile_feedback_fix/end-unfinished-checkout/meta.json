@@ -1,0 +1,14 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "end-unfinished-checkout",
+  "entrypoint_path": "functions/end-unfinished-checkout/index.ts",
+  "verify_jwt": false,
+  "file_names": [
+    "functions/end-unfinished-checkout/index.ts",
+    "functions/end-unfinished-checkout/cors.ts",
+    "functions/_shared/cors.ts",
+    "functions/_shared/notify.ts",
+    "functions/_shared/normalizeSiteUrl.ts",
+    "functions/_shared/earlyLeaveEmail.ts"
+  ]
+}

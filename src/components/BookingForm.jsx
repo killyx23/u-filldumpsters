@@ -30,7 +30,11 @@ import {
   rangeHasBlockedOccupancyNight,
 } from '@/utils/calendarAvailabilityHints';
 import { CalendarNextMonthHint } from '@/components/CalendarNextMonthHint';
-import { isHourlySelfPickupPlan } from '@/utils/availabilityServiceUi';
+import {
+  isHourlySelfPickupPlan,
+  usesDeliveryPickupSlots,
+  usesDeliveryWindowSlots,
+} from '@/utils/availabilityServiceUi';
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
 import { useNavigate } from 'react-router-dom';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
@@ -71,7 +75,9 @@ export const BookingForm = ({
   const [feesLoading, setFeesLoading] = useState(true);
   const [feesError, setFeesError] = useState(null);
   
-  const isDelivery = plan?.id === 2 && deliveryService;
+  const planId = Number(plan?.id);
+  // Plan id 4 is the dump-trailer delivery variant stored on some past bookings.
+  const isDelivery = (planId === 2 && Boolean(deliveryService)) || planId === 4;
   const { getFeeForService } = useDumpFees();
 
   console.group('[BookingForm] Component Initialization');
@@ -82,12 +88,15 @@ export const BookingForm = ({
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
+    const findById = (id) => allPlans.find((p) => Number(p.id) === Number(id));
+
     if (isDelivery) {
-      const variantId = plan?.delivery_variant_service_id ?? 4;
-      return allPlans.find((p) => p.id === variantId) || null;
+      const variantId = Number(plan?.delivery_variant_service_id ?? 4);
+      return findById(variantId) || findById(4) || (planId === 4 ? plan : null);
     }
-    return allPlans.find((p) => p.id === plan?.id) || null;
-  }, [isDelivery, allPlans, plan, loadingPlans]);
+
+    return findById(planId) || plan || null;
+  }, [isDelivery, allPlans, plan, planId, loadingPlans]);
 
   const handleReorderSelect = async (pastBooking) => {
     if (onReorderSelect) onReorderSelect(pastBooking);
@@ -277,16 +286,25 @@ export const BookingForm = ({
     setLoadingAvailability(true);
     const startDate = formatISO(startOfMonth(month), { representation: 'date' });
     const endDate = formatISO(endOfMonth(month), { representation: 'date' });
-    const targetServiceId = currentPlan?.id || plan.id;
+    const serviceId = Number(currentPlan?.id || plan.id);
     
     try {
       const { data, error } = await supabase.functions.invoke('get-availability', {
-        body: { serviceId: plan.id, startDate, endDate, isDelivery }
+        body: {
+          serviceId,
+          startDate,
+          endDate,
+          // When the selected plan is already the delivery variant (id 4), the edge
+          // function must look up that service directly — not resolve via isDelivery.
+          isDelivery: planId === 4 ? false : isDelivery,
+        }
       });
       
       let mergedAvailability = {};
-      if (!error && !data?.error) {
+      if (!error && !data?.error && data?.availability) {
         mergedAvailability = { ...data.availability };
+      } else if (error || data?.error) {
+        console.error('[BookingForm] get-availability failed:', error || data?.error);
       }
       
       setAvailability(prev => ({ ...prev, ...mergedAvailability }));
@@ -302,7 +320,7 @@ export const BookingForm = ({
     } finally {
       setLoadingAvailability(false);
     }
-  }, [plan, isDelivery, currentPlan]);
+  }, [plan, planId, isDelivery, currentPlan]);
   
   useEffect(() => {
     if (!plan) return;
@@ -321,6 +339,12 @@ export const BookingForm = ({
     };
   }, [currentPlan, plan, currentMonth, fetchAvailability]);
   
+  useEffect(() => {
+    // Drop cached days when the effective service changes (reorder / delivery toggle)
+    // so self-pickup pickupSlots cannot mask empty delivery windows.
+    setAvailability({});
+  }, [planId, isDelivery]);
+
   useEffect(() => {
     fetchAvailability(currentMonth);
   }, [fetchAvailability, currentMonth]);
@@ -453,13 +477,26 @@ export const BookingForm = ({
   
   const dropOffDisabledDates = useMemo(() => {
     const dates = [{ before: startOfDay(addDays(new Date(), 1)) }];
+    const hourlyPickup = isHourlySelfPickupPlan(plan, isDelivery);
     for (const dateStr in availability) {
-      if (!availability[dateStr].available) {
+      const day = availability[dateStr];
+      if (!day?.available) {
+        dates.push(parse(dateStr, 'yyyy-MM-dd', new Date()));
+        continue;
+      }
+      // Hourly self-pickup uses fixed read-only times, not picker slots.
+      if (hourlyPickup) continue;
+      // Yard may be "open" but have no delivery/pickup windows left for this service.
+      const dropSlots = usesDeliveryWindowSlots(plan, isDelivery)
+          ? day.deliverySlots || []
+          : day.pickupSlots || day.hourlySlots || [];
+      const hasBookableSlot = dropSlots.some((slot) => slot?.available !== false);
+      if (!hasBookableSlot) {
         dates.push(parse(dateStr, 'yyyy-MM-dd', new Date()));
       }
     }
     return dates;
-  }, [availability]);
+  }, [availability, plan, isDelivery]);
 
   const pickupDisabledDates = useMemo(() => {
     const dropOff = bookingData.dropOffDate ? startOfDay(bookingData.dropOffDate) : null;
@@ -468,8 +505,22 @@ export const BookingForm = ({
       dates.push({ before: dropOff });
       dates.push((date) => isPickupDateBlockedByRange(dropOff, date, availability));
     }
+    const hourlyPickup = isHourlySelfPickupPlan(plan, isDelivery);
+    if (!hourlyPickup) {
+      for (const dateStr in availability) {
+        const day = availability[dateStr];
+        if (!day?.available) continue;
+        const pickupSlots = usesDeliveryPickupSlots(plan, isDelivery)
+            ? day.pickupSlots || []
+            : day.returnSlots || [];
+        const hasBookableSlot = pickupSlots.some((slot) => slot?.available !== false);
+        if (!hasBookableSlot) {
+          dates.push(parse(dateStr, 'yyyy-MM-dd', new Date()));
+        }
+      }
+    }
     return dates;
-  }, [dropOffDisabledDates, bookingData.dropOffDate, availability]);
+  }, [dropOffDisabledDates, bookingData.dropOffDate, availability, plan, isDelivery]);
 
   const showNextMonthHint = useMemo(
     () => isMonthFullyUnavailable(currentMonth, availability, { loading: loadingAvailability }),
@@ -477,7 +528,9 @@ export const BookingForm = ({
   );
   
   const timeSlots = useMemo(() => {
-    if (!currentPlan || !plan) return { dropOff: [], pickup: [] };
+    // Prefer live catalog row, but never block slots solely because allPlans missed a match.
+    const effectivePlan = currentPlan || plan;
+    if (!effectivePlan) return { dropOff: [], pickup: [] };
     const dropOffDateStr = bookingData.dropOffDate ? format(bookingData.dropOffDate, 'yyyy-MM-dd') : null;
     const pickupDateStr = bookingData.pickupDate ? format(bookingData.pickupDate, 'yyyy-MM-dd') : null;
     const dropOffAvail = dropOffDateStr ? availability[dropOffDateStr] : null;
@@ -485,30 +538,70 @@ export const BookingForm = ({
     let dropOffSlots = [];
     let pickupSlots = [];
     
-    const hourlyPickup = isHourlySelfPickupPlan(plan, isDelivery);
+    const hourlyPickup = isHourlySelfPickupPlan(effectivePlan, isDelivery);
+    const useDeliveryDrop = usesDeliveryWindowSlots(effectivePlan, isDelivery);
+    const useDeliveryPick = usesDeliveryPickupSlots(effectivePlan, isDelivery);
 
-    if (dropOffAvail && dropOffAvail.available) {
-      if (plan.id === 1) dropOffSlots = dropOffAvail.deliverySlots || [];
-      else if (hourlyPickup) dropOffSlots = dropOffAvail.pickupSlots || dropOffAvail.hourlySlots || [];
-      else if (plan.id === 2 && isDelivery) dropOffSlots = dropOffAvail.deliverySlots || [];
-      else if (plan.id === 3) dropOffSlots = dropOffAvail.deliverySlots || [];
+    if (dropOffAvail && dropOffAvail.available !== false) {
+      if (useDeliveryDrop) {
+        dropOffSlots = dropOffAvail.deliverySlots || [];
+      } else if (hourlyPickup) {
+        dropOffSlots = dropOffAvail.pickupSlots || dropOffAvail.hourlySlots || [];
+      } else {
+        // Fallback: prefer delivery windows, then pickup/hourly.
+        dropOffSlots =
+          dropOffAvail.deliverySlots?.length
+            ? dropOffAvail.deliverySlots
+            : dropOffAvail.pickupSlots || dropOffAvail.hourlySlots || [];
+      }
     }
-    if (pickupAvail && pickupAvail.available) {
+    if (pickupAvail && pickupAvail.available !== false) {
       // get-availability sources pickupSlots from each service's own calendar columns
       // (delivery-pickup window for window services, pickup/return-by for hourly self-pickup),
       // so no client-side override or direct table query is needed here.
-      if (plan.id === 1) pickupSlots = pickupAvail.pickupSlots || [];
-      else if (hourlyPickup) pickupSlots = pickupAvail.returnSlots || [];
-      else if (plan.id === 2 && isDelivery) pickupSlots = pickupAvail.pickupSlots || [];
+      if (useDeliveryPick) {
+        pickupSlots = pickupAvail.pickupSlots || [];
+      } else if (hourlyPickup) {
+        pickupSlots = pickupAvail.returnSlots || [];
+      } else {
+        pickupSlots = pickupAvail.pickupSlots || pickupAvail.returnSlots || [];
+      }
     }
     
     console.log('[BookingForm] Time slots:', {
+      planId: effectivePlan?.id,
+      isDelivery,
+      dropOffDateStr,
       dropOff: dropOffSlots.length,
-      pickup: pickupSlots.length
+      pickup: pickupSlots.length,
+      dayAvailable: dropOffAvail?.available,
+      hasDeliverySlots: Boolean(dropOffAvail?.deliverySlots?.length),
     });
     
     return { dropOff: dropOffSlots, pickup: pickupSlots };
   }, [bookingData.dropOffDate, bookingData.pickupDate, availability, currentPlan, plan, isDelivery]);
+
+  // Delivery windows are often a single 6–8 AM option — fill it in so reorder
+  // doesn't look like "no times" when the dropdown is still on the placeholder.
+  useEffect(() => {
+    if (isHourlySelfPickupPlan(currentPlan || plan, isDelivery)) return;
+
+    const firstBookable = (slots) =>
+      (slots || []).find((slot) => slot?.available !== false && slot?.value);
+
+    setBookingData((prev) => {
+      let next = prev;
+      const dropSlot = firstBookable(timeSlots.dropOff);
+      if (prev.dropOffDate && dropSlot && !prev.dropOffTimeSlot) {
+        next = { ...next, dropOffTimeSlot: dropSlot.value };
+      }
+      const pickSlot = firstBookable(timeSlots.pickup);
+      if (prev.pickupDate && pickSlot && !prev.pickupTimeSlot) {
+        next = next === prev ? { ...next, pickupTimeSlot: pickSlot.value } : { ...next, pickupTimeSlot: pickSlot.value };
+      }
+      return next;
+    });
+  }, [timeSlots, currentPlan, plan, isDelivery, setBookingData]);
   
   const handleDateSelect = async (field, date) => {
     const newDate = date ? startOfDay(date) : null;
@@ -1450,14 +1543,18 @@ const TimeSlotPicker = ({
   loading
 }) => <div className="md:col-span-1">
     <label className="text-sm font-medium text-white mb-2 block">{label}</label>
-    <Select onValueChange={onValueChange} value={value} disabled={disabled || loading}>
-      <SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder="Select a time" /></SelectTrigger>
+    <Select
+      onValueChange={onValueChange}
+      value={value || undefined}
+      disabled={disabled || loading}
+    >
+      <SelectTrigger className="w-full bg-white/10 border-white/30 text-white"><Clock className="mr-2 h-4 w-4" /><SelectValue placeholder={loading ? 'Loading times…' : (!slots?.length && !disabled ? 'No times for this date' : 'Select a time')} /></SelectTrigger>
       <SelectContent className="bg-gray-800 border-gray-700 text-white">
         {loading ? <SelectItem value="loading" disabled>Loading...</SelectItem> : slots?.length > 0 ? slots.map(slot => (
           <SelectItem key={slot.value} value={slot.value} disabled={slot.available === false}>
             {slot.label || slot.value}{slot.available === false ? ' (Full)' : ''}
           </SelectItem>
-        )) : <SelectItem value="no-slots" disabled>None</SelectItem>}
+        )) : <SelectItem value="no-slots" disabled>No times available — try another date</SelectItem>}
       </SelectContent>
     </Select>
   </div>;

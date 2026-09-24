@@ -110,6 +110,55 @@ function pinStartIso(backdateMinutes = 2): string {
   return clampIgloohomeStart(isoPlusMinutes(-backdateMinutes));
 }
 
+async function logRemoteLockOverride(
+  supabase: ReturnType<typeof createClient>,
+  lockId: string,
+  operation: "lock" | "unlock",
+  jobId: string,
+  jobState: string,
+) {
+  try {
+    let orderId: number | null = null;
+    const { data: presence } = await supabase
+      .from("lock_device_presence")
+      .select("last_order_id")
+      .eq("device_id", lockId)
+      .maybeSingle();
+    if (presence?.last_order_id) orderId = Number(presence.last_order_id);
+
+    if (!orderId) {
+      const { data: pin } = await supabase
+        .from("rental_access_codes")
+        .select("order_id")
+        .eq("lock_id", lockId)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (pin?.order_id) orderId = Number(pin.order_id);
+    }
+
+    if (!orderId) {
+      console.log(`[test-lock-lifecycle] Remote ${operation} job ${jobId} — no booking to log`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("rental_tracking_logs").insert({
+      order_id: orderId,
+      event_type: "admin_override",
+      event_timestamp: now,
+      api_sync_timestamp: now,
+      notes: `Remote ${operation} via bridge (admin). Job ${jobId} — ${jobState}.`,
+    });
+    if (error) {
+      console.error("[test-lock-lifecycle] remote override log failed:", error.message);
+    }
+  } catch (err) {
+    console.error("[test-lock-lifecycle] remote override log exception:", err);
+  }
+}
+
 async function requireAdmin(req: Request) {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return { error: "Missing Authorization", status: 401 as const };
@@ -525,8 +574,66 @@ Deno.serve(async (req) => {
       }
 
       const outcome = await waitForJobCompletion(oauth.token, jobId, 8, 2500);
+      await logRemoteLockOverride(supabase, lockId, operation, jobId, outcome.state);
+
+      // Bridge accepted the job (completed or still pending). Record the open/close
+      // ourselves so last opened / last closed update without waiting on webhook type 5
+      // or a slow unlock poll. Unlock often stays pending past ~20s even though the
+      // padlock already opened. Do NOT call applyLockEvent — remote unlock must not
+      // mark Rented/Returned. Skip only on hard job failure.
+      let lastOpenedAt: string | null = null;
+      let lastClosedAt: string | null = null;
+      let deviceEventsStored = 0;
+      let writtenAt: string | null = null;
+      if (outcome.state === "completed" || outcome.state === "pending") {
+        const nowMs = Date.now();
+        writtenAt = new Date(nowMs).toISOString();
+        const rawEntry = {
+          logType: operation === "lock" ? 37 : 11, // Bluetooth lock / unlock
+          entryDate: Math.floor(nowMs / 1000),
+          operationId: String(jobId),
+          deviceId: lockId,
+          keyId: `remote-${operation}`,
+        };
+        const parsed = parseActivityLogEntry(rawEntry);
+        if (parsed) {
+          const deviceTracking = await recordDeviceEvents(supabase, [parsed], {
+            deviceId: lockId,
+            bridgeId: bridgeId || null,
+          });
+          deviceEventsStored = deviceTracking.stored;
+          if (deviceTracking.stored > 0 || deviceTracking.skippedDuplicates > 0) {
+            writtenAt = parsed.eventTimestamp;
+          }
+        } else {
+          console.error(
+            "[test-lock-lifecycle] Could not parse remote lock/unlock activity entry",
+            rawEntry,
+          );
+          writtenAt = null;
+        }
+
+        const { data: presence } = await supabase
+          .from("lock_device_presence")
+          .select("last_opened_at, last_closed_at")
+          .eq("device_id", lockId)
+          .maybeSingle();
+        lastOpenedAt = presence?.last_opened_at ?? null;
+        lastClosedAt = presence?.last_closed_at ?? null;
+        // Prefer the timestamp we just wrote if the view is somehow behind.
+        if (writtenAt) {
+          if (operation === "unlock") {
+            lastOpenedAt = writtenAt;
+          } else {
+            lastClosedAt = writtenAt;
+          }
+        }
+      }
+
+      // Pending = job accepted by Igloohome; treat as success for admin remote controls.
+      const accepted = outcome.state === "completed" || outcome.state === "pending";
       return jsonResponse({
-        success: outcome.state === "completed",
+        success: accepted,
         action,
         jobType,
         jobId,
@@ -534,6 +641,9 @@ Deno.serve(async (req) => {
         grantedScopes,
         polls: outcome.polls,
         raw: outcome.raw,
+        deviceEventsStored,
+        lastOpenedAt,
+        lastClosedAt,
         webhookExpected: "Signed event.type 3 (Job Complete)",
       }, outcome.state === "failed" ? 502 : 200);
     }

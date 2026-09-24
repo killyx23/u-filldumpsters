@@ -10,6 +10,7 @@ import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoy
 import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
 export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onStartNewOrder }) => {
   const [status, setStatus] = useState('idle'); // idle, sending, sent, verifying, authenticated
@@ -40,7 +41,7 @@ export const ReturningCustomerSignIn = ({ isOpen, onClose, onReorderSelect, onSt
           name: 'Valued Customer',
           pending_customer_id: null,
           purpose: 'returning',
-          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+          site_url: getAppOrigin(),
         }
       });
 

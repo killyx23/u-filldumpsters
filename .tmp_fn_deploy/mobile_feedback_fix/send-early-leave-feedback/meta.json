@@ -1,0 +1,14 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "send-early-leave-feedback",
+  "entrypoint_path": "functions/send-early-leave-feedback/index.ts",
+  "verify_jwt": true,
+  "file_names": [
+    "functions/send-early-leave-feedback/index.ts",
+    "functions/send-early-leave-feedback/cors.ts",
+    "functions/_shared/cors.ts",
+    "functions/_shared/notify.ts",
+    "functions/_shared/normalizeSiteUrl.ts",
+    "functions/_shared/earlyLeaveEmail.ts"
+  ]
+}

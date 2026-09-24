@@ -444,6 +444,33 @@ Deno.serve(async (req) => {
       console.error(`[Request Booking Change] chat_messages insert failed:`, chatError.message);
     }
 
+    try {
+      const { error: emailError } = await supabaseAdmin.functions.invoke(
+        "send-reschedule-confirmation-email",
+        {
+          body: {
+            bookingId: numericBookingId,
+            emailType: "under_review",
+          },
+        },
+      );
+      if (emailError) {
+        console.warn(
+          `[Request Booking Change] under_review email failed for booking ${numericBookingId}:`,
+          emailError.message || emailError,
+        );
+      } else {
+        console.log(
+          `[Request Booking Change] under_review email sent for booking ${numericBookingId}`,
+        );
+      }
+    } catch (emailErr) {
+      console.warn(
+        `[Request Booking Change] under_review email threw for booking ${numericBookingId}:`,
+        emailErr instanceof Error ? emailErr.message : String(emailErr),
+      );
+    }
+
     console.log(`[Request Booking Change] Successfully processed request for booking ${numericBookingId}`);
 
     return new Response(

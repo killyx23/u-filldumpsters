@@ -9,6 +9,7 @@ import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
 export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect }) => {
   const [mode, setMode] = useState('input'); // input, sending, sent, verifying, authenticated
@@ -46,7 +47,7 @@ export const ReturningCustomerSignInSection = ({ onEmailChange, onReorderSelect 
           name: 'Valued Customer',
           pending_customer_id: null,
           purpose: 'returning',
-          site_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+          site_url: getAppOrigin(),
         }
       });
 

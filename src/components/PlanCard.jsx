@@ -82,9 +82,9 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
 
     const displayDescription =
         plan?.displayDescription || plan?.homepage_description || plan?.description || '';
-    const displayPrice = plan?.displayPrice ?? plan?.homepage_price ?? plan?.base_price ?? 0;
+    const displayPrice = plan?.displayPrice ?? plan?.base_price ?? 0;
     const displayPriceUnit =
-        plan?.displayPriceUnit || plan?.homepage_price_unit || plan?.price_unit || '';
+        plan?.displayPriceUnit || plan?.price_unit || '';
     const planName = formatCustomerFacingPlanName(plan?.displayName || plan?.name || plan?.highlight?.text) || 'Service Plan';
 
     const displayDeliveryFee =

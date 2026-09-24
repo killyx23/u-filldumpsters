@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Loader2, Lock, Unlock } from 'lucide-react';
 import { invokeLockLifecycle } from '@/lib/lockLifecycleInvoke';
+import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
 
 const PENDING_ACTION = {
   remote_unlock: {
@@ -33,7 +34,13 @@ const PENDING_ACTION = {
   },
 };
 
-export default function RemoteBridgeControls({ bridgeOnline, onSuccess, compact = false }) {
+export default function RemoteBridgeControls({
+  bridgeOnline,
+  onSuccess,
+  compact = false,
+  lastOpenedAt = null,
+  lastClosedAt = null,
+}) {
   const [busy, setBusy] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
 
@@ -45,7 +52,9 @@ export default function RemoteBridgeControls({ bridgeOnline, onSuccess, compact 
         const data = await invokeLockLifecycle(action);
         toast({
           title: action === 'remote_unlock' ? 'Remote unlock sent' : 'Remote lock sent',
-          description: `Job ${data.jobId} — ${data.jobState || 'completed'}.`,
+          description: `Job ${data.jobId} — ${data.jobState || 'completed'}${
+            data.jobState === 'pending' ? ' (bridge still finishing)' : ''
+          }.`,
         });
         onSuccess?.(data);
       } catch (err) {
@@ -64,48 +73,70 @@ export default function RemoteBridgeControls({ bridgeOnline, onSuccess, compact 
   const bridgeOffline = bridgeOnline === false;
   const disabled = !!busy || bridgeOffline;
 
+  const buttons = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        type="button"
+        className="bg-orange-600 hover:bg-orange-700"
+        disabled={disabled}
+        onClick={() => setPendingAction('remote_unlock')}
+      >
+        {busy === 'remote_unlock' ? (
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        ) : (
+          <Unlock className="h-4 w-4 mr-2" />
+        )}
+        Remote Unlock
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="border-slate-500/50 text-slate-200 hover:bg-slate-800"
+        disabled={disabled}
+        onClick={() => setPendingAction('remote_lock')}
+      >
+        {busy === 'remote_lock' ? (
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        ) : (
+          <Lock className="h-4 w-4 mr-2" />
+        )}
+        Remote Lock
+      </Button>
+    </div>
+  );
+
   return (
     <>
-      <div className={compact ? 'space-y-2' : 'rounded-lg border border-white/10 bg-black/20 p-4 space-y-3'}>
-        {!compact && <p className="text-sm font-medium text-slate-200">Remote bridge controls</p>}
-        <p className="text-xs text-slate-500">
-          Opens or closes the padlock via the Wi-Fi bridge. Does not use a booking PIN — will not
-          mark a rental Rented or Returned.
-        </p>
+      <div className={compact ? 'rounded-lg border border-white/10 bg-black/20 p-3 space-y-2' : 'rounded-lg border border-white/10 bg-black/20 p-4 space-y-3'}>
+        {!compact && (
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-sm font-medium text-slate-200">Remote bridge controls</p>
+            <LockOpenCloseTimes
+              lastOpenedAt={lastOpenedAt}
+              lastClosedAt={lastClosedAt}
+              align="right"
+            />
+          </div>
+        )}
+        {compact && (
+          <LockOpenCloseTimes
+            lastOpenedAt={lastOpenedAt}
+            lastClosedAt={lastClosedAt}
+            align="right"
+          />
+        )}
+        {!compact && (
+          <p className="text-xs text-slate-500">
+            Opens or closes the padlock via the Wi-Fi bridge. Does not use a booking PIN — will not
+            mark a rental Rented or Returned.
+          </p>
+        )}
         {bridgeOffline && (
-          <p className="text-xs text-amber-300/90">
+          <p className={`text-xs text-amber-300/90 ${compact ? 'text-right' : ''}`}>
             Bridge is offline. Remote jobs cannot complete until the bridge reconnects.
           </p>
         )}
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            className="bg-orange-600 hover:bg-orange-700"
-            disabled={disabled}
-            onClick={() => setPendingAction('remote_unlock')}
-          >
-            {busy === 'remote_unlock' ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <Unlock className="h-4 w-4 mr-2" />
-            )}
-            Remote Unlock
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="border-slate-500/50 text-slate-200 hover:bg-slate-800"
-            disabled={disabled}
-            onClick={() => setPendingAction('remote_lock')}
-          >
-            {busy === 'remote_lock' ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <Lock className="h-4 w-4 mr-2" />
-            )}
-            Remote Lock
-          </Button>
-        </div>
+        {buttons}
       </div>
 
       <AlertDialog open={!!pendingAction} onOpenChange={(open) => !open && setPendingAction(null)}>

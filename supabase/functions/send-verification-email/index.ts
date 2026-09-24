@@ -1,6 +1,6 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { normalizeSiteUrl, resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 
 const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
@@ -12,6 +12,37 @@ const DEFAULT_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Escape & in href so email clients do not truncate query strings. */
 function escapeHref(url: string): string {
   return String(url).replace(/&/g, "&amp;");
+}
+
+/** True when this function talks to local/Docker Supabase (codes live in that DB). */
+function isLocalSupabaseRuntime(): boolean {
+  const url = (Deno.env.get("SUPABASE_URL") || "").trim();
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return (
+      host === "kong" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "host.docker.internal" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal")
+    );
+  } catch {
+    return /kong|localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
+/**
+ * Verification links must open the same app that stored the code.
+ * Local runtime: keep the booking page origin (do not rewrite to production).
+ * Hosted runtime: use the phone-reachable public site.
+ */
+function resolveVerificationSiteUrl(site_url?: string | null): string {
+  if (isLocalSupabaseRuntime()) {
+    return normalizeSiteUrl(site_url);
+  }
+  return resolvePublicSiteUrl(site_url);
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
@@ -92,7 +123,7 @@ Deno.serve(async (req)=>{
       console.error("[send-verification-email] Database error:", dbError);
       throw new Error("Failed to store verification code");
     }
-    const siteUrl = resolvePublicSiteUrl(site_url);
+    const siteUrl = resolveVerificationSiteUrl(site_url);
     const emailLower = email.toLowerCase();
     // checkout (pending booking) → /verify-email
     // portal (forgot login) → /customer-login recovery
