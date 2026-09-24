@@ -233,6 +233,92 @@ const generateRescheduleEmailHTML = (opts: {
 </html>`;
 };
 
+const generateRescheduleUnderReviewEmailHTML = (opts: {
+  booking: Record<string, unknown>;
+  customerName: string;
+  snapshot: Record<string, unknown> | null;
+  siteUrl: string;
+}) => {
+  const { booking, customerName, snapshot, siteUrl } = opts;
+  const source = (snapshot || {}) as Record<string, unknown>;
+
+  const currentDrop = formatDateTime(
+    source.original_drop_off_date || booking.drop_off_date,
+    source.original_drop_off_time || booking.drop_off_time_slot,
+  );
+  const currentPick = formatDateTime(
+    source.original_pickup_date || booking.pickup_date,
+    source.original_pickup_time || booking.pickup_time_slot,
+  );
+  const requestedDrop = formatDateTime(source.new_drop_off_date, source.new_drop_off_time);
+  const requestedPick = formatDateTime(source.new_pickup_date, source.new_pickup_time);
+  const hasRequestedSchedule =
+    Boolean(source.new_drop_off_date) || Boolean(source.new_pickup_date);
+
+  const serviceName = formatCustomerFacingPlanName(
+    String(
+      source.new_service_name ||
+        source.original_service_name ||
+        (booking.plan as Record<string, unknown>)?.name ||
+        "N/A",
+    ),
+  );
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Reschedule Request Under Review</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:640px;margin:24px auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+    <div style="background:linear-gradient(135deg,#1e3a8a 0%,#3b82f6 100%);padding:28px 24px;color:#fff;text-align:center;">
+      <h1 style="margin:0;font-size:24px;">Reschedule Request Under Review</h1>
+      <p style="margin:10px 0 0;opacity:0.95;font-size:16px;">Booking #${booking.id}</p>
+    </div>
+    <div style="padding:28px 24px;">
+      <div style="background-color:#fef3c7;border-left:4px solid #d97706;padding:15px;border-radius:4px;margin-bottom:24px;">
+        <p style="margin:0;color:#92400e;font-weight:bold;">We've received your reschedule request and it is currently under review.</p>
+      </div>
+      <p style="color:#374151;font-size:15px;line-height:1.5;">Hi ${customerName},</p>
+      <p style="color:#374151;font-size:15px;line-height:1.5;">
+        Thank you for submitting a reschedule request for Booking #${booking.id}. Our scheduling team is reviewing your request
+        to confirm availability and any pricing updates.
+      </p>
+      <p style="color:#374151;font-size:15px;line-height:1.5;">
+        <strong>Your current booking remains in place until this request is approved.</strong>
+        We will email you as soon as a decision is made, or if we need any additional information from you.
+      </p>
+
+      ${sectionBlock("Service", [["Service", serviceName]])}
+      ${sectionBlock("Current schedule", [
+        ["Start", currentDrop],
+        ["End", currentPick],
+      ])}
+      ${
+        hasRequestedSchedule
+          ? sectionBlock("Requested schedule", [
+              ["Start", requestedDrop !== "N/A" ? requestedDrop : ""],
+              ["End", requestedPick !== "N/A" ? requestedPick : ""],
+            ])
+          : ""
+      }
+
+      <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
+        <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
+          You can track this request anytime in your Customer Portal under Bookings and Communication.
+          ${siteUrl ? ` Portal: <a href="${siteUrl}/customer-portal" style="color:#1d4ed8;">${siteUrl}/customer-portal</a>` : ""}
+        </p>
+      </div>
+      <div style="margin-top:24px;text-align:center;color:#6b7280;font-size:13px;">
+        Questions? Contact support@u-filldumpsters.com
+      </div>
+    </div>
+    <div style="background:#111827;padding:16px;text-align:center;color:#9ca3af;font-size:12px;">
+      © ${new Date().getFullYear()} U-Fill Dumpsters LLC. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -243,6 +329,10 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const bookingId = body.bookingId ?? body.booking_id;
     if (!bookingId) throw new Error("bookingId is required");
+
+    const emailTypeRaw = String(body.emailType ?? body.email_type ?? "approved").toLowerCase();
+    const isUnderReview =
+      emailTypeRaw === "under_review" || emailTypeRaw === "reschedule_under_review";
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     const { data: booking, error } = await supabase
@@ -264,6 +354,55 @@ Deno.serve(async (req) => {
       [booking.customers?.first_name, booking.customers?.last_name].filter(Boolean).join(" ") ||
       "Customer";
 
+    const history = Array.isArray(booking.reschedule_history) ? booking.reschedule_history : [];
+    const pendingSnapshot =
+      [...history].reverse().find(
+        (e: Record<string, unknown>) =>
+          e?.type === "reschedule_request" && e?.status === "pending",
+      ) ||
+      [...history].reverse().find((e: Record<string, unknown>) => e?.type === "reschedule_request") ||
+      null;
+
+    const siteUrl = normalizeSiteUrl(body.site_url);
+
+    if (isUnderReview) {
+      const underReviewHtml = generateRescheduleUnderReviewEmailHTML({
+        booking,
+        customerName,
+        snapshot: pendingSnapshot,
+        siteUrl,
+      });
+      const underReviewSubject =
+        `Reschedule Request Under Review #${booking.id} — U-Fill Dumpsters`;
+      console.log(
+        `[send-reschedule-confirmation-email] Sending under_review to ${recipientEmail} for booking ${booking.id}`,
+      );
+      const underReviewResult = await sendEmailWithRetry(
+        recipientEmail,
+        underReviewSubject,
+        underReviewHtml,
+      );
+      if (!underReviewResult.success) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: underReviewResult.error || "Failed to send under-review email",
+          }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Reschedule under-review email sent.",
+          provider: underReviewResult.provider,
+          recipient: recipientEmail,
+          email_type: "under_review",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const paymentDelta = parseJsonField(booking.payment_delta_details);
     const originalTotal = Number(
       body.originalTotal ?? paymentDelta.original_total_price ?? booking.total_price ?? 0,
@@ -275,13 +414,11 @@ Deno.serve(async (req) => {
       body.stripeTransactionId ?? paymentDelta.stripe_transaction_id ?? null;
     const amountProcessed = Number(body.amountProcessed ?? paymentDelta.amount_processed ?? Math.abs(delta));
 
-    const history = Array.isArray(booking.reschedule_history) ? booking.reschedule_history : [];
     const snapshot =
       body.approvalSnapshot ||
-      [...history].reverse().find((e: Record<string, unknown>) => e?.type === "reschedule_request") ||
+      pendingSnapshot ||
       null;
 
-    const siteUrl = normalizeSiteUrl(body.site_url);
     const html = generateRescheduleEmailHTML({
       booking,
       customerName,
@@ -311,6 +448,7 @@ Deno.serve(async (req) => {
         message: "Reschedule confirmation email sent.",
         provider: emailResult.provider,
         recipient: recipientEmail,
+        email_type: "approved",
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

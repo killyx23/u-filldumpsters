@@ -1,0 +1,68 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "igloohome-webhook",
+  "entrypoint_path": "functions/igloohome-webhook/index.ts",
+  "verify_jwt": true,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/cors.ts",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/deliveryBooking.ts",
+      "bytes": 2208
+    },
+    {
+      "name": "functions/_shared/iglooActivity.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/iglooActivity.ts",
+      "bytes": 16261
+    },
+    {
+      "name": "functions/_shared/iglooWebhookAuth.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/iglooWebhookAuth.ts",
+      "bytes": 7333
+    },
+    {
+      "name": "functions/_shared/lockAlerts.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockAlerts.ts",
+      "bytes": 2681
+    },
+    {
+      "name": "functions/_shared/lockDeviceState.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockDeviceState.ts",
+      "bytes": 6179
+    },
+    {
+      "name": "functions/_shared/lockEventState.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockEventState.ts",
+      "bytes": 8557
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/notify.ts",
+      "bytes": 7044
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/parseBookingTimeSlot.ts",
+      "bytes": 5568
+    },
+    {
+      "name": "functions/_shared/pinTiming.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/pinTiming.ts",
+      "bytes": 9256
+    },
+    {
+      "name": "functions/igloohome-webhook/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/igloohome-webhook/cors.ts",
+      "bytes": 53
+    },
+    {
+      "name": "functions/igloohome-webhook/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/igloohome-webhook/index.ts",
+      "bytes": 15200
+    }
+  ]
+}

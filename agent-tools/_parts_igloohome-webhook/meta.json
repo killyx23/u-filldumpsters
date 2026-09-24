@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "igloohome-webhook", "entrypoint_path": "functions/igloohome-webhook/index.ts", "verify_jwt": true}

@@ -17,15 +17,18 @@ import {
   addCalendarDays,
   addGraceHour,
   buildBookingDateUTC,
+  canIssueHourlyAlgoPin,
   denverCalendarDate,
-  formatAlgoPinStartIso,
+  getHourlyAlgoPinWindow,
   getPinActivationStart,
   isBookingEnded,
   isDropOffTodayOrTomorrow,
   isDueForFirstPinNotify,
   isDueForPinReminder,
+  PIN_REVOKE_STATUSES,
 } from "../_shared/pinTiming.ts";
-import { ensurePinOnLock, pollJob } from "../_shared/lockPin.ts";
+import { ensurePinOnLock, pollJob, deletePinVerified } from "../_shared/lockPin.ts";
+import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 import { notifyPinReady, notifyPinReminder } from "../_shared/pinNotify.ts";
 import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
@@ -49,6 +52,19 @@ function denverHour(now: Date = new Date()): number {
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
+
+type PinFallbackResult = {
+  success: boolean;
+  pin?: string;
+  pinId?: string;
+  pinType?: "bridge_proxied" | "algopin";
+  startDate: string;
+  endDate: string;
+  lockConfirmed?: boolean;
+  /** True when the row was already inserted (AlgoPIN path self-persists). */
+  alreadyPersisted?: boolean;
+  error?: string;
+};
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -109,10 +125,22 @@ async function runPinNotifyPass(
     const endTime = String(activePin.end_time || "");
 
     if (isDueForFirstPinNotify(booking as never) && !booking.pin_notification_sent_at) {
+      const { data: fresh } = await supabase
+        .from("bookings")
+        .select("status")
+        .eq("id", booking.id)
+        .maybeSingle();
+      if (fresh?.status !== "Confirmed") continue;
       await notifyPinReady(supabase, booking, pin, startTime, endTime);
       first.push({ bookingId: booking.id });
     }
     if (isDueForPinReminder(booking as never)) {
+      const { data: fresh } = await supabase
+        .from("bookings")
+        .select("status")
+        .eq("id", booking.id)
+        .maybeSingle();
+      if (fresh?.status !== "Confirmed") continue;
       await notifyPinReminder(supabase, booking, pin, startTime, endTime);
       reminders.push({ bookingId: booking.id });
     }
@@ -134,20 +162,7 @@ async function isLockOnline(accessToken: string, lockId: string): Promise<boolea
 }
 
 async function deletePinFromLock(accessToken: string, lockId: string, bridgeId: string, pin: string) {
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ jobType: 5, jobData: { pin } }),
-  });
-  const body = await readResponse(res);
-  if (!res.ok && res.status !== 201) {
-    return { success: false, error: `Delete failed with status ${res.status}` };
-  }
-  return { success: true };
+  return deletePinVerified(accessToken, lockId, bridgeId, pin, 45_000);
 }
 
 async function tryBridgeDurationPin(
@@ -176,68 +191,13 @@ async function tryBridgeDurationPin(
   });
 }
 
-async function createAlgoPin(
-  accessToken: string,
-  lockId: string,
-  dropOffDate: string,
-  dropOffTimeSlot: string | null | undefined,
-  pickupDate: string,
-  orderId: number,
-  labelSuffix = "",
-) {
-  const startDateHourOnly = formatAlgoPinStartIso(
-    buildBookingDateUTC(dropOffDate, dropOffTimeSlot, 12),
-  );
-  const startUnix = new Date(startDateHourOnly).getTime() / 1000;
-  const endUnix = new Date(pickupDate + "T23:59:59Z").getTime() / 1000;
-  const variance = Math.min(5, Math.max(1, Math.ceil((endUnix - startUnix) / 86400)));
-  const payload = {
-    accessName: `Dump Trailer Rental - Order #${orderId}${labelSuffix}`,
-    startDate: startDateHourOnly,
-    variance,
-  };
-  console.log(`${LOG} Creating AlgoPIN for order #${orderId}:`, payload);
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/algopin/onetime`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = await readResponse(res);
-  if (!res.ok && res.status !== 201) {
-    const detail = body.json?.message || body.json?.error || body.json?.errorMessage || body.text;
-    console.warn(
-      `${LOG} AlgoPIN HTTP ${res.status} for order #${orderId}:`,
-      typeof detail === "string" ? detail.slice(0, 400) : detail,
-    );
-    return {
-      success: false,
-      error: `AlgoPIN failed with status ${res.status}${detail ? `: ${String(detail).slice(0, 200)}` : ""}`,
-    };
-  }
-  const pin = body.json?.pin || body.json?.access_code || body.json?.code || body.json?.data?.pin || "";
-  if (!pin) {
-    console.warn(`${LOG} AlgoPIN OK but no pin field for order #${orderId}:`, body.json ?? body.text);
-    return { success: false, error: "AlgoPIN succeeded but no PIN value in response" };
-  }
-  return {
-    success: true,
-    pin,
-    pinId: body.json?.pinId || body.json?.id || "",
-    startDate: startDateHourOnly,
-  };
-}
-
 async function generatePinWithFallback(
   accessToken: string,
   lockId: string,
   bridgeId: string,
   supabase: SupabaseClient,
   booking: Record<string, unknown>,
-) {
+): Promise<PinFallbackResult> {
   const orderId = booking.id as number;
   const startDate = getPinActivationStart(booking as never);
   const endDate = addGraceHour(
@@ -252,33 +212,82 @@ async function generatePinWithFallback(
       success: true,
       pin: bridgeResult.pin,
       pinId: bridgeResult.jobId,
-      pinType: "bridge_proxied" as const,
+      pinType: "bridge_proxied",
       startDate,
       endDate,
       lockConfirmed: bridgeResult.lockConfirmed,
+      alreadyPersisted: false,
     };
   }
 
-  console.warn(`${LOG} Bridge failed for order #${orderId}, trying AlgoPIN. Error: ${bridgeResult.error}`);
-  const algoResult = await createAlgoPin(
+  console.warn(`${LOG} Bridge failed for order #${orderId}, trying hourly AlgoPIN. Error: ${bridgeResult.error}`);
+  if (!canIssueHourlyAlgoPin(booking as never)) {
+    return {
+      success: false,
+      error: `${bridgeResult.error} | Hourly AlgoPIN deferred until 12 hours before pickup`,
+      startDate,
+      endDate,
+    };
+  }
+  const algoWindow = getHourlyAlgoPinWindow(booking as never);
+  const algoResult = await createAlgoPinWithVariance({
+    supabase,
     accessToken,
     lockId,
-    String(booking.drop_off_date ?? ""),
-    booking.drop_off_time_slot as string | null,
-    String(booking.pickup_date ?? ""),
-    orderId,
-  );
+    startDate: algoWindow.startDate,
+    endDate: algoWindow.endDate,
+    accessName: `${accessName} (AlgoPIN)`,
+    insertRow: {
+      order_id: orderId,
+      customer_email: booking.email,
+      customer_phone: booking.phone || "",
+      status: "active",
+      lock_deleted_at: null,
+      lock_confirmed_at: new Date().toISOString(),
+      confirm_attempts: 0,
+    },
+  });
+
   if (algoResult.success) {
+    console.log(`${LOG} ✓ AlgoPIN succeeded for order #${orderId} (variance ${algoResult.variance})`);
     return {
       success: true,
       pin: algoResult.pin,
       pinId: algoResult.pinId,
-      pinType: "algopin" as const,
-      startDate,
-      endDate,
+      pinType: "algopin",
+      startDate: algoResult.startDate,
+      endDate: algoResult.endDate,
       lockConfirmed: true,
+      alreadyPersisted: true,
     };
   }
+
+  if (algoResult.exhausted) {
+    console.warn(`${LOG} AlgoPIN variance slots exhausted for order #${orderId} — retrying bridge once more`);
+    const retryBridge = await tryBridgeDurationPin(accessToken, lockId, bridgeId, supabase, booking, {
+      skipClear: true,
+    });
+    if (retryBridge.lockConfirmed || retryBridge.jobId) {
+      return {
+        success: true,
+        pin: retryBridge.pin,
+        pinId: retryBridge.jobId,
+        pinType: "bridge_proxied",
+        startDate,
+        endDate,
+        lockConfirmed: retryBridge.lockConfirmed,
+        alreadyPersisted: false,
+      };
+    }
+    return {
+      success: false,
+      error:
+        `Bridge: ${bridgeResult.error} | AlgoPIN: exhausted (all variance slots active) | Bridge retry: ${retryBridge.error}`,
+      startDate,
+      endDate,
+    };
+  }
+
   return {
     success: false,
     error: `Bridge: ${bridgeResult.error} | AlgoPIN: ${algoResult.error}`,
@@ -380,23 +389,24 @@ Deno.serve(async (req) => {
     };
 
     // ================================================================
-    // PHASE 1: DELETE PINs for cancelled / pending_review bookings
+    // PHASE 1: DELETE PINs for cancelled / pending_review / cancellation_pending
     // ================================================================
     console.log(`${LOG} === PHASE 1: DELETIONS ===`);
     let deleteQuery = supabase
       .from("rental_access_codes")
-      .select("id, order_id, access_pin, pin_type, bookings!inner(id, status)")
+      .select("id, order_id, access_pin, pin_type, status, bookings!inner(id, status)")
       .eq("status", "active")
-      .in("bookings.status", ["Cancelled", "pending_review"]);
+      .in("bookings.status", [...PIN_REVOKE_STATUSES]);
     if (focusOrderId) deleteQuery = deleteQuery.eq("order_id", focusOrderId);
     const { data: activePinsToDelete } = await deleteQuery;
 
     let pendingQuery = supabase
       .from("rental_access_codes")
-      .select("id, order_id, access_pin, pin_type, bookings!inner(id, status)")
+      .select("id, order_id, access_pin, pin_type, status, bookings!inner(id, status)")
       .eq("status", "expired")
+      .neq("pin_type", "algopin")
       .is("lock_deleted_at", null)
-      .in("bookings.status", ["Cancelled", "pending_review"]);
+      .in("bookings.status", [...PIN_REVOKE_STATUSES]);
     if (focusOrderId) pendingQuery = pendingQuery.eq("order_id", focusOrderId);
     const { data: pendingLockDeletes } = await pendingQuery;
 
@@ -406,9 +416,13 @@ Deno.serve(async (req) => {
     const deleteResults: Array<Record<string, unknown>> = [];
     for (const record of allPinsToProcess) {
       if (record.pin_type === "algopin") {
+        if (record.status === "expired") {
+          deleteResults.push({ bookingId: record.order_id, success: true, method: "algopin_natural_expiry" });
+          continue;
+        }
         await supabase
           .from("rental_access_codes")
-          .update({ status: "expired", lock_deleted_at: now, notified_at: now })
+          .update({ status: "expired", notified_at: now })
           .eq("id", record.id);
         deleteResults.push({ bookingId: record.order_id, success: true, method: "algopin_natural_expiry" });
         continue;
@@ -416,7 +430,7 @@ Deno.serve(async (req) => {
       await pace();
       try {
         const result = await deletePinFromLock(accessToken, lockId, bridgeId, record.access_pin);
-        if (!result.success) {
+        if (!result.ok) {
           await supabase.from("rental_access_codes").update({ status: "expired", notified_at: now }).eq(
             "id",
             record.id,
@@ -489,29 +503,34 @@ Deno.serve(async (req) => {
         }
         const startTimeUTC = pinResult.startDate;
         const endTimeUTC = pinResult.endDate;
-        await supabase
-          .from("rental_access_codes")
-          .update({ status: "expired" })
-          .eq("order_id", booking.id)
-          .eq("status", "active");
-        const { error: insertError } = await supabase.from("rental_access_codes").insert({
-          order_id: booking.id,
-          customer_email: booking.email,
-          customer_phone: booking.phone || "",
-          access_pin: pinResult.pin,
-          pin_id: pinResult.pinId || "",
-          pin_type: pinResult.pinType,
-          lock_id: lockId,
-          start_time: startTimeUTC,
-          end_time: endTimeUTC,
-          status: "active",
-          lock_deleted_at: null,
-          lock_confirmed_at: pinResult.lockConfirmed ? now : null,
-          confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
-        });
-        if (insertError) {
-          generateResults.push({ bookingId: booking.id, success: false, error: insertError.message });
-          continue;
+        // AlgoPIN rows are already persisted by createAlgoPinWithVariance (its insert
+        // is what lets it detect and retry past a variance-collision race) — only
+        // bridge rows still need to be inserted here.
+        if (!pinResult.alreadyPersisted) {
+          await supabase
+            .from("rental_access_codes")
+            .update({ status: "expired" })
+            .eq("order_id", booking.id)
+            .eq("status", "active");
+          const { error: insertError } = await supabase.from("rental_access_codes").insert({
+            order_id: booking.id,
+            customer_email: booking.email,
+            customer_phone: booking.phone || "",
+            access_pin: pinResult.pin,
+            pin_id: pinResult.pinId || "",
+            pin_type: pinResult.pinType,
+            lock_id: lockId,
+            start_time: startTimeUTC,
+            end_time: endTimeUTC,
+            status: "active",
+            lock_deleted_at: null,
+            lock_confirmed_at: pinResult.lockConfirmed ? now : null,
+            confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
+          });
+          if (insertError) {
+            generateResults.push({ bookingId: booking.id, success: false, error: insertError.message });
+            continue;
+          }
         }
         await supabase.from("bookings").update({ pin_generated_at: now }).eq("id", booking.id);
         generateResults.push({
@@ -562,29 +581,39 @@ Deno.serve(async (req) => {
           if (pinResult.success) {
             const startTimeUTC = pinResult.startDate;
             const endTimeUTC = pinResult.endDate;
-            const { error: insertError } = await supabase.from("rental_access_codes").insert({
-              order_id: orderId,
-              customer_email: booking.email,
-              customer_phone: booking.phone || "",
-              access_pin: pinResult.pin,
-              pin_id: pinResult.pinId || "",
-              pin_type: pinResult.pinType,
-              lock_id: lockId,
-              start_time: startTimeUTC,
-              end_time: endTimeUTC,
-              status: "active",
-              lock_deleted_at: null,
-              lock_confirmed_at: pinResult.lockConfirmed ? now : null,
-              confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
-            });
-            if (!insertError) {
+            // AlgoPIN rows are already persisted by createAlgoPinWithVariance — only
+            // bridge rows still need to be inserted here.
+            if (pinResult.alreadyPersisted) {
               confirmResults.push({
                 orderId,
                 action: "regenerated_missing_active",
                 pinType: pinResult.pinType,
               });
             } else {
-              confirmResults.push({ orderId, action: "regenerate_failed", error: insertError.message });
+              const { error: insertError } = await supabase.from("rental_access_codes").insert({
+                order_id: orderId,
+                customer_email: booking.email,
+                customer_phone: booking.phone || "",
+                access_pin: pinResult.pin,
+                pin_id: pinResult.pinId || "",
+                pin_type: pinResult.pinType,
+                lock_id: lockId,
+                start_time: startTimeUTC,
+                end_time: endTimeUTC,
+                status: "active",
+                lock_deleted_at: null,
+                lock_confirmed_at: pinResult.lockConfirmed ? now : null,
+                confirm_attempts: pinResult.lockConfirmed ? 0 : 1,
+              });
+              if (!insertError) {
+                confirmResults.push({
+                  orderId,
+                  action: "regenerated_missing_active",
+                  pinType: pinResult.pinType,
+                });
+              } else {
+                confirmResults.push({ orderId, action: "regenerate_failed", error: insertError.message });
+              }
             }
           } else {
             confirmResults.push({ orderId, action: "regenerate_failed", error: pinResult.error });
@@ -674,42 +703,43 @@ Deno.serve(async (req) => {
       const msToPickup = dropOff - nowMs;
       const needAlgo = attempts >= ALERT_ATTEMPTS || ageMs >= RETRY_BUDGET_MS || msToPickup <= TWO_HOURS_MS;
 
-      if (needAlgo) {
-        const algo = await createAlgoPin(
+      if (needAlgo && canIssueHourlyAlgoPin(booking as never)) {
+        const algoWindow = getHourlyAlgoPinWindow(booking as never);
+        const algo = await createAlgoPinWithVariance({
+          supabase,
           accessToken,
           lockId,
-          String(booking.drop_off_date ?? ""),
-          booking.drop_off_time_slot,
-          String(booking.pickup_date ?? booking.drop_off_date ?? ""),
-          orderId,
-          " (AlgoPIN fallback)",
-        );
+          startDate: algoWindow.startDate,
+          endDate: algoWindow.endDate,
+          accessName: `Dump Trailer Rental - Order #${orderId} (AlgoPIN fallback)`,
+          insertRow: {
+            order_id: orderId,
+            customer_email: booking.email,
+            customer_phone: booking.phone || "",
+            status: "active",
+            lock_confirmed_at: new Date().toISOString(),
+            confirm_attempts: attempts,
+          },
+        });
         if (algo.success) {
-          const nowIso = new Date().toISOString();
+          // Only retire the old (unconfirmed) bridge PIN row once the new AlgoPIN row
+          // is confirmed inserted — exclude it by id so we don't expire the row we
+          // just created.
           await supabase
             .from("rental_access_codes")
             .update({ status: "expired" })
             .eq("order_id", orderId)
-            .eq("status", "active");
-          const endDate = `${booking.pickup_date || booking.drop_off_date}T23:59:59+00:00`;
-          const { error: insertError } = await supabase.from("rental_access_codes").insert({
-            order_id: orderId,
-            customer_email: booking.email,
-            customer_phone: booking.phone || "",
-            access_pin: algo.pin,
-            pin_id: algo.pinId,
-            pin_type: "algopin",
-            lock_id: lockId,
-            start_time: algo.startDate,
-            end_time: endDate,
-            status: "active",
-            lock_confirmed_at: nowIso,
-            confirm_attempts: attempts,
-          });
-          if (!insertError) {
-            confirmResults.push({ orderId, action: "algopin_fallback", pin: algo.pin });
-            continue;
-          }
+            .eq("status", "active")
+            .neq("id", algo.rowId);
+          confirmResults.push({ orderId, action: "algopin_fallback", pin: algo.pin, variance: algo.variance });
+          continue;
+        }
+        if (!algo.exhausted) {
+          console.warn(`${LOG} AlgoPIN escalation failed for order #${orderId}: ${algo.error}`);
+        } else {
+          console.warn(
+            `${LOG} AlgoPIN variance slots exhausted for order #${orderId} during escalation: ${algo.error}`,
+          );
         }
 
         const failMsg =

@@ -38,12 +38,15 @@ export const Header = ({ onReorderSelect }) => {
     const flow = searchParams.get('flow');
     const email = searchParams.get('email')?.trim().toLowerCase() ?? '';
     const code = (searchParams.get('code') || '').replace(/\D/g, '').slice(0, 6);
+    const hasCode = /^\d{6}$/.test(code);
 
-    if (flow !== 'returning' || !email || returningUrlHandled.current) return;
+    // Open returning-customer modal from email deep links (email+code, or code-only legacy).
+    if (flow !== 'returning' || returningUrlHandled.current) return;
+    if (!email && !hasCode) return;
 
     returningUrlHandled.current = true;
     setReturningInitialEmail(email);
-    setReturningInitialCode(/^\d{6}$/.test(code) ? code : '');
+    setReturningInitialCode(hasCode ? code : '');
     setIsReturningCustomerModalOpen(true);
   }, [searchParams]);
 

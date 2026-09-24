@@ -16,7 +16,7 @@
  *                       without HTTP self-fetch (avoids edge-runtime deadlock)
  *   sync              — pull real activity logs from the Wi-Fi bridge
  *   probe             — raw jobType 15 response (payload discovery)
- *   algopin           — offline one-time AlgoPIN (no bridge)
+ *   algopin           — offline duration (hourly) AlgoPIN (no bridge)
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -24,7 +24,7 @@ import { getCorsHeaders } from "./cors.ts";
 import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
 import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import { alertBreakInAttempt } from "../_shared/lockAlerts.ts";
-import { getBookingWindow, clampIgloohomeStart } from "../_shared/pinTiming.ts";
+import { getBookingWindow, clampIgloohomeStart, formatAlgoPinEndIso } from "../_shared/pinTiming.ts";
 import {
   fetchDeviceActivityRows,
   mergeActivityEvents,
@@ -34,6 +34,7 @@ import {
   type LockActivityEvent,
 } from "../_shared/iglooActivity.ts";
 import { ensurePinOnLock, clearKnownPins } from "../_shared/lockPin.ts";
+import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { isAdminWithMfa } from "../_shared/jwtAal.ts";
 import {
   getOAuthToken,
@@ -107,6 +108,55 @@ function isoPlusMinutes(minutes: number, from = new Date()): string {
  */
 function pinStartIso(backdateMinutes = 2): string {
   return clampIgloohomeStart(isoPlusMinutes(-backdateMinutes));
+}
+
+async function logRemoteLockOverride(
+  supabase: ReturnType<typeof createClient>,
+  lockId: string,
+  operation: "lock" | "unlock",
+  jobId: string,
+  jobState: string,
+) {
+  try {
+    let orderId: number | null = null;
+    const { data: presence } = await supabase
+      .from("lock_device_presence")
+      .select("last_order_id")
+      .eq("device_id", lockId)
+      .maybeSingle();
+    if (presence?.last_order_id) orderId = Number(presence.last_order_id);
+
+    if (!orderId) {
+      const { data: pin } = await supabase
+        .from("rental_access_codes")
+        .select("order_id")
+        .eq("lock_id", lockId)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (pin?.order_id) orderId = Number(pin.order_id);
+    }
+
+    if (!orderId) {
+      console.log(`[test-lock-lifecycle] Remote ${operation} job ${jobId} — no booking to log`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("rental_tracking_logs").insert({
+      order_id: orderId,
+      event_type: "admin_override",
+      event_timestamp: now,
+      api_sync_timestamp: now,
+      notes: `Remote ${operation} via bridge (admin). Job ${jobId} — ${jobState}.`,
+    });
+    if (error) {
+      console.error("[test-lock-lifecycle] remote override log failed:", error.message);
+    }
+  } catch (err) {
+    console.error("[test-lock-lifecycle] remote override log exception:", err);
+  }
 }
 
 async function requireAdmin(req: Request) {
@@ -274,38 +324,33 @@ async function fetchDevicesSummary(
 
 /**
  * AlgoPIN codes are computed by the lock itself, so they work with no bridge and
- * no connectivity at the padlock. startDate must be hour-aligned.
+ * no connectivity at the padlock. startDate/endDate must be hour-aligned.
  */
-async function createOneTimeAlgoPin(
+async function createHourlyAlgoPinForTest(
   accessToken: string,
   lockId: string,
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  booking: Record<string, unknown>,
   startDate: string,
-  variance: number,
-  accessName: string,
+  endDate: string,
 ) {
-  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}/algopin/onetime`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
+  return createAlgoPinWithVariance({
+    supabase,
+    accessToken,
+    lockId,
+    startDate,
+    endDate,
+    accessName: `TEST AlgoPIN - Order #${booking.id}`,
+    insertRow: {
+      order_id: booking.id,
+      customer_email: booking.email,
+      customer_phone: booking.phone || "",
+      status: "active",
+      lock_confirmed_at: new Date().toISOString(),
+      confirm_attempts: 0,
     },
-    body: JSON.stringify({ variance, startDate, accessName }),
   });
-  const body = await readResponse(res);
-  if (!res.ok && res.status !== 201) {
-    return { success: false as const, error: `AlgoPIN failed (HTTP ${res.status})`, raw: body.json ?? body.text };
-  }
-  const pin = String(body.json?.pin || body.json?.access_code || body.json?.code || "");
-  if (!pin) {
-    return { success: false as const, error: "AlgoPIN succeeded but no PIN in response", raw: body.json };
-  }
-  return {
-    success: true as const,
-    pin,
-    pinId: String(body.json?.pinId || body.json?.id || ""),
-    raw: body.json,
-  };
 }
 
 /** Floor an ISO timestamp to the top of its UTC hour (AlgoPIN requires zeroed minutes). */
@@ -529,8 +574,66 @@ Deno.serve(async (req) => {
       }
 
       const outcome = await waitForJobCompletion(oauth.token, jobId, 8, 2500);
+      await logRemoteLockOverride(supabase, lockId, operation, jobId, outcome.state);
+
+      // Bridge accepted the job (completed or still pending). Record the open/close
+      // ourselves so last opened / last closed update without waiting on webhook type 5
+      // or a slow unlock poll. Unlock often stays pending past ~20s even though the
+      // padlock already opened. Do NOT call applyLockEvent — remote unlock must not
+      // mark Rented/Returned. Skip only on hard job failure.
+      let lastOpenedAt: string | null = null;
+      let lastClosedAt: string | null = null;
+      let deviceEventsStored = 0;
+      let writtenAt: string | null = null;
+      if (outcome.state === "completed" || outcome.state === "pending") {
+        const nowMs = Date.now();
+        writtenAt = new Date(nowMs).toISOString();
+        const rawEntry = {
+          logType: operation === "lock" ? 37 : 11, // Bluetooth lock / unlock
+          entryDate: Math.floor(nowMs / 1000),
+          operationId: String(jobId),
+          deviceId: lockId,
+          keyId: `remote-${operation}`,
+        };
+        const parsed = parseActivityLogEntry(rawEntry);
+        if (parsed) {
+          const deviceTracking = await recordDeviceEvents(supabase, [parsed], {
+            deviceId: lockId,
+            bridgeId: bridgeId || null,
+          });
+          deviceEventsStored = deviceTracking.stored;
+          if (deviceTracking.stored > 0 || deviceTracking.skippedDuplicates > 0) {
+            writtenAt = parsed.eventTimestamp;
+          }
+        } else {
+          console.error(
+            "[test-lock-lifecycle] Could not parse remote lock/unlock activity entry",
+            rawEntry,
+          );
+          writtenAt = null;
+        }
+
+        const { data: presence } = await supabase
+          .from("lock_device_presence")
+          .select("last_opened_at, last_closed_at")
+          .eq("device_id", lockId)
+          .maybeSingle();
+        lastOpenedAt = presence?.last_opened_at ?? null;
+        lastClosedAt = presence?.last_closed_at ?? null;
+        // Prefer the timestamp we just wrote if the view is somehow behind.
+        if (writtenAt) {
+          if (operation === "unlock") {
+            lastOpenedAt = writtenAt;
+          } else {
+            lastClosedAt = writtenAt;
+          }
+        }
+      }
+
+      // Pending = job accepted by Igloohome; treat as success for admin remote controls.
+      const accepted = outcome.state === "completed" || outcome.state === "pending";
       return jsonResponse({
-        success: outcome.state === "completed",
+        success: accepted,
         action,
         jobType,
         jobId,
@@ -538,6 +641,9 @@ Deno.serve(async (req) => {
         grantedScopes,
         polls: outcome.polls,
         raw: outcome.raw,
+        deviceEventsStored,
+        lastOpenedAt,
+        lastClosedAt,
         webhookExpected: "Signed event.type 3 (Job Complete)",
       }, outcome.state === "failed" ? 502 : 200);
     }
@@ -957,17 +1063,17 @@ Deno.serve(async (req) => {
         .eq("status", "active");
 
       const startIso = floorToHourIso();
-      const endIso = isoPlusMinutes(durationMinutes);
-      const variance = Math.min(24, Math.max(1, Math.ceil(durationMinutes / 60)));
-      const algo = await createOneTimeAlgoPin(
+      const endIso = formatAlgoPinEndIso(isoPlusMinutes(Math.max(durationMinutes, 60)));
+      const algo = await createHourlyAlgoPinForTest(
         oauth.token,
         lockId,
+        supabase,
+        booking,
         startIso,
-        variance,
-        `TEST AlgoPIN - Order #${bookingId}`,
+        endIso,
       );
       if (!algo.success) {
-        return jsonResponse({ success: false, error: algo.error, raw: algo.raw }, 502);
+        return jsonResponse({ success: false, error: algo.error }, 502);
       }
 
       const now = new Date().toISOString();
@@ -992,27 +1098,13 @@ Deno.serve(async (req) => {
         })
         .eq("id", bookingId);
 
-      await supabase.from("rental_access_codes").insert({
-        order_id: bookingId,
-        customer_email: booking.email,
-        customer_phone: booking.phone || "",
-        access_pin: algo.pin,
-        pin_id: algo.pinId,
-        pin_type: "algopin",
-        lock_id: lockId,
-        start_time: startIso,
-        end_time: endIso,
-        status: "active",
-        lock_confirmed_at: now,
-        confirm_attempts: 0,
-      });
       await supabase.from("rental_tracking_logs").insert({
         order_id: bookingId,
         event_type: "admin_override",
         event_timestamp: now,
         notes:
-          `TEST algopin: one-time AlgoPIN ${algo.pin} (no bridge), ` +
-          `${durationMinutes}min window from ${startIso}`,
+          `TEST algopin: hourly AlgoPIN ${algo.pin} (no bridge, variance ${algo.variance}), ` +
+          `${durationMinutes}min requested window ${algo.startDate}→${algo.endDate}`,
       });
 
       const after = await fetchBookingStatus(supabase, bookingId);
@@ -1025,9 +1117,9 @@ Deno.serve(async (req) => {
         lockJobState: "completed",
         needsConfirm: false,
         instructions: [
-          `One-time AlgoPIN ${algo.pin} works offline — no bridge needed.`,
+          `Hourly AlgoPIN ${algo.pin} works offline — no bridge needed.`,
           "Enter it on the padlock followed by the unlock key to open.",
-          "It is single-use: after unlocking, use Simulate Lock (or lock physically + Sync) to finish.",
+          "It is valid for the whole test window (repeat unlocks ok).",
           "Click Restore Dates when finished.",
         ],
       });

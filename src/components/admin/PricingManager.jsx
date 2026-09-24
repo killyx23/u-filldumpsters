@@ -35,6 +35,9 @@ const ServicePricingCard = ({ service, onSave }) => {
             const updatePayload = {
                 base_price: parseFloat(price) || 0,
                 price_unit: unit || '',
+                // Keep marketing display columns in sync with Service Pricing.
+                homepage_price: parseFloat(price) || 0,
+                homepage_price_unit: unit || '',
                 mileage_rate: parseFloat(mileageRate) || 0,
                 delivery_fee: parseFloat(deliveryFee) || 0
             };
@@ -1146,7 +1149,7 @@ export const PricingManager = () => {
             <div className="bg-white/10 p-6 rounded-2xl border border-white/20">
                 <h2 className="text-2xl font-bold mb-4 text-white">Service Pricing</h2>
                 <div className="space-y-4">
-                    {services.filter(s => [1,2,3,4].includes(s.id)).map(service => (
+                    {rentableServices.map(service => (
                         <ServicePricingCard key={service.id} service={service} onSave={handleSaveService} />
                     ))}
                 </div>

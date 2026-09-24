@@ -1,0 +1,1 @@
+{"name": "functions/reconcile-lock-pins/cors.ts", "content": "export { getCorsHeaders } from '../_shared/cors.ts';\n"}

@@ -36,7 +36,7 @@ import {
   isDiyHomepageService,
   isDiyMachineService,
 } from '@/config/diyEquipmentMachines';
-import { fetchServiceById } from '@/utils/servicePlan';
+import { fetchServiceById, resolveReorderPlanSelection } from '@/utils/servicePlan';
 import { setStoredReferralCode } from '@/utils/referralCodeStorage';
 import { clearRememberedPaymentEquipmentHold } from '@/utils/pendingBookingEquipmentHold';
 
@@ -256,16 +256,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     console.log(`[${timestamp}] [BookingJourney] Reordering service from booking:`, pastBooking.id);
 
     try {
-      let plan = pastBooking.plan;
-      if (!plan && pastBooking.plan_id) {
-        const { data: planData } = await supabase
-          .from('plans')
-          .select('*')
-          .eq('id', pastBooking.plan_id)
-          .maybeSingle();
-        plan = planData;
-      }
-      const addons = pastBooking.addons || {};
+      const { plan, deliveryService: wantsDelivery, addons } = await resolveReorderPlanSelection(
+        supabase,
+        pastBooking
+      );
 
       const { data: customer, error: customerError } = await supabase
         .from('customers')
@@ -312,7 +306,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       });
 
       setSelectedPlan(plan);
-      setDeliveryService(addons.deliveryService || (plan?.id === 2 && addons.isDelivery) || false);
+      setDeliveryService(wantsDelivery);
       setCurrentStep(1);
       setHighestStep(1);
 

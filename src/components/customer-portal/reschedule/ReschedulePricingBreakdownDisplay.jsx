@@ -8,6 +8,13 @@ import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedul
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 
+/** Highest line total first so Original and New Request rows line up. */
+const byLineTotalDesc = (a, b) => {
+    const aTotal = Number(a.total) || (Number(a.price) || 0) * (Number(a.quantity) || 1);
+    const bTotal = Number(b.total) || (Number(b.price) || 0) * (Number(b.quantity) || 1);
+    return bTotal - aTotal || String(a.name || '').localeCompare(String(b.name || ''));
+};
+
 export const ReschedulePricingBreakdownDisplay = ({ 
     bookingId,
     originalService, 
@@ -66,6 +73,7 @@ export const ReschedulePricingBreakdownDisplay = ({
                     });
                 }
 
+                combined.sort(byLineTotalDesc);
                 setAllOriginalAddons(combined);
             } catch (error) {
                 console.error('Error fetching original add-ons:', error);
@@ -129,7 +137,7 @@ export const ReschedulePricingBreakdownDisplay = ({
                         }
                     });
                 }
-                const addons = Array.from(addonsMap.values());
+                const addons = Array.from(addonsMap.values()).sort(byLineTotalDesc);
 
                 const addonsCost = addons.reduce((sum, addon) => sum + addon.total, 0);
                 const subtotal = baseRentalCost + deliveryFeeApplied + mileageCharge + addonsCost;

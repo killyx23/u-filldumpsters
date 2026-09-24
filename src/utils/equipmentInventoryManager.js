@@ -183,10 +183,10 @@ export const syncBookingEquipment = async (bookingId, newEquipment = []) => {
     }
 
     for (const item of toIncrement) {
-      if (item.type === EquipmentTypes.RENTAL) {
+      if (item.type === EquipmentTypes.RENTAL || item.type === EquipmentTypes.CONSUMABLE) {
         await updateInventory(item.equipment_id, -item.quantity, item.type);
       }
-      // Consumables cannot be returned to inventory
+      // Services have no inventory to restore
     }
 
     // Delete all existing booking_equipment records for this booking

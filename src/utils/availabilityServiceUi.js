@@ -30,3 +30,27 @@ export function isHourlySelfPickupPlan(plan, isDelivery = false) {
   if (plan.customer_pickup && plan.service_type === 'hourly') return true;
   return false;
 }
+
+/**
+ * Drop-off times come from get-availability deliverySlots (window / delivery-only services).
+ * Includes plan id 4 when a past booking stored the delivery variant as the plan snapshot.
+ * @param {object|null} plan
+ * @param {boolean} [isDelivery]
+ */
+export function usesDeliveryWindowSlots(plan, isDelivery = false) {
+  if (!plan) return false;
+  if (isDelivery) return true;
+  const kind = getServiceAvailabilityUiKind(plan.id);
+  return kind === AVAILABILITY_UI.DELIVERY_WINDOW || kind === AVAILABILITY_UI.DELIVERY_ONLY;
+}
+
+/**
+ * Pickup times come from get-availability pickupSlots (delivery-pickup window).
+ * @param {object|null} plan
+ * @param {boolean} [isDelivery]
+ */
+export function usesDeliveryPickupSlots(plan, isDelivery = false) {
+  if (!plan) return false;
+  if (isDelivery) return true;
+  return getServiceAvailabilityUiKind(plan.id) === AVAILABILITY_UI.DELIVERY_WINDOW;
+}

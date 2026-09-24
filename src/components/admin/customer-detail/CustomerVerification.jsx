@@ -28,6 +28,7 @@ import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bo
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { syncBookingEquipment } from '@/utils/equipmentInventoryManager';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
@@ -40,6 +41,35 @@ const LATE_FEE_NOTE_OUTSIDE_24H =
 
 const moneyFmt = (n) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
+
+/** Build { id, quantity, type } list for syncBookingEquipment from addon/equipment rows. */
+const resolveEquipmentForSync = async (equipmentItems = []) => {
+    const items = (equipmentItems || [])
+        .map((a) => ({
+            id: Number(a?.id ?? a?.equipment_id ?? a?.dbId),
+            quantity: Number(a?.quantity || 1) || 1,
+            type: a?.type || null,
+        }))
+        .filter((a) => Number.isFinite(a.id) && a.id > 0);
+
+    const missingTypeIds = [...new Set(items.filter((i) => !i.type).map((i) => i.id))];
+    if (missingTypeIds.length > 0) {
+        const { data, error } = await supabase
+            .from('equipment')
+            .select('id, type')
+            .in('id', missingTypeIds);
+        if (error) {
+            console.error('[resolveEquipmentForSync] Failed to load equipment types:', error.message);
+        }
+        const typeMap = new Map((data || []).map((e) => [Number(e.id), e.type]));
+        for (const item of items) {
+            if (!item.type) {
+                item.type = typeMap.get(item.id) || 'rental';
+            }
+        }
+    }
+    return items;
+};
 
 const hasPendingRescheduleRequest = (booking) => {
     const history = Array.isArray(booking?.reschedule_history) ? booking.reschedule_history : [];
@@ -1534,6 +1564,41 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         if (error) {
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
+            if (isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)) {
+                try {
+                    const equipmentList = await resolveEquipmentForSync(
+                        bookingUpdate.addons?.equipment || []
+                    );
+                    const syncResult = await syncBookingEquipment(booking.id, equipmentList);
+                    if (!syncResult.success) {
+                        console.error(
+                            '[CustomerVerification] Equipment inventory sync failed after reschedule approve:',
+                            syncResult.error
+                        );
+                        toast({
+                            title: 'Inventory sync failed',
+                            description:
+                                syncResult.error ||
+                                'Schedule and pricing were approved, but equipment inventory could not be updated. Please retry inventory sync.',
+                            variant: 'destructive',
+                        });
+                    }
+                } catch (syncErr) {
+                    console.error(
+                        '[CustomerVerification] Equipment inventory sync threw after reschedule approve:',
+                        syncErr
+                    );
+                    toast({
+                        title: 'Inventory sync failed',
+                        description:
+                            syncErr instanceof Error
+                                ? syncErr.message
+                                : 'Schedule and pricing were approved, but equipment inventory could not be updated.',
+                        variant: 'destructive',
+                    });
+                }
+            }
+
             if (pendingRescheduleLog?.id) {
                 const logUpdate = {
                     request_status: 'approved',

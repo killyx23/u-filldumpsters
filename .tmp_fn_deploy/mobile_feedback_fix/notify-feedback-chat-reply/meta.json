@@ -1,0 +1,13 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "notify-feedback-chat-reply",
+  "entrypoint_path": "functions/notify-feedback-chat-reply/index.ts",
+  "verify_jwt": true,
+  "file_names": [
+    "functions/notify-feedback-chat-reply/index.ts",
+    "functions/notify-feedback-chat-reply/cors.ts",
+    "functions/_shared/cors.ts",
+    "functions/_shared/notify.ts",
+    "functions/_shared/normalizeSiteUrl.ts"
+  ]
+}

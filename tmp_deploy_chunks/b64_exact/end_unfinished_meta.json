@@ -1,0 +1,38 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "end-unfinished-checkout",
+  "entrypoint_path": "functions/end-unfinished-checkout/index.ts",
+  "verify_jwt": false,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "len": 1059,
+      "sha": "dad852d821373417ac8adab7beda83fd37f2875461a594458f4f6d9e28f8ad13"
+    },
+    {
+      "name": "functions/_shared/earlyLeaveEmail.ts",
+      "len": 3258,
+      "sha": "6d01f9a0816d5fff73ec758eded595b29b84ecb62762c03f1d46ceaff9c9c7b1"
+    },
+    {
+      "name": "functions/_shared/normalizeSiteUrl.ts",
+      "len": 2330,
+      "sha": "4ea17e07275d16332762f595c9c0aa3e2824bc714ddd7ceff53c43ae88bd8d15"
+    },
+    {
+      "name": "functions/_shared/notify.ts",
+      "len": 7044,
+      "sha": "8cddfe6e10192c03f62a93881ddfd197bcc6f6d4a8de565b59918048ceddcc79"
+    },
+    {
+      "name": "functions/end-unfinished-checkout/cors.ts",
+      "len": 53,
+      "sha": "04e33f69fff4a8fa4c71ddadad0b2723d3bda39cc79754c6e37089d510fba34c"
+    },
+    {
+      "name": "functions/end-unfinished-checkout/index.ts",
+      "len": 16058,
+      "sha": "6cce748025427117351fc2cdd711671b9ced9372a89c89629c7505536db8fe7a"
+    }
+  ]
+}

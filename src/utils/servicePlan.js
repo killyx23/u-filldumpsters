@@ -81,10 +81,11 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
     highlight: highlightText
       ? { text: highlightText, delay: 0.1 + displayOrderIndex * 0.1 }
       : undefined,
-    displayPrice: service.homepage_price ?? service.base_price ?? 0,
+    // Always show live admin Service Pricing (base_price), not stale homepage_price.
+    displayPrice: service.base_price ?? 0,
     displayPriceUnit: isDumpsterHomepage
       ? 'Daily Rate'
-      : service.homepage_price_unit ?? service.price_unit ?? '',
+      : service.price_unit ?? '',
     displayDescription: isDiyHomepage
       ? DIY_HOMEPAGE_DESCRIPTION
       : service.homepage_description || service.description || '',
@@ -217,6 +218,51 @@ function isCustomerPickupFromAudit(auditPlan, addons) {
 export async function fetchServiceById(supabase, serviceId) {
   if (!serviceId) return { data: null, error: null };
   return supabase.from('services').select('*').eq('id', serviceId).maybeSingle();
+}
+
+/**
+ * Normalize a past booking into the live catalog plan + delivery toggle used by BookingJourney.
+ * Some audit snapshots store the delivery variant (e.g. service id 4) as plan.id — map those
+ * back to the base service with deliveryService=true so availability/time pickers work.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {object} pastBooking
+ * @returns {Promise<{ plan: object|null, deliveryService: boolean, addons: object }>}
+ */
+export async function resolveReorderPlanSelection(supabase, pastBooking) {
+  const addons = pastBooking?.addons || {};
+  let plan = pastBooking?.plan || null;
+  const fallbackId = pastBooking?.plan_id ?? plan?.id ?? plan?.service_id;
+
+  if (!plan && fallbackId) {
+    const { data } = await fetchServiceById(supabase, Number(fallbackId));
+    plan = data;
+  }
+
+  let deliveryService = Boolean(addons.deliveryService || addons.isDelivery);
+  const snapshotId = Number(plan?.id ?? fallbackId);
+
+  if (Number.isFinite(snapshotId)) {
+    // If this id is someone else's delivery_variant_service_id, reorder as that base + delivery.
+    const { data: baseFromVariant } = await supabase
+      .from('services')
+      .select('*')
+      .eq('delivery_variant_service_id', snapshotId)
+      .maybeSingle();
+
+    if (baseFromVariant) {
+      plan = baseFromVariant;
+      deliveryService = true;
+    } else {
+      const { data: live } = await fetchServiceById(supabase, snapshotId);
+      if (live) plan = live;
+    }
+  }
+
+  if (Number(plan?.id) === 4) {
+    deliveryService = true;
+  }
+
+  return { plan, deliveryService, addons };
 }
 
 /** Default homepage catalog when flags are missing or unset. */

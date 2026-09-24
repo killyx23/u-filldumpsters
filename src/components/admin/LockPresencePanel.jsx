@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide-react';
 import { format } from 'date-fns';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
+import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
+import { bridgeOnlineFromDevices, loadLockPresenceDevices } from '@/utils/lockPresence';
 
 const PRESENCE = {
   on_premises: {
@@ -49,16 +50,13 @@ export default function LockPresencePanel() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error: queryError } = await supabase
-      .from('lock_device_presence')
-      .select('*')
-      .order('device_id');
+    const { devices: next, error: queryError } = await loadLockPresenceDevices();
     if (queryError) {
-      setError(queryError.message);
+      setError(queryError);
       setDevices([]);
     } else {
       setError(null);
-      setDevices(data || []);
+      setDevices(next);
     }
     setLoading(false);
   }, []);
@@ -66,6 +64,8 @@ export default function LockPresencePanel() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const primary = devices[0] || null;
 
   return (
     <Card className="bg-white/5 border-white/10">
@@ -88,17 +88,25 @@ export default function LockPresencePanel() {
       </CardHeader>
       <CardContent className="space-y-3">
         <RemoteBridgeControls
-          bridgeOnline={
-            devices.length === 0
-              ? null
-              : devices.some((d) => d.bridge_online === true)
-                ? true
-                : devices.every((d) => d.bridge_online === false)
-                  ? false
-                  : null
-          }
-          onSuccess={() => {
-            setTimeout(load, 1500);
+          bridgeOnline={bridgeOnlineFromDevices(devices)}
+          lastOpenedAt={primary?.last_opened_at}
+          lastClosedAt={primary?.last_closed_at}
+          onSuccess={(data) => {
+            if (data?.lastOpenedAt || data?.lastClosedAt) {
+              setDevices((prev) => {
+                if (!prev.length) return prev;
+                const [first, ...rest] = prev;
+                return [
+                  {
+                    ...first,
+                    last_opened_at: data.lastOpenedAt ?? first.last_opened_at,
+                    last_closed_at: data.lastClosedAt ?? first.last_closed_at,
+                  },
+                  ...rest,
+                ];
+              });
+            }
+            load();
           }}
         />
 
@@ -140,13 +148,12 @@ export default function LockPresencePanel() {
 
               <p className="text-sm text-slate-400">{state.detail}</p>
 
+              <LockOpenCloseTimes
+                lastOpenedAt={device.last_opened_at}
+                lastClosedAt={device.last_closed_at}
+              />
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs text-slate-400">
-                <span>
-                  Changed: <span className="text-slate-200">{when(device.state_changed_at)}</span>
-                </span>
-                <span>
-                  Last event: <span className="text-slate-200">{when(device.last_event_at)}</span>
-                </span>
                 <span>
                   Bridge:{' '}
                   <span

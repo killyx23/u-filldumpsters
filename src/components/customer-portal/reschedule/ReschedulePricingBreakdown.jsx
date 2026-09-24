@@ -14,6 +14,11 @@ import {
 } from '@/utils/rescheduleTaxCalculator';
 import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 
+/** Highest line total first so Original and New Request rows line up. */
+const byLineTotalDesc = (a, b) =>
+    (Number(b.total) || 0) - (Number(a.total) || 0) ||
+    String(a.name || '').localeCompare(String(b.name || ''));
+
 export const ReschedulePricingBreakdown = ({
     bookingId,
     originalService,
@@ -154,6 +159,7 @@ export const ReschedulePricingBreakdown = ({
                 if (insuranceAddon) {
                     allOriginalAddons.push(insuranceAddon);
                 }
+                allOriginalAddons.sort(byLineTotalDesc);
                 console.log(`[ReschedulePricing] Total original addons: ${allOriginalAddons.length}`);
 
                 const originalAddonsForCalc = (originalAddonsList && originalAddonsList.length > 0)
@@ -284,7 +290,7 @@ export const ReschedulePricingBreakdown = ({
                         });
                     }
                 });
-                const newAddons = Array.from(addonsMap.values());
+                const newAddons = Array.from(addonsMap.values()).sort(byLineTotalDesc);
 
                 const newCostsData = {
                     baseRentalCost: newCostResult.baseRentalCost,

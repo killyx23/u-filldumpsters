@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
-const PIN_DELETE_STATUSES = new Set(['Cancelled', 'pending_review']);
+const PIN_DELETE_STATUSES = new Set(['Cancelled', 'cancellation_pending', 'pending_review']);
 
 export const shouldDeletePinForStatus = (status) => PIN_DELETE_STATUSES.has(status);
 

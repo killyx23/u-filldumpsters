@@ -1,0 +1,48 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "generate-daily-pins",
+  "entrypoint_path": "functions/generate-daily-pins/index.ts",
+  "verify_jwt": false,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/cors.ts",
+      "bytes": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/deliveryBooking.ts",
+      "bytes": 2208
+    },
+    {
+      "name": "functions/_shared/iglooAuth.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/iglooAuth.ts",
+      "bytes": 11615
+    },
+    {
+      "name": "functions/_shared/lockPin.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/lockPin.ts",
+      "bytes": 11160
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/parseBookingTimeSlot.ts",
+      "bytes": 5568
+    },
+    {
+      "name": "functions/_shared/pinTiming.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/_shared/pinTiming.ts",
+      "bytes": 9256
+    },
+    {
+      "name": "functions/generate-daily-pins/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/generate-daily-pins/cors.ts",
+      "bytes": 53
+    },
+    {
+      "name": "functions/generate-daily-pins/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/supabase/functions/generate-daily-pins/index.ts",
+      "bytes": 22941
+    }
+  ]
+}

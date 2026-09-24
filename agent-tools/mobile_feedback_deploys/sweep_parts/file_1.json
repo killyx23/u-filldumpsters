@@ -1,0 +1,1 @@
+{"name": "functions/sweep-unfinished-checkouts/cors.ts", "content": "export { getCorsHeaders } from \"../_shared/cors.ts\";\n"}

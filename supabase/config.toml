@@ -401,6 +401,10 @@ verify_jwt = false
 # Invoked by pg_cron with the service_role Bearer token.
 verify_jwt = true
 
+[functions.notify-feedback-chat-reply]
+# Invoked by DB trigger via pg_net with the service_role Bearer token.
+verify_jwt = true
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

@@ -25,9 +25,25 @@ import {
     isPickupDateBlockedByRange,
     rangeHasBlockedOccupancyNight,
 } from '@/utils/calendarAvailabilityHints';
+import { getServiceAvailabilityTimes } from '@/utils/serviceAvailabilityHelper';
 
 const isDateUnavailable = (date, availability) => {
     return isDateVisitUnavailable(availability[format(date, 'yyyy-MM-dd')]);
+};
+
+const isHourlySelfPickupService = (serviceId) =>
+    serviceId === 2 || serviceId === 5 || serviceId === 8;
+
+const DEFAULT_PICKUP_START = '08:00:00';
+const DEFAULT_RETURN_BY = '18:00:00';
+
+const toFixedTimeSlot = (timeValue, fallback) => {
+    const value = timeValue || fallback;
+    return {
+        value,
+        label: convertTo12Hour(value),
+        available: true,
+    };
 };
 
 export const RescheduleDateTimeSelector = ({
@@ -167,6 +183,26 @@ export const RescheduleDateTimeSelector = ({
         const fetchTimeSlots = async () => {
             setFetchingTimes(true);
             try {
+                // Hourly self-pickup stores a single pickup-start / return-by time, not a range.
+                // get-availability returnSlots need return_end_time and stay empty for these services.
+                if (isHourlySelfPickupService(serviceId)) {
+                    const startTimes = await getServiceAvailabilityTimes(serviceId, newDropOffDate);
+                    const dropSlot = toFixedTimeSlot(startTimes.pickupStartTime, DEFAULT_PICKUP_START);
+                    setDropOffTimeSlots([dropSlot]);
+                    setNewDropOffTime(dropSlot.value);
+
+                    if (newPickupDate) {
+                        const endTimes = await getServiceAvailabilityTimes(serviceId, newPickupDate);
+                        const pickSlot = toFixedTimeSlot(endTimes.returnByTime, DEFAULT_RETURN_BY);
+                        setPickupTimeSlots([pickSlot]);
+                        setNewPickupTime(pickSlot.value);
+                    } else {
+                        setPickupTimeSlots([]);
+                        setNewPickupTime(null);
+                    }
+                    return;
+                }
+
                 const dropOffDateFormatted = format(newDropOffDate, 'yyyy-MM-dd');
                 const pickupDateFormatted = newPickupDate ? format(newPickupDate, 'yyyy-MM-dd') : dropOffDateFormatted;
                 const startDate = dropOffDateFormatted <= pickupDateFormatted ? dropOffDateFormatted : pickupDateFormatted;
@@ -208,18 +244,6 @@ export const RescheduleDateTimeSelector = ({
                     setDropOffTimeSlots(dropSlots);
                     ensureSelectableSlot(newDropOffTime, dropSlots, setNewDropOffTime);
                     setPickupTimeSlots([]);
-                } else if (serviceId === 2 || serviceId === 5 || serviceId === 8) {
-                    const dropSlot = (dropOffAvail?.pickupSlots || [])[0];
-                    setDropOffTimeSlots(dropSlot ? [dropSlot] : []);
-                    if (dropSlot) setNewDropOffTime(dropSlot.value);
-
-                    if (newPickupDate) {
-                        const pickSlot = (pickupAvail?.returnSlots || [])[0];
-                        setPickupTimeSlots(pickSlot ? [pickSlot] : []);
-                        if (pickSlot) setNewPickupTime(pickSlot.value);
-                    } else {
-                        setPickupTimeSlots([]);
-                    }
                 } else {
                     setDropOffTimeSlots([]);
                     setPickupTimeSlots([]);
@@ -306,7 +330,7 @@ export const RescheduleDateTimeSelector = ({
                 start: "Delivery (Time Window)",
                 end: "Delivery (Pickup Window)"
             };
-        } else if (serviceId === 2) {
+        } else if (isHourlySelfPickupService(serviceId)) {
             return {
                 start: "Pickup Start Time",
                 end: "Return by Time"
@@ -325,6 +349,12 @@ export const RescheduleDateTimeSelector = ({
 
     const labels = getLabels();
     const numberOfMonths = typeof window !== 'undefined' && window.innerWidth >= 768 ? 2 : 1;
+    const showHourlyReadOnlyTimes = isHourlySelfPickupService(serviceId);
+    const hourlyStartDisplay = dropOffTimeSlots[0]?.label
+        || (!newDropOffDate ? 'Choose start date' : 'Time not available');
+    const hourlyEndDisplay = !newPickupDate
+        ? 'Choose end date'
+        : (pickupTimeSlots[0]?.label || 'Time not available');
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 max-w-5xl mx-auto w-full">
@@ -417,10 +447,10 @@ export const RescheduleDateTimeSelector = ({
                                         <Label className="text-gray-300 text-sm font-bold uppercase tracking-widest flex items-center">
                                             <Clock className="w-4 h-4 mr-2 text-gold"/> {labels.start}
                                         </Label>
-                                        {serviceId === 2 ? (
+                                        {showHourlyReadOnlyTimes ? (
                                             <div className="w-full h-12 bg-gray-950 border border-gray-700 text-white rounded-xl flex items-center px-4">
                                                 <Clock className="w-4 h-4 mr-2 text-gray-500" />
-                                                <span>{dropOffTimeSlots[0]?.label || 'Loading...'}</span>
+                                                <span>{hourlyStartDisplay}</span>
                                             </div>
                                         ) : (
                                             <Select value={newDropOffTime} onValueChange={setNewDropOffTime} disabled={dropOffTimeSlots.length === 0}>
@@ -443,10 +473,10 @@ export const RescheduleDateTimeSelector = ({
                                             <Label className="text-gray-300 text-sm font-bold uppercase tracking-widest flex items-center">
                                                 <Clock className="w-4 h-4 mr-2 text-gold"/> {labels.end}
                                             </Label>
-                                            {serviceId === 2 ? (
+                                            {showHourlyReadOnlyTimes ? (
                                                 <div className="w-full h-12 bg-gray-950 border border-gray-700 text-white rounded-xl flex items-center px-4">
                                                     <Clock className="w-4 h-4 mr-2 text-gray-500" />
-                                                    <span>{pickupTimeSlots[0]?.label || 'Loading...'}</span>
+                                                    <span>{hourlyEndDisplay}</span>
                                                 </div>
                                             ) : (
                                                 <Select value={newPickupTime} onValueChange={setNewPickupTime} disabled={pickupTimeSlots.length === 0}>

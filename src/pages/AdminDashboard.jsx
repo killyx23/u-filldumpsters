@@ -30,6 +30,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
 import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
 import { isActionItemVerificationBooking } from '@/utils/paymentDelta';
+import AdminRemoteLockBar from '@/components/admin/AdminRemoteLockBar';
 
 export const AdminDashboard = () => {
     const { user, signOut } = useAuth();
@@ -174,14 +175,17 @@ export const AdminDashboard = () => {
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
             <div className="container mx-auto">
-                <div className="flex flex-wrap justify-between items-center mb-8">
+                <div className="flex flex-wrap justify-between items-start mb-8 gap-4">
                     <h1 className="text-3xl font-bold text-yellow-400">Admin Dashboard</h1>
                     {user && (
-                        <div className="flex items-center gap-4">
-                            <span className="text-sm text-gray-400 hidden sm:inline">{user.email}</span>
-                            <button onClick={handleSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">
-                                Sign Out
-                            </button>
+                        <div className="flex flex-wrap items-start justify-end gap-4">
+                            <AdminRemoteLockBar />
+                            <div className="flex items-center gap-4 pt-1">
+                                <span className="text-sm text-gray-400 hidden sm:inline">{user.email}</span>
+                                <button onClick={handleSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                                    Sign Out
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

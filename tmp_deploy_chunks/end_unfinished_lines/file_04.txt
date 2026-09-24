@@ -1,0 +1,5 @@
+functions/end-unfinished-checkout/cors.ts
+53
+1
+export { getCorsHeaders } from "../_shared/cors.ts";
+

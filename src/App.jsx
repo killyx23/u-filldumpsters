@@ -59,8 +59,38 @@ const PortalAccessCodesRedirect = () => {
   return <Navigate to={mergeRouteQuery('/customer-portal?tab=access-codes', search)} replace />;
 };
 
+/**
+ * Legacy /verify links:
+ * - Checkout (token present) → /verify-email
+ * - Returning customer (email+code, or flow=returning) → homepage returning flow
+ * - Code-only → homepage with code seeded so the customer can enter their email
+ */
 const VerifyRedirect = () => {
   const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const token = (params.get('token') || params.get('bookingId') || '').trim();
+  const email = (params.get('email') || '').trim().toLowerCase();
+  const code = (params.get('code') || '').replace(/\D/g, '').slice(0, 6);
+  const flow = (params.get('flow') || '').trim().toLowerCase();
+
+  if (token) {
+    return <Navigate to={`/verify-email${search}`} replace />;
+  }
+
+  const isReturning =
+    flow === 'returning' ||
+    (Boolean(email) && /^\d{6}$/.test(code)) ||
+    /^\d{6}$/.test(code);
+
+  if (isReturning) {
+    const next = new URLSearchParams();
+    if (email) next.set('email', email);
+    if (/^\d{6}$/.test(code)) next.set('code', code);
+    next.set('flow', 'returning');
+    const query = next.toString();
+    return <Navigate to={`/${query ? `?${query}` : ''}`} replace />;
+  }
+
   return <Navigate to={`/verify-email${search}`} replace />;
 };
 

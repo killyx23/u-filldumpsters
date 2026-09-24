@@ -1,0 +1,6 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "end-unfinished-checkout",
+  "entrypoint_path": "functions/end-unfinished-checkout/index.ts",
+  "verify_jwt": false
+}
