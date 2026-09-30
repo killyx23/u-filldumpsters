@@ -11,7 +11,7 @@ export function calculateBookingTotal(
   deliveryService = false,
   insurancePrice = 0,
   {
-    insuranceIsTaxable = true,
+    insuranceIsTaxable = false,
     drivewayPrice = 0,
     drivewayIsTaxable = true,
     serviceTaxFlags = {},
