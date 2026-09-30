@@ -157,7 +157,7 @@ export const calculateBookingCosts = async (
             resolvedTaxOptions = {
                 serviceTaxFlags: serviceRow || {},
                 equipmentTaxFlags: {},
-                insuranceIsTaxable: true,
+                insuranceIsTaxable: false,
                 drivewayIsTaxable: true,
                 drivewayPrice: 0,
             };
@@ -165,7 +165,7 @@ export const calculateBookingCosts = async (
             resolvedTaxOptions = {
                 serviceTaxFlags: {},
                 equipmentTaxFlags: {},
-                insuranceIsTaxable: true,
+                insuranceIsTaxable: false,
                 drivewayIsTaxable: true,
                 drivewayPrice: 0,
             };
