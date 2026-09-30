@@ -774,6 +774,8 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             deliveryService={deliveryService}
             contactAddress={bookingData.contactAddress}
             customerEmail={bookingData.email}
+            rentalStart={bookingData.dropOffDate}
+            rentalEnd={bookingData.pickupDate || bookingData.dropOffDate}
           />
         );
       case 3:

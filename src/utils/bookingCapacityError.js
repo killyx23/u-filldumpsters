@@ -39,3 +39,43 @@ export function describeBookingCapacityError(error) {
       'will show what is still open.',
   };
 }
+
+const EQUIPMENT_STOCK_MARKER = 'equipment_insufficient_stock';
+
+export function isEquipmentStockError(error) {
+  if (!error) return false;
+  const fields = [error.details, error.detail, error.message, error.hint, error.code];
+  return fields.some(
+    (field) => typeof field === 'string' && field.includes(EQUIPMENT_STOCK_MARKER)
+  );
+}
+
+/**
+ * Customer-facing copy when rental add-ons (dump cart / hand truck) cannot be held.
+ * @param {{hint?: string, message?: string}|null} error
+ * @returns {{title: string, description: string}}
+ */
+export function describeEquipmentStockError(error) {
+  const hint = typeof error?.hint === 'string' ? error.hint.trim() : '';
+  const named =
+    hint && !hint.includes(EQUIPMENT_STOCK_MARKER) ? hint : '';
+  const what = named || 'a rental add-on';
+
+  return {
+    title: 'Rental Gear Just Sold Out',
+    description:
+      `Another customer reserved ${what} while you were checking out. ` +
+      'You have not been charged. Please go back and update your add-ons, then try again.',
+  };
+}
+
+/** Build a thrown Error that isEquipmentStockError recognizes. */
+export function equipmentStockErrorFromRpc(rpcError) {
+  const { title, description } = describeEquipmentStockError(rpcError);
+  const err = new Error(description);
+  err.title = title;
+  err.details = EQUIPMENT_STOCK_MARKER;
+  err.detail = EQUIPMENT_STOCK_MARKER;
+  err.hint = typeof rpcError?.hint === 'string' ? rpcError.hint : undefined;
+  return err;
+}

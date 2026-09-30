@@ -17,6 +17,7 @@ import { buildProtectionPlanIdsPayload } from '@/utils/protectionPlans';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { toInventoryDate, checkInventoryAvailability, bookableFromInventoryRow } from '@/utils/equipmentInventoryManager';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 
@@ -33,7 +34,7 @@ const disposalMeta = [
   { id: 'applianceDisposal', dbId: 6, label: 'Appliance Disposal', price: 0, icon: <WashingMachine className="h-6 w-6 mr-3 text-yellow-400" /> },
 ];
 
-export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress, customerEmail }) => {
+export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onBack, plan, deliveryService, contactAddress, customerEmail, rentalStart = null, rentalEnd = null }) => {
   const [customerId, setCustomerId] = useState(null);
   const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
   const [showDrivewayDeclineWarning, setShowDrivewayDeclineWarning] = useState(false);
@@ -147,14 +148,18 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
   const fetchInventory = useCallback(async () => {
     setLoadingInventory(true);
-    const { data, error } = await supabase.functions.invoke('get-equipment-inventory');
+    const startDate = toInventoryDate(rentalStart);
+    const endDate = toInventoryDate(rentalEnd) || startDate;
+    const { data, error } = await supabase.functions.invoke('get-equipment-inventory', {
+      body: { startDate, endDate },
+    });
     if (error) {
       toast({ title: "Could not load equipment inventory.", variant: "destructive" });
     } else {
       setEquipmentInventory(data.inventory);
     }
     setLoadingInventory(false);
-  }, []);
+  }, [rentalStart, rentalEnd]);
 
   useEffect(() => {
     fetchInventory();
@@ -191,14 +196,23 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       const equipmentInfo = equipmentMetaWithPrices.find(e => e.id === itemId);
       if(!equipmentInfo) return prev;
 
+      const inventoryItem = equipmentInventory.find((inv) => Number(inv.id) === Number(equipmentInfo.dbId));
+      const isRental = String(equipmentInfo.type || '').toLowerCase() === 'rental';
+      const maxAvailable = inventoryItem
+        ? (isRental
+            ? bookableFromInventoryRow({ ...inventoryItem, type: 'rental' })
+            : Number(inventoryItem.available_quantity ?? inventoryItem.total_quantity ?? 0))
+        : 0;
+      const clampedQuantity = Math.max(0, Math.min(Number(newQuantity) || 0, maxAvailable));
+
       const currentEquipment = Array.isArray(prev.equipment) ? prev.equipment : [];
       const existingItem = currentEquipment.find(item => item.id === itemId);
       
-      if (newQuantity > 0) {
+      if (clampedQuantity > 0) {
         if (existingItem) {
-          return { ...prev, equipment: currentEquipment.map(item => item.id === itemId ? { ...item, quantity: newQuantity } : item) };
+          return { ...prev, equipment: currentEquipment.map(item => item.id === itemId ? { ...item, quantity: clampedQuantity } : item) };
         } else {
-          return { ...prev, equipment: [...currentEquipment, { id: itemId, dbId: equipmentInfo.dbId, quantity: newQuantity }] };
+          return { ...prev, equipment: [...currentEquipment, { id: itemId, dbId: equipmentInfo.dbId, quantity: clampedQuantity }] };
         }
       } else {
         return { ...prev, equipment: currentEquipment.filter(item => item.id !== itemId) };
@@ -222,6 +236,54 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
       if (dAddress.isVerified && (!addonsData?.deliveryDistance || addonsData.deliveryDistance <= 0)) {
         toast({ title: "Distance Calculation Required", description: "Delivery distance must be calculated before proceeding.", variant: "destructive" });
+        return;
+      }
+    }
+
+    // Re-check rental stock so stale selections cannot proceed after another hold.
+    const selectedRentals = Array.isArray(addonsData?.equipment)
+      ? addonsData.equipment.filter((item) => Number(item?.quantity || 0) > 0)
+      : [];
+    if (selectedRentals.length > 0) {
+      const unavailable = [];
+      const reducedEquipment = [];
+      for (const item of selectedRentals) {
+        const meta = equipmentMetaWithPrices.find((e) => e.id === item.id) || item;
+        const dbId = Number(item.dbId || meta.dbId || item.equipment_id);
+        const requested = Number(item.quantity || 1);
+        if (!Number.isFinite(dbId) || requested <= 0) continue;
+
+        const live = await checkInventoryAvailability(dbId, requested, {
+          startDate: rentalStart,
+          endDate: rentalEnd,
+        });
+        const available = typeof live?.quantity === 'number' ? live.quantity : 0;
+
+        if (available < requested) {
+          unavailable.push(meta.label || item.id);
+          if (available > 0) {
+            reducedEquipment.push({ ...item, dbId, quantity: available });
+          }
+        } else {
+          reducedEquipment.push({ ...item, dbId, quantity: requested });
+        }
+      }
+
+      // Refresh badges for the UI after the live checks
+      void fetchInventory();
+
+      if (unavailable.length > 0) {
+        setAddonsData((prev) => ({
+          ...prev,
+          equipment: reducedEquipment,
+        }));
+        toast({
+          title: 'Rental gear unavailable',
+          description:
+            `${unavailable.join(', ')} ${unavailable.length === 1 ? 'is' : 'are'} no longer in stock for your dates. ` +
+            'Your selection was updated — review add-ons and try again.',
+          variant: 'destructive',
+        });
         return;
       }
     }

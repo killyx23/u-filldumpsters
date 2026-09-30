@@ -27,7 +27,13 @@ import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
 import { buildPlanSnapshot } from '@/utils/servicePlan';
 import { ensureBookingMileage } from '@/utils/bookingMileage';
-import { isBookingCapacityError, describeBookingCapacityError } from '@/utils/bookingCapacityError';
+import {
+  isBookingCapacityError,
+  describeBookingCapacityError,
+  isEquipmentStockError,
+  describeEquipmentStockError,
+  equipmentStockErrorFromRpc,
+} from '@/utils/bookingCapacityError';
 import { getStoredReferralCode } from '@/utils/referralCodeStorage';
 import {
   markEquipmentHoldActive,
@@ -621,6 +627,7 @@ export const PaymentPage = ({ onBack }) => {
   const [loadingBookingData, setLoadingBookingData] = useState(true);
   const [dataError, setDataError] = useState(null);
   const [dataErrorTitle, setDataErrorTitle] = useState('Booking Creation Failed');
+  const [dataErrorKind, setDataErrorKind] = useState(null);
 
   const [validatedTotal, setValidatedTotal] = useState(0);
   const [rewardsOffer, setRewardsOffer] = useState(null);
@@ -951,10 +958,11 @@ export const PaymentPage = ({ onBack }) => {
           }
         }
 
-        // Decrement equipment only for a new hold — reused rows already decremented.
-        const holdAlreadyActive = Boolean(data.reused && data.equipment_hold_active);
+        // Equipment hold is taken inside create_pending_booking when possible.
+        // Client decrement is a fallback only when the RPC did not already hold stock.
+        const holdAlreadyActive = Boolean(data.equipment_hold_active);
         if (!holdAlreadyActive && pendingData.addons_data?.equipment?.length > 0) {
-          console.log(`[${timestamp}] [PaymentPage] Decrementing equipment quantities...`);
+          console.log(`[${timestamp}] [PaymentPage] Decrementing equipment quantities (client fallback)...`);
           const equipmentToDecrement = pendingData.addons_data.equipment.map(item => ({
             equipment_id: item.dbId || item.equipment_id,
             quantity: item.quantity,
@@ -964,9 +972,16 @@ export const PaymentPage = ({ onBack }) => {
           });
           if (decrementError) {
             console.error(`[${timestamp}] [PaymentPage] Equipment decrement failed:`, decrementError);
-          } else {
-            await markEquipmentHoldActive(data.id, bookingPayload.addons);
+            try {
+              await cancelPendingPaymentBookingById(data.id, {
+                notes: 'Torn down: rental equipment out of stock at checkout',
+              });
+            } catch (teardownErr) {
+              console.error(`[${timestamp}] [PaymentPage] Teardown after stock failure:`, teardownErr);
+            }
+            throw equipmentStockErrorFromRpc(decrementError);
           }
+          await markEquipmentHoldActive(data.id, bookingPayload.addons);
         } else if (data.reused) {
           rememberPaymentEquipmentHold(data.id);
         }
@@ -1022,9 +1037,16 @@ export const PaymentPage = ({ onBack }) => {
           const { title, description } = describeBookingCapacityError(err);
           setDataErrorTitle(title);
           setDataError(description);
+          setDataErrorKind('capacity');
+        } else if (isEquipmentStockError(err)) {
+          const { title, description } = describeEquipmentStockError(err);
+          setDataErrorTitle(err.title || title);
+          setDataError(description);
+          setDataErrorKind('equipment_stock');
         } else {
           setDataErrorTitle('Booking Creation Failed');
           setDataError(err.message);
+          setDataErrorKind('generic');
         }
       }
     };
@@ -1256,6 +1278,18 @@ export const PaymentPage = ({ onBack }) => {
 
   // Error state - booking data not found or failed initialization
   if (!loadingBookingData && dataError) {
+    const pendingResumeToken =
+      pendingCustomerData?.id || searchParams.get('bookingId');
+    const resumeAddons = () => {
+      if (pendingResumeToken) {
+        navigate('/', { state: { resumeStep: 2, token: pendingResumeToken } });
+      } else if (onBack) {
+        onBack();
+      } else {
+        navigate(-1);
+      }
+    };
+
     return (
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-2xl mx-auto bg-red-900/40 border border-red-500/50 p-8 rounded-lg shadow-lg">
@@ -1267,19 +1301,39 @@ export const PaymentPage = ({ onBack }) => {
             {dataError}
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
-            <Button 
-              onClick={() => navigate('/')} 
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              Start New Booking
-            </Button>
-            <Button 
-              onClick={() => onBack ? onBack() : navigate(-1)} 
-              variant="outline" 
-              className="flex-1 text-white hover:bg-white/10"
-            >
-              Go Back
-            </Button>
+            {dataErrorKind === 'equipment_stock' && pendingResumeToken ? (
+              <>
+                <Button
+                  onClick={resumeAddons}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  Update rental add-ons
+                </Button>
+                <Button
+                  onClick={() => navigate('/')}
+                  variant="outline"
+                  className="flex-1 text-white hover:bg-white/10"
+                >
+                  Start New Booking
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button 
+                  onClick={() => navigate('/')} 
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  Start New Booking
+                </Button>
+                <Button 
+                  onClick={() => onBack ? onBack() : navigate(-1)} 
+                  variant="outline" 
+                  className="flex-1 text-white hover:bg-white/10"
+                >
+                  Go Back
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

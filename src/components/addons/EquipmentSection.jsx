@@ -2,6 +2,7 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { AddonSection } from './AddonSection';
 import { EquipmentItem } from './EquipmentItem';
+import { bookableFromInventoryRow } from '@/utils/equipmentInventoryManager';
 
 export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, equipmentInventory, loadingInventory, equipmentMeta, title, icon }) => {
     if (equipmentMeta.length === 0) {
@@ -16,7 +17,12 @@ export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, eq
                     const currentItem = addonsData.equipment.find(e => e.id === item.id);
                     const quantity = currentItem ? currentItem.quantity : 0;
                     const inventoryItem = equipmentInventory.find(inv => inv.id === item.dbId);
-                    const available = inventoryItem ? inventoryItem.total_quantity : 0;
+                    const isRental = String(item.type || inventoryItem?.type || '').toLowerCase() === 'rental';
+                    const available = inventoryItem
+                        ? (isRental
+                            ? bookableFromInventoryRow({ ...inventoryItem, type: 'rental' })
+                            : Number(inventoryItem.available_quantity ?? inventoryItem.total_quantity ?? 0))
+                        : 0;
                     
                     // Use price from item metadata (loaded from equipment_pricing in parent)
                     const itemPrice = Number(item.price || 0);

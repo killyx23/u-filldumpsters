@@ -276,7 +276,8 @@ export async function sendEarlyLeaveFeedbackEmail(bookingId, siteUrl = null) {
 
 /**
  * After successful payment: keep inventory allocated, but clear the unpaid-hold flag
- * so abandon/cancel/timeout paths do not restock a paid booking.
+ * so abandon/timeout paths do not restock a paid booking. A later approved
+ * cancellation restocks through release_cancelled_booking_equipment instead.
  */
 export async function clearEquipmentHoldFlagWithoutRestock(bookingId, currentAddons = null) {
   const id = Number(bookingId);

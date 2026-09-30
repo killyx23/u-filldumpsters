@@ -41,8 +41,24 @@ export async function ensureBridge(
   bridgeId: string | null,
 ): Promise<void> {
   if (!bridgeId) return;
+  const now = new Date().toISOString();
+
+  // Lock/unlock activity traveling through the bridge proves it is reachable.
+  // Event type 10 (Bridge Connection) remains the path that can mark offline.
+  const { data: previous } = await supabase
+    .from("lock_bridges")
+    .select("bridge_id, is_online")
+    .eq("bridge_id", bridgeId)
+    .maybeSingle();
+
+  const changed = previous?.is_online !== true;
   const { error } = await supabase.from("lock_bridges").upsert(
-    { bridge_id: bridgeId, last_event_at: new Date().toISOString() },
+    {
+      bridge_id: bridgeId,
+      last_event_at: now,
+      is_online: true,
+      ...(changed ? { last_changed_at: now } : {}),
+    },
     { onConflict: "bridge_id" },
   );
   if (error) console.error("[lockDeviceState] ensureBridge failed:", error.message);

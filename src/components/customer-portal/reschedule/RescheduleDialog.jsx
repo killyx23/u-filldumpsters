@@ -544,6 +544,8 @@ export const RescheduleDialog = ({
               setSelectedAddonsList={setSelectedAddonsList}
               bookingId={bookingId}
               selectedService={selectedService}
+              newDropOffDate={newDropOffDate}
+              newPickupDate={newPickupDate}
             />
           )}
 

@@ -180,14 +180,47 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
   const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
   const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
-  const couponDiscountAmount = Number(addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0);
-  const couponCode = addons?.coupon?.code || null;
-  const totalRewardsDiscount = Math.max(0, loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount);
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
+
+  // Prefer gross catalog amounts so lines match checkout; discounts are separate rows.
+  const grossSnapshotSum = snapshot.reduce(
+    (sum, line) => sum + Math.max(0, Number(line.amount ?? 0)),
+    0,
+  );
+
+  let couponDiscountAmount = Number(
+    addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0,
+  );
+  const coupon = addons?.coupon;
+  if (!(couponDiscountAmount > 0) && coupon) {
+    if (coupon.discountType === "fixed") {
+      couponDiscountAmount = Number(coupon.discountValue || 0);
+    } else if (coupon.discountType === "percentage") {
+      const baseForPct = grossSnapshotSum > 0 ? grossSnapshotSum : Math.max(0, subtotal);
+      couponDiscountAmount = (baseForPct * Number(coupon.discountValue || 0)) / 100;
+    }
+  }
+  if (!(couponDiscountAmount > 0) && snapshot.length > 0) {
+    const allocated = snapshot.reduce((sum, line) => {
+      const gross = Number(line.amount ?? 0);
+      const after = Number(line.amountAfterDiscount ?? gross);
+      return sum + Math.max(0, gross - after);
+    }, 0);
+    couponDiscountAmount = Math.max(
+      0,
+      allocated - loyaltyDiscountAmount - referralDiscountAmount,
+    );
+  }
+
+  const couponCode = coupon?.code || null;
+  const totalRewardsDiscount = Math.max(
+    0,
+    loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount,
+  );
   let rows = "";
   if (snapshot.length > 0) {
     for (const line of snapshot) {
-      const amount = Number(line.amountAfterDiscount ?? line.amount ?? 0);
+      const amount = Number(line.amount ?? line.amountAfterDiscount ?? 0);
       if (amount <= 0) continue;
       const label = line.label || line.key || "Charge";
       if (!offersDrivewayProtection && /driveway/i.test(String(label))) continue;

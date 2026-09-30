@@ -13,7 +13,7 @@ import { DeclineWarningDialog } from '@/components/addons/DeclineWarningDialog';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useProtectionPlans } from '@/hooks/useProtectionPlans';
 import { toast } from '@/components/ui/use-toast';
-import { checkInventoryAvailability } from '@/utils/equipmentInventoryManager';
+import { checkInventoryAvailability, fetchEquipmentAvailability, toInventoryDate } from '@/utils/equipmentInventoryManager';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import {
   filterAvailableAddonsForService,
@@ -47,6 +47,8 @@ export const RescheduleAddonsSection = ({
   setSelectedAddonsList,
   bookingId,
   selectedService = null,
+  newDropOffDate = null,
+  newPickupDate = null,
 }) => {
   const [availableEquipment, setAvailableEquipment] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -208,6 +210,17 @@ export const RescheduleAddonsSection = ({
 
         console.log('[RescheduleAddons] Available equipment fetched (excluding ID 7):', equipmentData?.length);
 
+        const stockStart = toInventoryDate(newDropOffDate) || toInventoryDate(originalBooking?.drop_off_date);
+        const stockEnd = toInventoryDate(newPickupDate) || toInventoryDate(originalBooking?.pickup_date) || stockStart;
+        const datedStock = await fetchEquipmentAvailability({
+          startDate: stockStart,
+          endDate: stockEnd,
+          excludeBookingId: bookingId,
+        });
+        const availableById = new Map(
+          (datedStock || []).map((row) => [Number(row.id), Number(row.available_quantity)])
+        );
+
         const equipmentWithIcons = (equipmentData || []).map(eq => ({
           id: eq.id,
           name: eq.name,
@@ -215,7 +228,9 @@ export const RescheduleAddonsSection = ({
           description: eq.description || eq.type || 'Equipment item',
           icon: getIconForEquipment(eq.name),
           type: eq.type || 'rental',
-          total_quantity: eq.total_quantity || 0,
+          total_quantity: availableById.has(Number(eq.id))
+            ? availableById.get(Number(eq.id))
+            : (eq.total_quantity || 0),
           isQuantityControlled: eq.type !== 'service' || isDisposalService(eq.name)
         }));
 
@@ -250,7 +265,18 @@ export const RescheduleAddonsSection = ({
     };
 
     fetchEquipment();
-  }, [insurancePrice, rentalInsurance, serviceId, drivewayProtection, drivewayPrice]);
+  }, [
+    insurancePrice,
+    rentalInsurance,
+    serviceId,
+    drivewayProtection,
+    drivewayPrice,
+    newDropOffDate,
+    newPickupDate,
+    bookingId,
+    originalBooking?.drop_off_date,
+    originalBooking?.pickup_date,
+  ]);
 
   const visibleAddons = filterAvailableAddonsForService(availableEquipment, serviceId, {
     hasDrivewayPlan: Boolean(drivewayProtection),
@@ -303,7 +329,11 @@ export const RescheduleAddonsSection = ({
       
       // Check inventory for rentals and consumables (but don't block)
       if (addon.type === 'rental' || addon.type === 'consumable') {
-        const inventoryCheck = await checkInventoryAvailability(addon.id, quantityToAdd);
+        const inventoryCheck = await checkInventoryAvailability(addon.id, quantityToAdd, {
+          startDate: newDropOffDate || originalBooking?.drop_off_date,
+          endDate: newPickupDate || originalBooking?.pickup_date,
+          excludeBookingId: bookingId,
+        });
         
         if (!inventoryCheck.available) {
           setInventoryWarnings(prev => ({
@@ -370,7 +400,11 @@ export const RescheduleAddonsSection = ({
       const additionalNeeded = Math.max(0, qty - originalQty);
       
       if (additionalNeeded > 0) {
-        const inventoryCheck = await checkInventoryAvailability(addon.id, additionalNeeded);
+        const inventoryCheck = await checkInventoryAvailability(addon.id, additionalNeeded, {
+          startDate: newDropOffDate || originalBooking?.drop_off_date,
+          endDate: newPickupDate || originalBooking?.pickup_date,
+          excludeBookingId: bookingId,
+        });
         
         if (!inventoryCheck.available && inventoryCheck.quantity > 0) {
           const maxAllowed = originalQty + inventoryCheck.quantity;

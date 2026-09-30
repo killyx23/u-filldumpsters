@@ -1,4 +1,19 @@
+import { format, isValid, parseISO } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
+
+/** Calendar date (yyyy-MM-dd) for inventory overlap checks. */
+export function toInventoryDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return isValid(value) ? format(value, 'yyyy-MM-dd') : null;
+  }
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const parsed = parseISO(value);
+    return isValid(parsed) ? format(parsed, 'yyyy-MM-dd') : null;
+  }
+  return null;
+}
 
 /**
  * Equipment Inventory Manager
@@ -13,6 +28,34 @@ export const EquipmentTypes = {
   CONSUMABLE: 'consumable',
   SERVICE: 'service'
 };
+
+/**
+ * Bookable qty for UI/checkout until holds are date-aware end-to-end.
+ * Rentals: min(date-aware, on-hand). Other types: date-aware (or on-hand).
+ */
+export function holdableQuantity({
+  type,
+  dateAwareQuantity,
+  onHandQuantity,
+} = {}) {
+  const onHand = Number(onHandQuantity);
+  const dateAware = Number(dateAwareQuantity);
+  const safeOnHand = Number.isFinite(onHand) ? Math.max(0, onHand) : 0;
+  const safeDateAware = Number.isFinite(dateAware) ? Math.max(0, dateAware) : safeOnHand;
+  const isRental = String(type || '').toLowerCase() === EquipmentTypes.RENTAL;
+  if (isRental) return Math.min(safeDateAware, safeOnHand);
+  return safeDateAware;
+}
+
+/** Resolve bookable qty from a get-equipment-inventory row. */
+export function bookableFromInventoryRow(row) {
+  if (!row) return 0;
+  return holdableQuantity({
+    type: row.type,
+    dateAwareQuantity: row.available_quantity ?? row.total_quantity,
+    onHandQuantity: row.on_hand_quantity ?? row.total_quantity,
+  });
+}
 
 /**
  * Calculate inventory changes when equipment is added/removed from booking
@@ -116,20 +159,47 @@ export const updateInventory = async (equipmentId, quantityChange, type) => {
 };
 
 /**
- * Check if sufficient inventory is available
- * @param {number} equipmentId - Equipment ID
- * @param {number} requestedQuantity - Quantity requested
+ * On-hand stock, plus rental units that are checked out on a different set of days.
+ * Returns null when the date-aware database function is not available yet.
  */
-export const checkInventoryAvailability = async (equipmentId, requestedQuantity) => {
-  const { data: equipment, error } = await supabase
+export async function fetchEquipmentAvailability({ startDate, endDate, excludeBookingId } = {}) {
+  const start = toInventoryDate(startDate);
+  const end = toInventoryDate(endDate) || start;
+  if (!start || !end) return null;
+
+  const { data, error } = await supabase.rpc('equipment_inventory_snapshot', {
+    p_start: start,
+    p_end: end,
+    p_exclude_booking_id: excludeBookingId ?? null,
+  });
+
+  if (error) {
+    console.warn('[equipment availability] date-aware stock unavailable:', error.message);
+    return null;
+  }
+  return data || [];
+}
+
+export function stockForEquipment(inventoryItem) {
+  if (!inventoryItem) return 0;
+  const dated = inventoryItem.available_quantity;
+  if (dated != null && dated !== '') return Number(dated);
+  return Number(inventoryItem.total_quantity || 0);
+}
+
+export const checkInventoryAvailability = async (equipmentId, requestedQuantity, options = {}) => {
+  const start = toInventoryDate(options.startDate);
+  const end = toInventoryDate(options.endDate) || start;
+
+  const { data: equipment, error: equipmentError } = await supabase
     .from('equipment')
     .select('total_quantity, name, type')
     .eq('id', equipmentId)
     .single();
 
-  if (error) {
-    console.error('Error checking inventory:', error);
-    return { available: false, error: error.message };
+  if (equipmentError) {
+    console.error('Error checking inventory:', equipmentError);
+    return { available: false, error: equipmentError.message };
   }
 
   // Services are always available
@@ -137,13 +207,36 @@ export const checkInventoryAvailability = async (equipmentId, requestedQuantity)
     return { available: true, quantity: 9999 };
   }
 
-  const available = equipment.total_quantity >= requestedQuantity;
-  
+  const onHand = Number(equipment.total_quantity ?? 0);
+  let dateAware = onHand;
+
+  if (start && end) {
+    const { data, error } = await supabase.rpc('equipment_quantity_available', {
+      p_equipment_id: equipmentId,
+      p_start: start,
+      p_end: end,
+      p_exclude_booking_id: options.excludeBookingId ?? null,
+    });
+    if (!error && data != null) {
+      dateAware = Number(data);
+    }
+  }
+
+  const quantity = holdableQuantity({
+    type: equipment.type,
+    dateAwareQuantity: dateAware,
+    onHandQuantity: onHand,
+  });
+  const available = quantity >= requestedQuantity;
+
   return {
     available,
-    quantity: equipment.total_quantity,
+    quantity,
+    onHand,
+    dateAware,
     name: equipment.name,
-    shortage: available ? 0 : requestedQuantity - equipment.total_quantity
+    type: equipment.type,
+    shortage: available ? 0 : requestedQuantity - quantity,
   };
 };
 

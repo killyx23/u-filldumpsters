@@ -161,8 +161,11 @@ const SharedProductModal = ({ isOpen, onClose, title, images, features, specific
 };
 
 export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, quantity, onQuantityChange, available }) => {
-    const isAvailable = available > 0;
-    const canAddMore = available > quantity;
+    const safeAvailable = Number.isFinite(Number(available)) ? Number(available) : 0;
+    const safeQuantity = Number.isFinite(Number(quantity)) ? Number(quantity) : 0;
+    const isAvailable = safeAvailable > 0;
+    const overSelected = safeQuantity > safeAvailable;
+    const canAddMore = safeAvailable > safeQuantity;
     
     // Categorize item types
     const isGorillaCart = label === 'Wheelbarrow' || label.includes('Gorilla') || label.includes('Dump Cart');
@@ -183,11 +186,19 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
     };
 
     // Calculate item total: price × quantity
-    const itemTotal = Number(price) * Number(quantity);
+    const itemTotal = Number(price) * Number(safeQuantity);
 
+    const showOutOfStock = !isAvailable || overSelected;
     const addButton = (
-        <Button size="sm" variant={quantity > 0 ? "destructive" : "secondary"} onClick={() => onQuantityChange(quantity > 0 ? 0 : 1)} disabled={!isAvailable && quantity === 0}>
-            {quantity > 0 ? 'Remove' : (isAvailable ? 'Add' : 'Out of Stock')}
+        <Button
+            size="sm"
+            variant={safeQuantity > 0 || overSelected ? "destructive" : "secondary"}
+            onClick={() => onQuantityChange(safeQuantity > 0 || overSelected ? 0 : 1)}
+            disabled={safeQuantity === 0 && !overSelected && !isAvailable}
+        >
+            {safeQuantity > 0 || overSelected
+              ? 'Remove'
+              : (isAvailable ? 'Add' : 'Out of Stock')}
         </Button>
     );
 
@@ -211,20 +222,25 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
                             Click for Details
                         </span>
                     )}
+                    {showOutOfStock && safeQuantity === 0 && (
+                        <span className="text-[10px] uppercase tracking-wider bg-red-700/80 text-white px-2 py-0.5 rounded-full font-bold">
+                            Out of Stock
+                        </span>
+                    )}
                 </div>
                 
                 <div onClick={(e) => e.stopPropagation()} className="flex items-center shrink-0 ml-4">
                     {hasQuantitySelector ? (
                         <div className="flex items-center gap-2">
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(Math.max(0, quantity - 1))}>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(Math.max(0, safeQuantity - 1))}>
                                 <Minus className="h-4 w-4" />
                             </Button>
-                            <span className="font-bold text-lg text-white w-8 text-center">{quantity}</span>
+                            <span className="font-bold text-lg text-white w-8 text-center">{safeQuantity}</span>
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <span tabIndex={0}>
-                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(quantity + 1)} disabled={!canAddMore}>
+                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-white hover:bg-white/20" onClick={() => onQuantityChange(safeQuantity + 1)} disabled={!canAddMore}>
                                                 <Plus className="h-4 w-4" />
                                             </Button>
                                         </span>
@@ -236,9 +252,9 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
                     ) : (
                         <div className="flex items-center gap-4">
                             <span className="font-semibold text-green-400">
-                                {quantity > 0 ? `$${itemTotal.toFixed(2)}` : `+$${Number(price).toFixed(2)}`}
+                                {safeQuantity > 0 ? `$${itemTotal.toFixed(2)}` : `+$${Number(price).toFixed(2)}`}
                             </span>
-                            {!isAvailable && quantity === 0 ? (
+                            {safeQuantity === 0 && !isAvailable ? (
                                 <TooltipProvider>
                                     <Tooltip>
                                         <TooltipTrigger asChild><span tabIndex={0}>{addButton}</span></TooltipTrigger>

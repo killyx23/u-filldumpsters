@@ -1,11 +1,22 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide-react';
 import { format } from 'date-fns';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
 import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
 import { bridgeOnlineFromDevices, loadLockPresenceDevices } from '@/utils/lockPresence';
+import { supabase } from '@/lib/customSupabaseClient';
+import { toast } from '@/components/ui/use-toast';
+
+const UNLINKED = '__unlinked__';
 
 const PRESENCE = {
   on_premises: {
@@ -45,12 +56,22 @@ function when(value) {
 
 export default function LockPresencePanel() {
   const [devices, setDevices] = useState([]);
+  const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [linkingDeviceId, setLinkingDeviceId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { devices: next, error: queryError } = await loadLockPresenceDevices();
+    const [{ devices: next, error: queryError }, equipmentRes] = await Promise.all([
+      loadLockPresenceDevices(),
+      supabase
+        .from('equipment')
+        .select('id, name, type')
+        .order('type', { ascending: true })
+        .order('name', { ascending: true }),
+    ]);
+
     if (queryError) {
       setError(queryError);
       setDevices([]);
@@ -58,12 +79,55 @@ export default function LockPresencePanel() {
       setError(null);
       setDevices(next);
     }
+
+    if (equipmentRes.error) {
+      console.warn('[LockPresencePanel] Could not load equipment catalog:', equipmentRes.error.message);
+      setEquipmentOptions([]);
+    } else {
+      setEquipmentOptions(equipmentRes.data || []);
+    }
+
     setLoading(false);
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const linkEquipment = useCallback(
+    async (deviceId, rawValue) => {
+      if (!deviceId) return;
+      const equipmentId = rawValue === UNLINKED || rawValue === '' || rawValue == null
+        ? null
+        : Number(rawValue);
+      if (equipmentId != null && !Number.isFinite(equipmentId)) return;
+
+      setLinkingDeviceId(deviceId);
+      const { error: updateError } = await supabase
+        .from('lock_devices')
+        .update({ equipment_id: equipmentId })
+        .eq('device_id', deviceId);
+
+      if (updateError) {
+        toast({
+          title: 'Could not link lock',
+          description: updateError.message,
+          variant: 'destructive',
+        });
+      } else {
+        const linkedName = equipmentOptions.find((e) => Number(e.id) === equipmentId)?.name;
+        toast({
+          title: equipmentId == null ? 'Lock unlinked' : 'Lock linked to equipment',
+          description: equipmentId == null
+            ? `${deviceId} is no longer mapped to catalog equipment.`
+            : `${deviceId} → ${linkedName || `equipment #${equipmentId}`}`,
+        });
+        await load();
+      }
+      setLinkingDeviceId(null);
+    },
+    [equipmentOptions, load],
+  );
 
   const primary = devices[0] || null;
 
@@ -126,6 +190,9 @@ export default function LockPresencePanel() {
         {devices.map((device) => {
           const state = PRESENCE[device.presence] || PRESENCE.unknown;
           const { Icon } = state;
+          const selectValue = device.equipment_id != null
+            ? String(device.equipment_id)
+            : UNLINKED;
           return (
             <div
               key={device.device_id}
@@ -177,10 +244,32 @@ export default function LockPresencePanel() {
                     Booking: <span className="text-slate-200">#{device.last_order_id}</span>
                   </span>
                 )}
+              </div>
+
+              <div className="pt-1 space-y-1.5">
+                <p className="text-xs text-slate-500">Linked equipment</p>
+                <Select
+                  value={selectValue}
+                  onValueChange={(value) => linkEquipment(device.device_id, value)}
+                  disabled={linkingDeviceId === device.device_id}
+                >
+                  <SelectTrigger className="h-9 max-w-md bg-black/30 border-white/15">
+                    <SelectValue placeholder="Link to equipment…" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-white/15 text-white">
+                    <SelectItem value={UNLINKED}>Not linked</SelectItem>
+                    {equipmentOptions.map((item) => (
+                      <SelectItem key={item.id} value={String(item.id)}>
+                        {item.name}
+                        {item.type ? ` (${item.type})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {!device.equipment_id && (
-                  <span className="text-amber-300/80 col-span-2">
-                    Not linked to equipment yet
-                  </span>
+                  <p className="text-xs text-amber-300/80">
+                    Pick a catalog item so this lock is mapped to equipment.
+                  </p>
                 )}
               </div>
 
