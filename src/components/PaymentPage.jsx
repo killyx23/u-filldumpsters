@@ -858,6 +858,8 @@ export const PaymentPage = ({ onBack }) => {
           ) || 0,
           addons: {
             ...pendingData.addons_data,
+            smsTransactionalOptIn: pendingData.booking_data?.smsTransactionalOptIn === true,
+            smsMarketingOptIn: pendingData.booking_data?.smsMarketingOptIn === true,
             verificationSkipped: driverVerificationSkipped,
             isDelivery: pendingData.delivery_service,
             referralCode: normalizedReferralCode || null,

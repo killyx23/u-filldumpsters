@@ -45,6 +45,8 @@ const INITIAL_BOOKING_DATA = {
   lastName: '',
   email: '',
   phone: '',
+  smsTransactionalOptIn: false,
+  smsMarketingOptIn: false,
   contactAddress: { street: '', city: '', state: '', zip: '', isVerified: false },
   addressVerified: false,
   dropOffDate: null,

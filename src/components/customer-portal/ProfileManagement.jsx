@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { SmsOptInFields } from '@/components/SmsOptInFields';
 
 export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
   const [isSaving, setIsSaving] = useState(false);
@@ -19,6 +20,8 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
       last_name: displayLastName,
       email: customer?.email || '',
       phone: customer?.phone || '',
+      sms_opt_in: customer?.sms_opt_in === true,
+      sms_marketing_opt_in: customer?.sms_marketing_opt_in === true,
       street: customer?.street || '',
       city: customer?.city || '',
       state: customer?.state || '',
@@ -114,6 +117,12 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
                         <Input id="phone" type="tel" value={formData.phone} onChange={handleInputChange} className="bg-black/30 border-white/20 text-white" required />
                     </div>
                 </div>
+                <SmsOptInFields
+                    transactional={formData.sms_opt_in}
+                    marketing={formData.sms_marketing_opt_in}
+                    onTransactionalChange={(checked) => setFormData(prev => ({ ...prev, sms_opt_in: checked }))}
+                    onMarketingChange={(checked) => setFormData(prev => ({ ...prev, sms_marketing_opt_in: checked }))}
+                />
 
                 <div className="pt-6 border-t border-white/10 space-y-4">
                     <h3 className="text-lg font-semibold text-yellow-400 flex items-center">

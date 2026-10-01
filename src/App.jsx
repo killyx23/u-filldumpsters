@@ -10,6 +10,8 @@ import { ReviewsPage } from '@/pages/ReviewsPage';
 import { ContactPage } from '@/pages/ContactPage';
 import { HowCanWeDoBetterPage } from '@/pages/HowCanWeDoBetterPage';
 import { AboutPage } from '@/pages/AboutPage';
+import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage';
+import { TermsPage } from '@/pages/TermsPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminLogin } from '@/pages/AdminLogin';
 import { AdminMfaPage } from '@/pages/AdminMfaPage';
@@ -129,6 +131,8 @@ function App() {
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/how-can-we-do-better" element={<HowCanWeDoBetterPage />} />
               <Route path="/about" element={<AboutPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
               <Route path="/admin-login" element={<AdminLogin />} />
               <Route path="/admin-mfa" element={<AdminMfaPage />} />
               <Route path="/customer-login" element={<CustomerLogin />} />

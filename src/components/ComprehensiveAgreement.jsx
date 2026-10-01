@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { SmsDisclosure } from '@/components/SmsOptInFields';
 import {
   createFeeLookup,
   DEFAULT_FEES,
@@ -381,19 +382,17 @@ const AgreementText = ({ fees }) => {
       <h3 className="text-lg text-yellow-300">SECTION 12: EXPRESS CONSENT FOR COMMUNICATIONS &amp; PRIVACY PROTECTION</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Express Communication Consent:</strong> By providing a telephone number and email address during
-          checkout, booking, or sign-up, the Customer explicitly consents and grants express authorization to the
-          Company to contact them via email, telephone voice call, pre-recorded voice message, and short message
-          service (SMS/text messaging).
+          <strong>Express Communication Consent:</strong> By providing an email address during checkout, booking, or
+          sign-up, the Customer consents to email about the rental. Text messages are a separate choice. Transactional
+          texts and marketing texts each have their own optional checkbox next to the phone number. Neither checkbox
+          is required or pre-checked, and checking one does not check the other.
         </li>
         <li>
-          <strong>Operational &amp; Marketing Scope:</strong> Authorized communications include, but are not limited to:
-          essential operational notifications, arrival tracking, pickup updates, billing notices, receipt delivery,
-          marketing materials, special coupons, holiday discounts, and company referral programs. The Customer
-          acknowledges that text messages and calls may be transmitted via automated telephone dialing systems or
-          automated email platforms. Consent to receive marketing text messages or emails is not a condition of
-          purchase or rental. Standard message and data rates may apply. The Customer may opt-out of marketing
-          communications at any time by replying "STOP" to text messages or clicking "Unsubscribe" in emails.
+          <strong>Operational &amp; Marketing Scope:</strong> Transactional texts, if opted in, cover booking
+          confirmations, arrival tracking, pickup updates, access codes, billing notices, and receipt delivery.
+          Marketing texts, if opted in separately, cover offers, coupons, and promotions. Email unsubscribe is
+          separate from text opt-out.
+          <SmsDisclosure className="mt-2 text-sm text-gray-300 leading-relaxed" />
         </li>
         <li>
           <strong>Strict Third-Party Privacy Protection:</strong> The Company strictly values the Customer&apos;s privacy.

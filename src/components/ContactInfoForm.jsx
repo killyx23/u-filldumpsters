@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
+import { SmsOptInFields } from '@/components/SmsOptInFields';
 
 export const ContactInfoForm = ({
     bookingData,
@@ -112,6 +113,12 @@ export const ContactInfoForm = ({
                                 <InputField icon={<User />} type="text" name="lastName" placeholder="Last Name" value={bookingData.lastName} onChange={handleInputChange} onBlur={handleBlur} required />
                             </div>
                             <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
+                            <SmsOptInFields
+                                transactional={bookingData.smsTransactionalOptIn}
+                                marketing={bookingData.smsMarketingOptIn}
+                                onTransactionalChange={(checked) => setBookingData(prev => ({ ...prev, smsTransactionalOptIn: checked }))}
+                                onMarketingChange={(checked) => setBookingData(prev => ({ ...prev, smsMarketingOptIn: checked }))}
+                            />
                             <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
 
                             {detectingReturning && bookingData.email?.includes('@') && (

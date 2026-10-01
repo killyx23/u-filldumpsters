@@ -178,8 +178,8 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           iconClassName: 'text-blue-300',
           shortLabel: 'Phone validation',
           summary: '10-digit phone',
-          description: 'We need a valid phone number for delivery updates and rental communication.',
-          howToUse: 'Enter a 10-digit US phone number. Fix any warning before continuing.',
+          description: 'A phone number is required for the rental. Text messages are optional and are not part of email.',
+          howToUse: 'Enter a 10-digit US phone number. The text-message boxes under the phone field start unchecked and are not required.',
         }),
         entry({
           id: 'address-fields',

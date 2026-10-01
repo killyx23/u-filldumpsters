@@ -1,11 +1,12 @@
 import React from 'react';
 import { formatMoney, formatPercent, formatTons } from '@/utils/chargesAndFeesConfig';
+import { SmsDisclosure } from '@/components/SmsOptInFields';
 
 export const buildTermsSections = (fee) => [
   {
     id: 'email',
     title: 'Email & Text Message Communication',
-    summary: 'Consent to email verification and order-related text (SMS) communication.',
+    summary: 'Email is required for booking updates. Text messages use separate optional checkboxes and are not required.',
     content: (
       <>
         <p>
@@ -17,12 +18,11 @@ export const buildTermsSections = (fee) => [
           rental. Your contact information will not be sold to third parties.
         </p>
         <p>
-          By providing my mobile phone number, I consent to receive text messages (SMS/MMS) from U-Fill Dumpsters LLC
-          about my order and rental, including booking confirmations, pickup and delivery updates, access codes,
-          scheduling changes, and other account-related notices. Message and data rates may apply. Message frequency
-          varies. Consent to receive text messages is not required as a condition of purchase. I may opt out at any time
-          by replying STOP to a text message or by contacting U-Fill Dumpsters LLC customer support.
+          Text messages are optional and are not part of email consent. Next to the phone number there are two separate
+          checkboxes, one for transactional order texts and one for marketing texts. Neither box is required or
+          pre-checked.
         </p>
+        <SmsDisclosure className="text-sm text-gray-300 leading-relaxed" />
       </>
     ),
   },

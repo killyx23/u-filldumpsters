@@ -303,6 +303,8 @@ export function mapPendingToBookingState(pending, hydratedPlan = null) {
       lastName: pending.last_name || '',
       email: pending.email || '',
       phone: pending.phone || '',
+      smsTransactionalOptIn: storedBookingData.smsTransactionalOptIn === true,
+      smsMarketingOptIn: storedBookingData.smsMarketingOptIn === true,
       contactAddress: pending.contact_address || {
         street: pending.street,
         city: pending.city,
