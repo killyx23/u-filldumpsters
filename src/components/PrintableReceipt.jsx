@@ -11,7 +11,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
@@ -355,12 +355,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     </div>
                 </section>
 
-                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0) || getLatestRescheduleApproval(booking)) && (
+                {(receipt_original_snapshot || (Array.isArray(receipt_status_history) && receipt_status_history.length > 0) || resolveRescheduleApprovalDisplay(booking)) && (
                     <section className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md" style={{ pageBreakInside: 'avoid' }}>
                         <h3 className="font-bold text-lg mb-2 text-blue-800">Receipt History</h3>
                         {receipt_original_snapshot && (
                             <p className="text-sm text-blue-900">
-                                {receipt_original_snapshot.status === 'pending_review' || getLatestRescheduleApproval(booking)
+                                {receipt_original_snapshot.status === 'pending_review' || resolveRescheduleApprovalDisplay(booking)
                                     ? 'Reschedule requested on '
                                     : 'Original receipt snapshot stored on '}
                                 {receipt_original_snapshot.captured_at
@@ -370,7 +370,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             </p>
                         )}
                         {(() => {
-                            const approval = getLatestRescheduleApproval(booking);
+                            const approval = resolveRescheduleApprovalDisplay(booking);
                             if (!approval) return null;
                             return (
                                 <div className="mt-3 p-3 bg-white border border-blue-200 rounded-md text-sm text-blue-950 space-y-1">

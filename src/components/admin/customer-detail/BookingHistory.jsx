@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPin, Clock } from 'lucide-react';
 import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
@@ -70,14 +70,22 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
     
     const handleResendConfirmation = async (booking) => {
         setIsSending(booking.id);
+        const recipientEmail = booking.email || customer?.email;
         const { error } = await supabase.functions.invoke('send-booking-confirmation', {
-            body: { booking: { ...booking, customers: customer } },
+            body: {
+                bookingId: booking.id,
+                force: true,
+                ...(recipientEmail ? { email: recipientEmail } : {}),
+            },
         });
 
         if (error) {
-            toast({ title: 'Failed to send email', description: error.message, variant: 'destructive' });
+            const errContext = await error.context?.json().catch(() => null);
+            const description = [errContext?.error, errContext?.details].filter(Boolean).join(': ')
+                || error.message;
+            toast({ title: 'Failed to send email', description, variant: 'destructive' });
         } else {
-            toast({ title: 'Confirmation Email Sent!', description: `An email has been sent to ${booking.email}.` });
+            toast({ title: 'Confirmation Email Sent!', description: `An email has been sent to ${recipientEmail || 'the customer'}.` });
         }
         setIsSending(null);
     };
@@ -93,7 +101,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
         return 'Manual Review';
     };
     const pendingReason = getPendingReason();
-    const rescheduleApproval = getLatestRescheduleApproval(booking);
+    const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
     const oneWayMiles = resolveOneWayMiles(booking, customer);
 
     return (

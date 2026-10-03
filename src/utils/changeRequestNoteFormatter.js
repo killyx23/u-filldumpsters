@@ -121,6 +121,50 @@ function parseDateRangeLine(line) {
   };
 }
 
+/** Premium Insurance is a service, not rental equipment. */
+export function isInsuranceAddonLabel(name) {
+  const text = String(name || '').toLowerCase();
+  return text.includes('premium insurance') || /\binsurance\b/.test(text);
+}
+
+function isInsuranceInventoryItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (item.id === 'insurance' || item.type === 'insurance' || item.equipment_id === 'insurance') return true;
+  return isInsuranceAddonLabel(item.name);
+}
+
+/** Split a comma-separated add-on line so insurance is not labeled as equipment. */
+export function splitInsuranceFromAddonText(text) {
+  if (!text || text === 'None' || text === '[]') {
+    return { equipment: '', insurance: '' };
+  }
+  const equipment = [];
+  const insurance = [];
+  for (const part of String(text).split(/,\s*/)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const name = trimmed.replace(/\s*\(qty\s*\d+\)\s*$/i, '');
+    if (isInsuranceAddonLabel(name)) insurance.push(trimmed);
+    else equipment.push(trimmed);
+  }
+  return { equipment: equipment.join(', '), insurance: insurance.join(', ') };
+}
+
+function joinAddonText(...parts) {
+  const values = parts.map((part) => String(part || '').trim()).filter((part) => part && part !== 'None' && part !== '[]');
+  return values.length ? values.join(', ') : null;
+}
+
+function partitionInsuranceAddons(addons) {
+  const equipment = [];
+  const insurance = [];
+  for (const addon of addons || []) {
+    if (isInsuranceInventoryItem(addon)) insurance.push(addon);
+    else equipment.push(addon);
+  }
+  return { equipment, insurance };
+}
+
 function extractField(lines, prefixes) {
   const list = Array.isArray(prefixes) ? prefixes : [prefixes];
   for (const line of lines) {
@@ -266,9 +310,15 @@ export function parseChangeRequestNote(content) {
     'Current Add-ons:',
   ]);
   const requestedAddons = extractField(lines, ['Requested add-ons:', 'Requested Add-ons:']);
-  const equipmentReturn = extractField(lines, ['Equipment to return:']);
-  const equipmentAllocate = extractField(lines, ['Equipment to allocate:']);
-  const equipmentUnchanged = extractField(lines, ['Unchanged equipment:']);
+  const returnedSplit = splitInsuranceFromAddonText(extractField(lines, ['Equipment to return:']));
+  const allocatedSplit = splitInsuranceFromAddonText(extractField(lines, ['Equipment to allocate:']));
+  const unchangedSplit = splitInsuranceFromAddonText(extractField(lines, ['Unchanged equipment:']));
+  const equipmentReturn = returnedSplit.equipment;
+  const equipmentAllocate = allocatedSplit.equipment;
+  const equipmentUnchanged = unchangedSplit.equipment;
+  const insuranceRemoved = joinAddonText(returnedSplit.insurance, extractField(lines, ['Insurance removed:']));
+  const insuranceAdded = joinAddonText(allocatedSplit.insurance, extractField(lines, ['Insurance added:']));
+  const insuranceUnchanged = joinAddonText(unchangedSplit.insurance, extractField(lines, ['Insurance:']));
 
   const comments = extractField(lines, ['Customer comments:', 'Customer Comments:', 'Comments:']);
 
@@ -279,7 +329,10 @@ export function parseChangeRequestNote(content) {
   const hasMeaningfulInventory =
     !emptyInventoryJson(equipmentReturn) ||
     !emptyInventoryJson(equipmentAllocate) ||
-    !emptyInventoryJson(equipmentUnchanged);
+    !emptyInventoryJson(equipmentUnchanged) ||
+    !emptyInventoryJson(insuranceRemoved) ||
+    !emptyInventoryJson(insuranceAdded) ||
+    !emptyInventoryJson(insuranceUnchanged);
 
   return {
     bookingId,
@@ -311,6 +364,9 @@ export function parseChangeRequestNote(content) {
     equipmentReturn: hasMeaningfulInventory && !emptyInventoryJson(equipmentReturn) ? equipmentReturn : null,
     equipmentAllocate: hasMeaningfulInventory && !emptyInventoryJson(equipmentAllocate) ? equipmentAllocate : null,
     equipmentUnchanged: hasMeaningfulInventory && !emptyInventoryJson(equipmentUnchanged) ? equipmentUnchanged : null,
+    insuranceRemoved: hasMeaningfulInventory && !emptyInventoryJson(insuranceRemoved) ? insuranceRemoved : null,
+    insuranceAdded: hasMeaningfulInventory && !emptyInventoryJson(insuranceAdded) ? insuranceAdded : null,
+    insuranceUnchanged: hasMeaningfulInventory && !emptyInventoryJson(insuranceUnchanged) ? insuranceUnchanged : null,
     comments,
     submittedAt: submittedRaw,
   };
@@ -378,9 +434,14 @@ export function buildFriendlyRescheduleReason({
 
   if (inventoryChanges) {
     const { to_return, to_allocate, unchanged } = inventoryChanges;
-    if (to_return?.length) lines.push(`Equipment to return: ${formatAddonList(to_return)}`);
-    if (to_allocate?.length) lines.push(`Equipment to allocate: ${formatAddonList(to_allocate)}`);
-    if (unchanged?.length) lines.push(`Unchanged equipment: ${formatAddonList(unchanged)}`);
+    const pushInventory = (equipmentLabel, insuranceLabel, items) => {
+      const { equipment, insurance } = partitionInsuranceAddons(items);
+      if (equipment.length) lines.push(`${equipmentLabel}: ${formatAddonList(equipment)}`);
+      if (insurance.length) lines.push(`${insuranceLabel}: ${formatAddonList(insurance)}`);
+    };
+    pushInventory('Equipment to return', 'Insurance removed', to_return);
+    pushInventory('Equipment to allocate', 'Insurance added', to_allocate);
+    pushInventory('Unchanged equipment', 'Insurance', unchanged);
   }
 
   const trimmedComments = (comments || '').trim();

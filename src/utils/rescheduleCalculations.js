@@ -133,7 +133,8 @@ export const calculateBookingCosts = async (
     addonsList,
     distanceMiles = 0,
     priceSnapshot = null,
-    taxOptions = null
+    taxOptions = null,
+    discounts = null,
 ) => {
     if (!service) {
         return { serviceCost: 0, addonsCost: 0, subtotal: 0, tax: 0, total: 0 };
@@ -182,6 +183,7 @@ export const calculateBookingCosts = async (
         taxOptions: resolvedTaxOptions,
         insurancePrice: 0,
         priceSnapshot,
+        discounts,
     });
 
     const serviceCost = costs.baseRentalCost + costs.deliveryFee + costs.mileageCharge;

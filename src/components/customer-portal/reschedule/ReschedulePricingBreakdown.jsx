@@ -182,6 +182,12 @@ export const ReschedulePricingBreakdown = ({
                     ? (Number(booking.customers?.distance_miles) || originalTotalMiles)
                     : 0;
 
+                const rewardDiscounts = {
+                    loyaltyDiscountAmount: booking.addons?.loyaltyDiscountAmount,
+                    loyaltyPointsToRedeem: booking.addons?.loyaltyPointsToRedeem,
+                    referralDiscountAmount: booking.addons?.referralDiscountAmount,
+                    coupon: booking.addons?.coupon,
+                };
                 const originalCostResult = await calculateRescheduleCosts({
                     service: originalService,
                     days: originalDays,
@@ -193,6 +199,7 @@ export const ReschedulePricingBreakdown = ({
                         serviceTaxFlags: originalServiceTax || taxOptions.serviceTaxFlags,
                     },
                     insurancePrice,
+                    discounts: rewardDiscounts,
                 });
 
                 const originalCostsData = {
@@ -275,6 +282,7 @@ export const ReschedulePricingBreakdown = ({
                     taxRate,
                     taxOptions,
                     insurancePrice,
+                    discounts: rewardDiscounts,
                 });
 
                 const addonsMap = new Map();

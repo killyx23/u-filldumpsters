@@ -1,6 +1,5 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
 import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
 import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
@@ -169,25 +168,65 @@ const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE)
   if (snap > 0) return snap;
   return Number(fallbackPrice) || DEFAULT_INSURANCE_PRICE;
 };
-const buildPriceSummaryHTML = (booking, insuranceAmount) => {
+const roundMoney = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
+const escapeHtml = (value) => String(value ?? "")
+  .replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;")
+  .replace(/"/g, "&quot;");
+
+/** Line total from the checkout snapshot when the saved equipment price was cleared. */
+const snapshotEquipmentAmount = (snapshot, item) => {
+  const id = String(item?.dbId ?? item?.equipment_id ?? item?.id ?? "");
+  const name = String(item?.label || item?.name || "").trim().toLowerCase();
+  for (const line of snapshot) {
+    const key = String(line?.key || "");
+    const amount = Number(line?.amount ?? 0);
+    if (!(amount > 0)) continue;
+    if (id && (key === `equipment_${id}` || key.endsWith(`_${id}`))) return amount;
+  }
+  if (!name) return 0;
+  for (const line of snapshot) {
+    const label = String(line?.label || "").trim().toLowerCase();
+    const amount = Number(line?.amount ?? 0);
+    if (amount > 0 && label && (label === name || name.includes(label) || label.includes(name))) {
+      return amount;
+    }
+  }
+  return 0;
+};
+
+const resolveReceiptPricing = (booking, insuranceAmount) => {
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const offersDrivewayProtection = Number(plan?.id) === 1;
-  const basePrice = Number(plan.price ?? plan.base_price ?? 0);
-  const subtotal = Number(booking.subtotal_before_tax ?? 0);
-  const tax = Number(booking.tax_amount ?? 0);
-  const total = resolveBookingGrandTotal(booking);
-  const taxRate = Number(booking.tax_rate_used ?? 7.45);
-  const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
-  const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
+  const charges: { label: string; amount: number }[] = [];
 
-  // Prefer gross catalog amounts so lines match checkout; discounts are separate rows.
-  const grossSnapshotSum = snapshot.reduce(
-    (sum, line) => sum + Math.max(0, Number(line.amount ?? 0)),
-    0,
-  );
+  const basePrice = Number(plan.price ?? plan.base_price ?? 0);
+  if (basePrice > 0) charges.push({ label: "Base Rental", amount: basePrice });
+  if (insuranceAmount > 0) charges.push({ label: "Premium Insurance", amount: insuranceAmount });
 
+  if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
+    const drivewayAmt = Number(addons.drivewayPriceApplied ?? 0);
+    if (drivewayAmt > 0) charges.push({ label: "Driveway Protection", amount: drivewayAmt });
+  }
+  const deliveryFee = Number(addons.deliveryFee ?? 0);
+  if (deliveryFee > 0) charges.push({ label: "Delivery Fee", amount: deliveryFee });
+  const mileageFee = Number(addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0);
+  if (mileageFee > 0) charges.push({ label: "Mileage Charge", amount: mileageFee });
+
+  if (Array.isArray(addons.equipment)) {
+    for (const item of addons.equipment) {
+      const qty = Number(item.quantity || 1);
+      const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
+      const amount = unitPrice > 0 ? unitPrice * qty : snapshotEquipmentAmount(snapshot, item);
+      if (!(amount > 0)) continue;
+      charges.push({ label: resolveEquipmentLabel(item), amount });
+    }
+  }
+
+  const gross = roundMoney(charges.reduce((sum, line) => sum + line.amount, 0));
   let couponDiscountAmount = Number(
     addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0,
   );
@@ -196,106 +235,62 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
     if (coupon.discountType === "fixed") {
       couponDiscountAmount = Number(coupon.discountValue || 0);
     } else if (coupon.discountType === "percentage") {
-      const baseForPct = grossSnapshotSum > 0 ? grossSnapshotSum : Math.max(0, subtotal);
-      couponDiscountAmount = (baseForPct * Number(coupon.discountValue || 0)) / 100;
+      couponDiscountAmount = (gross * Number(coupon.discountValue || 0)) / 100;
     }
   }
-  if (!(couponDiscountAmount > 0) && snapshot.length > 0) {
-    const allocated = snapshot.reduce((sum, line) => {
-      const gross = Number(line.amount ?? 0);
-      const after = Number(line.amountAfterDiscount ?? gross);
-      return sum + Math.max(0, gross - after);
-    }, 0);
-    couponDiscountAmount = Math.max(
-      0,
-      allocated - loyaltyDiscountAmount - referralDiscountAmount,
+  const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
+  const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
+  const discount = Math.min(
+    gross,
+    Math.max(0, couponDiscountAmount) + Math.max(0, loyaltyDiscountAmount) + Math.max(0, referralDiscountAmount),
+  );
+  const appliedCoupon = Math.min(discount, Math.max(0, couponDiscountAmount));
+  const appliedLoyalty = Math.min(roundMoney(discount - appliedCoupon), Math.max(0, loyaltyDiscountAmount));
+  const appliedReferral = roundMoney(Math.max(0, discount - appliedCoupon - appliedLoyalty));
+  const subtotal = roundMoney(Math.max(0, gross - appliedCoupon - appliedLoyalty - appliedReferral));
+  const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  const tax = roundMoney(subtotal * (taxRate / 100));
+  const total = roundMoney(subtotal + tax);
+
+  return {
+    charges,
+    subtotal,
+    tax,
+    total,
+    taxRate,
+    appliedCoupon,
+    appliedLoyalty,
+    appliedReferral,
+    couponCode: coupon?.code || null,
+    loyaltyPoints: Number(addons?.loyaltyPointsToRedeem || 0),
+  };
+};
+
+const buildPriceSummaryHTML = (booking, insuranceAmount) => {
+  const pricing = resolveReceiptPricing(booking, insuranceAmount);
+  const priceRow = (label, amount, color = "#4b5563") => `<tr>
+      <td style="padding: 6px 0; color: ${color};">${escapeHtml(label)}</td>
+      <td style="padding: 6px 0; color: ${color === "#4b5563" ? "#1f2937" : color}; text-align: right;">${amount < 0 ? "-" : ""}${formatCurrency(Math.abs(amount))}</td>
+    </tr>`;
+  let rows = pricing.charges.map((line) => priceRow(line.label, line.amount)).join("");
+  if (pricing.appliedCoupon > 0) {
+    rows += priceRow(
+      `Coupon Discount${pricing.couponCode ? ` (${pricing.couponCode})` : ""}`,
+      -pricing.appliedCoupon,
+      "#047857",
     );
   }
-
-  const couponCode = coupon?.code || null;
-  const totalRewardsDiscount = Math.max(
-    0,
-    loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount,
-  );
-  let rows = "";
-  if (snapshot.length > 0) {
-    for (const line of snapshot) {
-      const amount = Number(line.amount ?? line.amountAfterDiscount ?? 0);
-      if (amount <= 0) continue;
-      const label = line.label || line.key || "Charge";
-      if (!offersDrivewayProtection && /driveway/i.test(String(label))) continue;
-      rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">${label}</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
-    </tr>`;
-    }
-  } else {
-    if (basePrice > 0) {
-      rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">Base Rental</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(basePrice)}</td>
-    </tr>`;
-    }
-    if (insuranceAmount > 0) {
-      rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">Rental Insurance</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(insuranceAmount)}</td>
-    </tr>`;
-    }
-    if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
-      const drivewayAmt = Number(addons.drivewayPriceApplied ?? 0);
-      if (drivewayAmt > 0) {
-        rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">Driveway Protection</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(drivewayAmt)}</td>
-    </tr>`;
-      }
-    }
-    if (addons.deliveryFee > 0) {
-      rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">Delivery Fee</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(addons.deliveryFee)}</td>
-    </tr>`;
-    }
-    const mileageFee = addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0;
-    if (mileageFee > 0) {
-      rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">Mileage Charge</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(mileageFee)}</td>
-    </tr>`;
-    }
-    if (addons.equipment && Array.isArray(addons.equipment)) {
-      for (const item of addons.equipment) {
-        const dbId = item.dbId ?? item.equipment_id;
-        const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
-        const qty = Number(item.quantity || 1);
-        const amount = unitPrice > 0 ? unitPrice * qty : 0;
-        if (amount <= 0) continue;
-        rows += `<tr>
-      <td style="padding: 6px 0; color: #4b5563;">${resolveEquipmentLabel(item)}</td>
-      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
-    </tr>`;
-      }
-    }
+  if (pricing.appliedLoyalty > 0) {
+    rows += priceRow(
+      pricing.loyaltyPoints > 0 ? `Loyalty (${pricing.loyaltyPoints} pts)` : "Loyalty",
+      -pricing.appliedLoyalty,
+      "#047857",
+    );
   }
-  if (couponDiscountAmount > 0) {
-    rows += `<tr>
-      <td style="padding: 6px 0; color: #047857;">Coupon Discount${couponCode ? ` (${couponCode})` : ""}</td>
-      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(couponDiscountAmount)}</td>
-    </tr>`;
+  if (pricing.appliedReferral > 0) {
+    rows += priceRow("Referral Wallet Discount", -pricing.appliedReferral, "#047857");
   }
-  if (loyaltyDiscountAmount > 0) {
-    rows += `<tr>
-      <td style="padding: 6px 0; color: #047857;">Loyalty Points Discount (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)</td>
-      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(loyaltyDiscountAmount)}</td>
-    </tr>`;
-  }
-  if (referralDiscountAmount > 0) {
-    rows += `<tr>
-      <td style="padding: 6px 0; color: #047857;">Referral Wallet Discount</td>
-      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(referralDiscountAmount)}</td>
-    </tr>`;
-  }
+  const totalRewardsDiscount = pricing.appliedCoupon + pricing.appliedLoyalty + pricing.appliedReferral;
   const thankYouRewardsHTML = totalRewardsDiscount > 0 ? `
     <div style="margin-top: 12px; padding: 10px 12px; background: #ecfdf5; border: 1px solid #86efac; border-radius: 8px; color: #065f46; font-size: 13px;">
       Thank you for your loyalty and continued business. Your rewards discount has been applied to this booking.
@@ -308,18 +303,150 @@ const buildPriceSummaryHTML = (booking, insuranceAmount) => {
           ${rows}
           <tr style="border-top: 1px solid #e5e7eb;">
             <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold;">Subtotal</td>
-            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold; text-align: right;">${formatCurrency(subtotal)}</td>
+            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold; text-align: right;">${formatCurrency(pricing.subtotal)}</td>
           </tr>
           <tr>
-            <td style="padding: 6px 0; color: #4b5563;">Tax (${taxRate.toFixed(2)}%)</td>
-            <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(tax)}</td>
+            <td style="padding: 6px 0; color: #4b5563;">Tax (${pricing.taxRate.toFixed(2)}%)</td>
+            <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(pricing.tax)}</td>
           </tr>
           <tr style="border-top: 2px solid #3b82f6;">
             <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px;">Total Paid</td>
-            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(total)}</td>
+            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(pricing.total)}</td>
           </tr>
         </table>
         ${thankYouRewardsHTML}
+      </div>`;
+};
+
+const isInsuranceAddonLabel = (name: string) => {
+  const text = String(name || "").toLowerCase();
+  return text.includes("premium insurance") || /\binsurance\b/.test(text);
+};
+
+const splitInsuranceFromAddonText = (text: string) => {
+  const equipment: string[] = [];
+  const insurance: string[] = [];
+  for (const part of String(text || "").split(/,\s*/)) {
+    const trimmed = part.trim();
+    if (!trimmed || trimmed === "None" || trimmed === "[]") continue;
+    const name = trimmed.replace(/\s*\(qty\s*\d+\)\s*$/i, "");
+    if (isInsuranceAddonLabel(name)) insurance.push(trimmed);
+    else equipment.push(trimmed);
+  }
+  return { equipment: equipment.join(", "), insurance: insurance.join(", ") };
+};
+
+const joinAddonText = (...parts: string[]) =>
+  parts.map((part) => String(part || "").trim()).filter((part) => part && part !== "None" && part !== "[]").join(", ");
+
+const extractNoteField = (lines: string[], prefixes: string[]) => {
+  for (const line of lines) {
+    for (const prefix of prefixes) {
+      if (line.toLowerCase().startsWith(prefix.toLowerCase())) {
+        return line.slice(prefix.length).trim();
+      }
+    }
+  }
+  return "";
+};
+
+const isChangeRequestNote = (content: string) =>
+  /reschedule request|--- Structured request ---|Admin approval required|Scheduling approval required/i.test(content || "");
+
+const specialInstructionRow = (label: string, value: string) => {
+  if (!value) return "";
+  return `<tr>
+      <td style="padding: 8px 0; color: #6b7280; font-weight: bold; vertical-align: top; white-space: nowrap;">${escapeHtml(label)}</td>
+      <td style="padding: 8px 0; color: #1f2937;">${escapeHtml(value)}</td>
+    </tr>`;
+};
+
+const buildSpecialInstructionsHTML = (notes: unknown) => {
+  const raw = String(notes || "").trim();
+  if (!raw) return "";
+  if (!isChangeRequestNote(raw)) {
+    return `
+      <div style="margin-top: 25px; padding: 15px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
+        <p style="margin: 0; color: #92400e; font-weight: bold;">Special Instructions:</p>
+        <p style="margin: 10px 0 0 0; color: #78350f; white-space: pre-wrap;">${escapeHtml(raw)}</p>
+      </div>`;
+  }
+
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bookingMatch = raw.match(/booking\s*#?\s*(\d+)/i);
+  const schedule = {
+    originalDrop: "",
+    originalPick: "",
+    requestedDrop: "",
+    requestedPick: "",
+  };
+  let section: "original" | "requested" | null = null;
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (lower.startsWith("current schedule") || lower.startsWith("original schedule")) {
+      section = "original";
+      continue;
+    }
+    if (lower.startsWith("requested schedule") || lower.startsWith("new schedule")) {
+      section = "requested";
+      continue;
+    }
+    if (
+      lower.startsWith("service:") ||
+      lower.startsWith("delivery address") ||
+      lower.startsWith("current add-ons") ||
+      lower.startsWith("---")
+    ) {
+      section = null;
+    }
+    const drop = line.match(/^(?:Drop-off|Delivery)\s*:\s*(.+)$/i);
+    const pick = line.match(/^(?:Pickup|Return|Pick-up)\s*:\s*(.+)$/i);
+    if (drop && section === "original") schedule.originalDrop = drop[1].trim();
+    if (drop && section === "requested") schedule.requestedDrop = drop[1].trim();
+    if (pick && section === "original") schedule.originalPick = pick[1].trim();
+    if (pick && section === "requested") schedule.requestedPick = pick[1].trim();
+  }
+
+  const scheduleTable = (title: string, dropOff: string, pickup: string) => {
+    if (!dropOff && !pickup) return "";
+    return `
+      <p style="margin: 14px 0 6px; color: #1e40af; font-weight: bold;">${escapeHtml(title)}</p>
+      <table style="width: 100%; border-collapse: collapse;">
+        ${specialInstructionRow("Drop-off", dropOff)}
+        ${specialInstructionRow("Pickup", pickup)}
+      </table>`;
+  };
+  const address = extractNoteField(lines, ["Delivery address:", "Delivery Address:", "Contact address:", "Contact Address:"])
+    .replace(/\s*\((?:pending manual verification|needs address verification)\)\s*$/i, "");
+  const returned = splitInsuranceFromAddonText(extractNoteField(lines, ["Equipment to return:"]));
+  const allocated = splitInsuranceFromAddonText(extractNoteField(lines, ["Equipment to allocate:"]));
+  const unchanged = splitInsuranceFromAddonText(extractNoteField(lines, ["Unchanged equipment:"]));
+  const insuranceRemoved = joinAddonText(returned.insurance, extractNoteField(lines, ["Insurance removed:"]));
+  const insuranceAdded = joinAddonText(allocated.insurance, extractNoteField(lines, ["Insurance added:"]));
+  const insuranceUnchanged = joinAddonText(unchanged.insurance, extractNoteField(lines, ["Insurance:"]));
+
+  return `
+      <div style="margin-top: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Special Instructions</h2>
+        <p style="margin: 0 0 10px; color: #1e40af; font-weight: bold;">Reschedule request${bookingMatch ? ` for booking #${escapeHtml(bookingMatch[1])}` : ""}</p>
+        <table style="width: 100%; border-collapse: collapse;">
+          ${specialInstructionRow("Service", extractNoteField(lines, ["Service:"]))}
+        </table>
+        ${scheduleTable("Current schedule", schedule.originalDrop, schedule.originalPick)}
+        ${scheduleTable("Requested schedule", schedule.requestedDrop, schedule.requestedPick)}
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+          ${specialInstructionRow("Delivery address", address)}
+          ${specialInstructionRow("Distance", extractNoteField(lines, ["Distance:", "Distance (miles):"]))}
+          ${specialInstructionRow("Current add-ons", extractNoteField(lines, ["Current add-ons:", "Current Add-ons:", "Original add-ons:", "Original Add-ons:"]))}
+          ${specialInstructionRow("Requested add-ons", extractNoteField(lines, ["Requested add-ons:", "Requested Add-ons:"]))}
+          ${specialInstructionRow("Equipment to return", returned.equipment)}
+          ${specialInstructionRow("Equipment to allocate", allocated.equipment)}
+          ${specialInstructionRow("Unchanged equipment", unchanged.equipment)}
+          ${specialInstructionRow("Insurance removed", insuranceRemoved)}
+          ${specialInstructionRow("Insurance added", insuranceAdded)}
+          ${specialInstructionRow("Insurance", insuranceUnchanged)}
+          ${specialInstructionRow("Comments", extractNoteField(lines, ["Customer comments:", "Customer Comments:", "Comments:"]))}
+        </table>
       </div>`;
 };
 
@@ -561,7 +688,7 @@ const generateActionRequiredEmailHTML = (
     isPastDeadline: boolean;
   },
 ) => {
-  const grandTotal = resolveBookingGrandTotal(booking);
+  const grandTotal = resolveReceiptPricing(booking, insuranceAmount).total;
   const plan = booking.plan || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
   const customerIdText = booking.customers?.customer_id_text || "N/A";
@@ -711,7 +838,7 @@ const generateActionRequiredEmailHTML = (
 };
 
 const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
-  const grandTotal = resolveBookingGrandTotal(booking);
+  const grandTotal = resolveReceiptPricing(booking, insuranceAmount).total;
   const plan = booking.plan || {};
   const addons = booking.addons || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
@@ -915,13 +1042,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
         <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(grandTotal)}</p>
       </div>
 
-      <!-- Special Notes -->
-      ${booking.notes ? `
-      <div style="margin-top: 25px; padding: 15px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
-        <p style="margin: 0; color: #92400e; font-weight: bold;">Special Instructions:</p>
-        <p style="margin: 10px 0 0 0; color: #78350f;">${booking.notes}</p>
-      </div>
-      ` : ""}
+      ${buildSpecialInstructionsHTML(booking.notes)}
 
       <!-- Next Steps -->
       <div style="margin-top: 30px; padding: 20px; background-color: #f3f4f6; border-radius: 8px;">
@@ -1494,7 +1615,6 @@ Deno.serve(async (req)=>{
       });
     }
 
-    console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
     let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
     const { data: premiumPlan } = await supabase
       .from("protection_plans")
@@ -1505,6 +1625,10 @@ Deno.serve(async (req)=>{
       insuranceFallbackPrice = Number(premiumPlan.price);
     }
     const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
+    const receiptPricing = resolveReceiptPricing(booking, insuranceAmount);
+    console.log(
+      `[${timestamp}] [send-booking-confirmation] Generating email content subtotal=${receiptPricing.subtotal} tax=${receiptPricing.tax} total=${receiptPricing.total} lines=${receiptPricing.charges.map((line) => `${line.label}:${line.amount}`).join(",")}`,
+    );
     const isCancelledRefund =
       booking.status === "Cancelled" &&
       (booking.refund_details || booking.cancellation_details);
@@ -1582,8 +1706,15 @@ Deno.serve(async (req)=>{
           .update({ confirmation_email_sent_at: new Date().toISOString() })
           .eq("id", booking.id);
       }
-      const referrerEmailResult = isCancelledRefund || actionRequiredKind
-        ? { skipped: true, reason: isCancelledRefund ? "cancelled_refund" : "action_required" }
+      const referrerEmailResult = isCancelledRefund || actionRequiredKind || force
+        ? {
+          skipped: true,
+          reason: isCancelledRefund
+            ? "cancelled_refund"
+            : actionRequiredKind
+              ? "action_required"
+              : "forced_resend",
+        }
         : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
       return new Response(JSON.stringify({
         success: true,

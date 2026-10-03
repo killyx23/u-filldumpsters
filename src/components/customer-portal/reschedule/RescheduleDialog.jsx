@@ -309,11 +309,20 @@ export const RescheduleDialog = ({
         '';
 
       const days = calculateDays(newDropOffDate, newPickupDate);
+      const rewardAddons = originalBooking?.addons || {};
       const newCosts = await calculateBookingCosts(
         selectedService,
         days,
         selectedAddonsList,
-        selectedService?.id === 2 ? 0 : distanceMiles
+        selectedService?.id === 2 ? 0 : distanceMiles,
+        null,
+        null,
+        {
+          loyaltyDiscountAmount: rewardAddons.loyaltyDiscountAmount,
+          loyaltyPointsToRedeem: rewardAddons.loyaltyPointsToRedeem,
+          referralDiscountAmount: rewardAddons.referralDiscountAmount,
+          coupon: rewardAddons.coupon,
+        },
       );
       const originalTotal = Number(data?.originalCosts?.total ?? originalBooking?.total_price ?? 0);
       const newTotal = Number(newCosts?.total ?? originalTotal);

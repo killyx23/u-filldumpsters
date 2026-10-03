@@ -67,12 +67,42 @@ export function getLatestRescheduleApproval(booking) {
   return null;
 }
 
+const roundMoney = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
+
+const formatMoney = (amount) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(roundMoney(amount));
+
+/**
+ * Display totals for a reschedule. The charged amount stays the original total.
+ * When the booking total was corrected after approval, show that corrected total.
+ */
+export function resolveRescheduleApprovalDisplay(booking) {
+  const approval = getLatestRescheduleApproval(booking);
+  if (!approval) return null;
+
+  const chargedTotal = roundMoney(approval.original_total);
+  const frozenNew = roundMoney(approval.new_total);
+  const currentTotal = roundMoney(booking?.total_price);
+  const newTotal = currentTotal > 0 && Math.abs(currentTotal - frozenNew) >= 0.01
+    ? currentTotal
+    : frozenNew;
+
+  return {
+    ...approval,
+    original_total: chargedTotal,
+    new_total: newTotal,
+    delta: roundMoney(newTotal - chargedTotal),
+  };
+}
+
 export function formatRescheduleStripeLine(approval) {
   if (!approval) return null;
-  const money = (n) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
   const amount = approval.amount_processed ?? Math.abs(Number(approval.delta) || 0);
-  if (approval.stripe_type === 'charge') return `Card charged ${money(amount)}`;
-  if (approval.stripe_type === 'refund') return `Refunded to card ${money(amount)}`;
+  if (approval.stripe_type === 'charge') return `Card charged ${formatMoney(amount)}`;
+  if (approval.stripe_type === 'refund') return `Refunded to card ${formatMoney(amount)}`;
+  const reduction = roundMoney(Number(approval.original_total || 0) - Number(approval.new_total || 0));
+  if (approval.stripe_type !== 'refund' && reduction >= 0.01) {
+    return `Order reduced by ${formatMoney(reduction)}. Card was not refunded.`;
+  }
   return 'No additional charge or refund';
 }
