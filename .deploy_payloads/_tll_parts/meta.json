@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "test-lock-lifecycle", "entrypoint_path": "functions/test-lock-lifecycle/index.ts", "verify_jwt": true, "file_count": 15}

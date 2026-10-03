@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "send-return-confirmation", "entrypoint_path": "functions/send-return-confirmation/index.ts", "verify_jwt": true}

@@ -1,0 +1,440 @@
+import { getCorsHeaders } from "./cors.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { resolveBookingGrandTotal } from "../_shared/resolveBookingGrandTotal.ts";
+import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
+import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
+import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { sendSms } from "../_shared/notify.ts";
+import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
+import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
+
+const VERIFICATION_LEAD_HOURS = 12;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") || "noreply@u-filldumpsters.com";
+const formatCurrency = (amount)=>{
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD"
+  }).format(amount);
+};
+const formatDate = (dateString)=>{
+  if (!dateString) return "N/A";
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+  } catch  {
+    return dateString;
+  }
+};
+const EQUIPMENT_LABELS: Record<string, string> = {
+  wheelbarrow: "Wheelbarrow",
+  handTruck: "Hand Truck",
+  gloves: "Working Gloves (Pair)",
+  "1": "Wheelbarrow",
+  "2": "Hand Truck",
+  "3": "Working Gloves (Pair)",
+};
+const resolveEquipmentLabel = (item: { id?: string | number; dbId?: number; label?: string; name?: string }) => {
+  if (item.label) return item.label;
+  if (item.name) return item.name;
+  const bySlug = item.id != null ? EQUIPMENT_LABELS[String(item.id)] : undefined;
+  if (bySlug) return bySlug;
+  const byDb = item.dbId != null ? EQUIPMENT_LABELS[String(item.dbId)] : undefined;
+  if (byDb) return byDb;
+  return "Equipment";
+};
+
+/** Gloves and other buy-once add-ons (not inventory-returned). */
+const isPurchaseEquipmentItem = (item: {
+  id?: string | number;
+  dbId?: number;
+  equipment_id?: number;
+  type?: string;
+}) => {
+  if (String(item.type || "").toLowerCase() === "purchase") return true;
+  if (String(item.id || "").toLowerCase() === "gloves") return true;
+  const numericId = Number(item.dbId ?? item.equipment_id ?? item.id);
+  return Number.isFinite(numericId) && numericId === 3;
+};
+/** Dump Loader customer pickup (plan 2, no delivery) — matches src/utils/customerPickupService.js */
+const CUSTOMER_PICKUP_PLAN_IDS = [2];
+
+const parseJsonField = (value: unknown) => {
+  if (value == null) return {};
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === "object") return value as Record<string, unknown>;
+  return {};
+};
+
+const normalizeBookingJsonFields = (booking: { plan?: unknown; addons?: unknown }) => {
+  booking.plan = parseJsonField(booking.plan);
+  booking.addons = parseJsonField(booking.addons);
+  return booking;
+};
+
+const isTrailerSelfService = (booking: {
+  plan?: { id?: number; service_type?: string };
+  addons?: { isDelivery?: boolean; deliveryService?: boolean };
+  delivery_type?: string | null;
+}) => {
+  if (isDeliveryBooking(booking as Record<string, unknown>)) return false;
+  const plan = booking.plan || {};
+  if (booking.delivery_type === "self_service_trailer" || booking.delivery_type === "self_pickup") {
+    return true;
+  }
+  return CUSTOMER_PICKUP_PLAN_IDS.includes(Number(plan.id));
+};
+
+const CONFIRMED_STATUSES = new Set(["Confirmed", "confirmed", "Completed", "completed", "Cancelled", "cancelled"]);
+
+const resolveActionRequiredKind = (booking: {
+  status?: string | null;
+  was_verification_skipped?: boolean | null;
+  addons?: Record<string, unknown> | null;
+}): "pending_verification" | "pending_review" | null => {
+  const status = String(booking.status || "");
+  if (status === "pending_verification") return "pending_verification";
+  if (status === "pending_review") return "pending_review";
+  const skipped = Boolean(
+    booking.was_verification_skipped ||
+    booking.addons?.verificationSkipped ||
+    booking.addons?.wasVerificationSkipped
+  );
+  if (skipped && !CONFIRMED_STATUSES.has(status)) return "pending_verification";
+  return null;
+};
+
+const getVerificationDeadlineInfo = (booking: {
+  drop_off_date?: string | null;
+  drop_off_time_slot?: string | null;
+}) => {
+  const dateStr = booking.drop_off_date ? String(booking.drop_off_date) : "";
+  if (!dateStr) {
+    return { hoursRemaining: null as number | null, isPastDeadline: false };
+  }
+  const window = parseBookingTimeSlot(booking.drop_off_time_slot, 0);
+  const start = window?.start || { hour: 8, minute: 0, second: 0 };
+  const appointmentAt = businessWallTimeToUtc(dateStr, start);
+  if (!appointmentAt) {
+    return { hoursRemaining: null as number | null, isPastDeadline: false };
+  }
+  const deadlineAt = new Date(appointmentAt.getTime() - VERIFICATION_LEAD_HOURS * 60 * 60 * 1000);
+  const now = Date.now();
+  const isPastDeadline = now >= deadlineAt.getTime();
+  if (isPastDeadline) {
+    return { hoursRemaining: 0, isPastDeadline: true };
+  }
+  const hoursRemaining = Math.max(1, Math.ceil((deadlineAt.getTime() - now) / (1000 * 60 * 60)));
+  return { hoursRemaining, isPastDeadline: false };
+};
+
+/** Merge service row into booking.plan when JSON snapshot is missing fields. */
+const hydrateBookingPlanFromService = async (supabase, booking) => {
+  const planId = booking.plan?.id ?? booking.plan?.service_id;
+  if (!planId) return booking;
+  const { data: service } = await supabase
+    .from("services")
+    .select("id, name, description, service_type, base_price")
+    .eq("id", planId)
+    .maybeSingle();
+  if (!service) return booking;
+  booking.plan = {
+    ...booking.plan,
+    id: booking.plan?.id ?? service.id,
+    name: booking.plan?.name ?? service.name,
+    description: booking.plan?.description ?? service.description,
+    service_type: booking.plan?.service_type ?? service.service_type,
+    base_price: booking.plan?.base_price ?? service.base_price,
+  };
+  return booking;
+};
+const DEFAULT_INSURANCE_PRICE = 25;
+const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE) => {
+  if (addons?.insurance !== "accept") return 0;
+  const snap = Number(addons.insurancePriceApplied);
+  if (snap > 0) return snap;
+  return Number(fallbackPrice) || DEFAULT_INSURANCE_PRICE;
+};
+const buildPriceSummaryHTML = (booking, insuranceAmount) => {
+  const plan = booking.plan || {};
+  const addons = booking.addons || {};
+  const offersDrivewayProtection = Number(plan?.id) === 1;
+  const basePrice = Number(plan.price ?? plan.base_price ?? 0);
+  const subtotal = Number(booking.subtotal_before_tax ?? 0);
+  const tax = Number(booking.tax_amount ?? 0);
+  const total = resolveBookingGrandTotal(booking);
+  const taxRate = Number(booking.tax_rate_used ?? 7.45);
+  const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
+  const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
+  const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
+
+  // Prefer gross catalog amounts so lines match checkout; discounts are separate rows.
+  const grossSnapshotSum = snapshot.reduce(
+    (sum, line) => sum + Math.max(0, Number(line.amount ?? 0)),
+    0,
+  );
+
+  let couponDiscountAmount = Number(
+    addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0,
+  );
+  const coupon = addons?.coupon;
+  if (!(couponDiscountAmount > 0) && coupon) {
+    if (coupon.discountType === "fixed") {
+      couponDiscountAmount = Number(coupon.discountValue || 0);
+    } else if (coupon.discountType === "percentage") {
+      const baseForPct = grossSnapshotSum > 0 ? grossSnapshotSum : Math.max(0, subtotal);
+      couponDiscountAmount = (baseForPct * Number(coupon.discountValue || 0)) / 100;
+    }
+  }
+  if (!(couponDiscountAmount > 0) && snapshot.length > 0) {
+    const allocated = snapshot.reduce((sum, line) => {
+      const gross = Number(line.amount ?? 0);
+      const after = Number(line.amountAfterDiscount ?? gross);
+      return sum + Math.max(0, gross - after);
+    }, 0);
+    couponDiscountAmount = Math.max(
+      0,
+      allocated - loyaltyDiscountAmount - referralDiscountAmount,
+    );
+  }
+
+  const couponCode = coupon?.code || null;
+  const totalRewardsDiscount = Math.max(
+    0,
+    loyaltyDiscountAmount + referralDiscountAmount + couponDiscountAmount,
+  );
+  let rows = "";
+  if (snapshot.length > 0) {
+    for (const line of snapshot) {
+      const amount = Number(line.amount ?? line.amountAfterDiscount ?? 0);
+      if (amount <= 0) continue;
+      const label = line.label || line.key || "Charge";
+      if (!offersDrivewayProtection && /driveway/i.test(String(label))) continue;
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">${label}</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
+    </tr>`;
+    }
+  } else {
+    if (basePrice > 0) {
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Base Rental</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(basePrice)}</td>
+    </tr>`;
+    }
+    if (insuranceAmount > 0) {
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Rental Insurance</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(insuranceAmount)}</td>
+    </tr>`;
+    }
+    if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
+      const drivewayAmt = Number(addons.drivewayPriceApplied ?? 0);
+      if (drivewayAmt > 0) {
+        rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Driveway Protection</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(drivewayAmt)}</td>
+    </tr>`;
+      }
+    }
+    if (addons.deliveryFee > 0) {
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Delivery Fee</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(addons.deliveryFee)}</td>
+    </tr>`;
+    }
+    const mileageFee = addons.distanceInfo?.mileageFee ?? addons.mileageCharge ?? 0;
+    if (mileageFee > 0) {
+      rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">Mileage Charge</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(mileageFee)}</td>
+    </tr>`;
+    }
+    if (addons.equipment && Array.isArray(addons.equipment)) {
+      for (const item of addons.equipment) {
+        const dbId = item.dbId ?? item.equipment_id;
+        const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
+        const qty = Number(item.quantity || 1);
+        const amount = unitPrice > 0 ? unitPrice * qty : 0;
+        if (amount <= 0) continue;
+        rows += `<tr>
+      <td style="padding: 6px 0; color: #4b5563;">${resolveEquipmentLabel(item)}</td>
+      <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(amount)}</td>
+    </tr>`;
+      }
+    }
+  }
+  if (couponDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Coupon Discount${couponCode ? ` (${couponCode})` : ""}</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(couponDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (loyaltyDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Loyalty Points Discount (${Number(addons?.loyaltyPointsToRedeem || 0)} pts)</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(loyaltyDiscountAmount)}</td>
+    </tr>`;
+  }
+  if (referralDiscountAmount > 0) {
+    rows += `<tr>
+      <td style="padding: 6px 0; color: #047857;">Referral Wallet Discount</td>
+      <td style="padding: 6px 0; color: #047857; text-align: right;">-${formatCurrency(referralDiscountAmount)}</td>
+    </tr>`;
+  }
+  const thankYouRewardsHTML = totalRewardsDiscount > 0 ? `
+    <div style="margin-top: 12px; padding: 10px 12px; background: #ecfdf5; border: 1px solid #86efac; border-radius: 8px; color: #065f46; font-size: 13px;">
+      Thank you for your loyalty and continued business. Your rewards discount has been applied to this booking.
+    </div>
+  ` : "";
+  return `
+      <div style="margin-top: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Price Summary</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          ${rows}
+          <tr style="border-top: 1px solid #e5e7eb;">
+            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold;">Subtotal</td>
+            <td style="padding: 10px 0 6px; color: #1f2937; font-weight: bold; text-align: right;">${formatCurrency(subtotal)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; color: #4b5563;">Tax (${taxRate.toFixed(2)}%)</td>
+            <td style="padding: 6px 0; color: #1f2937; text-align: right;">${formatCurrency(tax)}</td>
+          </tr>
+          <tr style="border-top: 2px solid #3b82f6;">
+            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px;">Total Paid</td>
+            <td style="padding: 12px 0 6px; color: #1e40af; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(total)}</td>
+          </tr>
+        </table>
+        ${thankYouRewardsHTML}
+      </div>`;
+};
+
+/** True when cancel was due to missing/improper verification (vs customer portal cancel). */
+const isVerificationCancel = (cancellationDetails = {}, refundDetails = {}) => {
+  const source = cancellationDetails.cancel_source;
+  if (source === "verification") return true;
+  if (source === "customer_portal" || source === "admin") return false;
+  const reason = String(
+    cancellationDetails.reason || refundDetails.reason || "",
+  ).toLowerCase();
+  return /verificat/.test(reason);
+};
+
+const generateRefundEmailHTML = (booking) => {
+  const customerName = booking.customers?.name || booking.name || "there";
+  const refundDetails = booking.refund_details || {};
+  const cancellationDetails = booking.cancellation_details || {};
+  const originalTotal = Number(booking.total_price || 0);
+  const refundAmount = Number(
+    refundDetails.amount ?? cancellationDetails.refund_amount ?? 0,
+  );
+  const feeAmount = Number(
+    cancellationDetails.fee_amount ??
+      Math.max(0, originalTotal - refundAmount),
+  );
+  const hoursRaw = cancellationDetails.hours_before_appointment;
+  const hours =
+    hoursRaw != null && hoursRaw !== ""
+      ? Math.max(0, Math.round(Number(hoursRaw)))
+      : null;
+  const isLate =
+    cancellationDetails.fee_type === "late" ||
+    (hours != null && hours <= 24);
+  const feeTypeLabel = isLate
+    ? "Last-minute exception cancellation fee"
+    : "Standard cancellation fee";
+  const feePct = cancellationDetails.fee_percentage != null
+    ? Number(cancellationDetails.fee_percentage)
+    : null;
+  const reason =
+    cancellationDetails.reason ||
+    refundDetails.reason ||
+    null;
+  const verificationCancel = isVerificationCancel(
+    cancellationDetails,
+    refundDetails,
+  );
+  const goodbyeBody = verificationCancel
+    ? `We're sorry to see you go. We truly miss your business and hope that in the future you'll be able to provide the proper verification information so we can welcome you back to purchase with us again.`
+    : `We're sorry to see you go. We truly miss your business and hope you'll choose U-Fill Dumpsters again whenever you need us.`;
+  const goodbyeFooter = verificationCancel
+    ? `Thank you for considering U-Fill Dumpsters. We hope to serve you again soon with complete verification on file.`
+    : `Thank you for considering U-Fill Dumpsters. We'd love to welcome you back anytime.`;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Refund Confirmation - U-Fill Dumpsters</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); padding: 40px 20px; text-align: center;">
+      <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold;">Refund Confirmation</h1>
+      <p style="color: #e0f2fe; margin: 10px 0 0 0; font-size: 16px;">Booking #${booking.id}</p>
+    </div>
+    <div style="padding: 30px 20px;">
+      <div style="background-color: #dbeafe; border-left: 4px solid #2563eb; padding: 15px; border-radius: 4px; margin-bottom: 25px;">
+        <p style="margin: 0; color: #1e3a8a; font-weight: bold;">Your cancellation has been approved and your refund has been processed.</p>
+      </div>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        Hi ${customerName},
+      </p>
+      <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+        ${goodbyeBody}
+        Your cancellation for Booking #${booking.id} has been approved, and a refund of
+        <strong>${formatCurrency(refundAmount)}</strong> has been processed
+        ${feeAmount > 0 ? ` (cancellation fee: <strong>${formatCurrency(feeAmount)}</strong>)` : ""}.
+      </p>
+      <div style="margin-top: 25px;">
+        <h2 style="color: #1f2937; font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;">Refund Summary</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Original Total</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${formatCurrency(originalTotal)}</td>
+          </tr>
+          ${hours != null ? `
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Hours before appointment</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">${hours} hours</td>
+          </tr>` : ""}
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Fee type</td>
+            <td style="padding: 8px 0; color: #1f2937; text-align: right;">
+              ${feeTypeLabel}${feePct != null ? ` — up to ${feePct}%` : ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #4b5563;">Cancellation fee charged</td>
+            <td style="padding: 8px 0; color: #b91c1c; text-align: right;">-${formatCurrency(feeAmount)}</td>
+          </tr>
+          <tr style="border-top: 2px solid #3b82f6;">
+            <td style="padding: 12px 0 6px; color: #047857; font-weight: bold; font-size: 16px;">Amount Refunded</td>
+            <td style="padding: 12px 0 6px; color: #047857; font-weight: bold; font-size: 16px; text-align: right;">${formatCurrency(refundAmount)}</td>
+          </tr>
+        </table>
+      </div>
+      ${reason ? `
+      <div style="margin-top: 20px; padding: 12px 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <p style="margin: 0 0 6px 0; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;">Note</p>
+        <p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.5;">${reason}</p>
+      </div>` : ""}
+      <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-top: 25px;">
+        Per our rental agreement, refunds are typically processed within 1–2 business days. Your bank or card issuer usually posts the credit within 5–10 business days; in rare cases it may take up to 30 days.
+        If you have 
