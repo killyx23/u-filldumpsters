@@ -182,6 +182,15 @@ export const AdminDashboard = () => {
                             <AdminRemoteLockBar />
                             <div className="flex items-center gap-4 pt-1">
                                 <span className="text-sm text-gray-400 hidden sm:inline">{user.email}</span>
+                                <a
+                                    href="https://conversations-app.brevo.com"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold py-2 px-4 rounded transition-colors"
+                                >
+                                    <MessageCircle className="h-4 w-4" />
+                                    Live chat
+                                </a>
                                 <button onClick={handleSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">
                                     Sign Out
                                 </button>

@@ -36,6 +36,7 @@ import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
 import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortalGuard';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 import { ScrollToTop } from '@/components/ScrollToTop';
+import { BrevoChat } from '@/components/BrevoChat';
 
 const mergeRouteQuery = (to, incomingSearch) => {
   const [path, toQuery = ''] = to.split('?');
@@ -107,6 +108,7 @@ function App() {
     <SupabaseAuthProvider>
       <Router>
         <ScrollToTop />
+        <BrevoChat />
         <BookingFlowProvider>
         <Helmet>
           <title>Dumpster Rental | Book Online Today</title>
