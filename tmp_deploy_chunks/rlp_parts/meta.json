@@ -1,0 +1,18 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "reconcile-lock-pins",
+  "entrypoint_path": "functions/reconcile-lock-pins/index.ts",
+  "verify_jwt": false,
+  "file_names": [
+    "functions/_shared/algoPin.ts",
+    "functions/_shared/cors.ts",
+    "functions/_shared/deliveryBooking.ts",
+    "functions/_shared/iglooAuth.ts",
+    "functions/_shared/lockPin.ts",
+    "functions/_shared/parseBookingTimeSlot.ts",
+    "functions/_shared/pinNotify.ts",
+    "functions/_shared/pinTiming.ts",
+    "functions/reconcile-lock-pins/cors.ts",
+    "functions/reconcile-lock-pins/index.ts"
+  ]
+}

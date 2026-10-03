@@ -1,0 +1,58 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "sync-lock-activity",
+  "entrypoint_path": "functions/sync-lock-activity/index.ts",
+  "verify_jwt": true,
+  "files": [
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__cors.ts",
+      "len": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__deliveryBooking.ts",
+      "len": 2208
+    },
+    {
+      "name": "functions/_shared/iglooActivity.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__iglooActivity.ts",
+      "len": 16261
+    },
+    {
+      "name": "functions/_shared/iglooAuth.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__iglooAuth.ts",
+      "len": 12110
+    },
+    {
+      "name": "functions/_shared/lockDeviceState.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__lockDeviceState.ts",
+      "len": 6179
+    },
+    {
+      "name": "functions/_shared/lockEventState.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__lockEventState.ts",
+      "len": 8557
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__parseBookingTimeSlot.ts",
+      "len": 5568
+    },
+    {
+      "name": "functions/_shared/pinTiming.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions___shared__pinTiming.ts",
+      "len": 11453
+    },
+    {
+      "name": "functions/sync-lock-activity/cors.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions__sync-lock-activity__cors.ts",
+      "len": 53
+    },
+    {
+      "name": "functions/sync-lock-activity/index.ts",
+      "path": ".deploy_payloads/parts/sync-lock-activity/functions__sync-lock-activity__index.ts",
+      "len": 10027
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"name": "functions/send-return-confirmation/cors.ts", "content": "export { getCorsHeaders } from '../_shared/cors.ts';\n"}

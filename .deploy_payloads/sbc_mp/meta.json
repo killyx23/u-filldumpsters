@@ -1,0 +1,13 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "send-booking-confirmation",
+  "entrypoint_path": "functions/send-booking-confirmation/index.ts",
+  "verify_jwt": true,
+  "file_names": [
+    "functions/send-booking-confirmation/index.ts",
+    "functions/send-booking-confirmation/b64/0.txt",
+    "functions/send-booking-confirmation/b64/1.txt",
+    "functions/send-booking-confirmation/b64/2.txt",
+    "functions/send-booking-confirmation/b64/3.txt"
+  ]
+}

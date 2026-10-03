@@ -1,0 +1,1 @@
+{"project_id": "essesdjgtmralbkglpzw", "name": "send-booking-confirmation", "entrypoint_path": "functions/send-booking-confirmation/index.ts", "verify_jwt": true}

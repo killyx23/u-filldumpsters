@@ -1,0 +1,53 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "generate-daily-pins",
+  "entrypoint_path": "functions/generate-daily-pins/index.ts",
+  "verify_jwt": false,
+  "files": [
+    {
+      "name": "functions/_shared/algoPin.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__algoPin.ts",
+      "len": 8341
+    },
+    {
+      "name": "functions/_shared/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__cors.ts",
+      "len": 1059
+    },
+    {
+      "name": "functions/_shared/deliveryBooking.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__deliveryBooking.ts",
+      "len": 2208
+    },
+    {
+      "name": "functions/_shared/iglooAuth.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__iglooAuth.ts",
+      "len": 12110
+    },
+    {
+      "name": "functions/_shared/lockPin.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__lockPin.ts",
+      "len": 11160
+    },
+    {
+      "name": "functions/_shared/parseBookingTimeSlot.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__parseBookingTimeSlot.ts",
+      "len": 5568
+    },
+    {
+      "name": "functions/_shared/pinTiming.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions___shared__pinTiming.ts",
+      "len": 11453
+    },
+    {
+      "name": "functions/generate-daily-pins/cors.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions__generate-daily-pins__cors.ts",
+      "len": 53
+    },
+    {
+      "name": "functions/generate-daily-pins/index.ts",
+      "path": "/home/brandbekras/Dev/u-filldumpsters/.tmp_fn_deploy/gdp_exact_files/functions__generate-daily-pins__index.ts",
+      "len": 23377
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "slug": "send-return-confirmation",
+    "status": "success",
+    "version": 21
+  },
+  {
+    "slug": "sweep-unfinished-checkouts",
+    "status": "success",
+    "version": 4
+  },
+  {
+    "slug": "end-unfinished-checkout",
+    "status": "success",
+    "version": 7
+  },
+  {
+    "slug": "send-reschedule-confirmation-email",
+    "status": "success",
+    "version": 22
+  }
+]

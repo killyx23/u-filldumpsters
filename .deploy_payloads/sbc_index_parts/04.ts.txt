@@ -1,0 +1,56 @@
+nd" : "action_required" }
+        : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
+      return new Response(JSON.stringify({
+        success: true,
+        message: isCancelledRefund
+          ? "Refund confirmation email sent successfully"
+          : actionRequiredKind
+            ? "Action-required email sent successfully"
+            : "Confirmation email sent successfully",
+        provider: emailResult.provider,
+        recipient: recipientEmail,
+        email_type: emailKind,
+        referrerThankYou: referrerEmailResult,
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    } else {
+      if (confirmationClaimAt) {
+        await supabase
+          .from("bookings")
+          .update({ confirmation_email_sent_at: null })
+          .eq("id", booking.id)
+          .eq("confirmation_email_sent_at", confirmationClaimAt);
+      }
+      console.error(`[${timestamp}] [send-booking-confirmation] FAILED: All email attempts failed:`, emailResult.error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Failed to send confirmation email",
+        details: emailResult.error
+      }), {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+  } catch (error) {
+    const timestamp = new Date().toISOString();
+    console.error(`[${timestamp}] [send-booking-confirmation] CRITICAL ERROR:`, error);
+    return new Response(JSON.stringify({
+      error: "Internal server error",
+      details: error.message
+    }), {
+      status: 500,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json"
+      }
+    });
+  }
+});

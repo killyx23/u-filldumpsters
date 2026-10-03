@@ -1,0 +1,6 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "send-rental-started",
+  "entrypoint_path": "functions/send-rental-started/index.ts",
+  "verify_jwt": true
+}
