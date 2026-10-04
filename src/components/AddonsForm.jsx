@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, HardHat, ShoppingCart, Hammer, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
+import { ArrowLeft, HardHat, ShoppingCart, Hammer, Package, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -17,6 +17,7 @@ import { buildProtectionPlanIdsPayload } from '@/utils/protectionPlans';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { LoyaltyPointsRedemption } from '@/components/LoyaltyPointsRedemption';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { stampEquipmentSnapshots } from '@/utils/rentalEquipmentPricing';
 import { toInventoryDate, checkInventoryAvailability, bookableFromInventoryRow } from '@/utils/equipmentInventoryManager';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
@@ -97,29 +98,54 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   useEffect(() => {
     const loadPrices = async () => {
       try {
-        console.log('[AddonsForm] Loading equipment and disposal prices from database (IDs 1-6, excluding Premium Insurance)');
+        console.log('[AddonsForm] Loading equipment and disposal prices from database');
 
-        // Load equipment prices (IDs 1-3)
-        const updatedEquipmentMeta = await Promise.all(
-          equipmentMeta.map(async (item) => {
+        const { data: rentalRows, error: rentalError } = await supabase
+          .from('equipment')
+          .select('id, name, price, additional_day_price, type')
+          .eq('type', 'rental')
+          .order('name', { ascending: true });
+
+        let rentalCatalog = [];
+        if (!rentalError && Array.isArray(rentalRows) && rentalRows.length > 0) {
+          rentalCatalog = rentalRows.map((row) => {
+            const known = equipmentMeta.find((item) => item.type === 'rental' && item.dbId === Number(row.id));
+            return {
+              id: known?.id || `equipment-${row.id}`,
+              dbId: Number(row.id),
+              label: known?.label || row.name,
+              icon: known?.icon || <Package className="h-6 w-6 mr-3 text-yellow-400" />,
+              quantity: known?.quantity || false,
+              type: 'rental',
+              price: Number(row.price || 0),
+              additionalDayPrice: Number(row.additional_day_price || 0),
+            };
+          });
+        } else {
+          rentalCatalog = await Promise.all(
+            equipmentMeta.filter((item) => item.type === 'rental').map(async (item) => {
+              const price = await getPriceForEquipment(item.dbId);
+              return { ...item, price, additionalDayPrice: 0 };
+            })
+          );
+        }
+
+        const purchaseCatalog = await Promise.all(
+          equipmentMeta.filter((item) => item.type !== 'rental').map(async (item) => {
             const price = await getPriceForEquipment(item.dbId);
-            console.log(`[AddonsForm] Loaded price for ${item.label} (ID ${item.dbId}): $${price}`);
-            return { ...item, price };
+            return { ...item, price, additionalDayPrice: 0 };
           })
         );
 
-        // Load disposal prices (IDs 4-6)
         const updatedDisposalMeta = await Promise.all(
           disposalMeta.map(async (item) => {
             const price = await getPriceForEquipment(item.dbId);
-            console.log(`[AddonsForm] Loaded price for ${item.label} (ID ${item.dbId}): $${price}`);
             return { ...item, price };
           })
         );
 
-        setEquipmentMetaWithPrices(updatedEquipmentMeta);
+        setEquipmentMetaWithPrices([...rentalCatalog, ...purchaseCatalog]);
         setDisposalMetaWithPrices(updatedDisposalMeta);
-        console.log('[AddonsForm] ✓ All equipment prices loaded from database (no Premium Insurance fetched)');
       } catch (error) {
         console.error('[AddonsForm] Error loading prices:', error);
         toast({
@@ -330,11 +356,26 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     }
 
     const equipmentPrices = {};
+    const additionalDayPrices = {};
+    const equipmentTypes = {};
+    const equipmentNames = {};
     equipmentMetaWithPrices.forEach((item) => {
       equipmentPrices[item.dbId] = item.price;
+      additionalDayPrices[item.dbId] = item.additionalDayPrice || 0;
+      equipmentTypes[item.dbId] = item.type;
+      equipmentNames[item.dbId] = item.label;
     });
     disposalMetaWithPrices.forEach((item) => {
       equipmentPrices[item.dbId] = item.price;
+    });
+
+    updatedAddons.equipment = stampEquipmentSnapshots(addonsData?.equipment || [], {
+      prices: equipmentPrices,
+      additionalDayPrices,
+      types: equipmentTypes,
+      names: equipmentNames,
+      dropOff: rentalStart,
+      pickup: rentalEnd || rentalStart,
     });
 
     const calcResult = calculateBookingTotal(
@@ -344,7 +385,13 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       taxRate,
       deliveryService,
       insurancePrice,
-      taxOptions
+      {
+        ...taxOptions,
+        dropOff: rentalStart,
+        pickup: rentalEnd || rentalStart,
+        additionalDayPrices,
+        equipmentTypes,
+      }
     );
     const finalTotal = calcResult.total;
 
@@ -368,8 +415,12 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
 
   const loyaltyPreviewTotal = useMemo(() => {
     const equipmentPrices = {};
+    const additionalDayPrices = {};
+    const equipmentTypes = {};
     equipmentMetaWithPrices.forEach((item) => {
       equipmentPrices[item.dbId] = item.price;
+      additionalDayPrices[item.dbId] = item.additionalDayPrice || 0;
+      equipmentTypes[item.dbId] = item.type;
     });
     disposalMetaWithPrices.forEach((item) => {
       equipmentPrices[item.dbId] = item.price;
@@ -382,7 +433,13 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       taxRate,
       deliveryService,
       insurancePrice,
-      taxOptions
+      {
+        ...taxOptions,
+        dropOff: rentalStart,
+        pickup: rentalEnd || rentalStart,
+        additionalDayPrices,
+        equipmentTypes,
+      }
     );
 
     return Number(estimate?.total || basePrice || 0);
@@ -394,6 +451,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     equipmentMetaWithPrices,
     insurancePrice,
     plan,
+    rentalEnd,
+    rentalStart,
     taxOptions,
     taxRate,
   ]);
@@ -461,6 +520,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   equipmentMeta={rentalEquipment}
                   title="Rent Additional Equipment"
                   icon={<PackagePlus />}
+                  rentalStart={rentalStart}
+                  rentalEnd={rentalEnd}
                 />
                 <EquipmentSection 
                   addonsData={addonsData}
@@ -550,6 +611,9 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                   deliveryService={deliveryService}
                   fetchedMileageRate={fetchedMileageRate}
                   fetchedDeliveryFeeFlat={fetchedDeliveryFeeFlat}
+                  rentalStart={rentalStart}
+                  rentalEnd={rentalEnd}
+                  equipmentCatalog={equipmentMetaWithPrices}
               />
             </div>
           </div>

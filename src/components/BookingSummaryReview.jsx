@@ -6,6 +6,7 @@ import { format, parseISO, isValid } from 'date-fns';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { additionalDayFinePrint, equipmentNumericId, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
@@ -127,18 +128,18 @@ export const BookingSummaryReview = ({
 
         if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
             addonsData.equipment.forEach(item => {
-                const equipmentId = item.equipment_id || item.dbId || item.id;
-                if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+                const equipmentId = equipmentNumericId(item);
+                if (!equipmentId) return;
 
-                const price = Number(equipmentPrices[equipmentId] || 0);
-                const quantity = Number(item.quantity || 1);
-                const itemTotal = price * quantity;
+                const quote = resolveEquipmentCharge(item, {
+                    liveBasePrice: Number(equipmentPrices[equipmentId] || item.price || 0),
+                });
 
                 // ID 3 is Working Gloves (purchase item)
-                if (equipmentId === 3) {
-                    purchaseItemsCost += itemTotal;
+                if (equipmentId === 3 || item.type === 'purchase') {
+                    purchaseItemsCost += quote.lineTotal;
                 } else {
-                    rentEquipmentCost += itemTotal;
+                    rentEquipmentCost += quote.lineTotal;
                 }
             });
         }
@@ -272,16 +273,19 @@ export const BookingSummaryReview = ({
     const rentEquipmentItems = [];
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
-            const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3) return;
-            
-            const price = Number(equipmentPrices[equipmentId] || 0);
-            const quantity = Number(item.quantity || 1);
-            const itemName = equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`;
-            
-            rentEquipmentItems.push({ 
-                label: `${itemName} (x${quantity})`, 
-                amount: price * quantity 
+            const equipmentId = equipmentNumericId(item);
+            if (!equipmentId || equipmentId === 3 || item.type === 'purchase') return;
+
+            const quote = resolveEquipmentCharge(item, {
+                liveBasePrice: Number(equipmentPrices[equipmentId] || item.price || 0),
+            });
+            const itemName = item.name || item.label || (equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`);
+            const note = additionalDayFinePrint(quote);
+
+            rentEquipmentItems.push({
+                label: `${itemName} (x${quote.quantity})`,
+                amount: quote.lineTotal,
+                sublabel: note || undefined,
             });
         });
     }

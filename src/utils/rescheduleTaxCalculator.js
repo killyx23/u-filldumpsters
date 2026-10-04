@@ -4,6 +4,7 @@ import {
   resolveNumericEquipmentId,
   resolveAddonUnitPrice,
 } from '@/utils/rescheduleCalculations';
+import { equipmentLineAmount, isRentalEquipmentItem, quoteRentalEquipmentLine, rentalDayCount } from '@/utils/rentalEquipmentPricing';
 import { isDrivewayAddon } from '@/utils/rescheduleAddons';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
@@ -42,7 +43,9 @@ export function addonsListToAddonsData(addonsList = [], { deliveryFee = 0, milea
         equipment_id: equipId,
         name: addon.name,
         quantity: Number(addon.quantity || 1),
-        price: Number(addon.price ?? addon.unitPrice ?? 0),
+        price: Number(addon.basePrice ?? addon.price ?? addon.unitPrice ?? 0),
+        additionalDayPrice: Number(addon.additionalDayPrice ?? addon.additional_day_price ?? 0),
+        type: addon.type,
       });
     }
   }
@@ -111,11 +114,18 @@ export async function calculateRescheduleCosts({
   for (const addon of addonsList) {
     const price = await resolveAddonUnitPrice(addon, priceSnapshot);
     const qty = Number(addon?.quantity || 1);
-    addonsCost += price * qty;
-
     const equipId = resolveNumericEquipmentId(addon);
     if (equipId) {
       equipmentPrices[equipId] = price;
+      addonsCost += equipmentLineAmount({
+        ...addon,
+        equipment_id: equipId,
+        price,
+        additionalDayPrice: addon.additionalDayPrice ?? addon.additional_day_price,
+        type: addon.type,
+      }, equipmentPrices, { rentalDays: days });
+    } else {
+      addonsCost += price * qty;
     }
   }
 
@@ -146,6 +156,7 @@ export async function calculateRescheduleCosts({
     drivewayIsTaxable: taxOptions.drivewayIsTaxable,
     serviceTaxFlags: taxOptions.serviceTaxFlags ?? {},
     equipmentTaxFlags: taxOptions.equipmentTaxFlags ?? {},
+    rentalDays: days,
   });
 
   return {
@@ -176,13 +187,39 @@ export function quoteRescheduleBreakdown({
   deliveryFee = 0,
   taxRate = 0,
   insuranceIsTaxable = false,
+  rentalDays = null,
+  dropOff = null,
+  pickup = null,
 }) {
   const mapped = addonsListToAddonsData(newAddonsList, { deliveryFee, mileageCharge });
+  const stayDays = rentalDays ?? ((dropOff || pickup) ? rentalDayCount(dropOff, pickup) : null);
   const equipmentPrices = {};
-  for (const item of mapped.equipment) {
+  mapped.equipment = mapped.equipment.map((item) => {
     const id = item.equipment_id ?? item.dbId ?? item.id;
-    if (id != null) equipmentPrices[id] = Number(item.price || 0);
-  }
+    const base = Number(item.price || 0);
+    if (id != null) equipmentPrices[id] = base;
+    if (!isRentalEquipmentItem(item)) return item;
+    const quote = quoteRentalEquipmentLine({
+      basePrice: base,
+      additionalDayPrice: item.additionalDayPrice,
+      quantity: item.quantity,
+      rentalDays: stayDays,
+      dropOff,
+      pickup,
+      isRental: true,
+    });
+    return {
+      ...item,
+      type: 'rental',
+      price: quote.basePrice,
+      basePrice: quote.basePrice,
+      additionalDayPrice: quote.additionalDayPrice,
+      rentalDays: quote.rentalDays,
+      extraDays: quote.extraDays,
+      extraDayCharge: quote.extraDayCharge,
+      lineTotal: quote.lineTotal,
+    };
+  });
   const addonsData = {
     equipment: mapped.equipment,
     insurance: mapped.insurance,
@@ -205,6 +242,9 @@ export function quoteRescheduleBreakdown({
     insuranceIsTaxable,
     drivewayPrice: addonsData.drivewayPriceApplied,
     drivewayIsTaxable: true,
+    rentalDays: stayDays,
+    dropOff,
+    pickup,
   });
   return { mapped, breakdown };
 }

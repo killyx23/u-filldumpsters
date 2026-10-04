@@ -8,7 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
-import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { additionalDayIncludesPrint, equipmentNumericId, quoteEquipmentLineForItem } from '@/utils/rentalEquipmentPricing';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
@@ -28,7 +28,10 @@ export const OrderSummary = ({
     customerEmail,
     deliveryService,
     fetchedMileageRate,
-    fetchedDeliveryFeeFlat
+    fetchedDeliveryFeeFlat,
+    rentalStart = null,
+    rentalEnd = null,
+    equipmentCatalog = [],
 }) => {
     const [couponCode, setCouponCode] = useState('');
     const [validatingCoupon, setValidatingCoupon] = useState(false);
@@ -40,6 +43,8 @@ export const OrderSummary = ({
     );
     const [autoReferralAttempted, setAutoReferralAttempted] = useState(false);
     const [equipmentPrices, setEquipmentPrices] = useState({});
+    const [additionalDayPrices, setAdditionalDayPrices] = useState({});
+    const [equipmentTypes, setEquipmentTypes] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(false);
     
     const { insurancePrice, taxOptions, drivewayPrice } = useBookingTaxOptions(plan?.id);
@@ -53,38 +58,31 @@ export const OrderSummary = ({
         const loadAllPrices = async () => {
             setLoadingPrices(true);
             const prices = {};
+            const extraRates = {};
+            const types = {};
+            const catalogById = new Map(
+                (equipmentCatalog || []).map((item) => [Number(item.dbId), item])
+            );
 
             try {
-                console.log('[OrderSummary] Loading equipment prices (IDs 1-6, excluding Premium Insurance)');
-                
-                // Load equipment prices (IDs 1-6 only)
                 if (addons?.equipment && addons.equipment.length > 0) {
                     for (const item of addons.equipment) {
-                        const equipmentId = item.equipment_id || item.dbId || item.id;
-                        
-                        if (!equipmentId) {
-                            console.warn('[OrderSummary] Equipment item missing ID:', item);
-                            continue;
-                        }
+                        const equipmentId = equipmentNumericId(item);
+                        if (!equipmentId) continue;
 
-                        // Skip equipment ID 7 (Premium Insurance - uses services table)
-                        if (equipmentId === 7) {
-                            console.log('[OrderSummary] Skipping equipment ID 7 (Premium Insurance uses services table)');
-                            continue;
-                        }
-
-                        if (!isValidEquipmentId(equipmentId)) {
-                            console.error('[OrderSummary] Invalid equipment ID format:', equipmentId);
+                        const catalogItem = catalogById.get(equipmentId);
+                        if (catalogItem) {
+                            prices[equipmentId] = Number(catalogItem.price || 0);
+                            extraRates[equipmentId] = Number(catalogItem.additionalDayPrice || 0);
+                            types[equipmentId] = catalogItem.type || 'rental';
                             continue;
                         }
 
                         const price = await getPriceForEquipment(equipmentId);
                         prices[equipmentId] = price;
-                        console.log(`[OrderSummary] Loaded price for equipment ID ${equipmentId}: $${price}`);
                     }
                 }
 
-                // Load disposal item prices (IDs 4, 5, 6)
                 const disposalItems = [
                     { key: 'mattressDisposal', dbId: 4 },
                     { key: 'tvDisposal', dbId: 5 },
@@ -95,12 +93,12 @@ export const OrderSummary = ({
                     if (addons?.[disposal.key] && addons[disposal.key] > 0) {
                         const price = await getPriceForEquipment(disposal.dbId);
                         prices[disposal.dbId] = price;
-                        console.log(`[OrderSummary] Loaded disposal price for ID ${disposal.dbId}: $${price}`);
                     }
                 }
 
                 setEquipmentPrices(prices);
-                console.log('[OrderSummary] ✓ All equipment prices loaded (no Premium Insurance fetched)');
+                setAdditionalDayPrices(extraRates);
+                setEquipmentTypes(types);
             } catch (error) {
                 console.error('[OrderSummary] Error loading prices:', error);
                 toast({
@@ -114,7 +112,7 @@ export const OrderSummary = ({
         };
 
         loadAllPrices();
-    }, [addons?.equipment, addons?.mattressDisposal, addons?.tvDisposal, addons?.applianceDisposal]);
+    }, [addons?.equipment, addons?.mattressDisposal, addons?.tvDisposal, addons?.applianceDisposal, equipmentCatalog]);
 
     const handleCouponValidation = async () => {
         if (!couponCode.trim()) {
@@ -307,33 +305,24 @@ export const OrderSummary = ({
             drivewayProtectionCost = Number(drivewayPrice);
         }
 
-        // Equipment (Rent) and Items for Purchase (IDs 1-6 only, excluding ID 7)
+        const rentalQuoteOptions = {
+            rentalDays: null,
+            dropOff: rentalStart,
+            pickup: rentalEnd || rentalStart,
+            additionalDayPrices,
+            equipmentTypes,
+        };
+
         if (addons?.equipment && Array.isArray(addons.equipment)) {
             addons.equipment.forEach(item => {
-                const equipmentId = item.equipment_id || item.dbId || item.id;
-                
-                // Skip equipment ID 7 (Premium Insurance)
-                if (!equipmentId || equipmentId === 7) {
-                    if (equipmentId === 7) {
-                        console.log('[OrderSummary] Skipping equipment ID 7 in cost calculation (Premium Insurance)');
-                    }
-                    return;
-                }
-                
-                if (!isValidEquipmentId(equipmentId)) {
-                    console.warn('[OrderSummary] Skipping invalid equipment ID:', equipmentId);
-                    return;
-                }
+                const equipmentId = equipmentNumericId(item);
+                if (!equipmentId) return;
 
-                const price = Number(equipmentPrices[equipmentId] || 0);
-                const quantity = Number(item.quantity || 1);
-                const itemTotal = price * quantity;
-
-                // Equipment ID 3 is Working Gloves (purchase item)
-                if (equipmentId === 3) {
-                    purchaseItemsCost += itemTotal;
+                const quote = quoteEquipmentLineForItem(item, equipmentPrices, rentalQuoteOptions);
+                if (equipmentId === 3 || equipmentTypes[equipmentId] === 'purchase') {
+                    purchaseItemsCost += quote.lineTotal;
                 } else {
-                    equipmentCost += itemTotal;
+                    equipmentCost += quote.lineTotal;
                 }
             });
         }
@@ -371,6 +360,10 @@ export const OrderSummary = ({
             insurancePrice,
             drivewayPrice,
             ...taxOptions,
+            dropOff: rentalStart,
+            pickup: rentalEnd || rentalStart,
+            additionalDayPrices,
+            equipmentTypes,
         });
 
         let couponDiscount = 0;
@@ -407,7 +400,7 @@ export const OrderSummary = ({
             taxRate: taxBreakdown.taxRate,
             total: taxBreakdown.total,
         };
-    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions]);
+    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, additionalDayPrices, equipmentTypes, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions, rentalStart, rentalEnd]);
 
     const handleProceedClick = () => {
         if (!isDeliveryRequired) {
@@ -464,22 +457,26 @@ export const OrderSummary = ({
     }
 
     const rentEquipmentItems = [];
+    const catalogName = new Map((equipmentCatalog || []).map((item) => [Number(item.dbId), item.label]));
     if (addons?.equipment && Array.isArray(addons.equipment)) {
         addons.equipment.forEach(item => {
-            const equipmentId = item.equipment_id || item.dbId || item.id;
-            
-            // Skip equipment ID 7 (Premium Insurance) and invalid IDs
-            if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId) || equipmentId === 3) {
-                return;
-            }
-            
-            const price = Number(equipmentPrices[equipmentId] || 0);
-            const quantity = Number(item.quantity || 1);
-            const itemName = equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`;
-            
-            rentEquipmentItems.push({ 
-                label: `${itemName} (x${quantity})`, 
-                amount: price * quantity 
+            const equipmentId = equipmentNumericId(item);
+            if (!equipmentId || equipmentId === 3 || equipmentTypes[equipmentId] === 'purchase') return;
+
+            const quote = quoteEquipmentLineForItem(item, equipmentPrices, {
+                dropOff: rentalStart,
+                pickup: rentalEnd || rentalStart,
+                additionalDayPrices,
+                equipmentTypes,
+            });
+            const itemName = catalogName.get(equipmentId)
+                || (equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : item.name || `Equipment #${equipmentId}`);
+            const note = additionalDayIncludesPrint(quote);
+
+            rentEquipmentItems.push({
+                label: `${itemName} (x${quote.quantity})`,
+                amount: quote.lineTotal,
+                sublabel: note || undefined,
             });
         });
     }

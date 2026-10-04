@@ -3,8 +3,9 @@ import { Loader2 } from 'lucide-react';
 import { AddonSection } from './AddonSection';
 import { EquipmentItem } from './EquipmentItem';
 import { bookableFromInventoryRow } from '@/utils/equipmentInventoryManager';
+import { additionalDayIncludesPrint, quoteRentalEquipmentLine } from '@/utils/rentalEquipmentPricing';
 
-export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, equipmentInventory, loadingInventory, equipmentMeta, title, icon }) => {
+export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, equipmentInventory, loadingInventory, equipmentMeta, title, icon, rentalStart = null, rentalEnd = null }) => {
     if (equipmentMeta.length === 0) {
         return null;
     }
@@ -24,11 +25,28 @@ export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, eq
                             : Number(inventoryItem.available_quantity ?? inventoryItem.total_quantity ?? 0))
                         : 0;
                     
-                    // Use price from item metadata (loaded from equipment_pricing in parent)
                     const itemPrice = Number(item.price || 0);
+                    const isPurchaseItem = item.dbId === 3 || item.type === 'purchase';
+                    const stayQuote = quoteRentalEquipmentLine({
+                        basePrice: itemPrice,
+                        additionalDayPrice: item.additionalDayPrice || 0,
+                        quantity: Math.max(quantity, 1),
+                        dropOff: rentalStart,
+                        pickup: rentalEnd || rentalStart,
+                        isRental: isRental && !isPurchaseItem,
+                    });
+                    const unitForStay = isRental && !isPurchaseItem
+                        ? quoteRentalEquipmentLine({
+                            basePrice: itemPrice,
+                            additionalDayPrice: item.additionalDayPrice || 0,
+                            quantity: 1,
+                            dropOff: rentalStart,
+                            pickup: rentalEnd || rentalStart,
+                            isRental: true,
+                        }).lineTotal
+                        : itemPrice;
+                    const extraDayNote = isRental && !isPurchaseItem ? additionalDayIncludesPrint(stayQuote) : '';
                     
-                    // For Working Gloves (equipment_id 3), append price to label
-                    const isPurchaseItem = item.dbId === 3;
                     const displayLabel = isPurchaseItem && itemPrice > 0 
                         ? `${item.label} - $${itemPrice.toFixed(2)}`
                         : item.label;
@@ -38,7 +56,8 @@ export const EquipmentSection = ({ addonsData, handleEquipmentQuantityChange, eq
                             key={item.id} 
                             id={item.id} 
                             label={displayLabel} 
-                            price={itemPrice}
+                            price={unitForStay}
+                            extraDayNote={extraDayNote}
                             icon={item.icon}
                             hasQuantitySelector={item.quantity}
                             quantity={quantity}

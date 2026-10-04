@@ -13,6 +13,7 @@ import { retrievePendingBooking, hydratePlanFromPending, mapPendingToBookingStat
 import { attachCheckoutVerificationDocuments } from '@/utils/verificationImageHelper';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { additionalDayFinePrint, equipmentNumericId, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormatter';
 import { UiControlGuide } from '@/components/UiControlGuide';
@@ -396,17 +397,17 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
         if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
             addonsData.equipment.forEach(item => {
-                const equipmentId = item.equipment_id || item.dbId || item.id;
-                if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+                const equipmentId = equipmentNumericId(item);
+                if (!equipmentId) return;
 
-                const price = Number(equipmentPrices[equipmentId] || 0);
-                const quantity = Number(item.quantity || 1);
-                const itemTotal = price * quantity;
+                const quote = resolveEquipmentCharge(item, {
+                    liveBasePrice: Number(equipmentPrices[equipmentId] || item.price || 0),
+                });
 
-                if (equipmentId === 3) {
-                    purchaseItemsCost += itemTotal;
+                if (equipmentId === 3 || item.type === 'purchase') {
+                    purchaseItemsCost += quote.lineTotal;
                 } else {
-                    rentEquipmentCost += itemTotal;
+                    rentEquipmentCost += quote.lineTotal;
                 }
             });
         }
@@ -727,18 +728,19 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
     const rentEquipmentItems = [];
     if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
         addonsData.equipment.forEach(item => {
-            const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId) || equipmentId === 3) return;
+            const equipmentId = equipmentNumericId(item);
+            if (!equipmentId || equipmentId === 3 || item.type === 'purchase') return;
 
-            const price = Number(equipmentPrices[equipmentId] || 0);
-            const quantity = Number(item.quantity || 1);
-            const itemName = equipmentId === 1 ? 'Wheelbarrow' :
-                equipmentId === 2 ? 'Hand Truck' :
-                    `Equipment #${equipmentId}`;
+            const quote = resolveEquipmentCharge(item, {
+                liveBasePrice: Number(equipmentPrices[equipmentId] || item.price || 0),
+            });
+            const itemName = item.name || item.label || (equipmentId === 1 ? 'Wheelbarrow' : equipmentId === 2 ? 'Hand Truck' : `Equipment #${equipmentId}`);
+            const note = additionalDayFinePrint(quote);
 
             rentEquipmentItems.push({
-                label: `${itemName} (x${quantity})`,
-                amount: price * quantity
+                label: `${itemName} (x${quote.quantity})`,
+                amount: quote.lineTotal,
+                sublabel: note || undefined,
             });
         });
     }

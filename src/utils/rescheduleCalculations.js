@@ -1,6 +1,6 @@
 import { differenceInDays, differenceInHours, parseISO, isValid } from 'date-fns';
 import { getPriceFromSnapshotOrCurrent } from './equipmentPricingIntegration';
-import { isValidEquipmentId } from './equipmentIdValidator';
+import { isChargeableEquipmentId } from './rentalEquipmentPricing';
 import { getTaxRate } from './getTaxRate';
 import { supabase } from '@/lib/customSupabaseClient';
 
@@ -22,11 +22,11 @@ export function isInsuranceAddon(addon) {
     return name.includes('premium insurance');
 }
 
-/** Numeric equipment id 1–6 only (excludes insurance service id 7 and string slugs). */
+/** Numeric equipment id, excluding the insurance service id. */
 export function resolveNumericEquipmentId(addon) {
     const raw = addon?.equipment_id ?? addon?.dbId ?? addon?.id;
     const numericId = Number(raw);
-    if (!isValidEquipmentId(numericId) || numericId === INSURANCE_SERVICE_EQUIPMENT_ID) {
+    if (!isChargeableEquipmentId(numericId)) {
         return null;
     }
     return numericId;
@@ -54,19 +54,26 @@ export async function resolveAddonUnitPrice(addon, priceSnapshot = null) {
 export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment = [], insuranceFallbackPrice = 25) {
     const list = [];
     const seenIds = new Set();
+    const snapshotById = new Map();
+    for (const item of booking?.addons?.equipment || []) {
+        const id = Number(item?.dbId || item?.equipment_id);
+        if (Number.isInteger(id) && id > 0) snapshotById.set(id, item);
+    }
 
     for (const be of bookingEquip || []) {
         const equipId = be.equipment_id ?? be.equipment?.id;
         if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
         seenIds.add(equipId);
+        const snap = snapshotById.get(Number(equipId));
         list.push({
             id: equipId,
             equipment_id: equipId,
-            name: be.equipment?.name || 'Unknown Equipment',
-            quantity: be.quantity || 1,
-            price: Number(be.equipment?.price || 0),
+            name: be.equipment?.name || snap?.name || 'Unknown Equipment',
+            quantity: be.quantity || snap?.quantity || 1,
+            price: Number(snap?.basePrice ?? snap?.price ?? be.equipment?.price ?? 0),
+            additionalDayPrice: Number(snap?.additionalDayPrice ?? be.equipment?.additional_day_price ?? 0),
             description: be.equipment?.description || be.equipment?.type || 'Equipment',
-            type: be.equipment?.type || 'equipment',
+            type: snap?.type || be.equipment?.type || 'equipment',
         });
     }
 
@@ -85,8 +92,9 @@ export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment
                 equipment_id: equipId,
                 name: matched?.name || item.name || 'Equipment',
                 quantity: item.quantity || 1,
-                price: Number(matched?.price || item.price || 0),
-                type: matched?.type || 'equipment',
+                price: Number(item.basePrice ?? item.price ?? matched?.price ?? 0),
+                additionalDayPrice: Number(item.additionalDayPrice ?? matched?.additional_day_price ?? 0),
+                type: item.type || matched?.type || 'equipment',
             });
         }
     }

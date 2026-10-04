@@ -18,6 +18,7 @@ import {
     formatReturnIssueStatus,
     EQUIPMENT_FRIENDLY_LABELS,
 } from '@/utils/equipmentReturnDisplay';
+import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -74,7 +75,10 @@ import {
         if (addons.distanceInfo?.totalFee > 0) subtotal += addons.distanceInfo.totalFee;
         addons.equipment?.forEach(item => {
             const meta = equipmentMeta.find(e => e.id === item.id);
-            if (meta) subtotal += meta.price * item.quantity;
+            const quote = resolveEquipmentCharge(item, {
+                liveBasePrice: item.price || item.basePrice || meta?.price || 0,
+            });
+            subtotal += quote.lineTotal;
         });
 
         const getDiscountAmount = () => {
@@ -193,6 +197,16 @@ import {
                                                             <li key={item.id || equipmentId}>
                                                                 {label} (x{item.quantity}) —{' '}
                                                                 <span className={toneClass}>{display.label}</span>
+                                                                {(() => {
+                                                                    const quote = resolveEquipmentCharge(item);
+                                                                    const note = additionalDayFinePrint(quote);
+                                                                    if (!note) return null;
+                                                                    return (
+                                                                        <span className="block text-[11px] text-blue-200/80">
+                                                                            {note} · {`$${quote.lineTotal.toFixed(2)}`}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                             </li>
                                                         );
                                                     })}

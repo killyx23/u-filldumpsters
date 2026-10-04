@@ -10,6 +10,7 @@ import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distance
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 
 const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
@@ -85,9 +86,27 @@ export const ReceiptPage = () => {
                 let insuranceAddon = null;
 
                 if (booking.addons && typeof booking.addons === 'object') {
+                    if (Array.isArray(booking.addons.equipment)) {
+                        booking.addons.equipment.forEach((item) => {
+                            const quote = resolveEquipmentCharge(item, {
+                                liveBasePrice: Number(item.price || item.basePrice || 0),
+                            });
+                            const name = item.name || item.label || item.id || 'Equipment';
+                            equipmentAddons.push({
+                                name,
+                                quantity: quote.quantity,
+                                unitPrice: quote.quantity > 0 ? quote.lineTotal / quote.quantity : quote.lineTotal,
+                                total: quote.lineTotal,
+                                finePrint: additionalDayFinePrint(quote),
+                            });
+                        });
+                    }
+
                     Object.entries(booking.addons).forEach(([key, value]) => {
                         const keyLower = key.toLowerCase();
                         
+                        if (keyLower === 'equipment' || key === 'equipment') return;
+
                         // Skip metadata fields
                         if (keyLower.includes('delivery') || 
                             keyLower.includes('verification') || 
@@ -460,6 +479,9 @@ export const ReceiptPage = () => {
                                                                 <span className="text-gray-500 ml-2">
                                                                     (Qty: {item.quantity}) @ {formatCurrency(item.unitPrice)} each
                                                                 </span>
+                                                                {item.finePrint && (
+                                                                    <p className="text-[11px] text-gray-500">{item.finePrint}</p>
+                                                                )}
                                                             </div>
                                                             <span className="font-semibold text-white">{formatCurrency(item.total)}</span>
                                                         </div>

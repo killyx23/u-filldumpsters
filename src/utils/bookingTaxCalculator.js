@@ -1,5 +1,5 @@
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
-import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { equipmentLineAmount, equipmentNumericId } from '@/utils/rentalEquipmentPricing';
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -32,6 +32,11 @@ export function buildBookingLineItems({
   insuranceIsTaxable = false,
   drivewayPrice = 0,
   drivewayIsTaxable = true,
+  rentalDays = null,
+  dropOff = null,
+  pickup = null,
+  additionalDayPrices = {},
+  equipmentTypes = {},
 }) {
   const lines = [];
   const basePriceAmount = Number(plan?.price ?? plan?.base_price ?? 0);
@@ -93,12 +98,16 @@ export function buildBookingLineItems({
 
   if (addonsData?.equipment && Array.isArray(addonsData.equipment)) {
     addonsData.equipment.forEach((item) => {
-      const equipmentId = item.equipment_id || item.dbId || item.id;
-      if (!equipmentId || equipmentId === 7 || !isValidEquipmentId(equipmentId)) return;
+      const equipmentId = equipmentNumericId(item);
+      if (!equipmentId) return;
 
-      const price = Number(equipmentPrices[equipmentId] || 0);
-      const quantity = Number(item.quantity || 1);
-      const itemTotal = price * quantity;
+      const itemTotal = equipmentLineAmount(item, equipmentPrices, {
+        rentalDays: item.rentalDays ?? rentalDays ?? addonsData.rentalDays,
+        dropOff: dropOff || addonsData.dropOffDate || addonsData.drop_off_date,
+        pickup: pickup || addonsData.pickupDate || addonsData.pickup_date,
+        additionalDayPrices,
+        equipmentTypes,
+      });
       if (itemTotal <= 0) return;
 
       const flag = equipmentTaxFlags[equipmentId];

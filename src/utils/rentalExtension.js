@@ -1,4 +1,5 @@
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
+import { quoteEquipmentExtension } from '@/utils/rentalEquipmentPricing';
 
 const CLOSED_STATUSES = new Set([
   'Completed',
@@ -97,7 +98,7 @@ function dayIsBlocked(availability, date, { returnDay = false } = {}) {
  * Quote an extension to a new return date.
  * Days after the current return must be free. The new return day must also be open.
  */
-export function quoteRentalExtension(booking, newPickupDate, availability = {}) {
+export function quoteRentalExtension(booking, newPickupDate, availability = {}, catalogRates = {}) {
   const currentPickup = dateKey(booking?.pickup_date);
   const nextReturn = dateKey(newPickupDate);
   const dayRate = dayRateFromBooking(booking);
@@ -122,7 +123,9 @@ export function quoteRentalExtension(booking, newPickupDate, availability = {}) 
     }
   }
 
-  const subtotal = roundExtensionMoney(dayRate * dates.length);
+  const serviceSubtotal = roundExtensionMoney(dayRate * dates.length);
+  const equipment = quoteEquipmentExtension(booking, dates.length, catalogRates);
+  const subtotal = roundExtensionMoney(serviceSubtotal + equipment.subtotal);
   const tax = roundExtensionMoney(subtotal * (taxRate / 100));
   const total = roundExtensionMoney(subtotal + tax);
   return {
@@ -131,6 +134,9 @@ export function quoteRentalExtension(booking, newPickupDate, availability = {}) 
     dates,
     dayRate,
     taxRate,
+    serviceSubtotal,
+    equipmentSubtotal: equipment.subtotal,
+    equipmentLines: equipment.lines,
     subtotal,
     tax,
     total,

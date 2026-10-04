@@ -36,6 +36,7 @@ export const ExtendServiceDialog = ({
   const [reorderDate, setReorderDate] = useState(null);
   const [step, setStep] = useState('dates');
   const [charging, setCharging] = useState(false);
+  const [catalogRates, setCatalogRates] = useState({});
   const [extendedBooking, setExtendedBooking] = useState(null);
   const receiptRef = useRef(null);
   const handlePrint = useReactToPrint({ content: () => receiptRef.current });
@@ -53,6 +54,36 @@ export const ExtendServiceDialog = ({
     setCharging(false);
     setExtendedBooking(null);
   }, [open, booking?.id]);
+
+  useEffect(() => {
+    if (!open || !booking?.addons?.equipment) {
+      setCatalogRates({});
+      return;
+    }
+    const ids = booking.addons.equipment
+      .map((item) => Number(item.dbId || item.equipment_id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (!ids.length) {
+      setCatalogRates({});
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('equipment')
+      .select('id, additional_day_price, type')
+      .in('id', ids)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const rates = {};
+        for (const row of data || []) {
+          if (row.type === 'rental') rates[row.id] = Number(row.additional_day_price || 0);
+        }
+        setCatalogRates(rates);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, booking]);
 
   useEffect(() => {
     if (!open || !booking?.plan?.id || !currentPickup) return;
@@ -93,8 +124,8 @@ export const ExtendServiceDialog = ({
 
   const quote = useMemo(() => {
     if (!booking || !selectedDate) return null;
-    return quoteRentalExtension(booking, format(selectedDate, 'yyyy-MM-dd'), availability);
-  }, [booking, selectedDate, availability]);
+    return quoteRentalExtension(booking, format(selectedDate, 'yyyy-MM-dd'), availability, catalogRates);
+  }, [booking, selectedDate, availability, catalogRates]);
 
   const nextDayBlocked = useMemo(() => {
     if (!firstExtraDay || loadingDates) return false;
@@ -112,7 +143,7 @@ export const ExtendServiceDialog = ({
 
   const handleDayClick = (day) => {
     if (!booking || !firstExtraDay || day < firstExtraDay) return;
-    const result = quoteRentalExtension(booking, format(day, 'yyyy-MM-dd'), availability);
+    const result = quoteRentalExtension(booking, format(day, 'yyyy-MM-dd'), availability, catalogRates);
     if (!result.ok) {
       setSelectedDate(null);
       setReorderDate(day);
@@ -223,6 +254,12 @@ export const ExtendServiceDialog = ({
                 <p className="font-semibold text-emerald-200">Extra dates</p>
                 <p>{quote.dates.map((date) => format(parseISO(date), 'MMM d, yyyy')).join(', ')}</p>
                 <p>{quote.days} day{quote.days === 1 ? '' : 's'} at {money(quote.dayRate)} per day</p>
+                {quote.equipmentLines?.length > 0 && quote.equipmentLines.map((line) => (
+                  <p key={`${line.equipmentId}-${line.addedDays}`} className="text-xs text-emerald-100">
+                    {line.name || 'Rental equipment'}: {money(line.additionalDayPrice)} × {line.addedDays} additional day{line.addedDays === 1 ? '' : 's'}
+                    {line.quantity > 1 ? ` × ${line.quantity}` : ''} = {money(line.amount)}
+                  </p>
+                ))}
                 <p>Tax ({Number(quote.taxRate).toFixed(2)}%): {money(quote.tax)}</p>
                 <p className="font-semibold text-white">Added total: {money(quote.total)}</p>
                 <p>

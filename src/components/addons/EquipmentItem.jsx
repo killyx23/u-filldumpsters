@@ -160,7 +160,7 @@ const SharedProductModal = ({ isOpen, onClose, title, images, features, specific
   );
 };
 
-export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, quantity, onQuantityChange, available }) => {
+export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, quantity, onQuantityChange, available, extraDayNote = '' }) => {
     const safeAvailable = Number.isFinite(Number(available)) ? Number(available) : 0;
     const safeQuantity = Number.isFinite(Number(quantity)) ? Number(quantity) : 0;
     const isAvailable = safeAvailable > 0;
@@ -216,6 +216,9 @@ export const EquipmentItem = ({ id, label, price, icon, hasQuantitySelector, qua
                 
                 <div className="ml-3 text-white flex-grow flex items-center flex-wrap gap-3">
                     <span className="font-medium">{displayLabel}</span>
+                    {extraDayNote && (
+                        <span className="basis-full text-[11px] text-blue-100/80">{extraDayNote}</span>
+                    )}
                     
                     {isInteractive && (
                         <span className="text-[10px] uppercase tracking-wider bg-blue-600/80 text-white px-2 py-0.5 rounded-full font-bold animate-pulse shadow-sm">

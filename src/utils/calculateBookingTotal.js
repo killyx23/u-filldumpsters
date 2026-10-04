@@ -16,6 +16,11 @@ export function calculateBookingTotal(
     drivewayIsTaxable = true,
     serviceTaxFlags = {},
     equipmentTaxFlags = {},
+    rentalDays = null,
+    dropOff = null,
+    pickup = null,
+    additionalDayPrices = {},
+    equipmentTypes = {},
   } = {}
 ) {
   const breakdown = calculateBookingTaxBreakdown({
@@ -30,6 +35,11 @@ export function calculateBookingTotal(
     drivewayPrice,
     drivewayIsTaxable,
     taxRate,
+    rentalDays,
+    dropOff,
+    pickup,
+    additionalDayPrices,
+    equipmentTypes,
   });
 
   const lineByKey = Object.fromEntries(

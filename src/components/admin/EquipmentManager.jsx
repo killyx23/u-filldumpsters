@@ -63,6 +63,7 @@ export const EquipmentManager = () => {
         total_quantity: 0,
         type: 'rental',
         price: 0,
+        additional_day_price: 0,
         description: ''
     });
 
@@ -128,6 +129,7 @@ export const EquipmentManager = () => {
             total_quantity: item.total_quantity,
             type: item.type || 'rental',
             price: item.price || 0,
+            additional_day_price: item.additional_day_price || 0,
             description: item.description || ''
         });
     };
@@ -139,6 +141,9 @@ export const EquipmentManager = () => {
                 total_quantity: parseInt(formData.total_quantity),
                 type: formData.type,
                 price: parseFloat(formData.price),
+                additional_day_price: formData.type === 'rental'
+                    ? Math.max(0, parseFloat(formData.additional_day_price) || 0)
+                    : 0,
                 description: formData.description
             };
 
@@ -191,7 +196,7 @@ export const EquipmentManager = () => {
             setEditingId(null);
             setAddingNew(false);
             setAddingCategory(null);
-            setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, description: '' });
+            setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, additional_day_price: 0, description: '' });
             fetchEquipment();
         } catch (error) {
             console.error('Error saving equipment:', error);
@@ -229,13 +234,13 @@ export const EquipmentManager = () => {
         setEditingId(null);
         setAddingNew(false);
         setAddingCategory(null);
-        setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, description: '' });
+        setFormData({ name: '', total_quantity: 0, type: 'rental', price: 0, additional_day_price: 0, description: '' });
     };
 
     const handleAddInCategory = (categoryType) => {
         setAddingNew(true);
         setAddingCategory(categoryType);
-        setFormData({ ...formData, type: categoryType });
+        setFormData({ name: '', total_quantity: 0, type: categoryType, price: 0, additional_day_price: 0, description: '' });
     };
 
     const groupedEquipment = useMemo(() => Object.keys(EQUIPMENT_CATEGORIES).reduce((acc, category) => {
@@ -402,14 +407,28 @@ const EquipmentForm = ({ formData, setFormData, onSave, onCancel, isNew, categor
                     ))}
                 </SelectContent>
             </Select>
-            <Input
-                type="number"
-                step="0.01"
-                value={formData.price}
-                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                placeholder="Price ($)"
-                className="bg-gray-800 border-gray-600 text-white"
-            />
+            <div className={formData.type === 'rental' ? 'grid grid-cols-1 sm:grid-cols-2 gap-3' : ''}>
+                <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    placeholder="Price ($)"
+                    className="bg-gray-800 border-gray-600 text-white"
+                />
+                {formData.type === 'rental' && (
+                    <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.additional_day_price}
+                        onChange={(e) => setFormData({ ...formData, additional_day_price: e.target.value })}
+                        placeholder="Each extra day ($)"
+                        className="bg-gray-800 border-gray-600 text-white"
+                    />
+                )}
+            </div>
         </div>
         <Input
             value={formData.description}
@@ -532,7 +551,7 @@ const RentalAssignmentStatus = ({ item, assignments = [] }) => {
 const EquipmentItem = ({ item, onEdit, onDelete, category, assignments = [], showAssignmentStatus = false }) => (
     <div className={`equipment-item-card category-${category.color}`}>
         <div className="flex items-center justify-between">
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className={`flex-1 grid grid-cols-1 ${showAssignmentStatus ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3`}>
                 <div>
                     <p className="text-xs text-gray-400 mb-1">Name</p>
                     <p className="text-white font-medium">{item.name}</p>
@@ -552,6 +571,12 @@ const EquipmentItem = ({ item, onEdit, onDelete, category, assignments = [], sho
                     <p className="text-xs text-gray-400 mb-1">Price</p>
                     <p className="text-green-400 font-semibold">${Number(item.price || 0).toFixed(2)}</p>
                 </div>
+                {showAssignmentStatus && (
+                    <div>
+                        <p className="text-xs text-gray-400 mb-1">Each extra day</p>
+                        <p className="text-green-400 font-semibold">${Number(item.additional_day_price || 0).toFixed(2)}</p>
+                    </div>
+                )}
             </div>
             <div className="flex gap-2 ml-4">
                 <Button

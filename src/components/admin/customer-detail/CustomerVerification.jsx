@@ -1187,6 +1187,8 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                 mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddonsForQuote.mileageCharge ?? 0),
                 deliveryFee: Number(existingAddonsForQuote.deliveryFee || 0),
                 taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
+                dropOff: pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date,
+                pickup: pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date,
             })
             : null;
         const newTotal = round2(
@@ -1386,6 +1388,8 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddons.mileageCharge ?? 0),
                     deliveryFee: Number(existingAddons.deliveryFee || 0),
                     taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
+                    dropOff: pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date,
+                    pickup: pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date,
                 }).mapped;
                 const hadInsurance = existingAddons.insurance === 'accept';
                 const hadDriveway = existingAddons.drivewayProtection === 'accept';
@@ -1402,7 +1406,18 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         name: a.name,
                         label: a.name,
                         quantity: Number(a.quantity || 1),
-                        price: Number(a.price || 0),
+                        price: Number(a.basePrice ?? a.price ?? 0),
+                        type: a.type,
+                        ...((a.lineTotal != null)
+                            ? {
+                                basePrice: a.basePrice,
+                                additionalDayPrice: a.additionalDayPrice,
+                                rentalDays: a.rentalDays,
+                                extraDays: a.extraDays,
+                                extraDayCharge: a.extraDayCharge,
+                                lineTotal: a.lineTotal,
+                            }
+                            : {}),
                     })),
                     insurancePriceApplied:
                         mapped.insurance === 'accept'

@@ -58,6 +58,73 @@ function dayRateFromBooking(booking: { plan?: { base_price?: number; price?: num
   return 0;
 }
 
+function equipmentIdOf(item: { equipment_id?: number; dbId?: number; id?: number | string }) {
+  const raw = Number(item?.equipment_id ?? item?.dbId ?? item?.id);
+  return Number.isInteger(raw) && raw > 0 && raw !== 7 ? raw : null;
+}
+
+function isRentalAddon(item: { type?: string; equipment_id?: number; dbId?: number; id?: number | string; additionalDayPrice?: number; additional_day_price?: number }) {
+  const id = equipmentIdOf(item);
+  if (id === 3) return false;
+  const type = String(item?.type || "").toLowerCase();
+  if (type === "purchase" || type === "consumable" || type === "service") return false;
+  if (type === "rental") return true;
+  if (item?.additionalDayPrice != null || item?.additional_day_price != null) return true;
+  return id === 1 || id === 2;
+}
+
+function equipmentExtensionCharge(
+  equipment: Array<Record<string, unknown>>,
+  addedDays: number,
+  catalogRates: Record<number, number>,
+) {
+  let subtotal = 0;
+  const lines: Array<{ name: string; amount: number }> = [];
+  for (const item of equipment || []) {
+    if (!isRentalAddon(item as { type?: string })) continue;
+    const id = equipmentIdOf(item as { equipment_id?: number; dbId?: number; id?: number });
+    const stored = (item.additionalDayPrice ?? item.additional_day_price) as number | undefined;
+    const rate = round2(stored != null ? stored : (id != null ? catalogRates[id] ?? 0 : 0));
+    const qty = Number(item.quantity || 1);
+    const amount = round2(rate * addedDays * qty);
+    if (!(amount > 0)) continue;
+    subtotal = round2(subtotal + amount);
+    lines.push({ name: String(item.name || item.label || "Rental equipment"), amount });
+  }
+  return { subtotal, lines };
+}
+
+function applyEquipmentExtension(
+  equipment: Array<Record<string, unknown>>,
+  addedDays: number,
+  catalogRates: Record<number, number>,
+) {
+  return (equipment || []).map((item) => {
+    if (!isRentalAddon(item as { type?: string }) || addedDays <= 0) return item;
+    const id = equipmentIdOf(item as { equipment_id?: number; dbId?: number; id?: number });
+    const stored = (item.additionalDayPrice ?? item.additional_day_price) as number | undefined;
+    const rate = round2(stored != null ? stored : (id != null ? catalogRates[id] ?? 0 : 0));
+    if (!(rate > 0)) return item;
+    const qty = Number(item.quantity || 1);
+    const base = round2((item.basePrice ?? item.price ?? 0) as number);
+    const prevExtra = item.extraDays != null ? Math.max(0, Number(item.extraDays) || 0) : 0;
+    const extraDays = prevExtra + addedDays;
+    const extraDayCharge = round2(rate * extraDays * qty);
+    const lineTotal = round2(base * qty + extraDayCharge);
+    return {
+      ...item,
+      type: "rental",
+      price: base,
+      basePrice: base,
+      additionalDayPrice: rate,
+      extraDays,
+      extraDayCharge,
+      rentalDays: extraDays + 1,
+      lineTotal,
+    };
+  });
+}
+
 function returnDeadlinePassed(booking: { pickup_date?: string; pickup_time_slot?: string }) {
   const returnDate = dateKey(booking.pickup_date);
   const clock = parseClockTime(booking.pickup_time_slot || "23:00:00") || { hour: 23, minute: 0, second: 0 };
@@ -224,10 +291,28 @@ Deno.serve(async (req) => {
     const dayRate = dayRateFromBooking(booking);
     if (!(dayRate > 0)) return fail(400, "This booking has no day rate to extend.");
     const taxRate = Number(booking.tax_rate_used ?? 7.45);
-    const subtotal = round2(dayRate * dates.length);
+    const equipment = Array.isArray(booking.addons?.equipment) ? booking.addons.equipment : [];
+    const equipmentIds = equipment
+      .map((item: { equipment_id?: number; dbId?: number; id?: number }) => equipmentIdOf(item))
+      .filter((id: number | null): id is number => id != null);
+    const catalogRates: Record<number, number> = {};
+    if (equipmentIds.length > 0) {
+      const { data: rateRows } = await supabaseAdmin
+        .from("equipment")
+        .select("id, additional_day_price, type")
+        .in("id", equipmentIds);
+      for (const row of rateRows || []) {
+        if (row.type === "rental") catalogRates[Number(row.id)] = Number(row.additional_day_price || 0);
+      }
+    }
+    const equipmentCharge = equipmentExtensionCharge(equipment, dates.length, catalogRates);
+    const serviceSubtotal = round2(dayRate * dates.length);
+    const subtotal = round2(serviceSubtotal + equipmentCharge.subtotal);
     const tax = round2(subtotal * (taxRate / 100));
     const total = round2(subtotal + tax);
-    const description = `Rental extension: ${dates.length} day(s) for booking #${bookingId}`;
+    const description = equipmentCharge.subtotal > 0
+      ? `Rental extension: ${dates.length} day(s) for booking #${bookingId}, including equipment extra days`
+      : `Rental extension: ${dates.length} day(s) for booking #${bookingId}`;
     const charge = await chargeCard(booking.customer_id, bookingId, total, description);
 
     const approvedAt = new Date().toISOString();
@@ -241,6 +326,7 @@ Deno.serve(async (req) => {
       new_pickup_time: booking.pickup_time_slot,
       days: dates.length,
       day_rate: dayRate,
+      equipment_subtotal: equipmentCharge.subtotal,
       subtotal,
       tax,
       amount: total,
@@ -262,7 +348,7 @@ Deno.serve(async (req) => {
     };
     const nextPlan = {
       ...(booking.plan || {}),
-      price: round2(Number(booking.plan?.price || 0) + subtotal),
+      price: round2(Number(booking.plan?.price || 0) + serviceSubtotal),
     };
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("bookings")
@@ -273,7 +359,11 @@ Deno.serve(async (req) => {
         tax_amount: round2(Number(booking.tax_amount || 0) + tax),
         total_price: round2(Number(booking.total_price || 0) + total),
         receipt_status_history: [...history, entry],
-        addons: { ...(booking.addons || {}), extensions: [...extensions, entry] },
+        addons: {
+          ...(booking.addons || {}),
+          equipment: applyEquipmentExtension(equipment, dates.length, catalogRates),
+          extensions: [...extensions, entry],
+        },
         fees: {
           ...fees,
           rental_extension: feeRecord,

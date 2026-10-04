@@ -3,6 +3,7 @@ import { format, parseISO, isValid, differenceInDays } from 'date-fns';
 import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
+import { additionalDayFinePrint, equipmentNumericId, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer, parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
 import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
@@ -233,28 +234,32 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
     if (addons.equipment && Array.isArray(addons.equipment)) {
         addons.equipment.forEach(item => {
-            const equipmentId = item.equipment_id || item.dbId || item.id;
-            if (!equipmentId || !isValidEquipmentId(equipmentId)) return;
+            const equipmentId = equipmentNumericId(item);
+            if (!equipmentId) return;
 
-            const price = Number(equipmentPrices[equipmentId] || 0);
-            const quantity = Number(item.quantity || 1);
-            const itemTotal = price * quantity;
+            const quote = resolveEquipmentCharge(item, {
+                liveBasePrice: Number(equipmentPrices[equipmentId] || item.price || 0),
+            });
+            const itemTotal = quote.lineTotal;
             
-            let itemName = `Equipment #${equipmentId}`;
-            if (equipmentId === 1) itemName = 'Wheelbarrow';
-            else if (equipmentId === 2) itemName = 'Hand Truck';
-            else if (equipmentId === 3) itemName = 'Working Gloves (Pair)';
+            let itemName = item.name || item.label || `Equipment #${equipmentId}`;
+            if (!item.name && !item.label) {
+                if (equipmentId === 1) itemName = 'Wheelbarrow';
+                else if (equipmentId === 2) itemName = 'Hand Truck';
+                else if (equipmentId === 3) itemName = 'Working Gloves (Pair)';
+            }
 
             equipmentBreakdown.push({
                 id: equipmentId,
                 name: itemName,
-                quantity,
-                price,
+                quantity: quote.quantity,
+                price: quote.basePrice,
                 total: itemTotal,
-                isPurchase: equipmentId === 3
+                finePrint: additionalDayFinePrint(quote),
+                isPurchase: equipmentId === 3 || item.type === 'purchase'
             });
 
-            if (equipmentId === 3) {
+            if (equipmentId === 3 || item.type === 'purchase') {
                 purchaseItemsCost += itemTotal;
             } else {
                 rentEquipmentCost += itemTotal;
@@ -598,6 +603,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                                         <span className={`font-bold ml-2 ${display.kind === 'issue' ? 'text-red-600' : 'text-green-700'}`}>
                                                             {statusSuffix}
                                                         </span>
+                                                    )}
+                                                    {item.finePrint && (
+                                                        <div className="text-[10px] text-gray-500 leading-tight">{item.finePrint}</div>
                                                     )}
                                                 </td>
                                                 <td className="text-right py-1 pr-3">${item.total.toFixed(2)}</td>
