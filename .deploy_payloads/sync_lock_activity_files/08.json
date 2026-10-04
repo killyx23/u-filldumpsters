@@ -1,0 +1,1 @@
+{"name": "functions/sync-lock-activity/cors.ts", "content": "export { getCorsHeaders } from \"../_shared/cors.ts\";\n"}

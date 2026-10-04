@@ -16,7 +16,7 @@ import { SecureDeleteDialog, SecureDamagePhotoDeleteDialog } from '@/components/
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
@@ -865,7 +865,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const loyaltyPointsRedeemed = Number(booking.addons?.loyaltyPointsToRedeem || 0);
                 const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
-                const rescheduleApproval = getLatestRescheduleApproval(booking);
+                const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
                 const dropOffTimeLabel = convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A';
                 const pickupTimeLabel = convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A';
                 const oneWayMiles = resolveOneWayMiles(booking, customer);

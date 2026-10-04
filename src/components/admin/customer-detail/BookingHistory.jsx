@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPin, Clock } from 'lucide-react';
 import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { listRentalExtensions } from '@/utils/rentalExtension';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
@@ -70,14 +71,22 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
     
     const handleResendConfirmation = async (booking) => {
         setIsSending(booking.id);
+        const recipientEmail = booking.email || customer?.email;
         const { error } = await supabase.functions.invoke('send-booking-confirmation', {
-            body: { booking: { ...booking, customers: customer } },
+            body: {
+                bookingId: booking.id,
+                force: true,
+                ...(recipientEmail ? { email: recipientEmail } : {}),
+            },
         });
 
         if (error) {
-            toast({ title: 'Failed to send email', description: error.message, variant: 'destructive' });
+            const errContext = await error.context?.json().catch(() => null);
+            const description = [errContext?.error, errContext?.details].filter(Boolean).join(': ')
+                || error.message;
+            toast({ title: 'Failed to send email', description, variant: 'destructive' });
         } else {
-            toast({ title: 'Confirmation Email Sent!', description: `An email has been sent to ${booking.email}.` });
+            toast({ title: 'Confirmation Email Sent!', description: `An email has been sent to ${recipientEmail || 'the customer'}.` });
         }
         setIsSending(null);
     };
@@ -93,7 +102,8 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
         return 'Manual Review';
     };
     const pendingReason = getPendingReason();
-    const rescheduleApproval = getLatestRescheduleApproval(booking);
+    const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
+    const rentalExtensions = listRentalExtensions(booking);
     const oneWayMiles = resolveOneWayMiles(booking, customer);
 
     return (
@@ -123,6 +133,17 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                 <div className="mt-2 p-2 bg-orange-900/50 border border-orange-500/50 rounded-md text-sm text-orange-300 flex items-center">
                     <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
                     Pending Reason: <span className="font-semibold ml-1">{pendingReason}</span>
+                </div>
+            )}
+            {rentalExtensions.length > 0 && (
+                <div className="mt-2 p-2 bg-orange-900/40 border border-orange-500/40 rounded-md text-sm text-orange-100 space-y-1">
+                    <p className="font-semibold">Extended</p>
+                    {rentalExtensions.map((entry, index) => (
+                        <p key={`${entry.at || index}`}>
+                            Return {entry.original_pickup_date} → {entry.new_pickup_date}
+                            {entry.amount != null ? ` · charged $${Number(entry.amount).toFixed(2)}` : ''}
+                        </p>
+                    ))}
                 </div>
             )}
             {rescheduleApproval && (

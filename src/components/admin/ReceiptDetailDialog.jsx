@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag, Repeat, MapPin } from 'lucide-react';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
@@ -66,7 +66,7 @@ import {
             return formatTimeWindow(timeString, { ...timeOptions, ...extra });
         };
 
-        const rescheduleApproval = getLatestRescheduleApproval(booking);
+        const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
 
         let subtotal = plan.price || 0;
         if (addons.insurance === 'accept') subtotal += addonPrices.insurance;

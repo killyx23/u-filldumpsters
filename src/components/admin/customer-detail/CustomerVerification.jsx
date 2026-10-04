@@ -21,7 +21,7 @@ import {
     formatAddressDisplay,
 } from '@/utils/addressHelpers';
 import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
-import { addonsListToAddonsData } from '@/utils/rescheduleTaxCalculator';
+import { quoteRescheduleBreakdown } from '@/utils/rescheduleTaxCalculator';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 import { getBookingDateTime } from '@/utils/bookingPickupWindow';
 import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
@@ -1175,7 +1175,22 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             booking.total_price ??
             0
         );
+        const existingAddonsForQuote =
+            booking.addons && typeof booking.addons === 'object' ? booking.addons : {};
+        const quotedPricing = pendingSnapshot?.pricing || {};
+        const rescheduleQuote = isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)
+            ? quoteRescheduleBreakdown({
+                plan: booking.plan,
+                existingAddons: existingAddonsForQuote,
+                newAddonsList: pendingSnapshot.new_addons,
+                serviceCost: Number(quotedPricing.serviceCost ?? booking.plan?.price ?? booking.plan?.base_price ?? 0),
+                mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddonsForQuote.mileageCharge ?? 0),
+                deliveryFee: Number(existingAddonsForQuote.deliveryFee || 0),
+                taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
+            })
+            : null;
         const newTotal = round2(
+            rescheduleQuote?.breakdown?.total ??
             pendingSnapshot?.new_total ??
             pendingRescheduleLog?.new_total ??
             booking.payment_delta_details?.new_total_price ??
@@ -1345,23 +1360,33 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
 
         if (isRescheduleApprove) {
             bookingUpdate.total_price = newTotal;
-            if (pendingSnapshot?.pricing?.subtotal != null) {
-                bookingUpdate.subtotal_before_tax = Number(pendingSnapshot.pricing.subtotal);
-            }
-            if (pendingSnapshot?.pricing?.tax != null) {
-                bookingUpdate.tax_amount = Number(pendingSnapshot.pricing.tax);
-            }
-            if (pendingSnapshot?.pricing?.taxRate != null) {
-                bookingUpdate.tax_rate_used = Number(pendingSnapshot.pricing.taxRate);
+            if (rescheduleQuote?.breakdown) {
+                bookingUpdate.subtotal_before_tax = Number(rescheduleQuote.breakdown.subtotalBeforeTax);
+                bookingUpdate.tax_amount = Number(rescheduleQuote.breakdown.tax);
+                bookingUpdate.tax_rate_used = Number(rescheduleQuote.breakdown.taxRate);
+            } else {
+                if (pendingSnapshot?.pricing?.subtotal != null) {
+                    bookingUpdate.subtotal_before_tax = Number(pendingSnapshot.pricing.subtotal);
+                }
+                if (pendingSnapshot?.pricing?.tax != null) {
+                    bookingUpdate.tax_amount = Number(pendingSnapshot.pricing.tax);
+                }
+                if (pendingSnapshot?.pricing?.taxRate != null) {
+                    bookingUpdate.tax_rate_used = Number(pendingSnapshot.pricing.taxRate);
+                }
             }
 
             if (Array.isArray(pendingSnapshot?.new_addons)) {
-                const existingAddons =
-                    booking.addons && typeof booking.addons === 'object' ? booking.addons : {};
-                const mapped = addonsListToAddonsData(pendingSnapshot.new_addons, {
+                const existingAddons = existingAddonsForQuote;
+                const mapped = rescheduleQuote?.mapped || quoteRescheduleBreakdown({
+                    plan: booking.plan,
+                    existingAddons,
+                    newAddonsList: pendingSnapshot.new_addons,
+                    serviceCost: Number(quotedPricing.serviceCost ?? booking.plan?.price ?? booking.plan?.base_price ?? 0),
+                    mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddons.mileageCharge ?? 0),
                     deliveryFee: Number(existingAddons.deliveryFee || 0),
-                    mileageCharge: Number(existingAddons.mileageCharge || 0),
-                });
+                    taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
+                }).mapped;
                 const hadInsurance = existingAddons.insurance === 'accept';
                 const hadDriveway = existingAddons.drivewayProtection === 'accept';
                 const removingCoverage =
@@ -1393,6 +1418,19 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     nextAddons.protectionCancellationReason = 'Removed during reschedule approval';
                 } else {
                     delete nextAddons.protectionCancellationReason;
+                }
+
+                const breakdown = rescheduleQuote?.breakdown;
+                if (breakdown) {
+                    nextAddons.taxLineItemsSnapshot = (breakdown.lineItems || []).map((line) => ({
+                        key: line.key,
+                        label: line.label,
+                        amount: line.amount,
+                        is_taxable: line.is_taxable,
+                        amountAfterDiscount: line.amountAfterDiscount,
+                    }));
+                    nextAddons.taxableSubtotal = breakdown.taxableSubtotal;
+                    nextAddons.nonTaxableSubtotal = breakdown.nonTaxableSubtotal;
                 }
 
                 bookingUpdate.addons = nextAddons;

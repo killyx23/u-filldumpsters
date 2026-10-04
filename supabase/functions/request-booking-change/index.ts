@@ -174,15 +174,32 @@ function buildDetailedNote(
   }
 
   const inv = details.inventory_changes as Record<string, unknown> | undefined;
-  if (inv) {
-    const toReturn = inv.to_return;
-    const toAllocate = inv.to_allocate;
-    const hasReturn = Array.isArray(toReturn) && toReturn.length > 0;
-    const hasAllocate = Array.isArray(toAllocate) && toAllocate.length > 0;
-    if ((hasReturn || hasAllocate) && !/Equipment to return:|Equipment to allocate:/i.test(note)) {
-      if (hasReturn) note += `\nEquipment to return: ${JSON.stringify(toReturn)}`;
-      if (hasAllocate) note += `\nEquipment to allocate: ${JSON.stringify(toAllocate)}`;
-    }
+  if (inv && !/Equipment to return:|Equipment to allocate:|Insurance removed:|Insurance added:/i.test(note)) {
+    const isInsuranceItem = (item: { id?: string; type?: string; equipment_id?: string | number; name?: string }) => {
+      if (item?.id === "insurance" || item?.type === "insurance" || item?.equipment_id === "insurance") return true;
+      const name = String(item?.name || "").toLowerCase();
+      return name.includes("premium insurance") || /\binsurance\b/.test(name);
+    };
+    const formatItems = (items: unknown[]) =>
+      items
+        .map((item) => {
+          const row = item as { name?: string; quantity?: number };
+          return `${row?.name || "Add-on"} (qty ${Number(row?.quantity || 1)})`;
+        })
+        .join(", ");
+    const splitItems = (items: unknown) => {
+      const list = Array.isArray(items) ? items : [];
+      return {
+        equipment: list.filter((item) => !isInsuranceItem(item as { name?: string })),
+        insurance: list.filter((item) => isInsuranceItem(item as { name?: string })),
+      };
+    };
+    const returned = splitItems(inv.to_return);
+    const allocated = splitItems(inv.to_allocate);
+    if (returned.equipment.length) note += `\nEquipment to return: ${formatItems(returned.equipment)}`;
+    if (allocated.equipment.length) note += `\nEquipment to allocate: ${formatItems(allocated.equipment)}`;
+    if (returned.insurance.length) note += `\nInsurance removed: ${formatItems(returned.insurance)}`;
+    if (allocated.insurance.length) note += `\nInsurance added: ${formatItems(allocated.insurance)}`;
   }
 
   const submitted = details.request_timestamp ?? new Date().toISOString();

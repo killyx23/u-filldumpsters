@@ -3,12 +3,12 @@ import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet } from 'lucide-react';
+import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet, MessageSquare } from 'lucide-react';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
 import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
-import { getLatestRescheduleApproval, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import {
@@ -111,6 +111,8 @@ export const ComprehensiveHistoryDialog = ({
                             <DetailItem icon={<User />} label="Name" value={customer.name} />
                             <DetailItem icon={<Mail />} label="Email" value={<a href={`mailto:${customer.email}`} className="hover:underline">{customer.email}</a>} />
                             <DetailItem icon={<Phone />} label="Phone" value={<a href={`tel:${customer.phone}`} className="hover:underline">{customer.phone}</a>} />
+                            <DetailItem icon={<MessageSquare />} label="Order texts" value={customer.sms_opt_in === true ? 'Allowed' : 'Not allowed'} />
+                            <DetailItem icon={<MessageSquare />} label="Promotions" value={customer.sms_marketing_opt_in === true ? 'Allowed' : 'Not allowed'} />
                             <DetailItem icon={<Home />} label="Address" value={`${customer.street}, ${customer.city}, ${customer.state} ${customer.zip}`} />
                             <DetailItem icon={<Car />} label="License Plate" value={customer.license_plate || 'Not Provided'} />
                             <DetailItem icon={<ImageIcon />} label="License Images" value={
@@ -223,7 +225,7 @@ export const ComprehensiveHistoryDialog = ({
                             const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
                             const { rentals: rentalEquipment, purchases: purchasedEquipment } =
                                 splitBookingEquipmentRows(relevantEquipment);
-                            const rescheduleApproval = getLatestRescheduleApproval(booking);
+                            const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
                             return (
                                 <div key={booking.id} className="bg-white/5 p-4 rounded-lg border-l-4 border-blue-500">
                                     <div className="flex justify-between items-center mb-2">

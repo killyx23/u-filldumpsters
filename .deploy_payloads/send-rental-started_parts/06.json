@@ -1,0 +1,1 @@
+{"name": "functions/send-rental-started/cors.ts", "content": "export { getCorsHeaders } from \"../_shared/cors.ts\";\n"}

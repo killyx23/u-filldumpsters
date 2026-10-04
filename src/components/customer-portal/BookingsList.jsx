@@ -16,8 +16,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { canExtendBooking } from '@/utils/rentalExtension';
 
-export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onRescheduleClick }) => {
+export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onRescheduleClick, onExtendClick }) => {
   const [filterStatus, setFilterStatus] = useState('all');
 
   const filteredBookings = useMemo(() => {
@@ -123,6 +124,7 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
           const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
           const statusInfo = getStatusInfo(booking);
           const canModify = !booking.pending_address_verification && ['pending_payment', 'Confirmed', 'Rescheduled'].includes(booking.status);
+          const canExtend = canExtendBooking(booking);
           const isCompleted = ['Completed', 'flagged', 'Returned'].includes(booking.status) || booking.returned_at;
 
           return (
@@ -165,6 +167,11 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
                    </div>
                 )}
                 <Button variant="outline" size="sm" onClick={() => onReceiptClick(booking)} className="border-white/20 hover:bg-white/10">Details</Button>
+                {canExtend && (
+                  <Button size="sm" onClick={() => onExtendClick?.(booking)} className="bg-orange-500 hover:bg-orange-600 text-black font-bold">
+                    Extend service
+                  </Button>
+                )}
                 {canModify && (
                   <>
                     <Button 

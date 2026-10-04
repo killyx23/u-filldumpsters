@@ -163,6 +163,15 @@ export function ChangeRequestNoteContent({ content, source, className = '' }) {
         </div>
       )}
 
+      {(parsed.insuranceRemoved || parsed.insuranceAdded || parsed.insuranceUnchanged) && (
+        <div className="space-y-1 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-yellow-400/90">Insurance</p>
+          <DetailRow label="Removed:" value={parsed.insuranceRemoved} />
+          <DetailRow label="Added:" value={parsed.insuranceAdded} />
+          <DetailRow label="Unchanged:" value={parsed.insuranceUnchanged} />
+        </div>
+      )}
+
       {parsed.comments && (
         <div className="flex items-start gap-2">
           <MessageSquare className="h-4 w-4 text-yellow-400 mt-0.5 shrink-0" />

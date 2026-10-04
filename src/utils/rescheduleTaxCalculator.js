@@ -42,6 +42,7 @@ export function addonsListToAddonsData(addonsList = [], { deliveryFee = 0, milea
         equipment_id: equipId,
         name: addon.name,
         quantity: Number(addon.quantity || 1),
+        price: Number(addon.price ?? addon.unitPrice ?? 0),
       });
     }
   }
@@ -78,6 +79,7 @@ export async function calculateRescheduleCosts({
   taxOptions = {},
   insurancePrice = 0,
   priceSnapshot = null,
+  discounts = null,
 }) {
   if (!service) {
     return {
@@ -121,6 +123,12 @@ export async function calculateRescheduleCosts({
     deliveryFee,
     mileageCharge,
   });
+  if (discounts) {
+    addonsData.loyaltyDiscountAmount = Number(discounts.loyaltyDiscountAmount || 0);
+    addonsData.loyaltyPointsToRedeem = discounts.loyaltyPointsToRedeem || 0;
+    addonsData.referralDiscountAmount = Number(discounts.referralDiscountAmount || 0);
+    if (discounts.coupon) addonsData.coupon = discounts.coupon;
+  }
 
   const breakdown = calculateBookingTaxBreakdown({
     plan: {
@@ -153,4 +161,50 @@ export async function calculateRescheduleCosts({
     taxableSubtotal: breakdown.taxableSubtotal,
     nonTaxableSubtotal: breakdown.nonTaxableSubtotal,
   };
+}
+
+/**
+ * Reprice a reschedule from the requested add-ons plus discounts already on the booking.
+ * Equipment unit prices are kept so the saved snapshot matches the rows.
+ */
+export function quoteRescheduleBreakdown({
+  plan,
+  existingAddons = {},
+  newAddonsList = [],
+  serviceCost = 0,
+  mileageCharge = 0,
+  deliveryFee = 0,
+  taxRate = 0,
+  insuranceIsTaxable = false,
+}) {
+  const mapped = addonsListToAddonsData(newAddonsList, { deliveryFee, mileageCharge });
+  const equipmentPrices = {};
+  for (const item of mapped.equipment) {
+    const id = item.equipment_id ?? item.dbId ?? item.id;
+    if (id != null) equipmentPrices[id] = Number(item.price || 0);
+  }
+  const addonsData = {
+    equipment: mapped.equipment,
+    insurance: mapped.insurance,
+    drivewayProtection: mapped.drivewayProtection,
+    insurancePriceApplied: mapped.insurance === 'accept' ? Number(mapped.insurancePriceApplied || 0) : 0,
+    drivewayPriceApplied: mapped.drivewayProtection === 'accept' ? Number(mapped.drivewayPriceApplied || 0) : 0,
+    deliveryFee: Number(deliveryFee || 0),
+    mileageCharge: Number(mileageCharge || 0),
+    loyaltyDiscountAmount: Number(existingAddons.loyaltyDiscountAmount || 0),
+    loyaltyPointsToRedeem: existingAddons.loyaltyPointsToRedeem || 0,
+    referralDiscountAmount: Number(existingAddons.referralDiscountAmount || 0),
+    coupon: existingAddons.coupon || null,
+  };
+  const breakdown = calculateBookingTaxBreakdown({
+    plan: { ...(plan || {}), price: serviceCost, base_price: serviceCost, id: plan?.id },
+    addonsData,
+    equipmentPrices,
+    taxRate,
+    insurancePrice: addonsData.insurancePriceApplied,
+    insuranceIsTaxable,
+    drivewayPrice: addonsData.drivewayPriceApplied,
+    drivewayIsTaxable: true,
+  });
+  return { mapped, breakdown };
 }

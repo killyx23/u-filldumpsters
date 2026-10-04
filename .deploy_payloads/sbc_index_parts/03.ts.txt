@@ -1,0 +1,427 @@
+ferralError || !referralRow?.referrer_customer_id) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer lookup failed:`, referralError);
+      return { sent: false, skipped: false, reason: "referrer_not_found" };
+    }
+
+    const { data: referrer, error: referrerError } = await supabase
+      .from("customers")
+      .select("id, name, email, phone, customer_id_text")
+      .eq("id", referralRow.referrer_customer_id)
+      .maybeSingle();
+
+    if (referrerError || !referrer?.email) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer customer fetch failed:`, referrerError);
+      return { sent: false, skipped: false, reason: "referrer_email_missing" };
+    }
+
+    const rawPhone = String(referrer.phone || "").replace(/\D/g, "");
+    const customerIdText = referrer.customer_id_text || "";
+    if (!customerIdText || rawPhone.length < 10) {
+      console.error(`[${timestamp}] [send-booking-confirmation] Referrer missing portal login credentials`);
+      return { sent: false, skipped: false, reason: "referrer_login_incomplete" };
+    }
+
+    const loginUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+    const html = buildReferrerThankYouEmailHTML({
+      referrerName: referrer.name,
+      bonusDollars: pendingDollars,
+      bookingId: booking.id,
+      customerIdText,
+      phoneDisplay: referrer.phone,
+      loginUrl,
+    });
+    const subject = "Thank you for your referral – reward pending";
+    const emailResult = await sendEmailWithRetry(referrer.email, subject, html);
+    if (emailResult.success) {
+      console.log(`[${timestamp}] [send-booking-confirmation] Referrer thank-you sent to ${referrer.email} via ${emailResult.provider}`);
+      return { sent: true, recipient: referrer.email, provider: emailResult.provider };
+    }
+
+    console.error(`[${timestamp}] [send-booking-confirmation] Referrer thank-you failed:`, emailResult.error);
+    return { sent: false, skipped: false, reason: emailResult.error || "send_failed" };
+  } catch (err) {
+    console.error(`[${timestamp}] [send-booking-confirmation] Referrer thank-you exception:`, err);
+    return { sent: false, skipped: false, reason: err?.message || "exception" };
+  }
+};
+
+Deno.serve(async (req)=>{
+  const corsHeaders = getCorsHeaders(req);
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      headers: corsHeaders
+    });
+  }
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [send-booking-confirmation] Function entry`);
+  try {
+    const body = await req.json();
+    const bookingId = body.bookingId ?? body.booking_id;
+    const email = body.email;
+    const siteUrl = normalizeSiteUrl(body.site_url);
+    const force = body.force === true || body.force_resend === true;
+    console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}, force: ${force}`);
+    if (!bookingId) {
+      console.error(`[${timestamp}] [send-booking-confirmation] ERROR: Missing bookingId`);
+      return new Response(JSON.stringify({
+        error: "bookingId is required"
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    console.log(`[${timestamp}] [send-booking-confirmation] Fetching booking #${bookingId}`);
+    const { data: booking, error: fetchError } = await supabase.from("bookings").select("*, customers(*)").eq("id", bookingId).single();
+    if (fetchError || !booking) {
+      console.error(`[${timestamp}] [send-booking-confirmation] ERROR: Booking not found:`, fetchError);
+      return new Response(JSON.stringify({
+        error: "Booking not found",
+        details: fetchError?.message
+      }), {
+        status: 404,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+    normalizeBookingJsonFields(booking);
+    await hydrateBookingPlanFromService(supabase, booking);
+    const serviceId = booking.plan?.id ?? booking.plan?.service_id;
+    let serviceDetails = null;
+    if (serviceId) {
+      const { data: service } = await supabase.from("services").select("*").eq("id", serviceId).maybeSingle();
+      serviceDetails = service;
+    }
+    console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully planId=${booking.plan?.id} serviceType=${booking.plan?.service_type}`);
+    const recipientEmail = email || booking.email;
+    if (!recipientEmail) {
+      console.error(`[${timestamp}] [send-booking-confirmation] ERROR: No email address available`);
+      return new Response(JSON.stringify({
+        error: "No email address available"
+      }), {
+        status: 400,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      });
+    }
+
+    // PIN email (issued ~12h before pickup). Delivery bookings never get a padlock code.
+    const emailType = body.email_type || body.emailType || "confirmation";
+    if (emailType === "pin_update" || emailType === "pin_reminder") {
+      if (isDeliveryBooking(booking)) {
+        console.log(`[${timestamp}] [send-booking-confirmation] Skipping ${emailType} for delivery booking #${booking.id}`);
+        return new Response(JSON.stringify({
+          success: true,
+          skipped: true,
+          skippedReason: "delivery",
+          email_type: emailType,
+        }), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          },
+        });
+      }
+    }
+    if (emailType === "pin_update") {
+      const pin = body.pin || body.access_pin;
+      if (!pin) {
+        return new Response(JSON.stringify({ error: "pin is required for pin_update" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const pickupDateLabel = formatDate(booking.drop_off_date);
+      const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
+      const returnDateLabel = formatDate(booking.pickup_date);
+      const returnTimeLabel = formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot || "";
+      const activationLabel = pickupTimeLabel
+        ? `${pickupDateLabel} at ${pickupTimeLabel}`
+        : pickupDateLabel;
+      const pinHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:22px;">Your Access Code — Order #${booking.id}</h1>
+    </div>
+    <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
+      <p>Hi ${booking.name || "there"},</p>
+      <p>Your Dump Trailer access code is ready. Enter it on the padlock at pickup.</p>
+      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>
+      <p><strong>Activates:</strong> ${activationLabel}</p>
+      <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
+      <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+      </p>
+    </div>
+  </div>
+</body></html>`;
+      const pinSubject = `Your Access Code for Order #${booking.id} — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_update to ${recipientEmail}`);
+      const pinResult = await sendEmailWithRetry(recipientEmail, pinSubject, pinHtml);
+      if (!pinResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send PIN email",
+          details: pinResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // SMS companion (respects customers.sms_opt_in). Email success is enough to mark notified.
+      const phone = booking.customers?.phone || booking.phone || "";
+      const smsOptIn = booking.customers?.sms_opt_in !== false;
+      const smsContent =
+        `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. ` +
+        `Activates ${activationLabel}. View: ${siteUrl}/customer-portal?tab=access-codes`;
+      const smsResult = await sendSms(phone, smsContent, { smsOptIn });
+      console.log(`[${timestamp}] [send-booking-confirmation] pin_update SMS:`, smsResult);
+
+      const notifiedAt = new Date().toISOString();
+      await supabase.from("bookings").update({ pin_notification_sent_at: notifiedAt }).eq("id", booking.id);
+      await supabase
+        .from("rental_access_codes")
+        .update({ notified_at: notifiedAt })
+        .eq("order_id", booking.id)
+        .eq("status", "active");
+      return new Response(JSON.stringify({
+        success: true,
+        message: "PIN email sent successfully",
+        provider: pinResult.provider,
+        recipient: recipientEmail,
+        email_type: "pin_update",
+        sms: smsResult,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (emailType === "pin_reminder") {
+      const pin = body.pin || body.access_pin;
+      if (!pin) {
+        return new Response(JSON.stringify({ error: "pin is required for pin_reminder" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const pickupDateLabel = formatDate(booking.drop_off_date);
+      const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
+      const whenLabel = pickupTimeLabel ? `${pickupDateLabel} at ${pickupTimeLabel}` : pickupDateLabel;
+      const reminderHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:22px;">Pickup in about an hour — Order #${booking.id}</h1>
+    </div>
+    <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
+      <p>Hi ${booking.name || "there"},</p>
+      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>. Your padlock code:</p>
+      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+      </p>
+    </div>
+  </div>
+</body></html>`;
+      const reminderSubject = `Pickup soon — Order #${booking.id} access code — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_reminder to ${recipientEmail}`);
+      const reminderResult = await sendEmailWithRetry(recipientEmail, reminderSubject, reminderHtml);
+      if (!reminderResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send PIN reminder email",
+          details: reminderResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const phone = booking.customers?.phone || booking.phone || "";
+      const smsOptIn = booking.customers?.sms_opt_in !== false;
+      const smsContent =
+        `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. ` +
+        `View: ${siteUrl}/customer-portal?tab=access-codes`;
+      const smsResult = await sendSms(phone, smsContent, { smsOptIn });
+      console.log(`[${timestamp}] [send-booking-confirmation] pin_reminder SMS:`, smsResult);
+      const remindedAt = new Date().toISOString();
+      await supabase.from("bookings").update({ pin_reminder_sent_at: remindedAt }).eq("id", booking.id);
+      return new Response(JSON.stringify({
+        success: true,
+        message: "PIN reminder sent successfully",
+        provider: reminderResult.provider,
+        recipient: recipientEmail,
+        email_type: "pin_reminder",
+        sms: smsResult,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (emailType === "cancellation_under_review") {
+      let feeInfo = body.fee_info || body.feeInfo || null;
+      if (!feeInfo || typeof feeInfo !== "object") {
+        const { data: pendingLog } = await supabase
+          .from("reschedule_history_logs")
+          .select(
+            "fee_type, fee_percentage, fee_amount, hours_before_appointment",
+          )
+          .eq("booking_id", bookingId)
+          .eq("request_type", "cancellation")
+          .eq("request_status", "pending")
+          .order("reschedule_request_time", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (pendingLog) {
+          feeInfo = {
+            fee_type: pendingLog.fee_type,
+            fee_percentage: pendingLog.fee_percentage,
+            max_fee_amount: pendingLog.fee_amount,
+            hours_before_appointment: pendingLog.hours_before_appointment,
+          };
+        } else {
+          feeInfo = {};
+        }
+      }
+      const underReviewHtml = generateCancellationUnderReviewEmailHTML(
+        booking,
+        feeInfo,
+      );
+      const underReviewSubject =
+        `Cancellation Request Under Review #${booking.id} — U-Fill Dumpsters`;
+      console.log(
+        `[${timestamp}] [send-booking-confirmation] Sending cancellation_under_review to ${recipientEmail}`,
+      );
+      const underReviewResult = await sendEmailWithRetry(
+        recipientEmail,
+        underReviewSubject,
+        underReviewHtml,
+      );
+      if (!underReviewResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send cancellation under review email",
+          details: underReviewResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Cancellation under review email sent successfully",
+        provider: underReviewResult.provider,
+        recipient: recipientEmail,
+        email_type: "cancellation_under_review",
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log(`[${timestamp}] [send-booking-confirmation] Generating email content`);
+    let insuranceFallbackPrice = DEFAULT_INSURANCE_PRICE;
+    const { data: premiumPlan } = await supabase
+      .from("protection_plans")
+      .select("price")
+      .eq("plan_key", "premium_insurance")
+      .maybeSingle();
+    if (premiumPlan?.price != null) {
+      insuranceFallbackPrice = Number(premiumPlan.price);
+    }
+    const insuranceAmount = resolveInsuranceAmount(booking.addons, insuranceFallbackPrice);
+    const isCancelledRefund =
+      booking.status === "Cancelled" &&
+      (booking.refund_details || booking.cancellation_details);
+    const actionRequiredKind = isCancelledRefund ? null : resolveActionRequiredKind(booking);
+    const deadlineInfo = actionRequiredKind === "pending_verification"
+      ? getVerificationDeadlineInfo(booking)
+      : { hoursRemaining: null as number | null, isPastDeadline: false };
+    const emailKind = isCancelledRefund
+      ? "refund"
+      : actionRequiredKind || "confirmation";
+
+    // Send-once claim for normal confirmation emails (not pin/refund/action-required).
+    // force=true (explicit resend) bypasses the claim.
+    let confirmationClaimAt: string | null = null;
+    if (emailKind === "confirmation" && !force) {
+      confirmationClaimAt = new Date().toISOString();
+      const { data: claimed, error: claimError } = await supabase
+        .from("bookings")
+        .update({ confirmation_email_sent_at: confirmationClaimAt })
+        .eq("id", booking.id)
+        .is("confirmation_email_sent_at", null)
+        .select("id")
+        .maybeSingle();
+
+      if (claimError) {
+        console.error(`[${timestamp}] [send-booking-confirmation] Claim failed:`, claimError);
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to claim confirmation email send",
+          details: claimError.message,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (!claimed) {
+        console.log(`[${timestamp}] [send-booking-confirmation] Already sent for booking #${booking.id}; skipping`);
+        return new Response(JSON.stringify({
+          success: true,
+          already_sent: true,
+          message: "Confirmation email already sent",
+          recipient: recipientEmail,
+          email_type: "confirmation",
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const emailHTML = isCancelledRefund
+      ? generateRefundEmailHTML(booking)
+      : actionRequiredKind
+        ? generateActionRequiredEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl, {
+          kind: actionRequiredKind,
+          hoursRemaining: deadlineInfo.hoursRemaining,
+          isPastDeadline: deadlineInfo.isPastDeadline,
+        })
+        : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
+    const subject = isCancelledRefund
+      ? `Refund Confirmation #${booking.id} — U-Fill Dumpsters`
+      : actionRequiredKind === "pending_verification"
+        ? `Action Required: Finish verification for Booking #${booking.id} — U-Fill Dumpsters`
+        : actionRequiredKind === "pending_review"
+          ? `Action Required: Booking #${booking.id} is on hold — U-Fill Dumpsters`
+          : `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;
+    console.log(`[${timestamp}] [send-booking-confirmation] Sending email to ${recipientEmail} (type=${emailKind})`);
+    const emailResult = await sendEmailWithRetry(recipientEmail, subject, emailHTML);
+    if (emailResult.success) {
+      console.log(`[${timestamp}] [send-booking-confirmation] SUCCESS: Email sent via ${emailResult.provider}`);
+      if (emailKind === "confirmation" && force) {
+        await supabase
+          .from("bookings")
+          .update({ confirmation_email_sent_at: new Date().toISOString() })
+          .eq("id", booking.id);
+      }
+      const referrerEmailResult = isCancelledRefund || actionRequiredKind
+        ? { skipped: true, reason: isCancelledRefund ? "cancelled_refu

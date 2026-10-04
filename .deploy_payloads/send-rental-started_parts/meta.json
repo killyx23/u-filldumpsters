@@ -1,0 +1,26 @@
+{
+  "project_id": "essesdjgtmralbkglpzw",
+  "name": "send-rental-started",
+  "entrypoint_path": "functions/send-rental-started/index.ts",
+  "verify_jwt": true,
+  "file_names": [
+    "functions/_shared/cors.ts",
+    "functions/_shared/formatBookingTime.ts",
+    "functions/_shared/normalizeSiteUrl.ts",
+    "functions/_shared/notify.ts",
+    "functions/_shared/parseBookingTimeSlot.ts",
+    "functions/_shared/pinTiming.ts",
+    "functions/send-rental-started/cors.ts",
+    "functions/send-rental-started/index.ts"
+  ],
+  "file_lens": [
+    1059,
+    3940,
+    4360,
+    7044,
+    5568,
+    11453,
+    53,
+    6583
+  ]
+}

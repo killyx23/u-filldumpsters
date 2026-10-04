@@ -51,6 +51,11 @@ import {
   clearCheckoutTeardownDone,
 } from '@/utils/checkoutIdleGuard';
 import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
+import {
+  EQUIPMENT_FRIENDLY_LABELS,
+  isPurchaseEquipmentId,
+  resolveEquipmentId,
+} from '@/utils/equipmentReturnDisplay';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -99,6 +104,37 @@ const CategoryHeader = ({ icon, title }) => (
     <span>{title}</span>
   </div>
 );
+
+const equipmentChargeLines = (addonsData, lineItems, purchase) => {
+  const byKey = Object.fromEntries((lineItems || []).map((line) => [line.key, line]));
+  const rows = [];
+
+  for (const item of addonsData?.equipment || []) {
+    const equipmentId = resolveEquipmentId(item);
+    if (!equipmentId) continue;
+    if (isPurchaseEquipmentId(equipmentId) !== purchase) continue;
+
+    const rawId = item.equipment_id || item.dbId || item.id;
+    const line = byKey[`equipment_${equipmentId}`] || byKey[`equipment_${rawId}`];
+    const amount = Number(line?.amount ?? 0);
+    if (amount <= 0) continue;
+
+    const quantity = Number(item.quantity || 1);
+    const name =
+      EQUIPMENT_FRIENDLY_LABELS[equipmentId] ||
+      EQUIPMENT_FRIENDLY_LABELS[item.id] ||
+      line?.label ||
+      `Equipment #${equipmentId}`;
+
+    rows.push({
+      key: equipmentId,
+      label: `${name} (x${quantity})`,
+      amount,
+    });
+  }
+
+  return rows;
+};
 
 const CheckoutForm = ({ 
   onBack,
@@ -350,6 +386,9 @@ const CheckoutForm = ({
     }
   };
 
+  const rentalChargeLines = equipmentChargeLines(addonsData, pricingBreakdown.lineItems, false);
+  const purchaseChargeLines = equipmentChargeLines(addonsData, pricingBreakdown.lineItems, true);
+
   return (
     <div className="max-w-2xl mx-auto bg-slate-900/60 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
       <div className="flex items-center mb-8">
@@ -422,17 +461,21 @@ const CheckoutForm = ({
             </>
           )}
           
-          {pricingBreakdown.rentEquipmentCost > 0 && (
+          {rentalChargeLines.length > 0 && (
             <>
               <CategoryHeader icon="🚚" title="Rent Equipment" />
-              <BreakdownLine label="Equipment Rentals" value={pricingBreakdown.rentEquipmentCost} />
+              {rentalChargeLines.map((line) => (
+                <BreakdownLine key={line.key} label={line.label} value={line.amount} />
+              ))}
             </>
           )}
           
-          {pricingBreakdown.purchaseItemsCost > 0 && (
+          {purchaseChargeLines.length > 0 && (
             <>
               <CategoryHeader icon="🛒" title="Items for Purchase" />
-              <BreakdownLine label="Purchase Items" value={pricingBreakdown.purchaseItemsCost} />
+              {purchaseChargeLines.map((line) => (
+                <BreakdownLine key={line.key} label={line.label} value={line.amount} />
+              ))}
             </>
           )}
           

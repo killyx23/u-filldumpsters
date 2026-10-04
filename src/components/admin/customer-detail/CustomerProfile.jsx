@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote, Key, Edit, X, History, AlertTriangle, CheckCircle, ArrowRight, Car, Route, Pencil } from 'lucide-react';
+import { Loader2, User, Mail, Phone, Home, MapPin, Hash, Save, StickyNote, Key, Edit, X, History, AlertTriangle, CheckCircle, ArrowRight, Car, Route, Pencil, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EditInput } from '@/components/admin/EditInput';
 import { Textarea } from '@/components/ui/textarea';
@@ -168,7 +168,9 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
             const customerUpdateData = { 
                 ...editedCustomer, 
                 name: computedFullName,
-                unverified_address: !isValidAddress || forceSave 
+                unverified_address: !isValidAddress || forceSave,
+                sms_opt_in: editedCustomer.sms_opt_in === true,
+                sms_marketing_opt_in: editedCustomer.sms_marketing_opt_in === true,
             };
             
             // Clear existing distance data if address changed
@@ -323,6 +325,29 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                             </div>
                             <EditInput label="Email" icon={<Mail />} value={editedCustomer.email} onChange={(e) => handleInputChange('email', e.target.value)} isEditing={isEditing} type="email" />
                             <EditInput label="Phone" icon={<Phone />} value={editedCustomer.phone} onChange={(e) => handleInputChange('phone', e.target.value)} isEditing={isEditing} type="tel" />
+                            <div className="space-y-2 pl-1">
+                                <Label className="text-blue-200 flex items-center">
+                                    <MessageSquare className="w-4 h-4 mr-2" /> Text messages
+                                </Label>
+                                <label className="flex items-start gap-3 text-sm text-white cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={editedCustomer.sms_opt_in === true}
+                                        onChange={(e) => handleInputChange('sms_opt_in', e.target.checked)}
+                                        className="mt-1 h-4 w-4 shrink-0 accent-yellow-400"
+                                    />
+                                    <span>Order texts</span>
+                                </label>
+                                <label className="flex items-start gap-3 text-sm text-white cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={editedCustomer.sms_marketing_opt_in === true}
+                                        onChange={(e) => handleInputChange('sms_marketing_opt_in', e.target.checked)}
+                                        className="mt-1 h-4 w-4 shrink-0 accent-yellow-400"
+                                    />
+                                    <span>Promotions</span>
+                                </label>
+                            </div>
                             
                             <div className="bg-black/20 p-4 rounded-lg border border-white/10 space-y-3 mt-4">
                                 <Label className="text-yellow-400 font-semibold flex items-center">
@@ -349,6 +374,16 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                             <InfoRow icon={<User />} label="Last Name" value={displayLastName} />
                             <InfoRow icon={<Mail />} label="Email" value={editedCustomer.email} href={`mailto:${editedCustomer.email}`} />
                             <InfoRow icon={<Phone />} label="Phone" value={editedCustomer.phone} href={`tel:${editedCustomer.phone}`} />
+                            <div className="flex items-start py-2 border-b border-white/10">
+                                <div className="flex items-center w-1/3 text-blue-200">
+                                    <MessageSquare className="mr-3 h-5 w-5" />
+                                    <span>Text messages</span>
+                                </div>
+                                <div className="w-2/3 flex flex-col text-white">
+                                    <span>Order texts: {editedCustomer.sms_opt_in === true ? 'Allowed' : 'Not allowed'}</span>
+                                    <span>Promotions: {editedCustomer.sms_marketing_opt_in === true ? 'Allowed' : 'Not allowed'}</span>
+                                </div>
+                            </div>
                             <div className="flex items-start py-2 border-b border-white/10">
                                 <div className="flex items-center w-1/3 text-blue-200">
                                     <Home className="mr-3 h-5 w-5" />
