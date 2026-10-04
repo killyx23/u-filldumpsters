@@ -23,6 +23,7 @@ import { CommunicationHub } from '@/components/customer-portal/CommunicationHub'
 import { VerificationManager } from '@/components/customer-portal/VerificationManager';
 import { CustomerPortalResourcesPage } from '@/components/customer-portal/CustomerPortalResourcesPage';
 import { CancelDialog, RescheduleDialog } from '@/components/customer-portal/BookingActionsDialogs';
+import { ExtendServiceDialog } from '@/components/customer-portal/ExtendServiceDialog';
 import AccessCodesPage from '@/pages/AccessCodesPage';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getPortalGuideEntries } from '@/config/uiControlGuideEntries';
@@ -78,6 +79,7 @@ export const CustomerPortal = () => {
     const [selectedBookingForReceipt, setSelectedBookingForReceipt] = useState(null);
     const [selectedBookingForCancel, setSelectedBookingForCancel] = useState(null);
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
+    const [selectedBookingForExtend, setSelectedBookingForExtend] = useState(null);
     const autoLoginAttemptedRef = useRef(false);
 
     const mergeSearchParams = useCallback((updates = {}, options = {}) => {
@@ -730,6 +732,7 @@ export const CustomerPortal = () => {
                         onReceiptClick={(b) => handleTabChange('documents')} 
                         onCancelClick={setSelectedBookingForCancel} 
                         onRescheduleClick={handleRescheduleClick}
+                        onExtendClick={setSelectedBookingForExtend}
                     />
                 )}
 
@@ -805,6 +808,15 @@ export const CustomerPortal = () => {
                     onSuccess={() => fetchData(false)}
                 />
             )}
+
+            <ExtendServiceDialog
+                booking={selectedBookingForExtend}
+                open={!!selectedBookingForExtend}
+                onClose={() => setSelectedBookingForExtend(null)}
+                customer={customerData}
+                onReorder={handleQuickReorder}
+                onExtended={() => fetchData(false)}
+            />
 
         </div>
     );

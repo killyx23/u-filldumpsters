@@ -12,6 +12,7 @@ import QRCodeComponent from 'qrcode.react';
 import { formatBookingDateOnly } from '@/utils/bookingDateFormatter';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { listRentalExtensions } from '@/utils/rentalExtension';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
@@ -369,6 +370,14 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 {receipt_original_snapshot.status ? ` (status: ${receipt_original_snapshot.status})` : ''}.
                             </p>
                         )}
+                        {listRentalExtensions(booking).map((entry, index) => (
+                            <div key={`${entry.at || index}`} className="mt-3 p-3 bg-white border border-blue-200 rounded-md text-sm text-blue-950 space-y-1">
+                                <p className="font-bold text-blue-800">Rental extended</p>
+                                <p>Return was {entry.original_pickup_date}. It is now {entry.new_pickup_date} by {formatReceiptTime(entry.new_pickup_time || pickup_time_slot, { isReturnBy: isSelfService })}.</p>
+                                <p>Have it back, locked, and secured by that time.</p>
+                                <p>{entry.days} extra day{Number(entry.days) === 1 ? '' : 's'} · Charged ${Number(entry.amount || 0).toFixed(2)}</p>
+                            </div>
+                        ))}
                         {(() => {
                             const approval = resolveRescheduleApprovalDisplay(booking);
                             if (!approval) return null;

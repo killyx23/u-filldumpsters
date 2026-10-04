@@ -10,6 +10,7 @@ import { Eye, Printer, Send, DollarSign, Loader2, Calendar, AlertTriangle, MapPi
 import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
+import { listRentalExtensions } from '@/utils/rentalExtension';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
@@ -102,6 +103,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
     };
     const pendingReason = getPendingReason();
     const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
+    const rentalExtensions = listRentalExtensions(booking);
     const oneWayMiles = resolveOneWayMiles(booking, customer);
 
     return (
@@ -131,6 +133,17 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                 <div className="mt-2 p-2 bg-orange-900/50 border border-orange-500/50 rounded-md text-sm text-orange-300 flex items-center">
                     <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
                     Pending Reason: <span className="font-semibold ml-1">{pendingReason}</span>
+                </div>
+            )}
+            {rentalExtensions.length > 0 && (
+                <div className="mt-2 p-2 bg-orange-900/40 border border-orange-500/40 rounded-md text-sm text-orange-100 space-y-1">
+                    <p className="font-semibold">Extended</p>
+                    {rentalExtensions.map((entry, index) => (
+                        <p key={`${entry.at || index}`}>
+                            Return {entry.original_pickup_date} → {entry.new_pickup_date}
+                            {entry.amount != null ? ` · charged $${Number(entry.amount).toFixed(2)}` : ''}
+                        </p>
+                    ))}
                 </div>
             )}
             {rescheduleApproval && (
