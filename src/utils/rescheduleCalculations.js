@@ -65,13 +65,19 @@ export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment
         if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
         seenIds.add(equipId);
         const snap = snapshotById.get(Number(equipId));
+        const basePrice = Number(snap?.basePrice ?? snap?.price ?? be.equipment?.price ?? 0);
         list.push({
             id: equipId,
             equipment_id: equipId,
             name: be.equipment?.name || snap?.name || 'Unknown Equipment',
             quantity: be.quantity || snap?.quantity || 1,
-            price: Number(snap?.basePrice ?? snap?.price ?? be.equipment?.price ?? 0),
+            price: basePrice,
+            basePrice,
             additionalDayPrice: Number(snap?.additionalDayPrice ?? be.equipment?.additional_day_price ?? 0),
+            extraDays: snap?.extraDays,
+            extraDayCharge: snap?.extraDayCharge,
+            rentalDays: snap?.rentalDays,
+            lineTotal: snap?.lineTotal,
             description: be.equipment?.description || be.equipment?.type || 'Equipment',
             type: snap?.type || be.equipment?.type || 'equipment',
         });
@@ -87,13 +93,19 @@ export function buildOriginalAddonsList(booking, bookingEquip = [], allEquipment
             const equipId = item.dbId || matched?.id;
             if (!equipId || equipId === INSURANCE_SERVICE_EQUIPMENT_ID || seenIds.has(equipId)) continue;
             seenIds.add(equipId);
+            const basePrice = Number(item.basePrice ?? item.price ?? matched?.price ?? 0);
             list.push({
                 id: equipId,
                 equipment_id: equipId,
                 name: matched?.name || item.name || 'Equipment',
                 quantity: item.quantity || 1,
-                price: Number(item.basePrice ?? item.price ?? matched?.price ?? 0),
+                price: basePrice,
+                basePrice,
                 additionalDayPrice: Number(item.additionalDayPrice ?? matched?.additional_day_price ?? 0),
+                extraDays: item.extraDays,
+                extraDayCharge: item.extraDayCharge,
+                rentalDays: item.rentalDays,
+                lineTotal: item.lineTotal,
                 type: item.type || matched?.type || 'equipment',
             });
         }
@@ -198,8 +210,12 @@ export const calculateBookingCosts = async (
 
     return {
         serviceCost: round2(serviceCost),
+        baseRentalCost: costs.baseRentalCost,
+        deliveryFee: costs.deliveryFee,
         addonsCost: costs.addonsCost,
         mileageCharge: costs.mileageCharge,
+        discount: costs.discount,
+        discounts: costs.discounts,
         subtotal: costs.subtotal,
         tax: costs.tax,
         total: costs.total,

@@ -7,6 +7,7 @@ import { supabase } from '@/lib/customSupabaseClient';
  */
 export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
   const [pointsBalance, setPointsBalance] = useState(0);
+  const [pendingPoints, setPendingPoints] = useState(0);
   const [referralWallet, setReferralWallet] = useState({ pendingBalance: 0, availableBalance: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -73,7 +74,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
 
       const { data, error } = await supabase
         .from('loyalty_points')
-        .select('points_balance')
+        .select('points_balance, pending_balance')
         .eq('customer_id', customerId)
         .maybeSingle();
 
@@ -88,6 +89,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
 
       const balance = data?.points_balance ?? (await loadVerifiedRewards()) ?? 0;
       setPointsBalance(balance);
+      setPendingPoints(Number(data?.pending_balance || 0));
       if (customerId) {
         const { data: walletData } = await supabase
           .from('customer_referral_wallets')
@@ -201,6 +203,7 @@ export const useCustomerLoyaltyPoints = (customerId, verifiedEmail = null) => {
 
   return {
     pointsBalance,
+    pendingPoints,
     referralWallet,
     loading,
     error,

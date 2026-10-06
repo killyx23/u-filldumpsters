@@ -17,6 +17,7 @@ import {
     formatReturnIssueStatus,
     isRentalEquipmentId,
 } from '@/utils/equipmentReturnDisplay';
+import { feeChargeEntries } from '@/utils/feeCharges';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -51,6 +52,8 @@ const NoteCard = ({ note }) => (
 const fmtMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
 const fmtType = (value) => String(value || '').replace(/_/g, ' ');
 
+const feeChargeLines = (fees) => feeChargeEntries(fees).map(([, fee]) => fee);
+
 const LedgerList = ({ emptyLabel, children }) => (
     <div className="md:col-span-2 bg-black/20 rounded-lg p-3 max-h-72 overflow-y-auto space-y-2">
         {children || <p className="text-center text-blue-200 py-4">{emptyLabel}</p>}
@@ -75,7 +78,7 @@ export const ComprehensiveHistoryDialog = ({
     const totalSpent = bookings.reduce((acc, b) => {
         if (b.status === 'Cancelled') return acc;
         const bookingTotal = b.total_price || 0;
-        const feesTotal = b.fees ? Object.values(b.fees).reduce((feeAcc, fee) => feeAcc + (fee.amount || 0), 0) : 0;
+        const feesTotal = feeChargeLines(b.fees).reduce((feeAcc, fee) => feeAcc + Number(fee.amount || 0), 0);
         return acc + bookingTotal + feesTotal;
     }, 0);
 
@@ -340,8 +343,8 @@ export const ComprehensiveHistoryDialog = ({
 
                                     {(booking.fees && Object.keys(booking.fees).length > 0) || (booking.return_issues && Object.keys(booking.return_issues).length > 0) ? (
                                         <Section title="Fees & Return Issues" icon={<AlertTriangle className="mr-2 h-5 w-5"/>}>
-                                            {booking.fees && Object.values(booking.fees).map((fee, i) => (
-                                                <DetailItem key={`fee-${i}`} icon={<DollarSign className="text-orange-400"/>} label={`Fee: ${fee.description}`} value={`$${fee.amount.toFixed(2)}`} />
+                                            {feeChargeLines(booking.fees).map((fee, i) => (
+                                                <DetailItem key={`fee-${i}`} icon={<DollarSign className="text-orange-400"/>} label={`Fee: ${fee.description}`} value={`$${Number(fee.amount).toFixed(2)}`} />
                                             ))}
                                             {booking.return_issues && Object.keys(booking.return_issues).map((issue, i) => (
                                                 <DetailItem key={`issue-${i}`} icon={<AlertTriangle className="text-red-400"/>} label={`Issue: ${issue.replace(/_/g, ' ')}`} value={formatReturnIssueStatus(booking.return_issues[issue].status)} className="capitalize" />

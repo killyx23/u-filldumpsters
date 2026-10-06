@@ -67,7 +67,7 @@ export const CustomerDetailView = () => {
             const customerPromise = supabase.from('customers').select('*').eq('id', numericId).single();
             const bookingsPromise = supabase.from('bookings').select('*, stripe_payment_info(*)').eq('customer_id', numericId).order('created_at', { ascending: false });
             const notesPromise = supabase.from('customer_notes').select('*').eq('customer_id', numericId).order('created_at', { ascending: true });
-            const loyaltySummaryPromise = supabase.from('loyalty_points').select('points_balance, total_points_earned, total_points_redeemed').eq('customer_id', numericId).maybeSingle();
+            const loyaltySummaryPromise = supabase.from('loyalty_points').select('points_balance, pending_balance, total_points_earned, total_points_redeemed').eq('customer_id', numericId).maybeSingle();
             const referralWalletPromise = supabase.from('customer_referral_wallets').select('pending_balance, available_balance, total_earned, total_redeemed').eq('customer_id', numericId).maybeSingle();
             const loyaltyTransactionsPromise = supabase.from('loyalty_transactions').select('id, transaction_type, points_amount, booking_id, notes, created_at').eq('customer_id', numericId).order('created_at', { ascending: false }).limit(500);
             const referralWalletTransactionsPromise = supabase.from('referral_wallet_transactions').select('id, transaction_type, amount, booking_id, referral_id, notes, created_at, pending_balance_after, available_balance_after').eq('customer_id', numericId).order('created_at', { ascending: false }).limit(500);

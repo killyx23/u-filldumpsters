@@ -44,6 +44,7 @@ import {
   getActivitySyncToken,
   getDeviceActivityToken,
   getRemoteLockJobToken,
+  requestOAuthToken,
   tokenScopes,
   ACTIVITY_SYNC_SCOPE_HINT,
   DEVICE_ACTIVITY_SCOPE_HINT,
@@ -159,9 +160,108 @@ async function logRemoteLockOverride(
   }
 }
 
+type LogUploadResult = { jobId: string | null; jobStatus: number | null; completed: boolean };
+
+/** One log-upload job at a time. Status 1 means the bridge is still working. */
+let inflightLogUpload: { jobId: string; token: string; startedAt: number } | null = null;
+/** Unlock timestamp for which GET /devices has already reported UNLOCKED. */
+let sawUnlockedFor: string | null = null;
+
+async function pollLogUpload(token: string, jobId: string): Promise<LogUploadResult> {
+  let jobStatus: number | null = null;
+  for (let i = 0; i < 10; i++) {
+    await sleep(2500);
+    const poll = await fetch(`${IGLOOHOME_API_BASE_URL}/jobs/${jobId}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    const pollBody = await readResponse(poll);
+    const status = pollBody.json?.jobResponse?.jobStatus;
+    jobStatus = typeof status === "number" ? status : null;
+    const completed = pollBody.json?.completed === true || jobStatus === 0;
+    if (completed || jobStatus === 2) {
+      console.log(`[test-lock-lifecycle] log upload ${jobId} jobStatus=${jobStatus}`);
+      if (inflightLogUpload?.jobId === jobId) inflightLogUpload = null;
+      return { jobId, jobStatus, completed: completed && jobStatus !== 2 };
+    }
+  }
+  console.log(`[test-lock-lifecycle] log upload ${jobId} still running jobStatus=${jobStatus}`);
+  return { jobId, jobStatus, completed: false };
+}
+
+/**
+ * Ask the bridge to upload on-device logs (job type 15). Cloud activity does
+ * not include a new auto-lock until this upload finishes. A job still at
+ * status 1 is polled instead of starting another one.
+ */
+async function requestLogUpload(
+  clientId: string,
+  clientSecret: string,
+  lockId: string,
+  bridgeId: string,
+): Promise<LogUploadResult> {
+  const now = Date.now();
+  if (inflightLogUpload && now - inflightLogUpload.startedAt < 2 * 60 * 1000) {
+    console.log(`[test-lock-lifecycle] log upload already running ${inflightLogUpload.jobId}`);
+    return pollLogUpload(inflightLogUpload.token, inflightLogUpload.jobId);
+  }
+  const oauth = await getActivitySyncToken(clientId, clientSecret);
+  if (!oauth.token) {
+    console.warn("[test-lock-lifecycle] No activity-sync token for log upload:", oauth.reason);
+    return { jobId: null, jobStatus: null, completed: false };
+  }
+  const createRes = await fetch(
+    `${IGLOOHOME_API_BASE_URL}/devices/${lockId}/jobs/bridges/${bridgeId}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${oauth.token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        jobType: 15,
+        jobData: {
+          lockTime: new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+        },
+      }),
+    },
+  );
+  const createBody = await readResponse(createRes);
+  const jobId = createBody.json?.jobId || createBody.json?.id;
+  if ((!createRes.ok && createRes.status !== 201) || !jobId) {
+    console.warn(
+      "[test-lock-lifecycle] log upload job failed:",
+      createRes.status,
+      createBody.json?.message || createBody.json?.error || createBody.text,
+    );
+    return { jobId: null, jobStatus: null, completed: false };
+  }
+  inflightLogUpload = { jobId: String(jobId), token: oauth.token, startedAt: now };
+  return pollLogUpload(oauth.token, String(jobId));
+}
+
+function isHardwareLock(event: LockActivityEvent): boolean {
+  if (event.eventType !== "lock") return false;
+  const activityType = String(
+    (event.raw as { activityType?: unknown })?.activityType || "",
+  ).toUpperCase();
+  if (
+    activityType.includes("SET_TIME") ||
+    activityType.includes("BATTERY") ||
+    activityType.includes("FIRMWARE")
+  ) return false;
+  if (!activityType) return event.logType === PADLOCK_AUTOLOCK_LOG_TYPE;
+  return activityType.includes("RELOCK") ||
+    activityType.includes("AUTOLOCK") ||
+    activityType.includes("SHACKLE") ||
+    (activityType.includes("LOCK") && !activityType.includes("UNLOCK"));
+}
+
 /**
  * After a manual unlock, read recent cloud activity for the padlock auto-lock
  * (log type 13) and store it on the device. Does not call applyLockEvent.
+ * uploadLogs asks the bridge to upload first; the unlock request itself only
+ * reads activity so the open stays responsive.
  */
 async function pullManualAutolock(
   clientId: string,
@@ -170,32 +270,99 @@ async function pullManualAutolock(
   bridgeId: string,
   supabase: ReturnType<typeof createClient>,
   unlockAt: string | null,
-) {
+  uploadLogs = false,
+): Promise<LogUploadResult> {
+  const upload = uploadLogs
+    ? await requestLogUpload(clientId, clientSecret, lockId, bridgeId)
+    : { jobId: null, jobStatus: null, completed: true };
+  if (uploadLogs && !upload.completed) {
+    await recordCloseFromDeviceStatus(clientId, clientSecret, lockId, bridgeId, supabase, unlockAt);
+    return upload;
+  }
+
   const oauth = await getDeviceActivityToken(clientId, clientSecret);
   if (!oauth.token) {
     console.warn("[test-lock-lifecycle] No device-activity token for manual autolock:", oauth.reason);
-    return;
+    await recordCloseFromDeviceStatus(clientId, clientSecret, lockId, bridgeId, supabase, unlockAt);
+    return upload;
   }
   const unlockMs = unlockAt ? new Date(unlockAt).getTime() : Date.now();
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) await sleep(2500);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleep(2000);
     const fetched = await fetchDeviceActivityRows(oauth.token, lockId, {
-      maxPages: 1,
-      pageSize: 30,
+      maxPages: 4,
+      pageSize: 20,
     });
     if (fetched.error) {
       console.warn("[test-lock-lifecycle] manual autolock activity read:", fetched.error);
       continue;
     }
     const closes = mergeActivityEvents(fetched.rows).filter((event) => {
-      if (event.eventType !== "lock" || event.logType !== PADLOCK_AUTOLOCK_LOG_TYPE) return false;
+      if (!isHardwareLock(event)) return false;
       const lockMs = new Date(event.eventTimestamp).getTime();
       return lockMs >= unlockMs - 30_000 && lockMs - unlockMs <= 2 * 60 * 1000;
     });
     if (!closes.length) continue;
     await recordDeviceEvents(supabase, closes, { deviceId: lockId, bridgeId });
+    return upload;
+  }
+  await recordCloseFromDeviceStatus(clientId, clientSecret, lockId, bridgeId, supabase, unlockAt);
+  return upload;
+}
+
+/**
+ * The padlock's auto-lock does not show up as a lock activity row. GET /devices
+ * reports lockStatus LOCKED after the bridge syncs. That is the close signal.
+ * A sync that is still within a few seconds of the unlock is ignored so a stale
+ * LOCKED value from before the open does not flip the bar.
+ */
+async function recordCloseFromDeviceStatus(
+  clientId: string,
+  clientSecret: string,
+  lockId: string,
+  bridgeId: string,
+  supabase: ReturnType<typeof createClient>,
+  unlockAt: string | null,
+) {
+  const oauth = await requestOAuthToken(clientId, clientSecret, ["igloohomeapi/get-devices"]);
+  if (!oauth.token) {
+    console.warn("[test-lock-lifecycle] No get-devices token:", oauth.reason);
     return;
   }
+  const res = await fetch(`${IGLOOHOME_API_BASE_URL}/devices/${lockId}`, {
+    headers: { Authorization: `Bearer ${oauth.token}`, Accept: "application/json" },
+  });
+  const body = await readResponse(res);
+  if (!res.ok) {
+    console.warn("[test-lock-lifecycle] device status HTTP", res.status);
+    return;
+  }
+  const lockStatus = String(body.json?.lockStatus || "");
+  const lastSync = typeof body.json?.lastSync === "string" ? body.json.lastSync : null;
+  const normalized = lockStatus.toUpperCase();
+  console.log(`[test-lock-lifecycle] device lockStatus=${lockStatus} lastSync=${lastSync}`);
+  const unlockMs = unlockAt ? new Date(unlockAt).getTime() : 0;
+  const syncMs = lastSync ? new Date(lastSync).getTime() : 0;
+  if (normalized.includes("UNLOCK")) {
+    if (unlockAt) sawUnlockedFor = unlockAt;
+    return;
+  }
+  if (!normalized.includes("LOCK")) return;
+  const syncedAfterOpen = Boolean(unlockMs) && Number.isFinite(syncMs) && syncMs >= unlockMs + 5_000;
+  const sawThisOpen = unlockAt != null && sawUnlockedFor === unlockAt;
+  const dwellPassed = Number.isFinite(syncMs) && syncMs >= unlockMs + 45_000;
+  if (!syncedAfterOpen || (!sawThisOpen && !dwellPassed)) return;
+  const event: LockActivityEvent = {
+    eventType: "lock",
+    eventTimestamp: new Date(syncMs).toISOString(),
+    pinCode: null,
+    logType: null,
+    keyId: "device-lock-status",
+    operationId: lastSync,
+    deviceId: lockId,
+    raw: { activityType: "DEVICE_LOCK_STATUS", lockStatus, lastSync },
+  };
+  await recordDeviceEvents(supabase, [event], { deviceId: lockId, bridgeId });
 }
 
 async function requireAdmin(req: Request) {
@@ -699,6 +866,44 @@ Deno.serve(async (req) => {
         currentState,
         webhookExpected: "Signed event.type 3 (Job Complete)",
       }, outcome.state === "failed" ? 502 : 200);
+    }
+
+    // Read the padlock's auto-lock after a manual unlock. Device presence only.
+    if (action === "pull_manual_autolock") {
+      if (!clientId || !clientSecret || !lockId || !bridgeId) {
+        return jsonResponse({ success: false, error: "Missing Igloohome env" }, 500);
+      }
+      const { data: latestUnlock } = await supabase
+        .from("lock_device_events")
+        .select("occurred_at")
+        .eq("device_id", lockId)
+        .eq("event_kind", "unlock")
+        .eq("key_id", "remote-unlock")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const upload = await pullManualAutolock(
+        clientId,
+        clientSecret,
+        lockId,
+        bridgeId,
+        supabase,
+        latestUnlock?.occurred_at ?? null,
+        true,
+      );
+      const { data: deviceState } = await supabase
+        .from("lock_device_presence")
+        .select("device_id, current_state, last_opened_at, last_closed_at")
+        .eq("device_id", lockId)
+        .maybeSingle();
+      return jsonResponse({
+        success: true,
+        action: "pull_manual_autolock",
+        jobId: upload.jobId,
+        jobStatus: upload.jobStatus,
+        uploadCompleted: upload.completed,
+        deviceState,
+      });
     }
 
     const bookingId = Number(body.bookingId ?? body.booking_id ?? body.order_id);
@@ -1648,7 +1853,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       success: false,
-      error: `Unknown action: ${action}. Use status|setup|restore|simulate_unlock|simulate_lock|sync|probe|remote_lock|remote_unlock`,
+      error: `Unknown action: ${action}. Use status|setup|restore|simulate_unlock|simulate_lock|sync|probe|remote_lock|remote_unlock|pull_manual_autolock`,
     }, 400);
   } catch (error) {
     console.error("[test-lock-lifecycle] Unhandled:", error);

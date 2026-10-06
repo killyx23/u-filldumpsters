@@ -169,6 +169,60 @@ const resolveInsuranceAmount = (addons, fallbackPrice = DEFAULT_INSURANCE_PRICE)
   return Number(fallbackPrice) || DEFAULT_INSURANCE_PRICE;
 };
 const roundMoney = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
+
+/** Inclusive rental days. Extra days are every day after the first. */
+const rentalDayCount = (dropOff: unknown, pickup: unknown) => {
+  const start = String(dropOff || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const end = String(pickup || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!start || !end) return 1;
+  const startUtc = Date.UTC(Number(start[1]), Number(start[2]) - 1, Number(start[3]));
+  const endUtc = Date.UTC(Number(end[1]), Number(end[2]) - 1, Number(end[3]));
+  return Math.max(1, Math.round((endUtc - startUtc) / 86400000) + 1);
+};
+
+const additionalDayNote = (rate: number, extraDays: number, extraDayCharge: number, qty: number) => {
+  if (!(extraDays > 0) || !(rate > 0)) return "";
+  const qtySuffix = qty > 1 ? ` × ${qty}` : "";
+  return `Additional days: $${rate.toFixed(2)} × ${extraDays}${qtySuffix} = $${extraDayCharge.toFixed(2)}`;
+};
+
+/**
+ * Rental equipment is the first day plus each later day.
+ * Checkout stores that full amount on lineTotal; older rows only have the day-one price.
+ */
+const quoteEmailEquipment = (item, booking) => {
+  const qty = Math.max(0, Number(item?.quantity || 1));
+  if (isPurchaseEquipmentItem(item)) {
+    const unitPrice = Number(item?.price ?? item?.unitPrice ?? 0);
+    return { amount: roundMoney(unitPrice * qty), note: "" };
+  }
+
+  const hasSnapshot = item?.lineTotal != null && item.lineTotal !== "" &&
+    (item.basePrice != null || item.additionalDayPrice != null || item.additional_day_price != null);
+  if (hasSnapshot) {
+    const rate = roundMoney(item.additionalDayPrice ?? item.additional_day_price ?? 0);
+    const extraDays = item.extraDays != null
+      ? Math.max(0, Number(item.extraDays) || 0)
+      : Math.max(0, (Number(item.rentalDays) || 1) - 1);
+    const extraDayCharge = item.extraDayCharge != null
+      ? roundMoney(item.extraDayCharge)
+      : roundMoney(rate * extraDays * qty);
+    return {
+      amount: roundMoney(item.lineTotal),
+      note: additionalDayNote(rate, extraDays, extraDayCharge, qty),
+    };
+  }
+
+  const base = roundMoney(Number(item?.price ?? item?.unitPrice ?? item?.basePrice ?? 0));
+  const rate = roundMoney(Number(item?.additionalDayPrice ?? item?.additional_day_price ?? 0));
+  const extraDays = Math.max(0, rentalDayCount(booking?.drop_off_date, booking?.pickup_date) - 1);
+  const perUnitExtra = roundMoney(rate * extraDays);
+  const extraDayCharge = roundMoney(perUnitExtra * qty);
+  return {
+    amount: roundMoney((base + perUnitExtra) * qty),
+    note: additionalDayNote(rate, extraDays, extraDayCharge, qty),
+  };
+};
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
   .replace(/</g, "&lt;")
@@ -201,7 +255,7 @@ const resolveReceiptPricing = (booking, insuranceAmount) => {
   const addons = booking.addons || {};
   const offersDrivewayProtection = Number(plan?.id) === 1;
   const snapshot = Array.isArray(addons.taxLineItemsSnapshot) ? addons.taxLineItemsSnapshot : [];
-  const charges: { label: string; amount: number }[] = [];
+  const charges: { label: string; amount: number; note?: string }[] = [];
 
   const basePrice = Number(plan.price ?? plan.base_price ?? 0);
   if (basePrice > 0) charges.push({ label: "Base Rental", amount: basePrice });
@@ -218,11 +272,14 @@ const resolveReceiptPricing = (booking, insuranceAmount) => {
 
   if (Array.isArray(addons.equipment)) {
     for (const item of addons.equipment) {
-      const qty = Number(item.quantity || 1);
-      const unitPrice = Number(item.price ?? item.unitPrice ?? 0);
-      const amount = unitPrice > 0 ? unitPrice * qty : snapshotEquipmentAmount(snapshot, item);
+      const quoted = quoteEmailEquipment(item, booking);
+      const amount = quoted.amount > 0 ? quoted.amount : snapshotEquipmentAmount(snapshot, item);
       if (!(amount > 0)) continue;
-      charges.push({ label: resolveEquipmentLabel(item), amount });
+      charges.push({
+        label: resolveEquipmentLabel(item),
+        amount,
+        note: quoted.amount > 0 ? quoted.note : "",
+      });
     }
   }
 
@@ -268,11 +325,16 @@ const resolveReceiptPricing = (booking, insuranceAmount) => {
 
 const buildPriceSummaryHTML = (booking, insuranceAmount) => {
   const pricing = resolveReceiptPricing(booking, insuranceAmount);
-  const priceRow = (label, amount, color = "#4b5563") => `<tr>
-      <td style="padding: 6px 0; color: ${color};">${escapeHtml(label)}</td>
-      <td style="padding: 6px 0; color: ${color === "#4b5563" ? "#1f2937" : color}; text-align: right;">${amount < 0 ? "-" : ""}${formatCurrency(Math.abs(amount))}</td>
+  const priceRow = (label, amount, color = "#4b5563", note = "") => {
+    const noteHtml = note
+      ? `<div style="margin-top: 2px; color: #6b7280; font-size: 12px;">${escapeHtml(note)}</div>`
+      : "";
+    return `<tr>
+      <td style="padding: 6px 0; color: ${color};">${escapeHtml(label)}${noteHtml}</td>
+      <td style="padding: 6px 0; color: ${color === "#4b5563" ? "#1f2937" : color}; text-align: right; vertical-align: top;">${amount < 0 ? "-" : ""}${formatCurrency(Math.abs(amount))}</td>
     </tr>`;
-  let rows = pricing.charges.map((line) => priceRow(line.label, line.amount)).join("");
+  };
+  let rows = pricing.charges.map((line) => priceRow(line.label, line.amount, "#4b5563", line.note || "")).join("");
   if (pricing.appliedCoupon > 0) {
     rows += priceRow(
       `Coupon Discount${pricing.couponCode ? ` (${pricing.couponCode})` : ""}`,
@@ -1029,7 +1091,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       <div style="margin-top: 20px; padding: 14px 16px; background-color: #ecfdf5; border: 1px solid #86efac; border-radius: 8px;">
         <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.5;">
           <strong>Rewards Update:</strong> Thank you for your booking.
-          ${pointsEarned > 0 ? ` You earned <strong>${pointsEarned} loyalty points</strong> from this order.` : ''}
+          ${pointsEarned > 0 ? ` You have <strong>${pointsEarned} loyalty points</strong> pending from this order. They become available after the rental is completed.` : ''}
           ${referralPendingDollars > 0 ? ` Because you were referred, you just helped a friend or family member earn a referral reward!` : ''}
           Visit your Customer Portal anytime to track your balances, where you can also invite friends and family to try our services and start earning rewards yourself.
         </p>

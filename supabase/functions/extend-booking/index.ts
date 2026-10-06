@@ -2,6 +2,7 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { Stripe } from "npm:stripe@15.8.0";
 import { businessWallTimeToUtc, parseClockTime } from "../_shared/parseBookingTimeSlot.ts";
+import { chargeCardOffSession } from "../_shared/cardCharge.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -158,11 +159,13 @@ async function loadAvailability(serviceId: number, isDelivery: boolean, startDat
   return payload.availability || {};
 }
 
-async function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function chargeCard(customerId: number, bookingId: number, amount: number, description: string) {
+async function chargeCard(
+  customerId: number,
+  bookingId: number,
+  amount: number,
+  description: string,
+  idempotencyKey: string,
+) {
   const { data: customer, error: customerErr } = await supabaseAdmin
     .from("customers")
     .select("stripe_customer_id, email, name")
@@ -179,48 +182,23 @@ async function chargeCard(customerId: number, bookingId: number, amount: number,
     await supabaseAdmin.from("customers").update({ stripe_customer_id: stripeCustomerId }).eq("id", customerId);
   }
 
-  let invoiceId = "";
-  try {
-    await stripe.invoiceItems.create({
-      customer: stripeCustomerId,
-      amount: Math.round(amount * 100),
-      currency: "usd",
-      description,
-    });
-    const invoice = await stripe.invoices.create({
-      customer: stripeCustomerId,
-      collection_method: "charge_automatically",
-      auto_advance: true,
-      description: `Rental extension for booking #${bookingId}`,
-      metadata: {
-        booking_id: String(bookingId),
-        database_customer_id: String(customerId),
-        fee_type: "rental_extension",
-      },
-    });
-    invoiceId = invoice.id;
-    const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
-    await sleep(800);
-    let post = await stripe.invoices.retrieve(finalized.id);
-    if (post.status === "open" || post.status === "draft") {
-      await sleep(800);
-      post = await stripe.invoices.retrieve(finalized.id);
-    }
-    if (post.status !== "paid") {
-      throw new Error(`Failed to charge the card on file. Invoice status: ${post.status}`);
-    }
-    const latestCharge = typeof post.latest_charge === "string" ? post.latest_charge : post.latest_charge?.id;
-    const paymentIntentId = typeof post.payment_intent === "string" ? post.payment_intent : post.payment_intent?.id;
-    return { invoiceId, latestCharge: latestCharge ?? null, paymentIntentId: paymentIntentId ?? null };
-  } catch (error) {
-    if (invoiceId) {
-      try {
-        const invoice = await stripe.invoices.retrieve(invoiceId);
-        if (invoice.status !== "paid") await stripe.invoices.voidInvoice(invoiceId);
-      } catch (_) { /* already paid or closed */ }
-    }
-    throw error;
-  }
+  const charged = await chargeCardOffSession(
+    stripe,
+    stripeCustomerId,
+    Math.round(amount * 100),
+    description,
+    {
+      booking_id: String(bookingId),
+      database_customer_id: String(customerId),
+      fee_type: "rental_extension",
+    },
+    idempotencyKey,
+  );
+  return {
+    invoiceId: null as string | null,
+    latestCharge: charged.chargeId,
+    paymentIntentId: charged.paymentIntentId,
+  };
 }
 
 async function refundCharge(bookingId: number, amount: number, paymentIntentId: string | null, chargeId: string | null) {
@@ -313,7 +291,13 @@ Deno.serve(async (req) => {
     const description = equipmentCharge.subtotal > 0
       ? `Rental extension: ${dates.length} day(s) for booking #${bookingId}, including equipment extra days`
       : `Rental extension: ${dates.length} day(s) for booking #${bookingId}`;
-    const charge = await chargeCard(booking.customer_id, bookingId, total, description);
+    const charge = await chargeCard(
+      booking.customer_id,
+      bookingId,
+      total,
+      description,
+      `extend-${bookingId}-${newPickupDate}-${Math.round(total * 100)}`,
+    );
 
     const approvedAt = new Date().toISOString();
     const history = Array.isArray(booking.receipt_status_history) ? booking.receipt_status_history : [];

@@ -39,7 +39,12 @@ function formatAddonList(addons: unknown): string {
     .map((a: Record<string, unknown>) => {
       const name = String(a?.name || "Add-on");
       const qty = Number(a?.quantity || 1);
-      return `${name} (qty ${qty})`;
+      const extraDays = Number(a?.extraDays || 0);
+      const rate = Number(a?.additionalDayPrice ?? a?.additional_day_price ?? 0);
+      const lineTotal = a?.lineTotal != null ? Number(a.lineTotal) : null;
+      const extra = extraDays > 0 && rate > 0 ? `, ${extraDays} additional day${extraDays === 1 ? "" : "s"}` : "";
+      const amount = lineTotal != null ? `, $${lineTotal.toFixed(2)}` : "";
+      return `${name} (qty ${qty}${extra}${amount})`;
     })
     .join(", ");
 }

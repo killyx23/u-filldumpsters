@@ -11,7 +11,11 @@
  */
 
 import { type LockActivityEvent, redactPins } from "./iglooActivity.ts";
-import { resolveOrderIdByPin } from "./lockEventState.ts";
+import {
+  AUTOLOCK_DWELL_MS,
+  resolveOrderIdByPin,
+  resolvePrecedingUnlockOrderId,
+} from "./lockEventState.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -27,6 +31,119 @@ export type RecordResult = {
   stored: number;
   skippedDuplicates: number;
 };
+
+/** Igloo activity log type for a padlock auto-lock / shackle relock. */
+export const PADLOCK_AUTOLOCK_LOG_TYPE = 13;
+const MANUAL_UNLOCK_KEY = "remote-unlock";
+/** Hardware clock may sit slightly behind the server timestamp we stored for the unlock. */
+const MANUAL_AUTOLOCK_SKEW_MS = 30 * 1000;
+
+function eventMs(value: string | null | undefined): number {
+  const ms = value ? new Date(value).getTime() : NaN;
+  return Number.isNaN(ms) ? NaN : ms;
+}
+
+export function isManualAutolockWindow(unlockAt: string, lockAt: string): boolean {
+  const unlockMs = eventMs(unlockAt);
+  const lockMs = eventMs(lockAt);
+  if (!Number.isFinite(unlockMs) || !Number.isFinite(lockMs)) return false;
+  return lockMs >= unlockMs - MANUAL_AUTOLOCK_SKEW_MS && lockMs - unlockMs <= AUTOLOCK_DWELL_MS;
+}
+
+/**
+ * True when this close is the padlock auto-locking after an admin remote unlock.
+ * Those closes update device presence only — they must not mark a rental returned
+ * or send rental email.
+ */
+export async function isManualAutolockClose(
+  supabase: SupabaseClient,
+  deviceId: string,
+  event: { eventType?: string; logType?: number | null; eventTimestamp?: string },
+): Promise<boolean> {
+  if (event.eventType !== "lock" || event.logType !== PADLOCK_AUTOLOCK_LOG_TYPE) return false;
+  if (!event.eventTimestamp) return false;
+  const lockMs = eventMs(event.eventTimestamp);
+  if (!Number.isFinite(lockMs)) return false;
+
+  const { data: unlock, error } = await supabase
+    .from("lock_device_events")
+    .select("occurred_at, key_id")
+    .eq("device_id", deviceId)
+    .eq("event_kind", "unlock")
+    .lte("occurred_at", new Date(lockMs + MANUAL_AUTOLOCK_SKEW_MS).toISOString())
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !unlock?.occurred_at) return false;
+  if (unlock.key_id !== MANUAL_UNLOCK_KEY) return false;
+  return isManualAutolockWindow(unlock.occurred_at, event.eventTimestamp);
+}
+
+/**
+ * A manual unlock writes its open time immediately. The padlock then auto-locks,
+ * sometimes with a device clock a few seconds behind that open time. Roll the
+ * device back to locked and keep the hardware close time.
+ * An older auto-lock already stored before this unlock is ignored.
+ */
+export async function forceClosedAfterManualAutolock(
+  supabase: SupabaseClient,
+  deviceId: string,
+  batch: LockActivityEvent[] = [],
+): Promise<boolean> {
+  const batchUnlock = [...batch].reverse().find(
+    (event) => event.eventType === "unlock" && event.keyId === MANUAL_UNLOCK_KEY,
+  );
+  const batchLock = batchUnlock
+    ? batch.find((event) =>
+      event.eventType === "lock" &&
+      isManualAutolockWindow(batchUnlock.eventTimestamp, event.eventTimestamp)
+    )
+    : undefined;
+
+  let closedAt: string | null = batchLock?.eventTimestamp ?? null;
+
+  if (!closedAt) {
+    const { data: unlock } = await supabase
+      .from("lock_device_events")
+      .select("occurred_at, received_at")
+      .eq("device_id", deviceId)
+      .eq("event_kind", "unlock")
+      .eq("key_id", MANUAL_UNLOCK_KEY)
+      .order("received_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!unlock?.occurred_at || !unlock.received_at) return false;
+
+    const { data: locks } = await supabase
+      .from("lock_device_events")
+      .select("occurred_at")
+      .eq("device_id", deviceId)
+      .eq("event_kind", "lock")
+      .gte("received_at", unlock.received_at)
+      .order("received_at", { ascending: false })
+      .limit(5);
+    const match = (locks || []).find((row: { occurred_at?: string }) =>
+      row.occurred_at && isManualAutolockWindow(unlock.occurred_at, row.occurred_at)
+    );
+    closedAt = match?.occurred_at ?? null;
+  }
+
+  if (!closedAt) return false;
+
+  const { error } = await supabase
+    .from("lock_devices")
+    .update({
+      current_state: "locked",
+      state_changed_at: closedAt,
+      last_event_at: closedAt,
+    })
+    .eq("device_id", deviceId);
+  if (error) {
+    console.error("[lockDeviceState] manual autolock state update failed:", error.message);
+    return false;
+  }
+  return true;
+}
 
 export function defaultDeviceId(): string | null {
   return Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID") || null;
@@ -137,7 +254,11 @@ export async function recordDeviceEvents(
 
     // The PIN is used in memory to match a booking, then stripped before the
     // payload is stored. It is never written to the table or to the logs.
-    const orderId = await resolveOrderIdByPin(supabase, event.pinCode, event.eventTimestamp);
+    // A close with no PIN belongs to the unlock this device just matched.
+    let orderId = await resolveOrderIdByPin(supabase, event.pinCode, event.eventTimestamp);
+    if (!orderId && event.eventType === "lock" && !event.pinCode) {
+      orderId = await resolvePrecedingUnlockOrderId(supabase, deviceId, event.eventTimestamp);
+    }
 
     const { error } = await supabase.from("lock_device_events").insert({
       device_id: deviceId,
@@ -193,6 +314,14 @@ export async function recordDeviceEvents(
       })
       .eq("device_id", deviceId);
     if (error) console.error("[lockDeviceState] state update failed:", error.message);
+  }
+
+  const touched = new Set<string>([
+    ...latestPerDevice.keys(),
+    ...recorded.map((row) => row.deviceId),
+  ]);
+  for (const deviceId of touched) {
+    await forceClosedAfterManualAutolock(supabase, deviceId, ordered);
   }
 
   return { recorded, stored, skippedDuplicates };

@@ -73,6 +73,28 @@ function buildPaymentMetadata(
   };
 }
 
+async function ensureStripeCustomer(
+  stripe: ReturnType<typeof getStripeClient>,
+  supabase: ReturnType<typeof createClient>,
+  booking: { customers?: unknown },
+): Promise<string | null> {
+  const related = booking.customers;
+  const customer = Array.isArray(related) ? related[0] : related;
+  if (!customer || typeof customer !== "object") return null;
+  const row = customer as { id?: number; stripe_customer_id?: string | null; email?: string | null; name?: string | null };
+  if (!row.id) return null;
+  if (row.stripe_customer_id) return row.stripe_customer_id;
+  if (!row.email) return null;
+  const existing = await stripe.customers.list({ email: row.email, limit: 1 });
+  const stripeCustomerId = existing.data[0]?.id || (await stripe.customers.create({
+    email: row.email,
+    name: row.name || undefined,
+    metadata: { supabase_customer_id: String(row.id) },
+  })).id;
+  await supabase.from("customers").update({ stripe_customer_id: stripeCustomerId }).eq("id", row.id);
+  return stripeCustomerId;
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -112,7 +134,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     const { data: booking, error: fetchError } = await supabase
       .from("bookings")
-      .select("id, total_price, subtotal_before_tax, tax_amount, tax_rate_used, status, payment_intent, client_secret, addons")
+      .select("id, total_price, subtotal_before_tax, tax_amount, tax_rate_used, status, payment_intent, client_secret, addons, customer_id, customers(id, stripe_customer_id, email, name)")
       .eq("id", booking_id)
       .single();
 
@@ -133,6 +155,7 @@ Deno.serve(async (req) => {
 
     const amountInCents = Math.max(50, Math.round(grandTotal * 100));
     const metadata = buildPaymentMetadata(booking, booking_id as string | number, grandTotal);
+    const stripeCustomerId = await ensureStripeCustomer(stripe, supabase, booking);
     console.log(`[${timestamp}] [create-payment-intent] amount=${amountInCents}c metadata=`, metadata);
 
     if (sync_amount_only && booking.payment_intent) {
@@ -142,6 +165,9 @@ Deno.serve(async (req) => {
           amount: amountInCents,
           metadata,
           automatic_payment_methods: { enabled: true },
+          ...(stripeCustomerId
+            ? { customer: stripeCustomerId, setup_future_usage: "off_session" }
+            : {}),
         });
       }
       return new Response(JSON.stringify({
@@ -155,16 +181,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    const savedForLater = stripeCustomerId
+      ? { customer: stripeCustomerId, setup_future_usage: "off_session" as const }
+      : {};
     const paymentIntentCreateParams = {
       amount: amountInCents,
       currency: "usd",
       metadata,
       automatic_payment_methods: { enabled: true },
+      ...savedForLater,
     };
     const paymentIntentUpdateParams = {
       amount: amountInCents,
       metadata,
       automatic_payment_methods: { enabled: true },
+      ...savedForLater,
     };
 
     // Reuse an existing open PaymentIntent when possible (page refresh / retries).

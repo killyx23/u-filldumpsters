@@ -27,6 +27,7 @@ export type LockActivityEvent = {
  * These arrive as `logType` on each entry in `activityLogs[]`.
  */
 export const LOCK_LOG_TYPES = new Set([
+  13, // padlock auto-lock / shackle relock
   37, // Bluetooth lock
   49, // lock via keypad/button
   51, // lock with key/thumbturn
@@ -237,11 +238,11 @@ export function parseActivityLogEntry(entry: unknown): LockActivityEvent | null 
   const eventTimestamp = extractTimestamp(nested) || extractTimestamp(obj);
   if (!eventTimestamp) return null;
 
-  // Numeric logType is authoritative when present — the webhook sends codes,
-  // not descriptive strings, so this must win over the text heuristics below.
+  // Known numeric codes win. The webhook sends codes, not descriptions.
+  // Unmapped codes still fall through to activityType text (autolock, relock,
+  // locked) because cloud history rows carry both.
   let eventType = logTypeToEventKind(logType);
   if (!eventType) {
-    if (logType !== null) return null;
     const typeRaw = extractTypeRaw(nested) || extractTypeRaw(obj);
     if (isFailedActivity(typeRaw, nested) || isFailedActivity(typeRaw, obj)) return null;
     eventType = normalizeEventType(typeRaw);

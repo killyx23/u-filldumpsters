@@ -8,7 +8,7 @@ import { formatReferralWalletTxType, isReferralWalletDebit } from '@/utils/refer
 import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 
 export const PortalLoyaltySummary = ({ customerId }) => {
-  const { pointsBalance, referralWallet, loading, conversionRates, getPointsBalance } = useCustomerLoyaltyPoints(customerId);
+  const { pointsBalance, pendingPoints, referralWallet, loading, conversionRates, getPointsBalance } = useCustomerLoyaltyPoints(customerId);
   const [transactions, setTransactions] = useState([]);
   const [referralTransactions, setReferralTransactions] = useState([]);
   const [loadingTx, setLoadingTx] = useState(true);
@@ -67,6 +67,7 @@ export const PortalLoyaltySummary = ({ customerId }) => {
   }, [customerId]);
 
   const dollarValue = Number((pointsBalance / conversionRates.pointsToDollar).toFixed(2));
+  const pendingPointsBalance = Number(pendingPoints || 0);
   const availableReferral = Number(referralWallet?.availableBalance || 0);
   const pendingReferral = Number(referralWallet?.pendingBalance || 0);
 
@@ -94,6 +95,10 @@ export const PortalLoyaltySummary = ({ customerId }) => {
                 <div>
                   <p className="text-3xl font-bold text-yellow-400">{pointsBalance}</p>
                   <p className="text-sm text-gray-300">Points available</p>
+                </div>
+                <div>
+                  <p className="text-3xl font-bold text-orange-300">{pendingPointsBalance}</p>
+                  <p className="text-sm text-gray-300">Points pending</p>
                 </div>
                 <div>
                   <p className="text-3xl font-bold text-green-400">${dollarValue}</p>
@@ -134,20 +139,33 @@ export const PortalLoyaltySummary = ({ customerId }) => {
             <ul className="space-y-2">
               {transactions.map((tx) => {
                 const { debit, signedLabel } = formatLoyaltyTxAmount(tx);
+                const laterReleased = tx.transaction_type === 'pending' && transactions.some(
+                  (other) =>
+                    other.booking_id === tx.booking_id &&
+                    other.transaction_type === 'earned' &&
+                    new Date(other.created_at) >= new Date(tx.created_at)
+                );
                 return (
                 <li
                   key={tx.id}
-                  className="flex justify-between items-center text-sm border-b border-white/10 pb-2 gap-2"
+                  className={`text-sm border-b border-white/10 pb-2 ${laterReleased ? 'opacity-70' : ''}`}
                 >
-                  <span className="text-gray-200">
-                    {formatLoyaltyTxLabel(tx)}
-                  </span>
-                  <span className={debit ? 'text-red-300' : 'text-green-300'}>
-                    {signedLabel}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {format(new Date(tx.created_at), 'MMM d, yyyy')}
-                  </span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-gray-200">
+                      {formatLoyaltyTxLabel(tx)}
+                    </span>
+                    <span className={debit ? 'text-red-300' : 'text-green-300'}>
+                      {signedLabel}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {format(new Date(tx.created_at), 'MMM d, yyyy')}
+                    </span>
+                  </div>
+                  {laterReleased && (
+                    <p className="text-xs text-amber-200/80 mt-1">
+                      No longer pending — released after the rental was finalized.
+                    </p>
+                  )}
                 </li>
               );
               })}

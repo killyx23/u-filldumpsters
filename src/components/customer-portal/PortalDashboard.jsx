@@ -7,10 +7,11 @@ import { StatusDetailsModal } from './StatusDetailsModal';
 import { ImportantAppointmentDetails } from './ImportantAppointmentDetails';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
-  bookingNeedsSkippedVerification,
-  formatVerificationDeadlineMessage,
-  getVerificationDeadlineInfo,
+    bookingNeedsSkippedVerification,
+    formatVerificationDeadlineMessage,
+    getVerificationDeadlineInfo,
 } from '@/utils/verificationDeadline';
+import { getPendingReviews, getUnreviewedBookings, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
 
 const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
   return (
@@ -28,7 +29,10 @@ const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab })
               key={item.id}
               type="button"
               onClick={() => {
-                onNavigateToTab?.(item.targetTab);
+                onNavigateToTab?.(item.targetTab, {
+                  section: item.targetSection,
+                  bookingId: item.focusBookingId,
+                });
                 onOpenChange(false);
               }}
               className={`w-full text-left p-4 rounded-lg border transition-colors hover:bg-white/10 ${
@@ -57,7 +61,7 @@ const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab })
   );
 };
 
-export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateToTab }) => {
+export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, onRefresh, onNavigateToTab }) => {
   const [stats, setStats] = useState({
     activeCount: 0,
     pendingAddressCount: 0,
@@ -153,6 +157,32 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
         targetTab: 'messages',
       });
     }
+    const unreviewedBookings = getUnreviewedBookings(bookings, customerReviews);
+    if (unreviewedBookings.length > 0) {
+      attention.push({
+        id: 'pending-reviews',
+        severity: 'info',
+        title: `Leave a review (${unreviewedBookings.length})`,
+        description: unreviewedBookings.length === 1
+          ? 'A completed rental is ready for feedback if you want to leave one.'
+          : `${unreviewedBookings.length} completed rentals are ready for feedback if you want to leave one.`,
+        nextStep: 'Open Communication and choose Feedback to write your review.',
+        targetTab: 'messages',
+        targetSection: 'reviews',
+      });
+    }
+    const pendingReviews = getPendingReviews(customerReviews);
+    if (pendingReviews.length > 0) {
+      attention.push({
+        id: 'reviews-pending-approval',
+        severity: 'info',
+        title: pendingReviews.length === 1 ? 'Feedback pending' : `Feedback pending (${pendingReviews.length})`,
+        description: PENDING_REVIEW_MESSAGE,
+        nextStep: 'Open Communication and choose Feedback to check the status.',
+        targetTab: 'messages',
+        targetSection: 'reviews',
+      });
+    }
 
     // Generic 48h notice only when not already covered by license verification countdown
     const verySoon = upcoming.filter((b) => differenceInDays(parseISO(b.drop_off_date), new Date()) <= 2);
@@ -171,7 +201,7 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
       urgentItems: urgent
     });
     setAttentionItems(attention);
-  }, [bookings]);
+  }, [bookings, customerReviews]);
 
   const customerId = bookings?.[0]?.customer_id;
 
@@ -179,8 +209,8 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-2xl font-bold text-white mb-1">Five-Second Health Check</h2>
-          <p className="text-sm text-blue-200">A quick overview of your account status.</p>
+          <h2 className="text-2xl font-bold text-white mb-1">Your Account Overview</h2>
+          <p className="text-sm text-blue-200">Welcome! Here is a quick look at your current rental status and any items that need your attention.</p>
         </div>
         <div className="text-right">
           <p className="text-xs text-gray-400 mb-2">
@@ -220,6 +250,13 @@ export const PortalDashboard = ({ bookings, lastUpdated, onRefresh, onNavigateTo
                 <span className="mr-2">•</span> {item.text}
               </li>
             ))}
+            {attentionItems
+              .filter((item) => item.id === 'reviews-pending-approval')
+              .map((item) => (
+                <li key={item.id} className="text-sm text-blue-100 flex items-start">
+                  <span className="mr-2">•</span> {item.description}
+                </li>
+              ))}
           </ul>
         </div>
       )}

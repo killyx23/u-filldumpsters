@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,6 +17,7 @@ import {
     REVIEW_VIDEO_TYPES,
 } from '@/utils/reviewMediaHelper';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { getPendingReviews, getUnreviewedBookings, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
 import { ReviewMediaDisplay } from '@/components/ReviewMediaDisplay';
 import { ReviewAdminResponse } from '@/components/ReviewAdminResponse';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -29,7 +30,20 @@ import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { AIAssistantTab } from './AIAssistantTab';
 
-export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefreshData }) => {
+const COMMUNICATION_SECTIONS = ['chat', 'reviews', 'tickets', 'ai-assistant'];
+
+export const CommunicationHub = ({
+    customer,
+    bookings,
+    notes,
+    onNewNote,
+    onRefreshData,
+    activeSection = 'chat',
+    onSectionChange,
+    focusBookingId = null,
+}) => {
+    const section = COMMUNICATION_SECTIONS.includes(activeSection) ? activeSection : 'chat';
+
     return (
         <div className="space-y-6">
             <div>
@@ -37,7 +51,7 @@ export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefre
                 <p className="text-sm text-blue-200">Chat with support, get AI assistance, submit tickets, or leave reviews.</p>
             </div>
 
-            <Tabs defaultValue="chat" className="w-full">
+            <Tabs value={section} onValueChange={(value) => onSectionChange?.(value)} className="w-full">
                 <TabsList className="grid w-full grid-cols-4 bg-black/20 text-white">
                     <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
                     <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>
@@ -60,7 +74,12 @@ export const CommunicationHub = ({ customer, bookings, notes, onNewNote, onRefre
                 </TabsContent>
 
                 <TabsContent value="reviews" className="mt-4">
-                    <ReviewsSection customer={customer} bookings={bookings} onRefreshData={onRefreshData} />
+                    <ReviewsSection
+                        customer={customer}
+                        bookings={bookings}
+                        onRefreshData={onRefreshData}
+                        focusBookingId={section === 'reviews' ? focusBookingId : null}
+                    />
                 </TabsContent>
             </Tabs>
         </div>
@@ -276,7 +295,7 @@ const SupportTickets = ({ customer, notes, onNewNote }) => {
     );
 };
 
-const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
+const ReviewsSection = ({ customer, bookings, onRefreshData, focusBookingId = null }) => {
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -289,9 +308,10 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const imageInputRef = useRef(null);
     const videoInputRef = useRef(null);
+    const appliedFocusRef = useRef(null);
 
-    const fetchReviews = async () => {
-        setLoading(true);
+    const fetchReviews = async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
         setError(null);
         try {
             const { data, error } = await supabase
@@ -305,7 +325,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
         } catch (err) {
             setError(err.message);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
@@ -313,9 +333,22 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
         fetchReviews();
     }, [customer.id]);
 
-    const completedBookings = bookings?.filter(b => ['Completed', 'flagged', 'Returned'].includes(b.status) || b.returned_at) || [];
-    const reviewedBookingIds = reviews.map(r => r.booking_id);
-    const unreviewedBookings = completedBookings.filter(b => !reviewedBookingIds.includes(b.id));
+    const reviewedBookingIds = useMemo(() => reviews.map((review) => review.booking_id), [reviews]);
+    const unreviewedBookings = useMemo(
+        () => getUnreviewedBookings(bookings, reviewedBookingIds),
+        [bookings, reviewedBookingIds]
+    );
+    const pendingReviews = useMemo(() => getPendingReviews(reviews), [reviews]);
+
+    useEffect(() => {
+        if (loading || focusBookingId == null) return;
+        const focusKey = String(focusBookingId);
+        if (appliedFocusRef.current === focusKey) return;
+        const match = unreviewedBookings.find((booking) => String(booking.id) === focusKey);
+        if (!match) return;
+        appliedFocusRef.current = focusKey;
+        setSelectedBooking(match);
+    }, [focusBookingId, loading, unreviewedBookings]);
 
     const resetReviewForm = () => {
         setRating(5);
@@ -394,7 +427,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                 uploadedVideoPath = await uploadReviewVideo(customer.id, selectedBooking.id, video);
             }
 
-            const { error } = await supabase.from('reviews').insert({
+            const { data: created, error } = await supabase.from('reviews').insert({
                 booking_id: selectedBooking.id,
                 customer_id: customer.id,
                 rating,
@@ -403,13 +436,16 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                 image_urls: uploadedImagePaths.length ? uploadedImagePaths : null,
                 video_url: uploadedVideoPath,
                 is_public: false,
-            });
+            }).select().single();
 
             if (error) throw error;
 
-            toast({ title: 'Review submitted', description: 'Review submitted and pending customer service approval. Thank you for your feedback!' });
+            if (created) {
+                setReviews((prev) => [created, ...prev.filter((review) => review.id !== created.id)]);
+            }
+            toast({ title: 'Review submitted', description: PENDING_REVIEW_MESSAGE });
             resetReviewForm();
-            fetchReviews();
+            fetchReviews({ silent: true });
             if (onRefreshData) onRefreshData();
         } catch (err) {
             toast({
@@ -431,7 +467,17 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
     }
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
+            {pendingReviews.length > 0 && (
+                <div className="rounded-lg border border-blue-400/40 bg-blue-900/30 p-4 text-blue-100">
+                    <p className="font-semibold text-white flex items-center">
+                        <Clock className="w-4 h-4 mr-2 text-blue-300" />
+                        Feedback pending
+                    </p>
+                    <p className="text-sm mt-2">{PENDING_REVIEW_MESSAGE}</p>
+                </div>
+            )}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card className="bg-white/5 border-white/10 text-white">
                 <CardHeader>
                     <CardTitle className="text-lg">Leave a Review</CardTitle>
@@ -449,8 +495,17 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                         <div>
                             {unreviewedBookings.length === 0 ? (
                                 <div className="text-center p-6 bg-black/20 rounded-lg border border-white/5">
-                                    <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2 opacity-50" />
-                                    <p className="text-gray-400">You have no pending reviews. Complete a booking to leave feedback!</p>
+                                    {pendingReviews.length > 0 ? (
+                                        <>
+                                            <Clock className="w-12 h-12 text-blue-300 mx-auto mb-2 opacity-80" />
+                                            <p className="text-blue-100">{PENDING_REVIEW_MESSAGE}</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2 opacity-50" />
+                                            <p className="text-gray-400">You have no bookings waiting for a review.</p>
+                                        </>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="space-y-3">
@@ -606,7 +661,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                                     {review.is_public ? (
                                         <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded flex items-center border border-green-500/30"><CheckCircle className="w-3 h-3 mr-1"/> Published</span>
                                     ) : (
-                                        <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded flex items-center border border-orange-500/30"><Clock className="w-3 h-3 mr-1"/> Pending</span>
+                                        <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-1 rounded flex items-center border border-orange-500/30"><Clock className="w-3 h-3 mr-1"/> Pending approval</span>
                                     )}
                                 </div>
                                 <h4 className="font-bold text-sm mb-1 text-white">{review.title}</h4>
@@ -617,11 +672,12 @@ const ReviewsSection = ({ customer, bookings, onRefreshData }) => {
                                     className="mt-3"
                                 />
                                 <ReviewAdminResponse review={review} />
-                                <p className="text-xs text-gray-500 mt-3">{format(parseISO(review.created_at), 'PPP')}</p>
+                                <p className="text-xs text-gray-500 mt-3">{review.created_at ? format(parseISO(review.created_at), 'PPP') : 'Just now'}</p>
                             </CardContent>
                         </Card>
                     ))
                 )}
+            </div>
             </div>
         </div>
     );

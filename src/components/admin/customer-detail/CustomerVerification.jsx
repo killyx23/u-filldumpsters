@@ -28,7 +28,7 @@ import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bo
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
-import { syncBookingEquipment } from '@/utils/equipmentInventoryManager';
+import { assertRescheduleStock, syncBookingEquipment } from '@/utils/equipmentInventoryManager';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
@@ -1178,18 +1178,31 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         const existingAddonsForQuote =
             booking.addons && typeof booking.addons === 'object' ? booking.addons : {};
         const quotedPricing = pendingSnapshot?.pricing || {};
+        const quoteDeliveryFee = Number(quotedPricing.deliveryFee ?? existingAddonsForQuote.deliveryFee ?? 0);
+        const quoteMileageCharge = Number(quotedPricing.mileageCharge ?? existingAddonsForQuote.mileageCharge ?? 0);
+        const quoteBaseRental = quotedPricing.baseRentalCost != null
+            ? Number(quotedPricing.baseRentalCost)
+            : null;
+        const quoteServiceId = pendingSnapshot?.new_service_id
+            ?? pendingRescheduleLog?.new_service_id
+            ?? booking.plan?.id;
+        const quoteDropOff = pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date;
+        const quotePickup = pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date;
+        const rescheduleQuoteInput = {
+            plan: booking.plan,
+            serviceId: quoteServiceId,
+            existingAddons: existingAddonsForQuote,
+            newAddonsList: pendingSnapshot?.new_addons || [],
+            baseRentalCost: quoteBaseRental,
+            serviceCost: Number(quotedPricing.serviceCost ?? booking.plan?.price ?? booking.plan?.base_price ?? 0),
+            mileageCharge: quoteMileageCharge,
+            deliveryFee: quoteDeliveryFee,
+            taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
+            dropOff: quoteDropOff,
+            pickup: quotePickup,
+        };
         const rescheduleQuote = isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)
-            ? quoteRescheduleBreakdown({
-                plan: booking.plan,
-                existingAddons: existingAddonsForQuote,
-                newAddonsList: pendingSnapshot.new_addons,
-                serviceCost: Number(quotedPricing.serviceCost ?? booking.plan?.price ?? booking.plan?.base_price ?? 0),
-                mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddonsForQuote.mileageCharge ?? 0),
-                deliveryFee: Number(existingAddonsForQuote.deliveryFee || 0),
-                taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
-                dropOff: pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date,
-                pickup: pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date,
-            })
+            ? quoteRescheduleBreakdown(rescheduleQuoteInput)
             : null;
         const newTotal = round2(
             rescheduleQuote?.breakdown?.total ??
@@ -1204,6 +1217,43 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         let stripeType = 'none';
         let stripeTransactionId = null;
         let amountProcessed = 0;
+        let inventoryPrevious = null;
+
+        if (isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)) {
+            const equipmentList = await resolveEquipmentForSync(rescheduleQuote?.mapped?.equipment || []);
+            const stock = await assertRescheduleStock({
+                bookingId: booking.id,
+                newEquipment: equipmentList,
+                startDate: quoteDropOff,
+                endDate: quotePickup,
+            });
+            if (!stock.ok) {
+                toast({
+                    title: 'Equipment unavailable',
+                    description: stock.message || 'This request needs more equipment than is free on the new dates. Nothing was charged.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            const syncResult = await syncBookingEquipment(booking.id, equipmentList);
+            if (!syncResult.success) {
+                toast({
+                    title: 'Inventory update failed',
+                    description: syncResult.error || 'The request is still pending and nothing was charged.',
+                    variant: 'destructive',
+                });
+                return;
+            }
+            inventoryPrevious = syncResult.previous || null;
+        }
+
+        const restoreInventory = async () => {
+            if (!inventoryPrevious) return;
+            const restored = await syncBookingEquipment(booking.id, inventoryPrevious);
+            if (!restored.success) {
+                console.error('[handleApprove] Could not restore equipment inventory:', restored.error);
+            }
+        };
 
         if (isRescheduleApprove && Math.abs(delta) >= 0.01) {
             if (delta > 0) {
@@ -1226,6 +1276,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         description: msg,
                         variant: 'destructive',
                     });
+                    await restoreInventory();
                     return;
                 }
                 stripeType = 'charge';
@@ -1252,6 +1303,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         description: msg,
                         variant: 'destructive',
                     });
+                    await restoreInventory();
                     return;
                 }
                 stripeType = 'refund';
@@ -1284,6 +1336,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         'Could not charge the late reschedule fee. Schedule was not approved.',
                     variant: 'destructive',
                 });
+                if (stripeType === 'none') await restoreInventory();
                 return;
             }
             lateFeeCharged = feeAmount;
@@ -1361,6 +1414,14 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
         }
 
         if (isRescheduleApprove) {
+            if (rescheduleQuote?.baseRentalCost != null) {
+                const existingPlan = bookingUpdate.plan
+                    || (booking.plan && typeof booking.plan === 'object' ? booking.plan : {});
+                bookingUpdate.plan = {
+                    ...existingPlan,
+                    price: rescheduleQuote.baseRentalCost,
+                };
+            }
             bookingUpdate.total_price = newTotal;
             if (rescheduleQuote?.breakdown) {
                 bookingUpdate.subtotal_before_tax = Number(rescheduleQuote.breakdown.subtotalBeforeTax);
@@ -1380,17 +1441,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
 
             if (Array.isArray(pendingSnapshot?.new_addons)) {
                 const existingAddons = existingAddonsForQuote;
-                const mapped = rescheduleQuote?.mapped || quoteRescheduleBreakdown({
-                    plan: booking.plan,
-                    existingAddons,
-                    newAddonsList: pendingSnapshot.new_addons,
-                    serviceCost: Number(quotedPricing.serviceCost ?? booking.plan?.price ?? booking.plan?.base_price ?? 0),
-                    mileageCharge: Number(quotedPricing.mileageCharge ?? existingAddons.mileageCharge ?? 0),
-                    deliveryFee: Number(existingAddons.deliveryFee || 0),
-                    taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
-                    dropOff: pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date,
-                    pickup: pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date,
-                }).mapped;
+                const mapped = rescheduleQuote?.mapped || quoteRescheduleBreakdown(rescheduleQuoteInput).mapped;
                 const hadInsurance = existingAddons.insurance === 'accept';
                 const hadDriveway = existingAddons.drivewayProtection === 'accept';
                 const removingCoverage =
@@ -1615,43 +1666,9 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             .eq('id', booking.id);
             
         if (error) {
+            if (stripeType === 'none' && !lateFeeCharged) await restoreInventory();
             toast({ title: "Approval Failed", description: error.message, variant: 'destructive' });
         } else {
-            if (isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)) {
-                try {
-                    const equipmentList = await resolveEquipmentForSync(
-                        bookingUpdate.addons?.equipment || []
-                    );
-                    const syncResult = await syncBookingEquipment(booking.id, equipmentList);
-                    if (!syncResult.success) {
-                        console.error(
-                            '[CustomerVerification] Equipment inventory sync failed after reschedule approve:',
-                            syncResult.error
-                        );
-                        toast({
-                            title: 'Inventory sync failed',
-                            description:
-                                syncResult.error ||
-                                'Schedule and pricing were approved, but equipment inventory could not be updated. Please retry inventory sync.',
-                            variant: 'destructive',
-                        });
-                    }
-                } catch (syncErr) {
-                    console.error(
-                        '[CustomerVerification] Equipment inventory sync threw after reschedule approve:',
-                        syncErr
-                    );
-                    toast({
-                        title: 'Inventory sync failed',
-                        description:
-                            syncErr instanceof Error
-                                ? syncErr.message
-                                : 'Schedule and pricing were approved, but equipment inventory could not be updated.',
-                        variant: 'destructive',
-                    });
-                }
-            }
-
             if (pendingRescheduleLog?.id) {
                 const logUpdate = {
                     request_status: 'approved',

@@ -197,13 +197,15 @@ Deno.serve(async (req)=>{
     // ----------------------------------------------------------------
     let chargeId = null;
     let stripeCustomerId = null;
+    let paymentMethodId = null;
     let verifiedPaymentIntentId = paymentIntentId;
     if (paymentIntentId) {
       try {
         log("Retrieving PaymentIntent from Stripe…", paymentIntentId);
         const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
           expand: [
-            "latest_charge"
+            "latest_charge",
+            "payment_method"
           ]
         });
         log("PaymentIntent status", pi.status);
@@ -255,6 +257,27 @@ Deno.serve(async (req)=>{
             }
           }
         }
+        const method = pi.payment_method;
+        paymentMethodId = typeof method === "string" ? method : method?.id ?? null;
+        if (paymentMethodId && stripeCustomerId) {
+          try {
+            const saved = typeof method === "object" && method ? method : await stripe.paymentMethods.retrieve(paymentMethodId);
+            const owner = typeof saved.customer === "string" ? saved.customer : null;
+            if (owner && owner !== stripeCustomerId) {
+              paymentMethodId = null;
+            } else if (!owner) {
+              await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
+            }
+            if (paymentMethodId) {
+              await stripe.customers.update(stripeCustomerId, {
+                invoice_settings: { default_payment_method: paymentMethodId }
+              });
+            }
+          } catch (attachErr) {
+            log("Could not save payment method for later fees", attachErr instanceof Error ? attachErr.message : attachErr);
+            paymentMethodId = null;
+          }
+        }
       } catch (stripeErr) {
         console.error("[finalize-booking] Stripe retrieval error:", stripeErr);
       }
@@ -275,6 +298,7 @@ Deno.serve(async (req)=>{
       stripe_payment_intent_id: verifiedPaymentIntentId,
       stripe_charge_id: chargeId,
       stripe_customer_id: stripeCustomerId,
+      ...(paymentMethodId ? { stripe_payment_method_id: paymentMethodId } : {}),
       stripe_checkout_session_id: null,
       updated_at: new Date().toISOString()
     }, {

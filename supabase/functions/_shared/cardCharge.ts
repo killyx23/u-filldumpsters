@@ -41,9 +41,12 @@ export async function resolveInvoiceChargeId(
   return { chargeId, status: invoice.status ?? null, paymentIntentId };
 }
 
-async function defaultCardId(stripe: Stripe, stripeCustomerId: string): Promise<string> {
+export async function lookupSavedCardId(
+  stripe: Stripe,
+  stripeCustomerId: string,
+): Promise<string | null> {
   const customer = await stripe.customers.retrieve(stripeCustomerId);
-  if (customer.deleted) throw new Error("Stripe customer no longer exists.");
+  if (customer.deleted) return null;
   const preferred = customer.invoice_settings?.default_payment_method;
   if (typeof preferred === "string" && preferred) return preferred;
   if (preferred && typeof preferred === "object" && "id" in preferred && preferred.id) {
@@ -54,7 +57,34 @@ async function defaultCardId(stripe: Stripe, stripeCustomerId: string): Promise<
     type: "card",
     limit: 1,
   });
-  const cardId = methods.data[0]?.id;
+  return methods.data[0]?.id ?? null;
+}
+
+/**
+ * Attach a payment method from an earlier booking so a later fee can use it.
+ * Returns false when the method belongs to a different customer.
+ * Throws when Stripe refuses to reuse a one-time method.
+ */
+export async function attachPaymentMethodOnce(
+  stripe: Stripe,
+  stripeCustomerId: string,
+  paymentMethodId: string,
+): Promise<void> {
+  const method = await stripe.paymentMethods.retrieve(paymentMethodId);
+  const owner = typeof method.customer === "string" ? method.customer : null;
+  if (owner && owner !== stripeCustomerId) {
+    throw new Error("Saved payment method belongs to a different Stripe customer.");
+  }
+  if (!owner) {
+    await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
+  }
+  await stripe.customers.update(stripeCustomerId, {
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
+}
+
+async function defaultCardId(stripe: Stripe, stripeCustomerId: string): Promise<string> {
+  const cardId = await lookupSavedCardId(stripe, stripeCustomerId);
   if (!cardId) throw new Error("No card on file for this customer.");
   return cardId;
 }
@@ -75,6 +105,34 @@ export async function chargeCardOffSession(
     throw new Error("Amount must be a positive number.");
   }
   const paymentMethodId = await defaultCardId(stripe, stripeCustomerId);
+  return chargePaymentMethodOffSession(
+    stripe,
+    stripeCustomerId,
+    paymentMethodId,
+    amountCents,
+    description,
+    metadata,
+    idempotencyKey,
+  );
+}
+
+/**
+ * Off-session charge of one saved payment method.
+ * Throws unless Stripe returns a ch_ id. Does not write the fee row.
+ */
+export async function chargePaymentMethodOffSession(
+  stripe: Stripe,
+  stripeCustomerId: string,
+  paymentMethodId: string,
+  amountCents: number,
+  description: string,
+  metadata: Record<string, string>,
+  idempotencyKey: string,
+): Promise<{ chargeId: string; paymentIntentId: string }> {
+  if (!paymentMethodId) throw new Error("No card on file for this customer.");
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    throw new Error("Amount must be a positive number.");
+  }
   const pi = await stripe.paymentIntents.create({
     amount: amountCents,
     currency: "usd",

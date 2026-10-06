@@ -65,6 +65,8 @@ export function mergeOriginalAddonsForService(originalList = [], currentList = [
         ...existing,
         quantity: original.quantity ?? existing.quantity ?? 1,
         price: existing.price ?? original.price,
+        additionalDayPrice: existing.additionalDayPrice ?? original.additionalDayPrice ?? existing.additional_day_price ?? original.additional_day_price ?? 0,
+        type: existing.type || original.type,
       });
     }
   }

@@ -14,6 +14,8 @@ import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import { stampRescheduleAddons } from '@/utils/rescheduleComparison';
+import { assertRescheduleStock } from '@/utils/equipmentInventoryManager';
 import { filterAddonsForService } from '@/utils/rescheduleAddons';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 import {
@@ -276,9 +278,33 @@ export const RescheduleDialog = ({
       console.log('Original add-ons:', originalAddonsList);
       console.log('New add-ons:', selectedAddonsList);
 
+      const daysForQuote = calculateDays(newDropOffDate, newPickupDate);
+      const quotedAddons = stampRescheduleAddons(selectedAddonsList, daysForQuote);
+      const stockCheck = await assertRescheduleStock({
+        bookingId,
+        newEquipment: quotedAddons
+          .filter((addon) => addon.type === 'rental' || addon.type === 'consumable')
+          .map((addon) => ({
+            id: Number(addon.id ?? addon.equipment_id),
+            quantity: Number(addon.quantity || 1),
+            type: addon.type,
+          })),
+        startDate: newDropOffDate,
+        endDate: newPickupDate,
+      });
+      if (!stockCheck.ok) {
+        toast({
+          title: 'Not enough equipment',
+          description: stockCheck.message || 'The requested quantity is not available for these dates.',
+          variant: 'destructive',
+        });
+        setSubmitting(false);
+        return;
+      }
+
       const inventoryChanges = await calculateAddonsDifference(
         originalAddonsList,
-        selectedAddonsList
+        quotedAddons
       );
 
       console.log('Inventory changes:', inventoryChanges);
@@ -308,12 +334,12 @@ export const RescheduleDialog = ({
         (isDumpLoaderPickup ? null : verifiedAddress) ||
         '';
 
-      const days = calculateDays(newDropOffDate, newPickupDate);
+      const days = daysForQuote;
       const rewardAddons = originalBooking?.addons || {};
       const newCosts = await calculateBookingCosts(
         selectedService,
         days,
-        selectedAddonsList,
+        quotedAddons,
         selectedService?.id === 2 ? 0 : distanceMiles,
         null,
         null,
@@ -337,7 +363,7 @@ export const RescheduleDialog = ({
         new_drop_off_time: newDropOffTime,
         new_pickup_time: newPickupTime,
         original_addons: originalAddonsList,
-        new_addons: selectedAddonsList,
+        new_addons: quotedAddons,
         inventory_changes: {
           to_return: inventoryChanges.toReturn,
           to_allocate: inventoryChanges.toAllocate,
@@ -363,8 +389,12 @@ export const RescheduleDialog = ({
         new_total_price: newTotal,
         pricing: {
           serviceCost: newCosts.serviceCost,
+          baseRentalCost: newCosts.baseRentalCost,
+          deliveryFee: newCosts.deliveryFee,
           addonsCost: newCosts.addonsCost,
           mileageCharge: newCosts.mileageCharge,
+          discount: newCosts.discount,
+          discounts: newCosts.discounts,
           subtotal: newCosts.subtotal,
           tax: newCosts.tax,
           taxRate: newCosts.taxRate,

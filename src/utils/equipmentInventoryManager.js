@@ -240,46 +240,119 @@ export const checkInventoryAvailability = async (equipmentId, requestedQuantity,
   };
 };
 
+const tracksOnHand = (type) => {
+  const normalized = String(type || '').toLowerCase();
+  return normalized === EquipmentTypes.RENTAL || normalized === EquipmentTypes.CONSUMABLE;
+};
+
+const loadBookingEquipment = async (bookingId) => {
+  const { data, error } = await supabase
+    .from('booking_equipment')
+    .select('equipment_id, quantity, equipment(type, name)')
+    .eq('booking_id', bookingId);
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.equipment_id,
+    equipment_id: row.equipment_id,
+    quantity: Number(row.quantity || 1),
+    type: row.equipment?.type || null,
+    name: row.equipment?.name || null,
+  }));
+};
+
 /**
- * Sync booking equipment changes to database
- * @param {number} bookingId - Booking ID
- * @param {Array} newEquipment - New equipment list
+ * Extra units beyond what this booking already holds must be free on the new dates.
+ * Same quantity does not need more on-hand stock; the booking date change moves the hold.
  */
-export const syncBookingEquipment = async (bookingId, newEquipment = []) => {
+export const assertRescheduleStock = async ({
+  bookingId,
+  newEquipment = [],
+  startDate,
+  endDate,
+} = {}) => {
   try {
-    // Fetch existing equipment for this booking
-    const { data: existingEquipment, error: fetchError } = await supabase
-      .from('booking_equipment')
-      .select('*, equipment(*)')
-      .eq('booking_id', bookingId);
-
-    if (fetchError) throw fetchError;
-
-    // Calculate what needs to change
-    const { toDecrement, toIncrement } = calculateInventoryChanges(
-      existingEquipment.map(e => ({
-        id: e.equipment_id,
-        quantity: e.quantity,
-        type: e.equipment?.type
-      })),
-      newEquipment
-    );
-
-    // Update inventory for rentals and consumables
+    const existing = await loadBookingEquipment(bookingId);
+    const { toDecrement } = calculateInventoryChanges(existing, newEquipment);
     for (const item of toDecrement) {
-      if (item.type !== EquipmentTypes.SERVICE) {
-        const result = await updateInventory(item.equipment_id, item.quantity, item.type);
-        if (!result.success) {
-          throw new Error(result.error);
-        }
+      if (!tracksOnHand(item.type)) continue;
+      const check = await checkInventoryAvailability(item.equipment_id, item.quantity, {
+        startDate,
+        endDate,
+        excludeBookingId: bookingId,
+      });
+      if (!check.available) {
+        const name = check.name || 'Equipment';
+        const free = Number(check.quantity) || 0;
+        return {
+          ok: false,
+          message: `${name} does not have enough free stock for these dates. Additional available: ${free}.`,
+        };
       }
     }
+    return { ok: true, previous: existing };
+  } catch (error) {
+    return { ok: false, message: error.message || 'Could not check equipment inventory.' };
+  }
+};
 
-    for (const item of toIncrement) {
-      if (item.type === EquipmentTypes.RENTAL || item.type === EquipmentTypes.CONSUMABLE) {
-        await updateInventory(item.equipment_id, -item.quantity, item.type);
-      }
-      // Services have no inventory to restore
+const rpcQuantityItems = (items) => items
+  .filter((item) => tracksOnHand(item.type) && Number(item.quantity) > 0)
+  .map((item) => ({
+    equipment_id: item.equipment_id,
+    quantity: Number(item.quantity),
+  }));
+
+/**
+ * Sync booking equipment changes to database.
+ * Returns stock with increment_equipment_quantities and takes stock with
+ * decrement_equipment_quantities so on-hand cannot go below zero.
+ */
+export const syncBookingEquipment = async (bookingId, newEquipment = []) => {
+  let appliedIncrements = [];
+  let appliedDecrements = [];
+  let replacedRows = false;
+  let previous = [];
+  const reverseApplied = async () => {
+    if (appliedDecrements.length > 0) {
+      await supabase.rpc('increment_equipment_quantities', {
+        items_to_increment: appliedDecrements,
+      });
+    }
+    if (appliedIncrements.length > 0) {
+      await supabase.rpc('decrement_equipment_quantities', {
+        items_to_decrement: appliedIncrements,
+      });
+    }
+  };
+  try {
+    const existingEquipment = await loadBookingEquipment(bookingId);
+    previous = existingEquipment.map((item) => ({
+      id: item.id,
+      quantity: item.quantity,
+      type: item.type,
+    }));
+
+    const { toDecrement, toIncrement } = calculateInventoryChanges(
+      existingEquipment,
+      newEquipment
+    );
+    const increments = rpcQuantityItems(toIncrement);
+    const decrements = rpcQuantityItems(toDecrement);
+
+    if (increments.length > 0) {
+      const { error } = await supabase.rpc('increment_equipment_quantities', {
+        items_to_increment: increments,
+      });
+      if (error) throw error;
+      appliedIncrements = increments;
+    }
+
+    if (decrements.length > 0) {
+      const { error } = await supabase.rpc('decrement_equipment_quantities', {
+        items_to_decrement: decrements,
+      });
+      if (error) throw error;
+      appliedDecrements = decrements;
     }
 
     // Delete all existing booking_equipment records for this booking
@@ -289,17 +362,19 @@ export const syncBookingEquipment = async (bookingId, newEquipment = []) => {
       .eq('booking_id', bookingId);
 
     if (deleteError) throw deleteError;
+    replacedRows = true;
 
     // Insert new equipment records
     if (newEquipment.length > 0) {
       const equipmentRecords = newEquipment
-        .filter(eq => eq.type !== 'insurance') // Insurance is not stored in booking_equipment
-        .map(eq => ({
+        .filter((eq) => eq.type !== 'insurance' && eq.type !== 'driveway')
+        .map((eq) => ({
           booking_id: bookingId,
-          equipment_id: eq.id,
+          equipment_id: Number(eq.id ?? eq.equipment_id),
           quantity: eq.quantity || 1,
-          created_at: new Date().toISOString()
-        }));
+          created_at: new Date().toISOString(),
+        }))
+        .filter((eq) => Number.isFinite(eq.equipment_id) && eq.equipment_id > 0);
 
       if (equipmentRecords.length > 0) {
         const { error: insertError } = await supabase
@@ -310,10 +385,23 @@ export const syncBookingEquipment = async (bookingId, newEquipment = []) => {
       }
     }
 
-    return { success: true };
+    return { success: true, previous };
   } catch (error) {
     console.error('Error syncing booking equipment:', error);
-    return { success: false, error: error.message };
+    try {
+      await reverseApplied();
+      if (replacedRows && previous.length > 0) {
+        await supabase.from('booking_equipment').insert(previous.map((item) => ({
+          booking_id: bookingId,
+          equipment_id: item.id,
+          quantity: item.quantity || 1,
+          created_at: new Date().toISOString(),
+        })));
+      }
+    } catch (restoreError) {
+      console.error('Error restoring equipment after a failed sync:', restoreError);
+    }
+    return { success: false, error: error.message, previous };
   }
 };
 

@@ -5,7 +5,9 @@ import { getCorsHeaders } from "./cors.ts";
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import {
-  chargeCardOffSession,
+  attachPaymentMethodOnce,
+  chargePaymentMethodOffSession,
+  lookupSavedCardId,
   resolveInvoiceChargeId,
   resolvePaymentIntentChargeId,
 } from "../_shared/cardCharge.ts";
@@ -24,6 +26,45 @@ async function saveFeeCharge(bookingId, existingFees, feeType, fee) {
     }
   }).eq("id", bookingId);
   if (updErr) throw new Error(`DB error updating booking fees: ${updErr.message}`);
+}
+
+async function reusablePaymentMethodId(bookingId, bookingPaymentIntent, stripeCustomerId) {
+  const { data: paymentInfo } = await supabase
+    .from("stripe_payment_info")
+    .select("stripe_payment_method_id, stripe_payment_intent_id")
+    .eq("booking_id", bookingId)
+    .maybeSingle();
+  const savedId = paymentInfo?.stripe_payment_method_id;
+  if (typeof savedId === "string" && savedId.startsWith("pm_")) return savedId;
+
+  const onCustomer = await lookupSavedCardId(stripe, stripeCustomerId);
+  if (onCustomer) return onCustomer;
+
+  const paymentIntentId = paymentInfo?.stripe_payment_intent_id || bookingPaymentIntent;
+  if (!paymentIntentId) throw new Error("No card on file for this customer.");
+  const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["payment_method"] });
+  const method = pi.payment_method;
+  const methodId = typeof method === "string" ? method : method?.id;
+  if (!methodId) throw new Error("No card on file for this customer.");
+  await attachPaymentMethodOnce(stripe, stripeCustomerId, methodId);
+  await supabase.from("stripe_payment_info").update({
+    stripe_payment_method_id: methodId,
+    updated_at: new Date().toISOString()
+  }).eq("booking_id", bookingId);
+  return methodId;
+}
+
+async function bookingPaidWithLink(paymentIntentId) {
+  if (!paymentIntentId || typeof paymentIntentId !== "string") return false;
+  try {
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["payment_method"]
+    });
+    const method = pi.payment_method;
+    return Boolean(method && typeof method === "object" && method.type === "link");
+  } catch {
+    return false;
+  }
 }
 
 async function handleCharge({ customerId, amount, description, bookingId, feeType }) {
@@ -52,7 +93,7 @@ async function handleCharge({ customerId, amount, description, bookingId, feeTyp
     throw new Error(`Stripe customer ensure failed: ${e.message}`);
   }
 
-  const { data: bookingData, error: bookingErr } = await supabase.from("bookings").select("fees").eq("id", bookingId).single();
+  const { data: bookingData, error: bookingErr } = await supabase.from("bookings").select("fees, payment_intent").eq("id", bookingId).single();
   if (bookingErr) throw new Error(`DB error loading booking: ${bookingErr.message}`);
   const existingFees = bookingData?.fees || {};
   const existing = existingFees[feeType];
@@ -110,11 +151,40 @@ async function handleCharge({ customerId, amount, description, bookingId, feeTyp
   }
 
   const amountCents = Math.round(amount * 100);
-  const charged = await chargeCardOffSession(stripe, stripeCustomerId, amountCents, description, {
-    booking_id: String(bookingId),
-    database_customer_id: String(customerId),
-    fee_type: String(feeType)
-  }, `fee-${bookingId}-${feeType}-${amountCents}`);
+  let paymentMethodId;
+  try {
+    paymentMethodId = await reusablePaymentMethodId(bookingId, bookingData?.payment_intent, stripeCustomerId);
+  } catch (lookupErr) {
+    const message = lookupErr instanceof Error ? lookupErr.message : String(lookupErr);
+    if (!message.includes("No card on file") && !message.includes("previously used")) throw lookupErr;
+    const paidWithLink = await bookingPaidWithLink(bookingData?.payment_intent);
+    throw new Error(paidWithLink
+      ? "No card on file. This booking was paid with Stripe Link, and Link did not save a card that can be charged again."
+      : message);
+  }
+  let charged;
+  try {
+    charged = await chargePaymentMethodOffSession(
+      stripe,
+      stripeCustomerId,
+      paymentMethodId,
+      amountCents,
+      description,
+      {
+        booking_id: String(bookingId),
+        database_customer_id: String(customerId),
+        fee_type: String(feeType)
+      },
+      `fee-${bookingId}-${feeType}-${amountCents}`,
+    );
+  } catch (chargeErr) {
+    const message = chargeErr instanceof Error ? chargeErr.message : String(chargeErr);
+    if (!message.includes("No card on file") && !message.includes("previously used")) throw chargeErr;
+    const paidWithLink = await bookingPaidWithLink(bookingData?.payment_intent);
+    throw new Error(paidWithLink
+      ? "No card on file. This booking was paid with Stripe Link, and Link did not save a card that can be charged again."
+      : message);
+  }
 
   await saveFeeCharge(bookingId, existingFees, feeType, {
     amount,

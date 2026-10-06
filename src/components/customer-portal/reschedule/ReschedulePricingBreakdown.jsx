@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/api/EcommerceApi';
-import { Receipt, Loader2, ArrowRight, AlertCircle, Lock, RefreshCw } from 'lucide-react';
+import { Receipt, Loader2, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
-import { calculateDays, bookingHadInsurance } from '@/utils/rescheduleCalculations';
+import { calculateDays, buildOriginalAddonsList } from '@/utils/rescheduleCalculations';
+import { alignComparisonAddons } from '@/utils/rescheduleComparison';
 import { calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
 import { Button } from '@/components/ui/button';
 import { useTaxRate } from '@/utils/getTaxRate';
@@ -14,10 +15,107 @@ import {
 } from '@/utils/rescheduleTaxCalculator';
 import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 
-/** Highest line total first so Original and New Request rows line up. */
-const byLineTotalDesc = (a, b) =>
-    (Number(b.total) || 0) - (Number(a.total) || 0) ||
-    String(a.name || '').localeCompare(String(b.name || ''));
+const round2 = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
+
+const money = (amount, currencyInfo) => formatCurrency((Number(amount) || 0) * 100, currencyInfo);
+
+const DISCOUNT_ROWS = [
+    { key: 'loyalty', label: 'Loyalty discount' },
+    { key: 'referral', label: 'Referral discount' },
+    { key: 'coupon', label: 'Coupon' },
+];
+
+function BreakdownColumn({
+    tone,
+    serviceName,
+    costs,
+    alignedAddons,
+    showDelivery,
+    showMileage,
+    mileageNote,
+    showMileagePending,
+    discountRows,
+    taxLabel,
+    currencyInfo,
+}) {
+    const side = tone === 'original' ? 'original' : 'next';
+    const bodyText = tone === 'original' ? 'text-gray-300' : 'text-white';
+    const mutedText = tone === 'original' ? 'text-gray-500' : 'text-gray-400';
+    const border = tone === 'original' ? 'border-gray-800' : 'border-gold/30';
+    const heading = tone === 'original' ? 'text-gray-600' : 'text-gold-light';
+
+    return (
+        <div className="space-y-4 flex-1 text-base">
+            <div className={`flex justify-between items-start gap-4 ${bodyText}`}>
+                <span>Base Rental <span className={`text-xs ml-2 ${mutedText}`}>({serviceName} - {costs.days} days)</span></span>
+                <span className="font-bold shrink-0">{money(costs.baseRentalCost, currencyInfo)}</span>
+            </div>
+
+            {showDelivery && (
+                <div className={`flex justify-between items-center ${bodyText}`}>
+                    <span>Delivery Fee (Flat)</span>
+                    <span className="font-bold">{money(costs.deliveryFee, currencyInfo)}</span>
+                </div>
+            )}
+
+            {showMileage && (
+                <div className={`p-3 rounded-lg border ${tone === 'original' ? 'bg-gray-950 border-gray-800' : 'bg-gray-950/40 border-gold/20'}`}>
+                    <div className={`flex justify-between items-center ${bodyText}`}>
+                        <span className="font-semibold">Mileage Charge</span>
+                        <span className="font-bold">
+                            {showMileagePending ? 'Pending' : money(costs.mileageCharge, currencyInfo)}
+                        </span>
+                    </div>
+                    {mileageNote && <p className={`text-xs mt-1 min-h-4 ${mutedText}`}>{mileageNote}</p>}
+                </div>
+            )}
+
+            {alignedAddons.length > 0 && (
+                <div className={`pl-5 border-l-2 ${border} space-y-3 py-2`}>
+                    <span className={`text-xs font-black uppercase tracking-widest block mb-2 ${heading}`}>Add-ons & Equipment</span>
+                    {alignedAddons.map((row) => {
+                        const cell = row[side] || {};
+                        return (
+                            <div key={`${tone}-${row.key}`} className="space-y-1">
+                                <div className={`flex justify-between gap-4 text-sm ${bodyText}`}>
+                                    <span className="font-medium">{row.name}</span>
+                                    <span className="font-bold shrink-0">{money(cell.total, currencyInfo)}</span>
+                                </div>
+                                <p className={`text-xs min-h-4 ${mutedText}`}>
+                                    {cell.quantity > 0
+                                        ? `Qty: ${cell.quantity} @ ${money(cell.unitPrice, currencyInfo)} each`
+                                        : 'Not included'}
+                                </p>
+                                <p className={`text-xs min-h-4 ${mutedText}`}>{cell.note || '\u00a0'}</p>
+                            </div>
+                        );
+                    })}
+                    <div className={`flex justify-between text-sm pt-2 border-t ${tone === 'original' ? 'border-gray-800/50 text-gray-400' : 'border-gold/20 text-gray-300'}`}>
+                        <span>Add-ons Subtotal</span>
+                        <span>{money(costs.addonsTotal, currencyInfo)}</span>
+                    </div>
+                </div>
+            )}
+
+            {discountRows.map((row) => (
+                <div key={`${tone}-${row.key}`} className="flex justify-between items-center text-green-300">
+                    <span>{row.label}</span>
+                    <span className="font-bold">-{money(row.amount, currencyInfo)}</span>
+                </div>
+            ))}
+
+            <div className={`flex justify-between items-center ${bodyText} mt-4 pt-4 border-t ${tone === 'original' ? 'border-gray-800/50' : 'border-[hsl(var(--gold)_/_0.2)]'}`}>
+                <span>{tone === 'original' ? 'Subtotal' : 'New Subtotal'}</span>
+                <span className="font-bold">{money(costs.subtotal, currencyInfo)}</span>
+            </div>
+
+            <div className={`flex justify-between items-center ${tone === 'original' ? 'text-gray-400' : 'text-gray-300'}`}>
+                <span>{taxLabel}</span>
+                <span>{money(costs.tax, currencyInfo)}</span>
+            </div>
+        </div>
+    );
+}
 
 export const ReschedulePricingBreakdown = ({
     bookingId,
@@ -125,52 +223,9 @@ export const ReschedulePricingBreakdown = ({
                     }
                 }
 
-                // Extract ALL original add-ons including disposal services
-                console.log('[ReschedulePricing] Extracting original add-ons...');
-                const equipmentAddons = (booking.booking_equipment || []).map(be => {
-                    const name = be.equipment?.name || 'Unknown Equipment';
-                    const type = be.equipment?.type || 'rental';
-                    console.log(`[ReschedulePricing] Original addon: ${name} (type: ${type}, qty: ${be.quantity})`);
-                    
-                    return {
-                        name: name,
-                        quantity: be.quantity || 1,
-                        unitPrice: Number(be.equipment?.price || 0),
-                        total: Number(be.equipment?.price || 0) * (be.quantity || 1),
-                        type: type
-                    };
-                });
-
-                let insuranceAddon = null;
-                if (bookingHadInsurance(booking.addons)) {
-                    const applied = Number(booking.addons.insurancePriceApplied);
-                    const price = applied > 0 ? applied : 25;
-                    insuranceAddon = {
-                        name: 'Premium Insurance',
-                        quantity: 1,
-                        unitPrice: price,
-                        total: price,
-                        type: 'service',
-                    };
-                    console.log('[ReschedulePricing] Original addon: Premium Insurance');
-                }
-
-                const allOriginalAddons = [...equipmentAddons];
-                if (insuranceAddon) {
-                    allOriginalAddons.push(insuranceAddon);
-                }
-                allOriginalAddons.sort(byLineTotalDesc);
-                console.log(`[ReschedulePricing] Total original addons: ${allOriginalAddons.length}`);
-
                 const originalAddonsForCalc = (originalAddonsList && originalAddonsList.length > 0)
                     ? originalAddonsList
-                    : allOriginalAddons.map((a) => ({
-                        id: a.name === 'Premium Insurance' ? 'insurance' : undefined,
-                        name: a.name,
-                        price: a.unitPrice,
-                        quantity: a.quantity,
-                        type: a.type,
-                    }));
+                    : buildOriginalAddonsList(booking, booking.booking_equipment || [], [], insurancePrice || 25);
 
                 const { data: originalServiceTax } = await supabase
                     .from('services')
@@ -208,8 +263,8 @@ export const ReschedulePricingBreakdown = ({
                     mileageCharge: originalIsDelivery ? originalCostResult.mileageCharge : 0,
                     mileageDistance: originalIsDelivery ? originalTotalMiles : 0,
                     mileageRate: originalMileageRate,
-                    addons: allOriginalAddons,
                     addonsTotal: originalCostResult.addonsCost,
+                    discounts: originalCostResult.discounts || {},
                     subtotal: originalCostResult.subtotal,
                     tax: originalCostResult.tax,
                     total: originalCostResult.total,
@@ -217,7 +272,6 @@ export const ReschedulePricingBreakdown = ({
                 };
 
                 if (!isMounted) return;
-                setOriginalDetailedCosts(originalCostsData);
                 setTaxRateUsed(taxRate);
 
                 if (!newService || !newDropOffDate) {
@@ -285,20 +339,14 @@ export const ReschedulePricingBreakdown = ({
                     discounts: rewardDiscounts,
                 });
 
-                const addonsMap = new Map();
-                (newAddonsList || []).forEach((addon) => {
-                    const name = addon?.name || 'Unknown';
-                    const key = name.toLowerCase();
-                    if (!addonsMap.has(key)) {
-                        addonsMap.set(key, {
-                            name,
-                            quantity: Number(addon?.quantity) || 1,
-                            unitPrice: Number(addon?.price) || 0,
-                            total: (Number(addon?.price) || 0) * (Number(addon?.quantity) || 1),
-                        });
-                    }
-                });
-                const newAddons = Array.from(addonsMap.values()).sort(byLineTotalDesc);
+                const alignedAddons = alignComparisonAddons(
+                    originalAddonsForCalc,
+                    newAddonsList || [],
+                    { originalDays, newDays },
+                );
+                const sumSide = (side) => round2(
+                    alignedAddons.reduce((sum, row) => sum + Number(row[side]?.total || 0), 0),
+                );
 
                 const newCostsData = {
                     baseRentalCost: newCostResult.baseRentalCost,
@@ -306,15 +354,19 @@ export const ReschedulePricingBreakdown = ({
                     mileageCharge: isNewDeliveryService ? (isManualAddress ? 0 : newMileageCharge || newCostResult.mileageCharge) : 0,
                     mileageDistance: isNewDeliveryService ? newMileageDistance : 0,
                     mileageRate: newMileageRate,
-                    addons: newAddons,
-                    addonsTotal: newCostResult.addonsCost,
+                    addonsTotal: sumSide('next'),
+                    discounts: newCostResult.discounts || {},
                     subtotal: newCostResult.subtotal,
                     tax: newCostResult.tax,
                     total: newCostResult.total,
                     days: newDays,
+                    alignedAddons,
                 };
+                originalCostsData.addonsTotal = sumSide('original');
+                originalCostsData.alignedAddons = alignedAddons;
 
                 if (!isMounted) return;
+                setOriginalDetailedCosts(originalCostsData);
                 setNewCosts(newCostsData);
 
                 setMileageLogic(
@@ -379,6 +431,24 @@ export const ReschedulePricingBreakdown = ({
     const difference = newCosts.total - originalDetailedCosts.total;
     const isCredit = difference < 0;
     const isCharge = difference > 0;
+    const alignedAddons = newCosts.alignedAddons || originalDetailedCosts.alignedAddons || [];
+    const showDelivery = Number(originalDetailedCosts.deliveryFee) > 0 || Number(newCosts.deliveryFee) > 0;
+    const showMileage = Number(originalDetailedCosts.mileageCharge) > 0
+        || Number(newCosts.mileageCharge) > 0
+        || Boolean(mileageLogic);
+    const taxLabel = `Estimated Tax (${Number(taxRateUsed || taxRate).toFixed(2)}%)`;
+    const discountRows = DISCOUNT_ROWS.flatMap((row) => {
+        const originalAmount = Number(originalDetailedCosts.discounts?.[row.key] || 0);
+        const nextAmount = Number(newCosts.discounts?.[row.key] || 0);
+        if (originalAmount <= 0 && nextAmount <= 0) return [];
+        const code = originalDetailedCosts.discounts?.couponCode || newCosts.discounts?.couponCode;
+        return [{
+            key: row.key,
+            label: row.key === 'coupon' && code ? `Coupon (${code})` : row.label,
+            originalAmount,
+            nextAmount,
+        }];
+    });
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto w-full">
@@ -399,62 +469,20 @@ export const ReschedulePricingBreakdown = ({
                         </span>
                     </div>
                     <CardContent className="p-8 pt-16 flex flex-col h-full">
-                        <div className="space-y-4 flex-1 text-base">
-                            <div className="flex justify-between items-center text-gray-300">
-                                <span>Base Rental <span className="text-xs text-gray-500 ml-2">({originalService?.name} - {originalDetailedCosts.days} days)</span></span>
-                                <span className="font-bold">{formatCurrency(originalDetailedCosts.baseRentalCost * 100, currencyInfo)}</span>
-                            </div>
-                            
-                            {originalDetailedCosts.deliveryFee > 0 && (
-                                <div className="flex justify-between items-center text-gray-300">
-                                    <span>Delivery Fee (Flat)</span>
-                                    <span className="font-bold">{formatCurrency(originalDetailedCosts.deliveryFee * 100, currencyInfo)}</span>
-                                </div>
-                            )}
-
-                            {originalDetailedCosts.mileageCharge > 0 && (
-                                <div className="bg-gray-950 p-3 rounded-lg border border-gray-800">
-                                    <div className="flex justify-between items-center text-gray-300">
-                                        <span className="font-semibold">Mileage Charge</span>
-                                        <span className="font-bold">{formatCurrency(originalDetailedCosts.mileageCharge * 100, currencyInfo)}</span>
-                                    </div>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        {originalDetailedCosts.mileageDistance.toFixed(2)} miles (complete route) @ ${originalDetailedCosts.mileageRate.toFixed(2)}/mile
-                                    </p>
-                                </div>
-                            )}
-                            
-                            {originalDetailedCosts.addons.length > 0 && (
-                                <div className="pl-5 border-l-2 border-gray-800 space-y-2.5 py-2">
-                                    <span className="text-xs font-black text-gray-600 uppercase tracking-widest block mb-2">Add-ons & Equipment</span>
-                                    {originalDetailedCosts.addons.map((addon, idx) => (
-                                        <div key={`orig-addon-${idx}`} className="space-y-1">
-                                            <div className="flex justify-between text-sm text-gray-300">
-                                                <span className="font-medium">{addon.name}</span>
-                                                <span className="font-bold">{formatCurrency(addon.total * 100, currencyInfo)}</span>
-                                            </div>
-                                            <p className="text-xs text-gray-500">
-                                                Qty: {addon.quantity} @ {formatCurrency(addon.unitPrice * 100, currencyInfo)} each
-                                            </p>
-                                        </div>
-                                    ))}
-                                    <div className="flex justify-between text-sm text-gray-400 pt-2 border-t border-gray-800/50">
-                                        <span>Add-ons Subtotal</span>
-                                        <span>{formatCurrency(originalDetailedCosts.addonsTotal * 100, currencyInfo)}</span>
-                                    </div>
-                                </div>
-                            )}
-                            
-                            <div className="flex justify-between items-center text-gray-300 mt-4 pt-4 border-t border-gray-800/50">
-                                <span>Subtotal</span>
-                                <span className="font-bold">{formatCurrency(originalDetailedCosts.subtotal * 100, currencyInfo)}</span>
-                            </div>
-                            
-                            <div className="flex justify-between items-center text-gray-400">
-                                <span>Estimated Tax ({Number(taxRateUsed || taxRate).toFixed(2)}%)</span>
-                                <span>{formatCurrency(originalDetailedCosts.tax * 100, currencyInfo)}</span>
-                            </div>
-                        </div>
+                        <BreakdownColumn
+                            tone="original"
+                            serviceName={originalService?.name}
+                            costs={originalDetailedCosts}
+                            alignedAddons={alignedAddons}
+                            showDelivery={showDelivery}
+                            showMileage={showMileage}
+                            mileageNote={originalDetailedCosts.mileageCharge > 0
+                                ? `${Number(originalDetailedCosts.mileageDistance || 0).toFixed(2)} miles (complete route) @ $${Number(originalDetailedCosts.mileageRate || 0).toFixed(2)}/mile`
+                                : 'Not included'}
+                            discountRows={discountRows.map((row) => ({ key: row.key, label: row.label, amount: row.originalAmount }))}
+                            taxLabel={taxLabel}
+                            currencyInfo={currencyInfo}
+                        />
 
                         <div className="bg-gray-950 p-5 rounded-xl border border-gray-800 mt-8">
                             <div className="flex justify-between items-center">
@@ -476,78 +504,19 @@ export const ReschedulePricingBreakdown = ({
                         </span>
                     </div>
                     <CardContent className="p-8 pt-16 flex flex-col h-full">
-                        <div className="space-y-4 flex-1 text-base">
-                            <div className="flex justify-between items-center text-white">
-                                <span>Base Rental <span className="text-xs text-gold-light/60 ml-2">({newService?.name} - {newCosts.days} days)</span></span>
-                                <span className="font-bold">{formatCurrency(newCosts.baseRentalCost * 100, currencyInfo)}</span>
-                            </div>
-                            
-                            {newCosts.deliveryFee > 0 && (
-                                <div className="flex justify-between items-center text-white">
-                                    <span>Delivery Fee (Flat)</span>
-                                    <span className="font-bold">{formatCurrency(newCosts.deliveryFee * 100, currencyInfo)}</span>
-                                </div>
-                            )}
-
-                            {mileageLogic && (
-                                <div className={`p-3 rounded-lg border ${
-                                    mileageLogic.isSameAddress 
-                                        ? 'bg-blue-950/30 border-blue-500/30' 
-                                        : mileageLogic.isManualAddress 
-                                            ? 'bg-orange-950/30 border-orange-500/30'
-                                            : 'bg-green-950/30 border-green-500/30'
-                                }`}>
-                                    <div className="flex justify-between items-center text-white">
-                                        <span className="font-semibold flex items-center gap-2">
-                                            {mileageLogic.isSameAddress && <Lock className="w-4 h-4" />}
-                                            {!mileageLogic.isSameAddress && !mileageLogic.isManualAddress && <RefreshCw className="w-4 h-4" />}
-                                            Mileage Charge
-                                        </span>
-                                        <span className="font-bold">
-                                            {mileageLogic.isManualAddress ? 'Pending' : formatCurrency(newCosts.mileageCharge * 100, currencyInfo)}
-                                        </span>
-                                    </div>
-                                    <p className={`text-xs mt-1 ${
-                                        mileageLogic.isSameAddress ? 'text-blue-300' : 
-                                        mileageLogic.isManualAddress ? 'text-orange-300' : 
-                                        'text-green-300'
-                                    }`}>
-                                        {mileageLogic.explanation}
-                                    </p>
-                                </div>
-                            )}
-                            
-                            {newCosts.addons.length > 0 && (
-                                <div className="pl-5 border-l-2 border-gold/30 space-y-2.5 py-2">
-                                    <span className="text-xs font-black text-gold-light uppercase tracking-widest block mb-2">Selected Add-ons</span>
-                                    {newCosts.addons.map((addon, idx) => (
-                                        <div key={`new-addon-${idx}`} className="space-y-1">
-                                            <div className="flex justify-between text-sm text-white">
-                                                <span className="font-medium">{addon.name}</span>
-                                                <span className="font-bold">{formatCurrency(addon.total * 100, currencyInfo)}</span>
-                                            </div>
-                                            <p className="text-xs text-gray-400">
-                                                Qty: {addon.quantity} @ {formatCurrency(addon.unitPrice * 100, currencyInfo)} each
-                                            </p>
-                                        </div>
-                                    ))}
-                                    <div className="flex justify-between text-sm text-gray-300 pt-2 border-t border-gold/20">
-                                        <span>Add-ons Subtotal</span>
-                                        <span>{formatCurrency(newCosts.addonsTotal * 100, currencyInfo)}</span>
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex justify-between items-center text-white mt-4 pt-4 border-t border-[hsl(var(--gold)_/_0.2)]">
-                                <span>New Subtotal</span>
-                                <span className="font-bold">{formatCurrency(newCosts.subtotal * 100, currencyInfo)}</span>
-                            </div>
-
-                            <div className="flex justify-between items-center text-gray-300">
-                                <span>Estimated Tax ({Number(taxRateUsed || taxRate).toFixed(2)}%)</span>
-                                <span>{formatCurrency(newCosts.tax * 100, currencyInfo)}</span>
-                            </div>
-                        </div>
+                        <BreakdownColumn
+                            tone="next"
+                            serviceName={newService?.name}
+                            costs={newCosts}
+                            alignedAddons={alignedAddons}
+                            showDelivery={showDelivery}
+                            showMileage={showMileage}
+                            showMileagePending={Boolean(mileageLogic?.isManualAddress)}
+                            mileageNote={mileageLogic?.explanation || (newCosts.mileageCharge > 0 ? 'Mileage charge' : 'Not included')}
+                            discountRows={discountRows.map((row) => ({ key: row.key, label: row.label, amount: row.nextAmount }))}
+                            taxLabel={taxLabel}
+                            currencyInfo={currencyInfo}
+                        />
 
                         <div className="bg-gray-950 p-5 rounded-xl border border-[hsl(var(--gold)_/_0.4)] mt-8">
                             <div className="flex justify-between items-center">

@@ -49,12 +49,32 @@ const formatDateTime = (dateValue: unknown, timeValue: unknown) => {
 const formatAddonList = (addons: unknown) => {
   if (!Array.isArray(addons) || addons.length === 0) return "None";
   return addons
-    .map((a: Record<string, unknown>) => {
-      const name = String(a?.name || a?.label || "Add-on");
-      const qty = Number(a?.quantity || 1);
-      return `${name} (qty ${qty})`;
-    })
-    .join(", ");
+    .map((a: Record<string, unknown>) => formatAddonLine(a))
+    .join("; ");
+};
+
+const formatAddonLine = (addon: Record<string, unknown>) => {
+  const name = String(addon?.name || addon?.label || "Add-on");
+  const qty = Number(addon?.quantity || 1);
+  const lineTotal = addon?.lineTotal != null
+    ? Number(addon.lineTotal)
+    : (addon?.price != null ? Number(addon.price) * qty : null);
+  const extraDays = Number(addon?.extraDays || 0);
+  const rate = Number(addon?.additionalDayPrice ?? addon?.additional_day_price ?? 0);
+  const extra = extraDays > 0 && rate > 0
+    ? ` Includes ${formatCurrency(rate)} × ${extraDays} additional day${extraDays === 1 ? "" : "s"}`
+    : "";
+  const amount = lineTotal != null ? ` ${formatCurrency(lineTotal)}` : "";
+  return `${name} (qty ${qty})${extra}${amount}`.trim();
+};
+
+const addonDetailRows = (addons: unknown): Array<[string, string]> => {
+  if (!Array.isArray(addons) || addons.length === 0) return [["Equipment", "None"]];
+  return addons.map((addon) => {
+    const row = addon as Record<string, unknown>;
+    const name = String(row?.name || row?.label || "Add-on");
+    return [name, formatAddonLine(row).replace(`${name} `, "")];
+  });
 };
 
 const parseJsonField = (value: unknown) => {
@@ -174,6 +194,24 @@ const generateRescheduleEmailHTML = (opts: {
   if (stripeType === "charge") stripeLine = `Card charged ${formatCurrency(amountProcessed || Math.abs(delta))}`;
   if (stripeType === "refund") stripeLine = `Refunded to card ${formatCurrency(amountProcessed || Math.abs(delta))}`;
 
+  const savedAddons = (booking.addons || {}) as Record<string, unknown>;
+  const pricingRows: Array<[string, string]> = [
+    ["Original total", formatCurrency(originalTotal)],
+    ["Subtotal", formatCurrency(Number(booking.subtotal_before_tax || 0))],
+    ["Tax", formatCurrency(Number(booking.tax_amount || 0))],
+    ["New total", formatCurrency(newTotal)],
+    ["Difference", formatCurrency(delta)],
+    ["Payment", stripeLine],
+  ];
+  const loyalty = Number(savedAddons.loyaltyDiscountAmount || 0);
+  const referral = Number(savedAddons.referralDiscountAmount || 0);
+  if (loyalty > 0) pricingRows.splice(1, 0, ["Loyalty discount", `-${formatCurrency(loyalty)}`]);
+  if (referral > 0) pricingRows.splice(1, 0, ["Referral discount", `-${formatCurrency(referral)}`]);
+  const lateFee = (booking.fees as Record<string, unknown> | undefined)?.late_reschedule_fee as Record<string, unknown> | undefined;
+  if (Number(lateFee?.amount) > 0) {
+    pricingRows.push(["Late reschedule fee", formatCurrency(Number(lateFee?.amount))]);
+  }
+
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Reschedule Approved</title></head>
@@ -206,14 +244,11 @@ const generateRescheduleEmailHTML = (opts: {
       }
       ${sectionBlock("Equipment & add-ons", [
         ["Previous", formatAddonList(source.original_addons)],
-        ["Approved", formatAddonList(source.new_addons)],
+        ...addonDetailRows(
+          (booking.addons as Record<string, unknown>)?.equipment || source.new_addons,
+        ).map(([name, detail]) => [`Approved: ${name}`, detail] as [string, string]),
       ])}
-      ${sectionBlock("Pricing", [
-        ["Original total", formatCurrency(originalTotal)],
-        ["New total", formatCurrency(newTotal)],
-        ["Difference", formatCurrency(delta)],
-        ["Payment", stripeLine],
-      ])}
+      ${sectionBlock("Pricing", pricingRows)}
 
       <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
         <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
@@ -297,6 +332,15 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
           ? sectionBlock("Requested schedule", [
               ["Start", requestedDrop !== "N/A" ? requestedDrop : ""],
               ["End", requestedPick !== "N/A" ? requestedPick : ""],
+            ])
+          : ""
+      }
+      ${sectionBlock("Requested equipment", addonDetailRows(source.new_addons))}
+      ${
+        source.pricing || source.new_total
+          ? sectionBlock("Requested pricing", [
+              ["New total", formatCurrency(Number(source.new_total || (source.pricing as Record<string, unknown>)?.total || 0))],
+              ["Tax", formatCurrency(Number((source.pricing as Record<string, unknown>)?.tax || 0))],
             ])
           : ""
       }

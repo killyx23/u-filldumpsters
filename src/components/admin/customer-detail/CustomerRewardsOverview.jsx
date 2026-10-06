@@ -29,6 +29,7 @@ export const CustomerRewardsOverview = ({
   referrals = [],
 }) => {
   const pointsBalance = Number(loyaltySummary?.points_balance || 0);
+  const pendingPoints = Number(loyaltySummary?.pending_balance || 0);
   const pointsEarned = Number(loyaltySummary?.total_points_earned || 0);
   const pointsRedeemed = Number(loyaltySummary?.total_points_redeemed || 0);
   const pendingReferral = Number(referralWallet?.pending_balance || 0);
@@ -46,6 +47,10 @@ export const CustomerRewardsOverview = ({
         <div className="bg-white/5 border border-white/10 rounded-lg p-4">
           <p className="text-xs text-blue-200">Active Points</p>
           <p className="text-2xl font-bold text-yellow-400">{pointsBalance}</p>
+        </div>
+        <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+          <p className="text-xs text-blue-200">Pending Points</p>
+          <p className="text-2xl font-bold text-orange-300">{pendingPoints}</p>
         </div>
         <div className="bg-white/5 border border-white/10 rounded-lg p-4">
           <p className="text-xs text-blue-200">Used Points</p>

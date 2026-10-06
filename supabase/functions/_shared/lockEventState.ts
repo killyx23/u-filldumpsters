@@ -1,8 +1,12 @@
 /**
  * Lock-event state machine for self-pickup rentals.
  * - First unlock at/after booking start → Mark Rented (status Delivered + rented_out_at)
- * - Lock at/after scheduled end → Mark Returned (status pending_checklist + returned_at)
- * - Grace-hour sweep closes rentals whose last lock fell in/after the end window
+ *   and send the rental-started email/SMS.
+ * - The auto-lock a couple of minutes after an unlock only closes the lock icon.
+ * - A later lock finishes the rental once the scheduled return time has arrived,
+ *   including a lock that happened earlier while the trailer was away.
+ * - The sweep uses that later lock when the clock reaches the scheduled return
+ *   and nobody has to open the lock again.
  */
 
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "./pinTiming.ts";
@@ -17,6 +21,61 @@ export type LockEventInput = {
   eventTimestamp: string;
   notes?: string;
 };
+
+/** A close this soon after an unlock is the padlock auto-locking, not a return. */
+export const AUTOLOCK_DWELL_MS = 2 * 60 * 1000;
+/** Wake the bridge this long before drop-off so the pickup unlock is heard. */
+export const PICKUP_LISTEN_LEAD_MS = 30 * 60 * 1000;
+/** Keep listening this long after drop-off if they have not unlocked yet. */
+export const PICKUP_LISTEN_TAIL_MS = 12 * 60 * 60 * 1000;
+/** Wake the bridge this long before the scheduled return to catch the backlog. */
+export const RETURN_LISTEN_LEAD_MS = 2 * 60 * 60 * 1000;
+/** Stop the return wake a day after the scheduled end if they still have not come back. */
+export const RETURN_LISTEN_TAIL_MS = 24 * 60 * 60 * 1000;
+
+export type BridgeWakeReason = "pickup" | "return";
+
+/** True when this close belongs to the unlock that just happened. */
+export function isAutolockDwell(unlockMs: number, lockMs: number): boolean {
+  return lockMs >= unlockMs && lockMs - unlockMs <= AUTOLOCK_DWELL_MS;
+}
+
+/**
+ * The bridge should be woken for a pickup that has not unlocked yet, or for a
+ * return that is due. It should stay asleep for the days in between.
+ */
+export function bookingNeedsBridgeWake(
+  booking: Record<string, unknown>,
+  now: Date = new Date(),
+): BridgeWakeReason | null {
+  if (!isCustomerPickupBooking(booking)) return null;
+  if (booking.returned_at) return null;
+  const status = String(booking.status || "");
+  if (status === "Cancelled" || status === "Completed" || status === "flagged") return null;
+
+  const window = getBookingWindow(booking);
+  const nowMs = now.getTime();
+  if (!Number.isFinite(window.startMs) || !Number.isFinite(window.endMs)) return null;
+
+  if (
+    !booking.rented_out_at &&
+    nowMs >= window.startMs - PICKUP_LISTEN_LEAD_MS &&
+    nowMs < window.startMs + PICKUP_LISTEN_TAIL_MS &&
+    nowMs < window.endMs
+  ) {
+    return "pickup";
+  }
+
+  if (
+    booking.rented_out_at &&
+    nowMs >= window.endMs - RETURN_LISTEN_LEAD_MS &&
+    nowMs < window.endMs + RETURN_LISTEN_TAIL_MS
+  ) {
+    return "return";
+  }
+
+  return null;
+}
 
 function isCustomerPickupBooking(booking: Record<string, unknown>): boolean {
   if (isDeliveryBooking(booking)) return false;
@@ -179,7 +238,13 @@ export async function applyLockEvent(
     return inserted ? "logged_unlock" : "duplicate_unlock";
   }
 
-  // lock event
+  const pairedUnlockMs = await latestUnlockMsBefore(supabase, event.orderId, eventMs);
+  if (pairedUnlockMs !== null && isAutolockDwell(pairedUnlockMs, eventMs)) {
+    return inserted ? "logged_autolock" : "duplicate_autolock";
+  }
+
+  // A later close, once the scheduled return has arrived. The close itself may
+  // have happened earlier, while the trailer was away from the bridge.
   if (
     eventMs >= window.endMs &&
     booking.rented_out_at &&
@@ -191,9 +256,29 @@ export async function applyLockEvent(
   return inserted ? "logged_lock" : "duplicate_lock";
 }
 
+async function latestUnlockMsBefore(
+  supabase: SupabaseClient,
+  orderId: number,
+  lockMs: number,
+): Promise<number | null> {
+  const { data } = await supabase
+    .from("rental_tracking_logs")
+    .select("event_timestamp")
+    .eq("order_id", orderId)
+    .eq("event_type", "unlock")
+    .lte("event_timestamp", new Date(lockMs).toISOString())
+    .order("event_timestamp", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.event_timestamp) return null;
+  const ms = new Date(data.event_timestamp).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 /**
- * After ingesting events, close any self-pickup rental whose grace hour has
- * passed and that has a lock event at/after the scheduled end but no returned_at.
+ * Once the scheduled return time has arrived, finish a rental from its latest
+ * real lock. The pickup auto-lock does not count. An earlier close from while
+ * the trailer was away does, so they do not have to open the lock again.
  */
 export async function sweepGraceHourReturns(
   supabase: SupabaseClient,
@@ -219,19 +304,22 @@ export async function sweepGraceHourReturns(
   for (const booking of candidates) {
     if (!isCustomerPickupBooking(booking)) continue;
     const window = getBookingWindow(booking);
-    if (nowMs < window.graceEndMs) continue;
+    if (nowMs < window.endMs) continue;
 
     const { data: lockEvent } = await supabase
       .from("rental_tracking_logs")
       .select("event_timestamp")
       .eq("order_id", booking.id)
       .eq("event_type", "lock")
-      .gte("event_timestamp", new Date(window.endMs).toISOString())
       .order("event_timestamp", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (!lockEvent?.event_timestamp) continue;
+    const lockMs = new Date(lockEvent.event_timestamp).getTime();
+    if (Number.isNaN(lockMs)) continue;
+    const pairedUnlockMs = await latestUnlockMsBefore(supabase, Number(booking.id), lockMs);
+    if (pairedUnlockMs !== null && isAutolockDwell(pairedUnlockMs, lockMs)) continue;
 
     const ok = await markReturned(supabase, booking, lockEvent.event_timestamp);
     if (ok) closed += 1;
@@ -271,4 +359,35 @@ export async function resolveOrderIdByPin(
   }
   // Fallback: most recent matching PIN
   return Number(data[0].order_id);
+}
+
+/**
+ * A padlock auto-lock has no PIN. Attach it to the booking the preceding
+ * unlock on this device already matched, and only while that rental is still open.
+ */
+export async function resolvePrecedingUnlockOrderId(
+  supabase: SupabaseClient,
+  deviceId: string,
+  eventTimestamp: string,
+): Promise<number | null> {
+  const { data: unlock, error } = await supabase
+    .from("lock_device_events")
+    .select("order_id")
+    .eq("device_id", deviceId)
+    .eq("event_kind", "unlock")
+    .not("order_id", "is", null)
+    .lte("occurred_at", eventTimestamp)
+    .order("occurred_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !unlock?.order_id) return null;
+
+  const orderId = Number(unlock.order_id);
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, returned_at")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (!booking || booking.returned_at) return null;
+  return orderId;
 }

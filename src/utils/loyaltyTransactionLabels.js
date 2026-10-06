@@ -14,6 +14,8 @@ export function formatLoyaltyTxLabel(tx) {
   const bookingSuffix = tx?.booking_id ? ` (#${tx.booking_id})` : '';
 
   switch (type) {
+    case 'pending':
+      return `Pending${bookingSuffix}`;
     case 'earned':
       return `Earned${bookingSuffix}`;
     case 'redeemed':

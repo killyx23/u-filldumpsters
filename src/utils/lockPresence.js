@@ -50,6 +50,7 @@ export function watchManualLockAfterCommand({
   let stopped = false;
   let timer = null;
   const started = Date.now();
+  let lastPull = started;
   const waitingForAutolock = action === 'remote_unlock' && currentState !== 'locked';
 
   const finish = (devices) => {
@@ -60,6 +61,12 @@ export function watchManualLockAfterCommand({
 
   const tick = async () => {
     if (stopped) return;
+    if (waitingForAutolock && Date.now() - lastPull >= 35000) {
+      lastPull = Date.now();
+      supabase.functions.invoke('test-lock-lifecycle', {
+        body: { action: 'pull_manual_autolock' },
+      }).catch(() => {});
+    }
     const { devices } = await loadLockPresenceDevices();
     if (stopped) return;
     const device = devices?.[0];

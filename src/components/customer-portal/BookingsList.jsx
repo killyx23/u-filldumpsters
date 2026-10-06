@@ -17,8 +17,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { canExtendBooking } from '@/utils/rentalExtension';
+import { bookingNeedsReview, isReviewPending, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
 
-export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onRescheduleClick, onExtendClick }) => {
+export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, onCancelClick, onRescheduleClick, onExtendClick, onLeaveReview }) => {
   const [filterStatus, setFilterStatus] = useState('all');
 
   const filteredBookings = useMemo(() => {
@@ -125,7 +126,10 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
           const statusInfo = getStatusInfo(booking);
           const canModify = !booking.pending_address_verification && ['pending_payment', 'Confirmed', 'Rescheduled'].includes(booking.status);
           const canExtend = canExtendBooking(booking);
-          const isCompleted = ['Completed', 'flagged', 'Returned'].includes(booking.status) || booking.returned_at;
+          const canReview = bookingNeedsReview(booking, customerReviews);
+          const pendingReview = (customerReviews || []).find(
+            (review) => String(review?.booking_id) === String(booking.id) && isReviewPending(review)
+          );
 
           return (
             <Card key={booking.id} className={`bg-white/5 border-white/10 text-white flex flex-col ${booking.pending_address_verification ? 'border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.15)]' : ''}`}>
@@ -161,10 +165,23 @@ export const BookingsList = ({ bookings, onReceiptClick, onCancelClick, onResche
                 </div>
               </CardContent>
               <CardFooter className="pt-4 border-t border-white/5 flex flex-wrap gap-2 justify-end">
-                {isCompleted && (
-                   <div className="w-full text-xs text-yellow-400/80 mb-2 flex items-center justify-end">
+                {canReview && (
+                   <button
+                      type="button"
+                      onClick={() => onLeaveReview?.(booking)}
+                      className="w-full text-xs text-yellow-400/80 mb-2 flex items-center justify-end underline underline-offset-2 hover:text-yellow-300"
+                   >
                       <Star className="w-3 h-3 mr-1"/> Visit Communication Hub to leave a review
-                   </div>
+                   </button>
+                )}
+                {pendingReview && (
+                   <button
+                      type="button"
+                      onClick={() => onLeaveReview?.(booking)}
+                      className="w-full text-xs text-left text-blue-200 mb-2 flex items-start justify-end underline underline-offset-2 hover:text-blue-100"
+                   >
+                      <Clock className="w-3 h-3 mr-1 mt-0.5 shrink-0"/> {PENDING_REVIEW_MESSAGE}
+                   </button>
                 )}
                 <Button variant="outline" size="sm" onClick={() => onReceiptClick(booking)} className="border-white/20 hover:bg-white/10">Details</Button>
                 {canExtend && (

@@ -199,7 +199,11 @@ const FeeChargeDialog = ({ open, onOpenChange, booking, feeType, itemDetails, on
                 }
             });
 
-            if (error) throw error;
+            if (error) {
+                const errContext = await error.context?.json().catch(() => null);
+                throw new Error(errContext?.error || error.message);
+            }
+            if (data?.error) throw new Error(data.error);
 
             toast({ title: "Success", description: data.message });
             onSuccessfulCharge();
@@ -862,7 +866,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const relevantEquipment = equipment.filter(e => e.booking_id === booking.id);
                 
                 const paymentInfo = Array.isArray(booking.stripe_payment_info) ? booking.stripe_payment_info[0] : booking.stripe_payment_info;
-                const stripeChargeId = paymentInfo?.stripe_charge_id || booking.payment_intent || booking.client_secret || 'N/A';
+                const stripeCustomerId = paymentInfo?.stripe_customer_id || 'Not saved';
+                const stripeChargeId = paymentInfo?.stripe_charge_id || 'Not saved';
+                const stripePaymentMethodId = paymentInfo?.stripe_payment_method_id || 'Not saved';
                 
                 const totalPrice = booking.total_price && typeof booking.total_price === 'number' ? booking.total_price.toFixed(2) : '0.00';
                 const loyaltyPointsEarned = Number(booking.addons?.loyaltyPointsEarned || 0);
@@ -917,7 +923,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
                             <DetailItem icon={<Clock />} label={isPickup ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
                             <DetailItem icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(oneWayMiles)} />
+                            <DetailItem icon={<Hash />} label="Stripe Customer ID" value={stripeCustomerId} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
+                            <DetailItem icon={<Hash />} label="Stripe Payment Method" value={stripePaymentMethodId} />
                         </div>
 
                         {rescheduleApproval && (

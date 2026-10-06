@@ -28,7 +28,7 @@ function isBrowserUnreachableStorageHost(hostname) {
 }
 
 /**
- * In local dev, edge/storage may return signed URLs for 127.0.0.1:55421 or Docker-only
+ * In local dev, edge/storage may return signed URLs for 127.0.0.1:54321 or Docker-only
  * hosts like kong:8000. Rewrite onto the Vite origin so /storage/v1 is proxied and <img> loads.
  */
 export function rewriteStorageUrlForCurrentOrigin(url) {

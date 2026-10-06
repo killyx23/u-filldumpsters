@@ -5,6 +5,10 @@
  * 2) GET /devices/{id}/activity — reads stored unlock/lock history
  * 3) Match PINs → bookings, apply rented/returned state machine
  *
+ * The cron still ticks every 5 minutes, but the bridge is only woken while a
+ * pickup is waiting for its first unlock, while a return is due, or while a
+ * lock is still recorded as open. POST { "force": true } always wakes it.
+ *
  * Probe mode: POST { "probe": true } or ?probe=1 — returns raw payloads
  * without applying state changes.
  */
@@ -17,12 +21,13 @@ import {
   parseActivityLogsFromPayload,
   isEmptyActivityLogPayload,
 } from "../_shared/iglooActivity.ts";
+import { BOOKING_WINDOW_COLUMNS } from "../_shared/pinTiming.ts";
 import {
   applyLockEvent,
-  resolveOrderIdByPin,
+  bookingNeedsBridgeWake,
   sweepGraceHourReturns,
 } from "../_shared/lockEventState.ts";
-import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
+import { isManualAutolockClose, recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import {
   getActivitySyncToken,
   getDeviceActivityToken,
@@ -119,6 +124,39 @@ async function pollJobStatus(
   return { completed: false as const, timedOut: true as const, raw: last };
 }
 
+/**
+ * Wake only when a lock is still recorded open, a pickup is about to happen,
+ * or a return is due. Otherwise the 5-minute cron leaves the bridge asleep.
+ */
+async function bridgeWakeReason(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+): Promise<string | null> {
+  const { data: openDevice } = await supabase
+    .from("lock_devices")
+    .select("device_id")
+    .eq("current_state", "unlocked")
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+  if (openDevice?.device_id) return "lock_still_open";
+
+  const { data: bookings, error } = await supabase
+    .from("bookings")
+    .select(`id, status, plan, addons, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at`)
+    .is("returned_at", null)
+    .not("status", "in", '("Cancelled","Completed","flagged")');
+  if (error) {
+    console.error("[sync-lock-activity] wake query failed:", error.message);
+    return "wake_query_failed";
+  }
+  for (const booking of bookings ?? []) {
+    const reason = bookingNeedsBridgeWake(booking);
+    if (reason) return reason;
+  }
+  return null;
+}
+
 function syncEmptyHint(activityRows: number, eventsParsed: number): string | undefined {
   if (eventsParsed > 0) return undefined;
   if (activityRows === 0) {
@@ -144,11 +182,15 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     let probe = url.searchParams.get("probe") === "1";
+    let force = url.searchParams.get("force") === "1";
     if (req.method === "POST") {
       try {
         const body = await req.json();
         if (body?.probe === true || body?.probe === 1 || body?.probe === "1") {
           probe = true;
+        }
+        if (body?.force === true || body?.force === 1 || body?.force === "1") {
+          force = true;
         }
       } catch {
         // empty body is fine (cron)
@@ -170,6 +212,23 @@ Deno.serve(async (req) => {
     }
     if (!supabaseUrl || !serviceKey) {
       return jsonResponse({ success: false, error: "Missing Supabase env" }, 500);
+    }
+
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    if (!probe && !force) {
+      const wake = await bridgeWakeReason(supabase);
+      if (!wake) {
+        const swept = await sweepGraceHourReturns(supabase);
+        console.log("[sync-lock-activity] Bridge left asleep; no pickup or return window");
+        return jsonResponse({
+          success: true,
+          skipped: true,
+          reason: "bridge_idle",
+          graceHourClosed: swept,
+        });
+      }
+      console.log(`[sync-lock-activity] Waking bridge for ${wake}`);
     }
 
     const oauth = await getActivitySyncToken(clientId, clientSecret);
@@ -256,16 +315,18 @@ Deno.serve(async (req) => {
       `[sync-lock-activity] Parsed ${events.length} events (activityRows=${activityRows.length}) from job ${jobCreate.jobId}`,
     );
 
-    const supabase = createClient(supabaseUrl, serviceKey);
-
     // Keep device-level presence current even when the webhook missed a
-    // delivery. Duplicates are dropped by the unique index.
+    // delivery. Duplicates are dropped by the unique index. Newly stored
+    // closes inherit the booking from the unlock that preceded them.
     const deviceTracking = await recordDeviceEvents(supabase, events, { deviceId: lockId, bridgeId });
 
     const actions: Array<{ pin: string | null; orderId: number | null; action: string }> = [];
 
-    for (const event of events) {
-      const orderId = await resolveOrderIdByPin(supabase, event.pinCode, event.eventTimestamp);
+    for (const { event, deviceId, orderId } of deviceTracking.recorded) {
+      if (await isManualAutolockClose(supabase, deviceId, event)) {
+        actions.push({ pin: event.pinCode, orderId, action: "manual_autolock" });
+        continue;
+      }
       if (!orderId) {
         actions.push({ pin: event.pinCode, orderId: null, action: "unmatched_pin" });
         continue;

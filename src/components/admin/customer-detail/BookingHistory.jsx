@@ -13,6 +13,7 @@ import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/
 import { listRentalExtensions } from '@/utils/rentalExtension';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { additionalDayIncludesPrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -54,6 +55,29 @@ const DistanceWarning = ({ booking, customer }) => {
                 <span className="flex items-center"><Clock className="mr-1 h-3 w-3" /> {travelTime} mins</span>
             </div>
         </div>
+    );
+};
+
+const EquipmentLines = ({ booking }) => {
+    const equipment = Array.isArray(booking?.addons?.equipment) ? booking.addons.equipment : [];
+    const insurance = booking?.addons?.insurance === 'accept'
+        ? Number(booking.addons.insurancePriceApplied || 0)
+        : 0;
+    if (equipment.length === 0 && !(insurance > 0)) return null;
+    return (
+        <ul className="mt-2 space-y-1 text-sm text-blue-100">
+            {equipment.map((item, index) => {
+                const quote = resolveEquipmentCharge(item);
+                const note = additionalDayIncludesPrint(quote);
+                return (
+                    <li key={`${item.dbId || item.equipment_id || item.id || index}`}>
+                        {item.name || item.label || 'Equipment'} × {quote.quantity} — ${Number(quote.lineTotal || 0).toFixed(2)}
+                        {note ? <span className="block text-xs text-blue-200/80">{note}</span> : null}
+                    </li>
+                );
+            })}
+            {insurance > 0 && <li>Premium Insurance — ${insurance.toFixed(2)}</li>}
+        </ul>
     );
 };
 
@@ -116,6 +140,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="font-bold text-lg text-white">{formatCustomerFacingPlanName(booking.plan?.name) || 'N/A'}</p>
                     <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked: {format(parseISO(booking.created_at), 'Pp')}</p>
                     <p className="text-sm text-blue-200">{format(parseISO(booking.drop_off_date), 'PPP')} - {format(parseISO(booking.pickup_date), 'PPP')}</p>
+                    <EquipmentLines booking={booking} />
                     <p className="text-sm text-blue-200 flex items-center mt-1">
                         <MapPin className="mr-2 h-4 w-4"/>Distance (one-way): {formatMilesLabel(oneWayMiles)}
                     </p>

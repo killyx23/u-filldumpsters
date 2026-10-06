@@ -103,6 +103,36 @@ async function generatePDFReceipt(booking: any) {
   y -= 12;
   drawText(`Pick-up:  ${pickup}  (${formatSlot(booking.pickup_time_slot, isDelivery)})`, margin + 10, y, { size: 9, color: gray });
 
+  const equipmentLines = Array.isArray(booking.addons?.equipment) ? booking.addons.equipment : [];
+  for (const item of equipmentLines) {
+    const qty = Number(item?.quantity || 1);
+    const lineTotal = item?.lineTotal != null
+      ? Number(item.lineTotal)
+      : Number(item?.price || 0) * qty;
+    const extraDays = Number(item?.extraDays || 0);
+    const rate = Number(item?.additionalDayPrice ?? item?.additional_day_price ?? 0);
+    y -= 16;
+    drawText(String(item?.name || item?.label || 'Equipment'), margin, y, { size: 10, color: black });
+    drawText(formatCurrency(lineTotal), width - margin, y, { size: 10, align: 'right' });
+    y -= 12;
+    const detail = extraDays > 0 && rate > 0
+      ? `Qty ${qty} · Includes ${formatCurrency(rate)} × ${extraDays} additional day${extraDays === 1 ? '' : 's'}`
+      : `Qty ${qty} @ ${formatCurrency(Number(item?.basePrice ?? item?.price ?? 0))} each`;
+    drawText(detail, margin + 10, y, { size: 9, color: gray });
+  }
+  if (booking.addons?.insurance === 'accept') {
+    const insuranceAmount = Number(booking.addons.insurancePriceApplied || 0);
+    y -= 16;
+    drawText('Premium Insurance', margin, y, { size: 10, color: black });
+    drawText(formatCurrency(insuranceAmount), width - margin, y, { size: 10, align: 'right' });
+  }
+  if (booking.addons?.drivewayProtection === 'accept') {
+    const drivewayAmount = Number(booking.addons.drivewayPriceApplied || 0);
+    y -= 16;
+    drawText('Driveway Protection', margin, y, { size: 10, color: black });
+    drawText(formatCurrency(drivewayAmount), width - margin, y, { size: 10, align: 'right' });
+  }
+
   const receiptHistory = Array.isArray(booking.receipt_status_history) ? booking.receipt_status_history : [];
   const rescheduleApproval = [...receiptHistory].reverse().find((e: any) => e?.action === 'reschedule_approved');
   if (rescheduleApproval) {
@@ -138,6 +168,21 @@ async function generatePDFReceipt(booking: any) {
   }
 
   // ── Coupon ────────────────────────────────────────────────────────────
+  const loyaltyDiscount = Number(booking.addons?.loyaltyDiscountAmount || 0);
+  if (loyaltyDiscount > 0) {
+    y -= 20;
+    drawDivider(page, y + 8, margin, width, lightGray);
+    drawText('Loyalty discount', margin, y, { size: 10, color: green });
+    drawText(`-${formatCurrency(loyaltyDiscount)}`, width - margin, y, { size: 10, color: green, align: 'right' });
+  }
+  const referralDiscount = Number(booking.addons?.referralDiscountAmount || 0);
+  if (referralDiscount > 0) {
+    y -= 20;
+    drawDivider(page, y + 8, margin, width, lightGray);
+    drawText('Referral discount', margin, y, { size: 10, color: green });
+    drawText(`-${formatCurrency(referralDiscount)}`, width - margin, y, { size: 10, color: green, align: 'right' });
+  }
+
   const coupon = booking.addons?.coupon;
   if (coupon?.isValid) {
     let discountAmount = 0;

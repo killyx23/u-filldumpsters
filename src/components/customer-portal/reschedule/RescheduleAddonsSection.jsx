@@ -14,6 +14,8 @@ import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useProtectionPlans } from '@/hooks/useProtectionPlans';
 import { toast } from '@/components/ui/use-toast';
 import { checkInventoryAvailability, fetchEquipmentAvailability, toInventoryDate } from '@/utils/equipmentInventoryManager';
+import { quoteRentalEquipmentLine, additionalDayIncludesPrint, isRentalEquipmentItem } from '@/utils/rentalEquipmentPricing';
+import { calculateDays } from '@/utils/rescheduleCalculations';
 import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import {
   filterAvailableAddonsForService,
@@ -97,8 +99,12 @@ export const RescheduleAddonsSection = ({
             const equipId = be.equipment.id;
             const equipName = be.equipment.name;
             const equipType = be.equipment.type || 'rental';
-            const equipPrice = Number(be.equipment.price || 0);
+            const snap = (originalBooking.addons?.equipment || []).find((item) =>
+              Number(item?.dbId || item?.equipment_id || item?.id) === Number(equipId)
+            );
+            const equipPrice = Number(snap?.basePrice ?? snap?.price ?? be.equipment.price ?? 0);
             const equipQty = Number(be.quantity || 1);
+            const additionalDayPrice = Number(be.equipment.additional_day_price ?? snap?.additionalDayPrice ?? 0);
             
             console.log(`[RescheduleAddons] Original item: ${equipName} (ID: ${equipId}, Type: ${equipType}, Qty: ${equipQty})`);
             
@@ -106,6 +112,9 @@ export const RescheduleAddonsSection = ({
               id: equipId,
               name: equipName,
               price: equipPrice,
+              basePrice: equipPrice,
+              additionalDayPrice,
+              additional_day_price: additionalDayPrice,
               quantity: equipQty,
               type: equipType
             });
@@ -221,18 +230,23 @@ export const RescheduleAddonsSection = ({
           (datedStock || []).map((row) => [Number(row.id), Number(row.available_quantity)])
         );
 
-        const equipmentWithIcons = (equipmentData || []).map(eq => ({
-          id: eq.id,
-          name: eq.name,
-          price: Number(eq.price || 0),
-          description: eq.description || eq.type || 'Equipment item',
-          icon: getIconForEquipment(eq.name),
-          type: eq.type || 'rental',
-          total_quantity: availableById.has(Number(eq.id))
-            ? availableById.get(Number(eq.id))
-            : (eq.total_quantity || 0),
-          isQuantityControlled: eq.type !== 'service' || isDisposalService(eq.name)
-        }));
+        const equipmentWithIcons = (equipmentData || []).map(eq => {
+          const isRental = eq.type === 'rental';
+          return {
+            id: eq.id,
+            name: eq.name,
+            price: Number(eq.price || 0),
+            additionalDayPrice: isRental ? Number(eq.additional_day_price || 0) : 0,
+            additional_day_price: isRental ? Number(eq.additional_day_price || 0) : 0,
+            description: eq.description || eq.type || 'Equipment item',
+            icon: getIconForEquipment(eq.name),
+            type: eq.type || 'rental',
+            total_quantity: availableById.has(Number(eq.id))
+              ? availableById.get(Number(eq.id))
+              : (eq.total_quantity || 0),
+            isQuantityControlled: eq.type !== 'service' || isDisposalService(eq.name)
+          };
+        });
 
         // Insurance is rendered as Accept/Decline above the grid (not as a card)
         const allAddons = [
@@ -315,6 +329,13 @@ export const RescheduleAddonsSection = ({
     setShowInsuranceDeclineWarning(false);
   };
 
+  const stockCeiling = (addon) => {
+    if (addon?.type !== 'rental' && addon?.type !== 'consumable') return null;
+    const originalQty = Number(originalAddonsMap.get(addon.id)?.quantity || 0);
+    const free = Math.max(0, Number(addon.total_quantity) || 0);
+    return originalQty + free;
+  };
+
   const handleToggle = async (addon) => {
     const isCurrentlySelected = selectedAddonsList.some(a => 
       a.id === addon.id || 
@@ -324,32 +345,38 @@ export const RescheduleAddonsSection = ({
     const originalItem = originalAddonsMap.get(addon.id);
     
     if (!isCurrentlySelected) {
-      // Adding item
-      const quantityToAdd = originalItem ? originalItem.quantity : 1;
-      
-      // Check inventory for rentals and consumables (but don't block)
-      if (addon.type === 'rental' || addon.type === 'consumable') {
-        const inventoryCheck = await checkInventoryAvailability(addon.id, quantityToAdd, {
+      const ceiling = stockCeiling(addon);
+      let quantityToAdd = originalItem ? originalItem.quantity : 1;
+      if (ceiling != null) {
+        const additionalNeeded = Math.max(0, quantityToAdd);
+        const inventoryCheck = await checkInventoryAvailability(addon.id, Math.max(1, additionalNeeded), {
           startDate: newDropOffDate || originalBooking?.drop_off_date,
           endDate: newPickupDate || originalBooking?.pickup_date,
           excludeBookingId: bookingId,
         });
-        
-        if (!inventoryCheck.available) {
-          setInventoryWarnings(prev => ({
-            ...prev,
-            [addon.id]: `Only ${inventoryCheck.quantity} available in stock`
-          }));
-          
+        const maxTotal = Number(originalItem?.quantity || 0) + Math.max(0, Number(inventoryCheck.quantity) || 0);
+        if (maxTotal <= 0) {
           toast({
-            title: "Low Inventory",
-            description: `Only ${inventoryCheck.quantity} ${addon.name} currently available.`,
-            variant: "default"
+            title: "Out of stock",
+            description: `${addon.name} is not available for these dates.`,
+            variant: "destructive",
+          });
+          return;
+        }
+        quantityToAdd = Math.min(quantityToAdd, maxTotal);
+        if (quantityToAdd < (originalItem?.quantity || 1) && !inventoryCheck.available) {
+          toast({
+            title: "Stock limit",
+            description: `Only ${maxTotal} ${addon.name} can be added for these dates.`,
           });
         }
       }
 
-      setSelectedAddonsList(prev => [...prev, { ...addon, quantity: quantityToAdd }]);
+      setSelectedAddonsList(prev => [...prev, {
+        ...addon,
+        quantity: quantityToAdd,
+        additionalDayPrice: addon.additionalDayPrice ?? originalItem?.additionalDayPrice ?? 0,
+      }]);
     } else {
       // Removing item
       if (addon.type === 'consumable') {
@@ -374,7 +401,28 @@ export const RescheduleAddonsSection = ({
   };
 
   const handleQuantityChange = async (addon, newQuantity) => {
-    const qty = Math.max(0, Math.min(99, parseInt(newQuantity) || 0));
+    const ceiling = stockCeiling(addon);
+    let qty = Math.max(0, parseInt(newQuantity, 10) || 0);
+    if (ceiling != null) {
+      const originalQty = Number(originalAddonsMap.get(addon.id)?.quantity || 0);
+      const additionalNeeded = Math.max(0, qty - originalQty);
+      if (additionalNeeded > 0) {
+        const inventoryCheck = await checkInventoryAvailability(addon.id, additionalNeeded, {
+          startDate: newDropOffDate || originalBooking?.drop_off_date,
+          endDate: newPickupDate || originalBooking?.pickup_date,
+          excludeBookingId: bookingId,
+        });
+        const maxTotal = originalQty + Math.max(0, Number(inventoryCheck.quantity) || 0);
+        if (qty > maxTotal) {
+          qty = maxTotal;
+          toast({
+            title: "Stock limit reached",
+            description: `Only ${maxTotal} ${addon.name} can be on this booking for these dates.`,
+          });
+        }
+      }
+      qty = Math.min(qty, ceiling);
+    }
     
     // If quantity is 0, remove the item
     if (qty === 0) {
@@ -390,56 +438,13 @@ export const RescheduleAddonsSection = ({
       return;
     }
     
-    // Get original quantity for this item
-    const originalItem = originalAddonsMap.get(addon.id);
-    const originalQty = originalItem ? originalItem.quantity : 0;
-    
-    // Check inventory for rentals and consumables
-    if (addon.type === 'rental' || addon.type === 'consumable') {
-      // Calculate how much additional stock we need beyond original
-      const additionalNeeded = Math.max(0, qty - originalQty);
-      
-      if (additionalNeeded > 0) {
-        const inventoryCheck = await checkInventoryAvailability(addon.id, additionalNeeded, {
-          startDate: newDropOffDate || originalBooking?.drop_off_date,
-          endDate: newPickupDate || originalBooking?.pickup_date,
-          excludeBookingId: bookingId,
-        });
-        
-        if (!inventoryCheck.available && inventoryCheck.quantity > 0) {
-          const maxAllowed = originalQty + inventoryCheck.quantity;
-          setInventoryWarnings(prev => ({
-            ...prev,
-            [addon.id]: `Originally: ${originalQty}, Available stock: ${inventoryCheck.quantity}, Max total: ${maxAllowed}`
-          }));
-          
-          toast({
-            title: "Stock Limit Reached",
-            description: `You had ${originalQty} originally. Only ${inventoryCheck.quantity} additional available. Max total: ${maxAllowed}`,
-            variant: "default"
-          });
-        } else if (inventoryCheck.quantity === 0) {
-          setInventoryWarnings(prev => ({
-            ...prev,
-            [addon.id]: `No additional stock available (you had ${originalQty} originally)`
-          }));
-        } else {
-          setInventoryWarnings(prev => {
-            const updated = { ...prev };
-            delete updated[addon.id];
-            return updated;
-          });
-        }
-      } else {
-        // Reducing quantity or same as original - no stock issue
-        setInventoryWarnings(prev => {
-          const updated = { ...prev };
-          delete updated[addon.id];
-          return updated;
-        });
-      }
-    }
-    
+    setInventoryWarnings(prev => {
+      if (!prev[addon.id]) return prev;
+      const updated = { ...prev };
+      delete updated[addon.id];
+      return updated;
+    });
+
     setSelectedAddonsList(prev => 
       prev.map(a => {
         if (a.id === addon.id || (a.name && addon.name && a.name.toLowerCase() === addon.name.toLowerCase())) {
@@ -594,6 +599,14 @@ export const RescheduleAddonsSection = ({
         {visibleAddons?.map((addon, idx) => {
           const selected = isSelected(addon);
           const quantity = getQuantity(addon);
+          const stayQuote = quoteRentalEquipmentLine({
+            basePrice: addon.price,
+            additionalDayPrice: addon.additionalDayPrice,
+            quantity,
+            dropOff: newDropOffDate || originalBooking?.drop_off_date,
+            pickup: newPickupDate || originalBooking?.pickup_date,
+            isRental: isRentalEquipmentItem(addon),
+          });
           const hasWarning = inventoryWarnings[addon.id];
           const isDisposal = isDisposalService(addon.name);
           const isOriginal = isOriginalItem(addon.id);
@@ -661,6 +674,11 @@ export const RescheduleAddonsSection = ({
                     {formatCurrency(addon.price * 100, currencyInfo)}
                     {addon.isQuantityControlled && <span className="text-gray-500 text-sm font-normal ml-1">/each</span>}
                   </p>
+                  {Number(addon.additionalDayPrice) > 0 && (
+                    <p className="text-xs text-gray-400">
+                      + {formatCurrency(Number(addon.additionalDayPrice) * 100, currencyInfo)} each additional day
+                    </p>
+                  )}
                 </div>
 
                 {hasWarning && (
@@ -685,7 +703,7 @@ export const RescheduleAddonsSection = ({
                       <Input
                         type="number"
                         min="0"
-                        max="99"
+                        max={stockCeiling(addon) ?? undefined}
                         value={quantity}
                         onChange={(e) => { e.stopPropagation(); handleQuantityChange(addon, e.target.value); }}
                         className="h-8 w-14 text-center bg-gray-950 border-gray-700 text-white"
@@ -696,7 +714,7 @@ export const RescheduleAddonsSection = ({
                         size="sm"
                         onClick={(e) => { e.stopPropagation(); incrementQuantity(addon); }}
                         className="h-8 w-8 p-0 border-gray-700 hover:bg-gray-800"
-                        disabled={quantity >= 99}
+                        disabled={stockCeiling(addon) != null && quantity >= stockCeiling(addon)}
                       >
                         <Plus className="h-4 w-4" />
                       </Button>
@@ -704,12 +722,19 @@ export const RescheduleAddonsSection = ({
                   </div>
                 )}
 
-                {selected && addon.isQuantityControlled && quantity > 1 && (
-                  <div className="flex justify-between items-center pt-2 border-t border-gray-800">
-                    <span className="text-gray-400 text-sm">Item Total:</span>
-                    <span className="text-gold-light font-bold">
-                      {formatCurrency(addon.price * quantity * 100, currencyInfo)}
-                    </span>
+                {selected && addon.isQuantityControlled && quantity > 0 && (quantity > 1 || isRentalEquipmentItem(addon)) && (
+                  <div className="pt-2 border-t border-gray-800 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400 text-sm">Item Total:</span>
+                      <span className="text-gold-light font-bold">
+                        {formatCurrency(stayQuote.lineTotal * 100, currencyInfo)}
+                      </span>
+                    </div>
+                    {isRentalEquipmentItem(addon) && (
+                      <p className="text-xs text-gray-500">
+                        {additionalDayIncludesPrint(stayQuote) || `${calculateDays(newDropOffDate || originalBooking?.drop_off_date, newPickupDate || originalBooking?.pickup_date)} day stay`}
+                      </p>
+                    )}
                   </div>
                 )}
 

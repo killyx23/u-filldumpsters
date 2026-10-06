@@ -63,15 +63,26 @@ export const CustomerPortal = () => {
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
     const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dashboard');
+    const [communicationSection, setCommunicationSection] = useState(searchParams.get('section') || 'chat');
+    const [reviewFocusBookingId, setReviewFocusBookingId] = useState(() => {
+        const raw = searchParams.get('reviewBooking');
+        const parsed = Number(raw);
+        return raw && Number.isFinite(parsed) ? parsed : null;
+    });
 
     useEffect(() => {
         const tabFromUrl = searchParams.get('tab');
         if (tabFromUrl) {
             setActiveTab(tabFromUrl);
         }
+        setCommunicationSection(searchParams.get('section') || 'chat');
+        const reviewBooking = searchParams.get('reviewBooking');
+        const parsedReviewBooking = Number(reviewBooking);
+        setReviewFocusBookingId(reviewBooking && Number.isFinite(parsedReviewBooking) ? parsedReviewBooking : null);
     }, [searchParams]);
     const [customerData, setCustomerData] = useState(null);
     const [bookings, setBookings] = useState([]);
+    const [customerReviews, setCustomerReviews] = useState([]);
     const [notes, setNotes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(new Date());
@@ -221,10 +232,18 @@ export const CustomerPortal = () => {
         if (ph) setLoginPhone(ph);
     }, [searchParams]);
 
-    const handleTabChange = (tabId) => {
-        console.log('[CustomerPortal] Tab changed to:', tabId);
+    const handleTabChange = (tabId, options = {}) => {
+        const section = options.section || null;
+        const bookingId = options.bookingId ?? null;
+        console.log('[CustomerPortal] Tab changed to:', tabId, { section, bookingId });
         setActiveTab(tabId);
-        mergeSearchParams({ tab: tabId });
+        setCommunicationSection(section || 'chat');
+        setReviewFocusBookingId(bookingId);
+        mergeSearchParams({
+            tab: tabId,
+            section,
+            reviewBooking: bookingId,
+        });
     };
 
     const fetchData = useCallback(async (isInitialLoad = true) => {
@@ -328,6 +347,22 @@ export const CustomerPortal = () => {
             setBookings(data.bookings || []);
             setNotes(data.notes || []);
             setLastUpdated(new Date());
+
+            if (data.customer?.id) {
+                const { data: reviewRows, error: reviewError } = await supabase
+                    .from('reviews')
+                    .select('id, booking_id, is_public')
+                    .eq('customer_id', data.customer.id);
+
+                if (reviewError) {
+                    console.error(`[${timestamp}] [CustomerPortal] Failed to load review booking ids:`, reviewError);
+                    setCustomerReviews([]);
+                } else {
+                    setCustomerReviews(reviewRows || []);
+                }
+            } else {
+                setCustomerReviews([]);
+            }
 
         } catch (error) {
             const errorTimestamp = new Date().toISOString();
@@ -661,6 +696,7 @@ export const CustomerPortal = () => {
                     <div className="space-y-6">
                         <PortalDashboard 
                             bookings={bookings} 
+                            customerReviews={customerReviews}
                             customerData={customerData} 
                             lastUpdated={lastUpdated} 
                             onRefresh={() => fetchData(true)}
@@ -728,11 +764,15 @@ export const CustomerPortal = () => {
                 
                 {activeTab === 'bookings' && (
                     <BookingsList 
-                        bookings={bookings} 
+                        bookings={bookings}
+                        customerReviews={customerReviews}
                         onReceiptClick={(b) => handleTabChange('documents')} 
                         onCancelClick={setSelectedBookingForCancel} 
                         onRescheduleClick={handleRescheduleClick}
                         onExtendClick={setSelectedBookingForExtend}
+                        onLeaveReview={(booking) =>
+                            handleTabChange('messages', { section: 'reviews', bookingId: booking.id })
+                        }
                     />
                 )}
 
@@ -780,7 +820,15 @@ export const CustomerPortal = () => {
                         bookings={bookings} 
                         notes={notes} 
                         onNewNote={(n) => setNotes(prev => [...prev, n])} 
-                        onRefreshData={() => fetchData(false)} 
+                        onRefreshData={() => fetchData(false)}
+                        activeSection={communicationSection}
+                        onSectionChange={(section) =>
+                            handleTabChange('messages', {
+                                section,
+                                bookingId: section === 'reviews' ? reviewFocusBookingId : null,
+                            })
+                        }
+                        focusBookingId={reviewFocusBookingId}
                     />
                 )}
                 <UiControlGuide

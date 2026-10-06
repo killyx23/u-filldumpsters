@@ -26,6 +26,7 @@ import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState
 import {
   defaultBridgeId,
   defaultDeviceId,
+  isManualAutolockClose,
   type RecordedEvent,
   recordDeviceEvents,
 } from "../_shared/lockDeviceState.ts";
@@ -241,20 +242,42 @@ async function handleBridgeConnection(
 
   // Losing connectivity while a lock is still open is the worst case: the
   // equipment is accessible and we will not hear about further activity.
+  // One email per unlock episode. The 5-minute poll wakes the bridge, which
+  // otherwise recreates this online-to-offline edge and resends the same open.
   if (isOnline === false && changed) {
     const { data: openDevices } = await supabase
       .from("lock_devices")
-      .select("device_id, label, state_changed_at")
+      .select("device_id, label, state_changed_at, offline_alerted_for_state_at")
       .eq("bridge_id", bridgeId)
       .eq("current_state", "unlocked")
       .eq("is_active", true);
     for (const device of openDevices ?? []) {
+      const openedAt = device.state_changed_at ?? null;
+      if (openedAt && device.offline_alerted_for_state_at === openedAt) continue;
+      // Claim this unlock episode before sending so a second offline edge
+      // for the same open does not email again.
+      let claim = supabase
+        .from("lock_devices")
+        .update({ offline_alerted_for_state_at: openedAt })
+        .eq("device_id", device.device_id)
+        .eq("current_state", "unlocked");
+      claim = device.offline_alerted_for_state_at
+        ? claim.eq("offline_alerted_for_state_at", device.offline_alerted_for_state_at)
+        : claim.is("offline_alerted_for_state_at", null);
+      const { data: claimed, error: claimError } = await claim
+        .select("device_id")
+        .maybeSingle();
+      if (claimError) {
+        console.error("[igloohome-webhook] offline alert claim failed:", claimError.message);
+        continue;
+      }
+      if (!claimed) continue;
       alerts.push(() =>
         alertBridgeOfflineWhileUnlocked({
           bridgeId,
           deviceId: device.device_id,
           label: device.label,
-          lastStateChangedAt: device.state_changed_at,
+          lastStateChangedAt: openedAt,
         })
       );
     }
@@ -317,6 +340,10 @@ async function processDeferred(
       }
 
       if (!orderId) continue;
+      if (await isManualAutolockClose(supabase, deviceId, event)) {
+        console.log(`[igloohome-webhook] Manual auto-lock on ${deviceId} — device state only`);
+        continue;
+      }
       const action = await applyLockEvent(supabase, {
         orderId,
         eventType: event.eventType,
