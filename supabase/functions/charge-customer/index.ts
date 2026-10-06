@@ -1,9 +1,14 @@
 import { getCorsHeaders } from "./cors.ts";
-// charge-customer Edge Function (auto-collection fix)
-// Change: Do not call invoices.pay on charge_automatically invoices.
-// After finalize, poll once to confirm auto-charge and persist payment refs.
+// charge-customer Edge Function
+// Charges the customer's default card off-session and stores the Stripe charge id.
+// A fee row is not saved unless Stripe returns a ch_ id.
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  chargeCardOffSession,
+  resolveInvoiceChargeId,
+  resolvePaymentIntentChargeId,
+} from "../_shared/cardCharge.ts";
 const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -11,9 +16,16 @@ const stripe = new Stripe(STRIPE_SECRET_KEY ?? "", {
   apiVersion: "2024-06-20"
 });
 const supabase = createClient(SUPABASE_URL ?? "", SUPABASE_SERVICE_ROLE_KEY ?? "");
-async function sleep(ms) {
-  return new Promise((res)=>setTimeout(res, ms));
+async function saveFeeCharge(bookingId, existingFees, feeType, fee) {
+  const { error: updErr } = await supabase.from("bookings").update({
+    fees: {
+      ...existingFees,
+      [feeType]: fee
+    }
+  }).eq("id", bookingId);
+  if (updErr) throw new Error(`DB error updating booking fees: ${updErr.message}`);
 }
+
 async function handleCharge({ customerId, amount, description, bookingId, feeType }) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be a positive number.");
   const { data: customer, error: customerErr } = await supabase.from("customers").select("stripe_customer_id, email, name").eq("id", customerId).single();
@@ -39,84 +51,86 @@ async function handleCharge({ customerId, amount, description, bookingId, feeTyp
   } catch (e) {
     throw new Error(`Stripe customer ensure failed: ${e.message}`);
   }
-  let invoiceId;
-  try {
-    await stripe.invoiceItems.create({
-      customer: stripeCustomerId,
-      amount: Math.round(amount * 100),
-      currency: "usd",
-      description
-    });
-    const invoice = await stripe.invoices.create({
-      customer: stripeCustomerId,
-      collection_method: "charge_automatically",
-      auto_advance: true,
-      description: `Additional charges for booking #${bookingId}`,
-      metadata: {
-        booking_id: String(bookingId),
-        database_customer_id: String(customerId),
-        fee_type: feeType
-      }
-    });
-    invoiceId = invoice.id;
-    const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
-    // Wait briefly for auto-charge to complete (usually immediate)
-    await sleep(800);
-    const refreshed = await stripe.invoices.retrieve(finalized.id);
-    // If still open or draft, give one more short wait
-    if (refreshed.status === "open" || refreshed.status === "draft") {
-      await sleep(800);
-    }
-    const post = await stripe.invoices.retrieve(finalized.id);
-    if (post.status !== "paid") {
-      const latestChargeId = typeof post.latest_charge === "string" ? post.latest_charge : post.latest_charge?.id;
-      let failureMsg = `Invoice status: ${post.status}`;
-      if (latestChargeId) {
-        try {
-          const ch = await stripe.charges.retrieve(latestChargeId);
-          if (ch.failure_message) failureMsg = ch.failure_message;
-        } catch (_) {}
-      }
-      throw new Error(`Failed to auto-charge customer. ${failureMsg}`);
-    }
-    // Persist refs
-    const latestCharge = typeof post.latest_charge === "string" ? post.latest_charge : post.latest_charge?.id;
-    const paymentIntentId = typeof post.payment_intent === "string" ? post.payment_intent : post.payment_intent?.id;
-    const { data: bookingData, error: bookingErr } = await supabase.from("bookings").select("fees").eq("id", bookingId).single();
-    if (bookingErr) throw new Error(`DB error loading booking: ${bookingErr.message}`);
-    const existingFees = bookingData?.fees || {};
-    const newFees = {
-      ...existingFees,
-      [feeType]: {
-        amount,
-        description,
-        charge_id: latestCharge ?? null,
-        payment_intent_id: paymentIntentId ?? null,
-        invoice_id: invoiceId ?? null,
-        created_at: new Date().toISOString()
-      }
-    };
-    const { error: updErr } = await supabase.from("bookings").update({
-      fees: newFees
-    }).eq("id", bookingId);
-    if (updErr) throw new Error(`DB error updating booking fees: ${updErr.message}`);
+
+  const { data: bookingData, error: bookingErr } = await supabase.from("bookings").select("fees").eq("id", bookingId).single();
+  if (bookingErr) throw new Error(`DB error loading booking: ${bookingErr.message}`);
+  const existingFees = bookingData?.fees || {};
+  const existing = existingFees[feeType];
+  const prior = existing && typeof existing === "object" && !Array.isArray(existing) ? existing : null;
+
+  if (prior?.charge_id && String(prior.charge_id).startsWith("ch_")) {
     return {
       success: true,
-      message: "Customer charged successfully.",
-      invoiceId: invoiceId,
-      latestCharge,
-      paymentIntentId
+      message: "This fee was already charged.",
+      latestCharge: prior.charge_id,
+      paymentIntentId: prior.payment_intent_id ?? null,
+      invoiceId: prior.invoice_id ?? null,
+      alreadyCharged: true
     };
-  } catch (e) {
-    // Best-effort cleanup if needed
-    if (invoiceId) {
-      try {
-        const inv = await stripe.invoices.retrieve(invoiceId);
-        if (inv.status !== "paid") await stripe.invoices.voidInvoice(invoiceId);
-      } catch (_) {}
-    }
-    throw e;
   }
+
+  if (prior?.invoice_id) {
+    const existingInvoice = await resolveInvoiceChargeId(stripe, prior.invoice_id);
+    if (existingInvoice.chargeId) {
+      await saveFeeCharge(bookingId, existingFees, feeType, {
+        ...prior,
+        charge_id: existingInvoice.chargeId,
+        payment_intent_id: existingInvoice.paymentIntentId ?? prior.payment_intent_id ?? null
+      });
+      return {
+        success: true,
+        message: "Existing Stripe charge recorded.",
+        latestCharge: existingInvoice.chargeId,
+        paymentIntentId: existingInvoice.paymentIntentId,
+        invoiceId: prior.invoice_id,
+        alreadyCharged: true
+      };
+    }
+    if (existingInvoice.status === "paid") {
+      throw new Error("Stripe already marked this fee paid without a card charge. The card was not charged again.");
+    }
+  }
+
+  if (prior?.payment_intent_id) {
+    const existingChargeId = await resolvePaymentIntentChargeId(stripe, prior.payment_intent_id);
+    if (existingChargeId) {
+      await saveFeeCharge(bookingId, existingFees, feeType, {
+        ...prior,
+        charge_id: existingChargeId
+      });
+      return {
+        success: true,
+        message: "Existing Stripe charge recorded.",
+        latestCharge: existingChargeId,
+        paymentIntentId: prior.payment_intent_id,
+        invoiceId: prior.invoice_id ?? null,
+        alreadyCharged: true
+      };
+    }
+  }
+
+  const amountCents = Math.round(amount * 100);
+  const charged = await chargeCardOffSession(stripe, stripeCustomerId, amountCents, description, {
+    booking_id: String(bookingId),
+    database_customer_id: String(customerId),
+    fee_type: String(feeType)
+  }, `fee-${bookingId}-${feeType}-${amountCents}`);
+
+  await saveFeeCharge(bookingId, existingFees, feeType, {
+    amount,
+    description,
+    charge_id: charged.chargeId,
+    payment_intent_id: charged.paymentIntentId,
+    invoice_id: prior?.invoice_id ?? null,
+    created_at: prior?.created_at || new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: "Customer charged successfully.",
+    invoiceId: prior?.invoice_id ?? null,
+    latestCharge: charged.chargeId,
+    paymentIntentId: charged.paymentIntentId
+  };
 }
 async function handleRefund({ bookingId, amount, reason, paymentIntentId, chargeId }) {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be a positive number.");

@@ -18,6 +18,7 @@ import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/dist
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
+import { feeIsCharged } from '@/utils/feeCharges';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
@@ -302,10 +303,14 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
     }, [returnableEquipment]);
 
     const hasFee = (feeType, itemName = 'general') =>
-        Object.prototype.hasOwnProperty.call(fees, feeKeyFor(feeType, itemName));
+        feeIsCharged(fees[feeKeyFor(feeType, itemName)]);
 
     const hasTrailerDamageFee = () =>
-        Object.keys(fees).some((k) => k === 'damage_general' || (k.startsWith('damage_') && !returnableEquipment.some((eq) => feeKeyFor('damage', eq.name) === k)));
+        Object.keys(fees).some((k) => {
+            const matches = k === 'damage_general' ||
+                (k.startsWith('damage_') && !returnableEquipment.some((eq) => feeKeyFor('damage', eq.name) === k));
+            return matches && feeIsCharged(fees[k]);
+        });
 
     const isEquipmentHandled = (item) => {
         const disposition = dispositions[item.key];

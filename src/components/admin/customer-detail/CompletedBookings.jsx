@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { supabase } from '@/lib/customSupabaseClient';
+import { toast } from '@/components/ui/use-toast';
+import { feeChargeEntries } from '@/utils/feeCharges';
 import { format, parseISO } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { StatusBadge } from '@/components/admin/StatusBadge';
@@ -189,6 +192,43 @@ const FollowUpResolutionBlock = ({ resolution }) => {
 
 export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate }) => {
     const [resolveBooking, setResolveBooking] = useState(null);
+    const [chargingFeeKey, setChargingFeeKey] = useState(null);
+
+    const chargeStoredFee = async (booking, feeKey, fee) => {
+        const requestKey = `${booking.id}:${feeKey}`;
+        setChargingFeeKey(requestKey);
+        try {
+            const { data, error } = await supabase.functions.invoke('charge-customer', {
+                body: {
+                    customerId,
+                    amount: Number(fee.amount),
+                    description: fee.description || feeKey,
+                    bookingId: booking.id,
+                    feeType: feeKey,
+                },
+            });
+            if (error) {
+                const errContext = await error.context?.json().catch(() => null);
+                throw new Error(errContext?.error || error.message);
+            }
+            if (data?.error) throw new Error(data.error);
+            toast({
+                title: 'Card charged',
+                description: data?.latestCharge
+                    ? `Stripe charge ${data.latestCharge}`
+                    : (data?.message || 'The fee was charged.'),
+            });
+            onUpdate?.();
+        } catch (err) {
+            toast({
+                title: 'Charge failed',
+                description: err.message || 'The card was not charged.',
+                variant: 'destructive',
+            });
+        } finally {
+            setChargingFeeKey(null);
+        }
+    };
 
     if (!bookings || bookings.length === 0) return null;
 
@@ -428,16 +468,36 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                              </div>
                         )}
 
-                        {Object.keys(fees).length > 0 && (
+                        {feeChargeEntries(fees).length > 0 && (
                              <div className="mt-4 border-t border-white/20 pt-4 space-y-2">
                                 <h5 className="font-bold text-green-400 flex items-center"><DollarSign className="mr-2 h-5 w-5" />Additional Fees Charged</h5>
-                                {Object.entries(fees).map(([key, value]) => (
+                                {feeChargeEntries(fees).map(([key, value]) => {
+                                    const requestKey = `${booking.id}:${key}`;
+                                    const charged = typeof value.charge_id === 'string' && value.charge_id.startsWith('ch_');
+                                    return (
                                      <div key={key} className="bg-green-900/20 p-2 rounded-md">
                                         <p className="font-semibold text-green-200">{value.description}</p>
-                                        <p className="text-sm text-green-300">Amount: ${parseFloat(value.amount).toFixed(2)}</p>
-                                        <p className="text-xs text-gray-400">Charge ID: {value.charge_id}</p>
+                                        <p className="text-sm text-green-300">Amount: ${Number(value.amount).toFixed(2)}</p>
+                                        <p className="text-xs text-gray-400">Charge ID: {charged ? value.charge_id : 'Not charged'}</p>
+                                        {!charged && (
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="mt-2 bg-yellow-500 hover:bg-yellow-400 text-gray-900"
+                                                disabled={chargingFeeKey === requestKey}
+                                                onClick={() => chargeStoredFee(booking, key, value)}
+                                            >
+                                                {chargingFeeKey === requestKey ? (
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <DollarSign className="mr-2 h-4 w-4" />
+                                                )}
+                                                Charge card
+                                            </Button>
+                                        )}
                                      </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

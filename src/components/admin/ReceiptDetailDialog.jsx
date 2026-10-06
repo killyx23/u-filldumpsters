@@ -19,6 +19,7 @@ import {
     EQUIPMENT_FRIENDLY_LABELS,
 } from '@/utils/equipmentReturnDisplay';
 import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
+import { feeChargeEntries } from '@/utils/feeCharges';
 
     const DetailRow = ({ icon, label, value, className = '' }) => (
         <div className={`flex items-start py-2 border-b border-white/10 ${className}`}>
@@ -251,8 +252,13 @@ import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEq
                                 {return_issues && Object.entries(return_issues).map(([key, value]) => (
                                     <DetailRow key={key} icon={<AlertTriangle />} label={`Issue: ${key.replace(/_/g, ' ')}`} value={formatReturnIssueStatus(value.status)} className="capitalize" />
                                 ))}
-                                {fees && Object.entries(fees).map(([key, value]) => (
-                                    <DetailRow key={key} icon={<DollarSign />} label={`Fee: ${value.description}`} value={`$${parseFloat(value.amount).toFixed(2)}`} />
+                                {feeChargeEntries(fees).map(([key, value]) => (
+                                    <DetailRow
+                                        key={key}
+                                        icon={<DollarSign />}
+                                        label={`Fee: ${value.description || key}`}
+                                        value={`$${Number(value.amount).toFixed(2)} · ${value.charge_id || 'Not charged'}`}
+                                    />
                                 ))}
                             </section>
                         )}

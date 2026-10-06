@@ -22,7 +22,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
-import { recordDeviceEvents } from "../_shared/lockDeviceState.ts";
+import { PADLOCK_AUTOLOCK_LOG_TYPE, recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import { alertBreakInAttempt } from "../_shared/lockAlerts.ts";
 import { getBookingWindow, clampIgloohomeStart, formatAlgoPinEndIso } from "../_shared/pinTiming.ts";
 import {
@@ -156,6 +156,45 @@ async function logRemoteLockOverride(
     }
   } catch (err) {
     console.error("[test-lock-lifecycle] remote override log exception:", err);
+  }
+}
+
+/**
+ * After a manual unlock, read recent cloud activity for the padlock auto-lock
+ * (log type 13) and store it on the device. Does not call applyLockEvent.
+ */
+async function pullManualAutolock(
+  clientId: string,
+  clientSecret: string,
+  lockId: string,
+  bridgeId: string,
+  supabase: ReturnType<typeof createClient>,
+  unlockAt: string | null,
+) {
+  const oauth = await getDeviceActivityToken(clientId, clientSecret);
+  if (!oauth.token) {
+    console.warn("[test-lock-lifecycle] No device-activity token for manual autolock:", oauth.reason);
+    return;
+  }
+  const unlockMs = unlockAt ? new Date(unlockAt).getTime() : Date.now();
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await sleep(2500);
+    const fetched = await fetchDeviceActivityRows(oauth.token, lockId, {
+      maxPages: 1,
+      pageSize: 30,
+    });
+    if (fetched.error) {
+      console.warn("[test-lock-lifecycle] manual autolock activity read:", fetched.error);
+      continue;
+    }
+    const closes = mergeActivityEvents(fetched.rows).filter((event) => {
+      if (event.eventType !== "lock" || event.logType !== PADLOCK_AUTOLOCK_LOG_TYPE) return false;
+      const lockMs = new Date(event.eventTimestamp).getTime();
+      return lockMs >= unlockMs - 30_000 && lockMs - unlockMs <= 2 * 60 * 1000;
+    });
+    if (!closes.length) continue;
+    await recordDeviceEvents(supabase, closes, { deviceId: lockId, bridgeId });
+    return;
   }
 }
 
@@ -583,6 +622,7 @@ Deno.serve(async (req) => {
       // mark Rented/Returned. Skip only on hard job failure.
       let lastOpenedAt: string | null = null;
       let lastClosedAt: string | null = null;
+      let currentState: string | null = null;
       let deviceEventsStored = 0;
       let writtenAt: string | null = null;
       if (outcome.state === "completed" || outcome.state === "pending") {
@@ -613,13 +653,25 @@ Deno.serve(async (req) => {
           writtenAt = null;
         }
 
+        // The padlock auto-locks a few seconds after a manual unlock. Pull that
+        // close into device presence only — never applyLockEvent — so the admin
+        // bar can show Closed without moving a booking.
+        if (operation === "unlock") {
+          try {
+            await pullManualAutolock(clientId, clientSecret, lockId, bridgeId, supabase, writtenAt);
+          } catch (err) {
+            console.error("[test-lock-lifecycle] manual autolock pull failed:", err);
+          }
+        }
+
         const { data: presence } = await supabase
           .from("lock_device_presence")
-          .select("last_opened_at, last_closed_at")
+          .select("last_opened_at, last_closed_at, current_state")
           .eq("device_id", lockId)
           .maybeSingle();
         lastOpenedAt = presence?.last_opened_at ?? null;
         lastClosedAt = presence?.last_closed_at ?? null;
+        currentState = presence?.current_state ?? null;
         // Prefer the timestamp we just wrote if the view is somehow behind.
         if (writtenAt) {
           if (operation === "unlock") {
@@ -644,6 +696,7 @@ Deno.serve(async (req) => {
         deviceEventsStored,
         lastOpenedAt,
         lastClosedAt,
+        currentState,
         webhookExpected: "Signed event.type 3 (Job Complete)",
       }, outcome.state === "failed" ? 502 : 200);
     }

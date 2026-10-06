@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -12,7 +12,7 @@ import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide
 import { format } from 'date-fns';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
 import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
-import { bridgeOnlineFromDevices, loadLockPresenceDevices } from '@/utils/lockPresence';
+import { bridgeOnlineFromDevices, loadLockPresenceDevices, watchManualLockAfterCommand } from '@/utils/lockPresence';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 
@@ -60,6 +60,9 @@ export default function LockPresencePanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [linkingDeviceId, setLinkingDeviceId] = useState(null);
+  const [optimisticTimes, setOptimisticTimes] = useState(null);
+  const [watching, setWatching] = useState(false);
+  const stopWatch = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +95,7 @@ export default function LockPresencePanel() {
 
   useEffect(() => {
     load();
+    return () => stopWatch.current?.();
   }, [load]);
 
   const linkEquipment = useCallback(
@@ -130,6 +134,9 @@ export default function LockPresencePanel() {
   );
 
   const primary = devices[0] || null;
+  const lastOpenedAt = optimisticTimes?.lastOpenedAt ?? primary?.last_opened_at;
+  const lastClosedAt = optimisticTimes?.lastClosedAt ?? primary?.last_closed_at;
+  const currentState = optimisticTimes?.currentState ?? primary?.current_state ?? null;
 
   return (
     <Card className="bg-white/5 border-white/10">
@@ -153,24 +160,39 @@ export default function LockPresencePanel() {
       <CardContent className="space-y-3">
         <RemoteBridgeControls
           bridgeOnline={bridgeOnlineFromDevices(devices)}
-          lastOpenedAt={primary?.last_opened_at}
-          lastClosedAt={primary?.last_closed_at}
+          lastOpenedAt={lastOpenedAt}
+          lastClosedAt={lastClosedAt}
+          currentState={currentState}
+          watching={watching}
           onSuccess={(data) => {
-            if (data?.lastOpenedAt || data?.lastClosedAt) {
-              setDevices((prev) => {
-                if (!prev.length) return prev;
-                const [first, ...rest] = prev;
-                return [
-                  {
-                    ...first,
-                    last_opened_at: data.lastOpenedAt ?? first.last_opened_at,
-                    last_closed_at: data.lastClosedAt ?? first.last_closed_at,
-                  },
-                  ...rest,
-                ];
-              });
+            const nextState = data?.currentState
+              || (data?.action === 'remote_unlock' ? 'unlocked' : data?.action === 'remote_lock' ? 'locked' : null);
+            setOptimisticTimes({
+              lastOpenedAt: data?.lastOpenedAt ?? primary?.last_opened_at ?? null,
+              lastClosedAt: data?.lastClosedAt ?? primary?.last_closed_at ?? null,
+              currentState: nextState,
+            });
+            stopWatch.current?.();
+            if (data?.action === 'remote_unlock' && data?.currentState === 'locked') {
+              setWatching(false);
+              setOptimisticTimes(null);
+              load();
+              return;
             }
-            load();
+            setWatching(data?.action === 'remote_unlock');
+            stopWatch.current = watchManualLockAfterCommand({
+              action: data?.action,
+              lastOpenedAt: data?.lastOpenedAt,
+              lastClosedAt: data?.lastClosedAt,
+              currentState: data?.currentState,
+              onDevices: (next, { done }) => {
+                setDevices(next || []);
+                if (done) {
+                  setOptimisticTimes(null);
+                  setWatching(false);
+                }
+              },
+            });
           }}
         />
 
@@ -218,6 +240,7 @@ export default function LockPresencePanel() {
               <LockOpenCloseTimes
                 lastOpenedAt={device.last_opened_at}
                 lastClosedAt={device.last_closed_at}
+                currentState={device.current_state}
               />
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs text-slate-400">
