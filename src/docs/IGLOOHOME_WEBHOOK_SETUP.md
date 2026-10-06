@@ -51,10 +51,10 @@ that script if you hit the 2.111 errors).
 |---|---|
 | Frontend | http://localhost:3000 |
 | Lock test lab | http://localhost:3000/admin/lock-test |
-| Edge functions | http://127.0.0.1:55421/functions/v1/<name> |
-| Webhook (local) | http://127.0.0.1:55421/functions/v1/igloohome-webhook |
-| Studio | http://127.0.0.1:55423 |
-| API | http://127.0.0.1:55421 |
+| Edge functions | http://127.0.0.1:54321/functions/v1/<name> |
+| Webhook (local) | http://127.0.0.1:54321/functions/v1/igloohome-webhook |
+| Studio | http://127.0.0.1:54323 |
+| API | http://127.0.0.1:54321 |
 
 Verify new tables after migrations:
 

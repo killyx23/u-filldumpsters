@@ -12,7 +12,7 @@
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
 
-const BASE = "http://127.0.0.1:55421/functions/v1";
+const BASE = "http://127.0.0.1:54321/functions/v1";
 let failures = 0;
 
 function check(name, condition, detail = "") {

@@ -7,7 +7,7 @@ import crypto from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { challengeAndVerifyTotp } from "/home/razmataz23/Dev/u-filldumpsters/src/lib/adminMfa.js";
 
-const BASE = "http://127.0.0.1:55421/functions/v1";
+const BASE = "http://127.0.0.1:54321/functions/v1";
 const BOOKING_IDS = [1314, 1315, 1316];
 const FOURTH_BOOKING_ID = 1312;
 

@@ -16,7 +16,7 @@ import {
 } from "../supabase/functions/_shared/iglooAuth.ts";
 
 const TZ = "America/Denver";
-const BASE = "http://127.0.0.1:55421/functions/v1";
+const BASE = "http://127.0.0.1:54321/functions/v1";
 
 const JOBS = [
   {

@@ -280,7 +280,7 @@ logger.error = (msg, options) => {
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, process.cwd(), '');
 	const localSupabaseUrl =
-		(env.VITE_SUPABASE_URL || 'http://127.0.0.1:55421').replace(/\/+$/, '').replace(/\/rest\/v1$/i, '');
+		(env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321').replace(/\/+$/, '').replace(/\/rest\/v1$/i, '');
 
 	return {
 	customLogger: logger,
