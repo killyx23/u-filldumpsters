@@ -4,7 +4,7 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft, User, Clock, DollarSign, ShieldAlert, MessageSquare, Bell, AlertTriangle, MapPin, Shield } from 'lucide-react';
+import { Loader2, ArrowLeft, User, Clock, DollarSign, ShieldAlert, MessageSquare, Bell, AlertTriangle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CustomerProfile } from './CustomerProfile';
 import { CommunicationLog } from './CommunicationLog';
@@ -18,11 +18,10 @@ import { CustomerVerification } from './CustomerVerification';
 import { CustomerProfileHeader } from './CustomerProfileHeader';
 import { CustomerRewardsOverview } from './CustomerRewardsOverview';
 import { ProtectionPlanHistory } from './ProtectionPlanHistory';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
-import { hasPaymentDelta } from '@/utils/paymentDelta';
+import { hasPaymentDelta, isAddressOnlyVerificationBooking } from '@/utils/paymentDelta';
+import { AddressVerificationCard } from './AddressVerificationCard';
 import AdminRemoteLockBar from '@/components/admin/AdminRemoteLockBar';
 
 export const CustomerDetailView = () => {
@@ -216,12 +215,15 @@ export const CustomerDetailView = () => {
         // Same helper as History — excludes booking_not_finished (Did Not Finalize), pending_*, etc.
         const active = bookings.filter(isActiveBookingForHistory);
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
-        const verification = bookings.filter(b => !b.pending_address_verification && (
-            b.status === 'pending_verification' ||
-            b.status === 'pending_review' ||
-            b.status === 'cancellation_pending' ||
-            (b.status === 'pending_payment' && hasPaymentDelta(b))
-        ));
+        const verification = bookings.filter((b) => {
+            if (isAddressOnlyVerificationBooking(b)) return false;
+            return (
+                b.status === 'pending_verification' ||
+                b.status === 'pending_review' ||
+                b.status === 'cancellation_pending' ||
+                (b.status === 'pending_payment' && hasPaymentDelta(b))
+            );
+        });
         const cancelled = bookings.filter(b => b.status === 'Cancelled');
         const rescheduled = bookings.filter(b => b.status === 'Rescheduled');
         const historyActive = active;
@@ -293,6 +295,7 @@ export const CustomerDetailView = () => {
                      <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                        <CustomerProfile 
                             customer={customer} 
+                            bookings={bookings}
                             setCustomer={setCustomer} 
                             onUpdate={() => fetchCustomerDetails(false)} 
                             onHistoryClick={() => setIsHistoryDialogOpen(true)}
@@ -312,29 +315,15 @@ export const CustomerDetailView = () => {
                  <TabsContent value="verification">
                     <div className="space-y-8">
                          {pendingAddressBookings.length > 0 && (
-                            <div className="bg-orange-900/20 border border-orange-500/50 rounded-xl p-6">
-                                <h3 className="text-xl font-bold text-orange-400 mb-4 flex items-center">
-                                    <MapPin className="mr-2 h-6 w-6" /> Pending Address Verifications
-                                </h3>
-                                <div className="space-y-4">
-                                    {pendingAddressBookings.map(b => (
-                                        <Card key={b.id} className="bg-black/40 border-orange-500/30">
-                                            <CardContent className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                                <div>
-                                                    <p className="font-bold text-white text-lg">Booking #{b.id}</p>
-                                                    <p className="text-sm text-gray-400">Created: {format(parseISO(b.created_at), 'PPP')}</p>
-                                                    <p className="text-orange-200 mt-2 font-medium">Unverified Address: {b.unverified_address}</p>
-                                                    <p className="text-xs text-orange-400 mt-1">This booking is pending address verification. Go to Dashboard to approve or cancel.</p>
-                                                </div>
-                                                <Link to={`/admin?tab=pending-address`}>
-                                                    <Button variant="outline" className="border-orange-500 text-orange-400 hover:bg-orange-500 hover:text-white">
-                                                        Manage in Dashboard
-                                                    </Button>
-                                                </Link>
-                                            </CardContent>
-                                        </Card>
-                                    ))}
-                                </div>
+                            <div className="space-y-4">
+                                {pendingAddressBookings.map((b) => (
+                                    <AddressVerificationCard
+                                        key={b.id}
+                                        booking={b}
+                                        customer={customer}
+                                        onUpdate={() => fetchCustomerDetails(false)}
+                                    />
+                                ))}
                             </div>
                          )}
                          <CustomerVerification customer={customer} verificationBookings={verificationBookings} notes={notes} onUpdate={() => fetchCustomerDetails(false)} />

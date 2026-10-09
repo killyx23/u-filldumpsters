@@ -52,6 +52,43 @@ export function formatAddressDisplay(address) {
   return normalized?.formatted_address || '';
 }
 
+/** True when the customer accepted an address Google did not validate. */
+export function addressWasManuallyAccepted(address) {
+  if (!address || typeof address !== 'object') return false;
+  return address.isVerified === false || address.unverifiedAccepted === true;
+}
+
+/**
+ * Keep a Google selection verified. A manual "use this address" payload
+ * arrives with isVerified false and must stay unverified.
+ */
+export function applySelectedAddress(details) {
+  const manuallyAccepted = addressWasManuallyAccepted(details);
+  return {
+    ...(details || {}),
+    isVerified: !manuallyAccepted,
+    unverifiedAccepted: manuallyAccepted,
+    manualReviewAccepted: manuallyAccepted,
+  };
+}
+
+/** Google match, or a manual address the customer already approved in the review dialog. */
+export function addressCanProceed(address) {
+  if (!address?.street || !address?.city || !address?.state || !address?.zip) return false;
+  return address.isVerified === true || address.manualReviewAccepted === true;
+}
+
+/** Addon keys the booking insert trigger copies onto pending address columns. */
+export function addressReviewAddonFields(address) {
+  if (!addressWasManuallyAccepted(address)) return null;
+  const unverified = formatAddressParts(address?.street, address?.city, address?.state, address?.zip);
+  return {
+    pending_address_verification: true,
+    unverified_address: unverified,
+    pending_verification_reason: 'Address entered manually',
+  };
+}
+
 /** Compare two addresses by normalized formatted string (case-insensitive). */
 export function addressesAreEqual(a, b) {
   const left = formatAddressDisplay(a).toLowerCase().replace(/\s+/g, ' ').trim();

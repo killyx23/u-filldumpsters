@@ -28,6 +28,7 @@ import {
   bookingNeedsSkippedVerification,
   formatVerificationDeadlineMessage,
 } from '@/utils/verificationDeadline';
+import { AddressReviewPanel } from '@/components/customer-portal/AddressReviewPanel';
 
 export const VerificationManager = ({ customer, bookings = [], onUpdate }) => {
     const [licensePlate, setLicensePlate] = useState(customer?.license_plate || '');
@@ -411,6 +412,7 @@ export const VerificationManager = ({ customer, bookings = [], onUpdate }) => {
 
     return (
         <TooltipProvider>
+            <AddressReviewPanel bookings={bookings} onUpdate={onUpdate} />
             {deadlineBanner && (
                 <div className="mb-6 rounded-xl border border-orange-500/50 bg-orange-900/30 p-4 text-orange-100 text-sm">
                     <p className="font-semibold text-orange-300 mb-1">Action required — license verification</p>

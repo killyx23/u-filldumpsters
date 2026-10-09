@@ -9,6 +9,7 @@ import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { SmsOptInFields } from '@/components/SmsOptInFields';
+import { applySelectedAddress } from '@/utils/addressHelpers';
 
 export const ContactInfoForm = ({
     bookingData,
@@ -188,8 +189,8 @@ export const ContactInfoForm = ({
                                         contactAddress: {...prev.contactAddress, street: val, isVerified: false, unverifiedAccepted: true}
                                     }))} 
                                     onAddressSelect={(details) => setBookingData(prev => ({
-                                        ...prev, 
-                                        contactAddress: {...details, isVerified: true, unverifiedAccepted: false}
+                                        ...prev,
+                                        contactAddress: applySelectedAddress(details),
                                     }))} 
                                     placeholder="Start typing your address..." 
                                     required 

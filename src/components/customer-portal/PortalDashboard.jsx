@@ -8,9 +8,11 @@ import { ImportantAppointmentDetails } from './ImportantAppointmentDetails';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
     bookingNeedsSkippedVerification,
+    formatAddressDeadlineMessage,
     formatVerificationDeadlineMessage,
     getVerificationDeadlineInfo,
 } from '@/utils/verificationDeadline';
+import { loadCancellationFee } from '@/utils/cancellationFee';
 import { getPendingReviews, getUnreviewedBookings, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
 
 const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
@@ -73,6 +75,22 @@ export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, o
   const [selectedStatusType, setSelectedStatusType] = useState(null);
   const [attentionDialogOpen, setAttentionDialogOpen] = useState(false);
   const [attentionItems, setAttentionItems] = useState([]);
+  const [addressFee, setAddressFee] = useState(null);
+
+  useEffect(() => {
+    const primary = (bookings || []).find((b) => b.pending_address_verification);
+    if (!primary) {
+      setAddressFee(null);
+      return undefined;
+    }
+    let cancelled = false;
+    loadCancellationFee(primary).then((fee) => {
+      if (!cancelled) setAddressFee(fee);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookings]);
 
   useEffect(() => {
     if (!bookings) return;
@@ -89,13 +107,22 @@ export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, o
     const urgent = [];
     const attention = [];
     if (pendingAddress.length > 0) {
-      urgent.push({ type: 'address', text: `${pendingAddress.length} booking(s) require address verification immediately.` });
+      const primaryAddress = pendingAddress[0];
+      const addressDeadline = getVerificationDeadlineInfo(primaryAddress);
+      const addressMsg = formatAddressDeadlineMessage(primaryAddress, addressFee);
+      if (addressMsg) {
+        urgent.push({ type: 'address', text: addressMsg });
+      }
       attention.push({
         id: 'pending-address',
-        severity: 'warning',
-        title: `Address verification required (${pendingAddress.length})`,
-        description: 'One or more bookings are waiting for address verification.',
-        nextStep: 'Open Verification and complete the required address checks.',
+        severity: addressDeadline.isPastDeadline ? 'urgent' : 'warning',
+        title: addressDeadline.isPastDeadline
+          ? 'Address verification overdue'
+          : `Address verification due in ${addressDeadline.hoursRemaining ?? 0} hour${
+              addressDeadline.hoursRemaining === 1 ? '' : 's'
+            }`,
+        description: addressMsg || 'Correct the delivery address or explain why it cannot be validated.',
+        nextStep: 'Open Verification to correct the address, or write why Google cannot validate it.',
         targetTab: 'verification',
       });
     }
@@ -114,7 +141,9 @@ export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, o
         targetTab: 'bookings',
       });
     }
-    const pendingVerification = bookings.filter((b) => ['pending_review', 'pending_verification'].includes(b.status));
+    const pendingVerification = bookings.filter(
+      (b) => ['pending_review', 'pending_verification'].includes(b.status) && !b.pending_address_verification
+    );
     const skippedLicenseBookings = bookings.filter((b) => bookingNeedsSkippedVerification(b));
 
     if (skippedLicenseBookings.length > 0) {
@@ -201,7 +230,7 @@ export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, o
       urgentItems: urgent
     });
     setAttentionItems(attention);
-  }, [bookings, customerReviews]);
+  }, [bookings, customerReviews, addressFee]);
 
   const customerId = bookings?.[0]?.customer_id;
 

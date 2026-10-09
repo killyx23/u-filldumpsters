@@ -34,7 +34,20 @@ const InfoRow = ({ icon, label, value, href }) => {
     );
 };
 
-export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClick }) => {
+function addressStillPendingReview(customer, bookings) {
+    if (!customer) return false;
+    if (customer.unverified_address) return true;
+    const same = (left, right) => (left || '').trim().toLowerCase() === (right || '').trim().toLowerCase();
+    return (bookings || []).some((booking) => (
+        booking?.pending_address_verification &&
+        same(booking.street, customer.street) &&
+        same(booking.city, customer.city) &&
+        same(booking.state, customer.state) &&
+        same(booking.zip, customer.zip)
+    ));
+}
+
+export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClick, bookings = [] }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedCustomer, setEditedCustomer] = useState(customer);
     const [isSaving, setIsSaving] = useState(false);
@@ -391,7 +404,7 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                                 </div>
                                 <div className="w-2/3 flex flex-col">
                                     <span className="text-white break-all">{`${editedCustomer.street}, ${editedCustomer.city}, ${editedCustomer.state} ${editedCustomer.zip}`}</span>
-                                    {editedCustomer.unverified_address ? (
+                                    {addressStillPendingReview(editedCustomer, bookings) ? (
                                         <span className="flex items-center text-xs text-orange-400 mt-1"><AlertTriangle className="w-3 h-3 mr-1"/> Unverified Address</span>
                                     ) : (
                                         <span className="flex items-center text-xs text-green-400 mt-1"><CheckCircle className="w-3 h-3 mr-1"/> Verified</span>

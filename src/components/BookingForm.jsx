@@ -13,6 +13,8 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
+import { AddressVerificationDialog } from '@/components/AddressVerificationDialog';
+import { addressCanProceed, applySelectedAddress } from '@/utils/addressHelpers';
 import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
@@ -65,6 +67,7 @@ export const BookingForm = ({
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
   const [showDeliveryUnavailableDialog, setShowDeliveryUnavailableDialog] = useState(false);
+  const [addressReviewOpen, setAddressReviewOpen] = useState(false);
   const [checkingDeliveryAvailability, setCheckingDeliveryAvailability] = useState(false);
   const navigate = useNavigate();
   
@@ -851,6 +854,15 @@ export const BookingForm = ({
       return;
     }
     
+    if (!addressCanProceed(bookingData.contactAddress)) {
+        setAddressReviewOpen(true);
+        return;
+    }
+
+    submitBooking(bookingData.contactAddress);
+  };
+
+  const submitBooking = (address) => {
     const addonsPayload = {
       plan: {
         ...currentPlan,
@@ -861,13 +873,12 @@ export const BookingForm = ({
       deliveryService: isDelivery,
       deliveryFee: currentDeliveryFee
     };
-    
-    if (!bookingData.contactAddress?.isVerified) {
+
+    if (!address?.isVerified) {
         console.log('[BookingForm] Address not verified - marking for verification');
         addonsPayload.pending_address_verification = true;
-        addonsPayload.unverified_address = `${bookingData.contactAddress.street}, ${bookingData.contactAddress.city}, ${bookingData.contactAddress.state} ${bookingData.contactAddress.zip}`;
+        addonsPayload.unverified_address = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
         addonsPayload.pending_verification_reason = "Address entered manually";
-        bookingData.contactAddress.unverifiedAccepted = true;
     }
 
     console.log('[BookingForm] ✓ Submitting booking data:', {
@@ -883,7 +894,19 @@ export const BookingForm = ({
       }
     });
 
-    onSubmit(bookingData, baseRentalPrice, null, null, addonsPayload);
+    onSubmit({ ...bookingData, contactAddress: address }, baseRentalPrice, null, null, addonsPayload);
+  };
+
+  const handleManualAddressApproved = () => {
+    const address = {
+      ...bookingData.contactAddress,
+      isVerified: false,
+      unverifiedAccepted: true,
+      manualReviewAccepted: true,
+    };
+    setBookingData((prev) => ({ ...prev, contactAddress: address }));
+    setAddressReviewOpen(false);
+    submitBooking(address);
   };
 
   const handleManualAddressChange = (field, value) => {
@@ -894,7 +917,8 @@ export const BookingForm = ({
               ...prev.contactAddress,
               [field]: value,
               isVerified: false,
-              unverifiedAccepted: true
+              unverifiedAccepted: false,
+              manualReviewAccepted: false,
           }
       }));
   };
@@ -1345,16 +1369,15 @@ export const BookingForm = ({
                               ...prev.contactAddress,
                               street: val,
                               isVerified: false,
-                              unverifiedAccepted: true
+                              unverifiedAccepted: false,
+                              manualReviewAccepted: false,
                             }
                         }))} 
                         onAddressSelect={details => setBookingData(prev => ({
                             ...prev,
                             contactAddress: {
                               ...prev.contactAddress,
-                              isVerified: true,
-                              unverifiedAccepted: false,
-                              ...details,
+                              ...applySelectedAddress(details),
                             }
                         }))} 
                         placeholder="Start typing your address..." 
@@ -1381,9 +1404,9 @@ export const BookingForm = ({
                         placeholder="ZIP" 
                       />
                   </div>
-                  {!bookingData.contactAddress?.isVerified && bookingData.contactAddress?.street && (
+                  {bookingData.contactAddress?.street && !addressCanProceed(bookingData.contactAddress) && (
                       <p className="text-xs text-orange-300 bg-orange-900/20 p-2 rounded border border-orange-500/30 mt-2">
-                          Important: Please log in to the customer portal as soon as your order is placed. This allows you to verify your details and ensure your order processes as quickly as possible.
+                          This address is not verified. Choose it from the Google suggestions, or continue and approve manual review before the booking can go on.
                       </p>
                   )}
               </div>
@@ -1426,6 +1449,12 @@ export const BookingForm = ({
       </div>
     </motion.div>
     
+    <AddressVerificationDialog
+      isOpen={addressReviewOpen}
+      onOpenChange={setAddressReviewOpen}
+      onContinue={handleManualAddressApproved}
+    />
+
     <UnavailableServiceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} serviceName={planName} />
 
     <Dialog open={showDeliveryUnavailableDialog} onOpenChange={setShowDeliveryUnavailableDialog}>

@@ -180,9 +180,10 @@ export const Hero = () => {
             initial={{ opacity: 0, y: -20 }} 
             animate={{ opacity: 1, y: 0 }} 
             transition={{ duration: 0.6 }} 
-            className="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight text-white text-center text-balance leading-tight"
+            className="font-extrabold mb-6 tracking-tight text-white text-center text-balance leading-tight"
           >
-            Compact Machinery & Dumpster Rentals
+            <span className="block text-4xl md:text-6xl mb-2">Contactless</span>
+            <span className="block text-3xl md:text-5xl">Compact Machinery & Dumpster Rentals</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0 }}
@@ -198,7 +199,7 @@ export const Hero = () => {
             transition={{ duration: 0.6, delay: 0.2 }} 
             className="text-xl md:text-2xl text-blue-100 max-w-2xl mx-auto leading-relaxed"
           >
-            Fast, reliable, and affordable dumpster rental and equipment. Book online in minutes and enjoy seamless, professional delivery tailored to your project schedule.
+            Fast, reliable, and affordable dumpster rental and equipment. Book online in minutes and enjoy seamless, contactless pickup or professional delivery tailored to your project schedule.
           </motion.p>
         </div>
 

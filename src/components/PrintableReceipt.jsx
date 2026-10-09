@@ -136,7 +136,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         return <div className="p-8">Loading receipt...</div>;
     }
 
-    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, reschedule_history, return_issues, payment_delta_details, receipt_original_snapshot, receipt_status_history } = booking;
+    const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, pending_address_verification, unverified_address, reschedule_history, return_issues, payment_delta_details, receipt_original_snapshot, receipt_status_history } = booking;
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
     const isDelivery = addons?.deliveryService || addons?.isDelivery;
     const coupon = addons?.coupon;
@@ -177,10 +177,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const fullAddress = street && city ? `${street}, ${city}, ${state} ${zip}` : "N/A";
 
     const isCancelledAndRefunded = bookingStatus === 'Cancelled' && refund_details;
-    const isPendingReview = bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
+    const addressPending = Boolean(pending_address_verification);
+    const isPendingReview = addressPending || bookingStatus === 'pending_verification' || bookingStatus === 'pending_review';
     const isRescheduled = bookingStatus === 'Rescheduled';
 
     const getPendingReason = () => {
+        if (addressPending) return 'Pending Address Verification';
         if (!isPendingReview) return '';
         if (reschedule_history && reschedule_history.length > 0) return 'Pending Reschedule Approval';
         if (was_verification_skipped) return 'Pending Initial Verification';
@@ -844,10 +846,10 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             <footer className="text-xs text-gray-500 pt-4 mt-6" style={{ pageBreakInside: 'avoid' }}>
                 <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
                 {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver&apos;s license, auto insurance document, and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
+                {(addressPending || addons?.addressVerificationSkipped) && <p className="mb-2 font-bold text-orange-700"><strong>Address Not Verified:</strong> The delivery address{unverified_address ? ` (${unverified_address})` : ''} could not be validated. This booking stays pending until the customer corrects it or it is approved. If it is not resolved at least 12 hours before the appointment, the order may be canceled and a cancellation fee will be charged.</p>}
                 {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
                 {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {offersDrivewayProtection && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
-                {addons.addressVerificationSkipped && <p className="mb-2"><strong>Address Verification Skipped:</strong> Customer has proceeded with an unverified address and assumes all risks and associated costs resulting from potential delays or cancellation due to an inaccurate or unserviceable address.</p>}
                 <AgreementText booking={booking} hasInsurance={hasInsurance} />
                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
             </footer>

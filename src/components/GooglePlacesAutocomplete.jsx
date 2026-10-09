@@ -31,6 +31,8 @@ export const GooglePlacesAutocomplete = ({
   } = useGooglePlacesAutocomplete(GOOGLE_API_KEY);
 
   const [isOpen, setIsOpen] = useState(false);
+  const [noMatch, setNoMatch] = useState(false);
+  const selectedFromGoogle = useRef(false);
   const [inputValue, setInputValue] = useState(value || "");
   const [debouncedInputValue, setDebouncedInputValue] = useState(value || "");
   const wrapperRef = useRef(null);
@@ -82,8 +84,20 @@ export const GooglePlacesAutocomplete = ({
     }
   }, [debouncedInputValue, fetchSuggestions, clearSuggestions, isOpen, manualMode]);
 
+  useEffect(() => {
+    if (manualMode || selectedFromGoogle.current) return;
+    const query = debouncedInputValue?.trim() || '';
+    if (query.length >= 2 && !loading && suggestions.length === 0 && !apiError) {
+      setNoMatch(true);
+    } else if (suggestions.length > 0 || query.length < 2) {
+      setNoMatch(false);
+    }
+  }, [debouncedInputValue, loading, suggestions.length, apiError, manualMode]);
+
   const handleInputChange = (e) => {
     const val = e.target.value;
+    selectedFromGoogle.current = false;
+    setNoMatch(false);
     setInputValue(val);
     onChange(val);
     setIsOpen(true);
@@ -101,6 +115,8 @@ export const GooglePlacesAutocomplete = ({
   };
 
   const handleSelectSuggestion = async (placeId, description) => {
+    selectedFromGoogle.current = true;
+    setNoMatch(false);
     setInputValue(description);
     onChange(description);
     setIsOpen(false);
@@ -131,7 +147,8 @@ export const GooglePlacesAutocomplete = ({
         onAddressSelect({ 
           ...manualAddress, 
           isVerified: false, 
-          unverifiedAccepted: true 
+          unverifiedAccepted: true,
+          manualReviewAccepted: true,
         });
       }
     }
@@ -223,6 +240,13 @@ export const GooglePlacesAutocomplete = ({
           </button>
         )}
       </div>
+
+      {noMatch && !apiError && (
+        <div className="text-xs text-orange-200 flex items-start mt-2 bg-orange-900/20 p-2 rounded border border-orange-500/30">
+          <AlertCircle className="h-3 w-3 mr-1 mt-0.5 flex-shrink-0" />
+          No matching address. Pick a suggestion, or enter the address manually and approve the review.
+        </div>
+      )}
 
       {apiError && (
         <div className="text-xs text-red-400 flex items-center mt-2 bg-red-900/20 p-2 rounded border border-red-500/30">

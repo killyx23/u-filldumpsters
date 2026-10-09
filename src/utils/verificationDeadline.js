@@ -82,3 +82,27 @@ export function formatVerificationDeadlineMessage(booking, now = new Date()) {
   const hoursLabel = hoursRemaining === 1 ? '1 hour' : `${hoursRemaining} hours`;
   return `License verification due in ${hoursLabel} (required at least ${VERIFICATION_LEAD_HOURS} hours before pickup). Add your license plate, driver’s license (front and back), and insurance in Verification.`;
 }
+
+/**
+ * Countdown for a booking waiting on address review.
+ * Past the 12-hour mark, tell the customer the order will be canceled and a fee charged.
+ * @param {object} booking
+ * @param {{ percentage?: number, feeAmount?: number }|null} [fee]
+ * @param {Date} [now]
+ * @returns {string|null}
+ */
+export function formatAddressDeadlineMessage(booking, fee = null, now = new Date()) {
+  const { hoursRemaining, isPastDeadline, deadlineAt } = getVerificationDeadlineInfo(booking, now);
+  if (!deadlineAt) return null;
+
+  const feeSentence = fee?.percentage != null
+    ? ` The cancellation fee is ${Number(fee.percentage)}% of the order ($${Number(fee.feeAmount || 0).toFixed(2)}).`
+    : ' A cancellation fee from our pricing will be charged.';
+
+  if (isPastDeadline) {
+    return `Address verification is overdue. Your order will be canceled and you will be charged a cancellation fee unless the address is corrected or approved.${feeSentence}`;
+  }
+
+  const hoursLabel = hoursRemaining === 1 ? '1 hour' : `${hoursRemaining} hours`;
+  return `Address verification due in ${hoursLabel}. Correct the address, or explain why Google cannot validate it, at least ${VERIFICATION_LEAD_HOURS} hours before your appointment.`;
+}

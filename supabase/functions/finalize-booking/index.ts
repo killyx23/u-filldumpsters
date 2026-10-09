@@ -317,10 +317,14 @@ Deno.serve(async (req)=>{
       booking.addons?.verificationSkipped ||
       booking.addons?.wasVerificationSkipped
     );
+    const addressPending = Boolean(
+      booking.pending_address_verification ||
+      booking.addons?.pending_address_verification
+    );
     let finalStatus = "Confirmed";
     if (verificationSkipped) {
       finalStatus = "pending_verification";
-    } else if (booking.addons?.addressVerificationSkipped) {
+    } else if (addressPending || booking.addons?.addressVerificationSkipped) {
       finalStatus = "pending_review";
     }
     log("Determined final status", finalStatus);
@@ -330,6 +334,18 @@ Deno.serve(async (req)=>{
     const bookingUpdatePayload: Record<string, unknown> = { status: finalStatus };
     if (verificationSkipped && !booking.was_verification_skipped) {
       bookingUpdatePayload.was_verification_skipped = true;
+    }
+    if (addressPending) {
+      bookingUpdatePayload.pending_address_verification = true;
+      if (!booking.unverified_address && booking.addons?.unverified_address) {
+        bookingUpdatePayload.unverified_address = booking.addons.unverified_address;
+      }
+      if (!booking.pending_verification_reason && booking.addons?.pending_verification_reason) {
+        bookingUpdatePayload.pending_verification_reason = booking.addons.pending_verification_reason;
+      }
+      if (!booking.pending_verification_date) {
+        bookingUpdatePayload.pending_verification_date = new Date().toISOString();
+      }
     }
     // Paid — keep stock allocated; clear unpaid hold flag so cleanup/cancel do not restock
     if (booking.addons?.equipment_hold_active === true) {

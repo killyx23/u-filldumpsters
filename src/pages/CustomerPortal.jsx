@@ -803,8 +803,8 @@ export const CustomerPortal = () => {
                 {activeTab === 'verification' && (
                     <div className="space-y-6">
                         <div>
-                            <h2 className="text-2xl font-bold text-white mb-1">Identity Verification</h2>
-                            <p className="text-sm text-blue-200">Manage your driver's license, auto insurance, and vehicle details securely.</p>
+                            <h2 className="text-2xl font-bold text-white mb-1">Verification</h2>
+                            <p className="text-sm text-blue-200">Correct a delivery address, or manage your driver's license, auto insurance, and vehicle details.</p>
                         </div>
                         <VerificationManager
                             customer={customerData}

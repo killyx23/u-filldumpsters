@@ -29,6 +29,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { assertRescheduleStock, syncBookingEquipment } from '@/utils/equipmentInventoryManager';
+import { loadCancellationFee } from '@/utils/cancellationFee';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
@@ -181,9 +182,10 @@ const CancellationPendingDetails = ({ booking }) => {
     );
 };
 
-const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
+export const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate, initialReason }) => {
     const [refundAmount, setRefundAmount] = useState(booking?.total_price || 0);
     const [cancellationFee, setCancellationFee] = useState(0);
+    const [feeLabel, setFeeLabel] = useState('');
     const [reason, setReason] = useState("Customer service cancelled due to missing, not provided, or improper verification information.");
     const [isRefunding, setIsRefunding] = useState(false);
     const receiptRef = React.useRef();
@@ -195,6 +197,24 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     });
     
     React.useEffect(() => {
+        if (!open || !booking) return undefined;
+        if (initialReason) setReason(initialReason);
+        let cancelled = false;
+        loadCancellationFee(booking).then((fee) => {
+            if (cancelled) return;
+            setCancellationFee(fee.feeAmount);
+            setFeeLabel(
+                `${fee.feeType === 'late' ? 'Late' : 'Advance'} cancellation fee from admin pricing: ${fee.percentage}%`
+            );
+        }).catch(() => {
+            if (!cancelled) setFeeLabel('');
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [open, booking, initialReason]);
+
+    React.useEffect(() => {
         if (booking) {
             const total = booking.total_price || 0;
             const fee = parseFloat(cancellationFee) || 0;
@@ -203,26 +223,33 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
     }, [cancellationFee, booking]);
 
     const handleRefund = async () => {
-        if (!paymentInfo?.stripe_charge_id) {
+        const refund = parseFloat(refundAmount) || 0;
+        if (refund > 0 && !paymentInfo?.stripe_charge_id) {
             toast({ title: "Refund Failed", description: "This booking is missing a Stripe Charge ID and cannot be refunded automatically.", variant: "destructive" });
             return;
         }
         setIsRefunding(true);
         try {
-            const { error: refundError } = await supabase.functions.invoke('refund-payment', {
-                body: {
-                    bookingId: booking.id,
-                    amount: parseFloat(refundAmount),
-                    reason,
-                    chargeId: paymentInfo.stripe_charge_id,
-                }
-            });
-
-            if (refundError) throw refundError;
+            if (refund > 0) {
+                const { error: refundError } = await supabase.functions.invoke('refund-payment', {
+                    body: {
+                        bookingId: booking.id,
+                        amount: refund,
+                        reason,
+                        chargeId: paymentInfo.stripe_charge_id,
+                    }
+                });
+                if (refundError) throw refundError;
+            } else {
+                const { error: cancelError } = await supabase
+                    .from('bookings')
+                    .update({ status: 'Cancelled' })
+                    .eq('id', booking.id);
+                if (cancelError) throw cancelError;
+            }
             expireActiveRentalAccessCodesForOrder(booking.id, 'admin');
 
             const fee = parseFloat(cancellationFee) || 0;
-            const refund = parseFloat(refundAmount) || 0;
             await supabase.from('bookings').update({
                 cancellation_details: {
                     fee_amount: fee,
@@ -296,6 +323,7 @@ const RefundDialog = ({ booking, customer, open, onOpenChange, onUpdate }) => {
                     <div>
                         <Label htmlFor="cancellation-fee">Cancellation / Admin Fee</Label>
                         <Input id="cancellation-fee" type="number" value={cancellationFee} onChange={(e) => setCancellationFee(e.target.value)} placeholder="0.00" className="bg-white/20"/>
+                        {feeLabel && <p className="text-xs text-gray-400 mt-1">{feeLabel}. You can change the amount before refunding.</p>}
                     </div>
                     <div>
                         <Label>Amount to Refund</Label>

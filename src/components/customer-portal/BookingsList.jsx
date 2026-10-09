@@ -18,6 +18,7 @@ import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { canExtendBooking } from '@/utils/rentalExtension';
 import { bookingNeedsReview, isReviewPending, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
+import { formatAddressDeadlineMessage } from '@/utils/verificationDeadline';
 
 export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, onCancelClick, onRescheduleClick, onExtendClick, onLeaveReview }) => {
   const [filterStatus, setFilterStatus] = useState('all');
@@ -146,7 +147,9 @@ export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, o
                  {booking.pending_address_verification && (
                     <div className="bg-orange-900/30 border border-orange-500/40 p-3 rounded-md mb-2">
                         <p className="font-semibold text-orange-400 flex items-center mb-1"><AlertTriangle className="h-4 w-4 mr-1"/> Action Required</p>
-                        <p className="text-orange-200 text-xs">Address pending manual verification. Delivery cannot proceed until verified.</p>
+                        <p className="text-orange-200 text-xs">
+                          {formatAddressDeadlineMessage(booking) || 'Address pending manual verification. Open Verification to correct it or explain why Google cannot validate it.'}
+                        </p>
                     </div>
                 )}
                 <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-gray-300">

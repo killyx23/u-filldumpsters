@@ -35,6 +35,7 @@ import {
   equipmentStockErrorFromRpc,
 } from '@/utils/bookingCapacityError';
 import { getStoredReferralCode } from '@/utils/referralCodeStorage';
+import { addressReviewAddonFields } from '@/utils/addressHelpers';
 import {
   markEquipmentHoldActive,
   rememberPaymentEquipmentHold,
@@ -857,8 +858,8 @@ export const PaymentPage = ({ onBack }) => {
         ).trim();
         const fullName = `${retrievedBookingData.firstName} ${retrievedBookingData.lastName}`.trim();
         const driverVerificationSkipped = Boolean(pendingData.addons_data?.wasVerificationSkipped);
-        const isUnverifiedDelivery = pendingData.delivery_address &&
-                                     !pendingData.delivery_address.isVerified;
+        const deliveryForReview = pendingData.delivery_address || pendingData.contact_address;
+        const addressReview = addressReviewAddonFields(deliveryForReview);
 
         const liveService = await hydratePlanFromPending(pendingData);
         const quotedPrice = Number(pendingData.base_price ?? 0);
@@ -891,7 +892,7 @@ export const PaymentPage = ({ onBack }) => {
           tax_amount: calcResult.tax,
           tax_rate_used: calcResult.taxRate,
           status: 'pending_payment',
-          was_verification_skipped: driverVerificationSkipped || isUnverifiedDelivery,
+          was_verification_skipped: driverVerificationSkipped,
           verification_notes: pendingData.addons_data?.verificationNotes || null,
           pending_customer_id: pendingData.id,
           distance_miles: Number(
@@ -904,6 +905,7 @@ export const PaymentPage = ({ onBack }) => {
             smsTransactionalOptIn: pendingData.booking_data?.smsTransactionalOptIn === true,
             smsMarketingOptIn: pendingData.booking_data?.smsMarketingOptIn === true,
             verificationSkipped: driverVerificationSkipped,
+            ...(addressReview || {}),
             isDelivery: pendingData.delivery_service,
             referralCode: normalizedReferralCode || null,
             taxableSubtotal: calcResult.taxableSubtotal,

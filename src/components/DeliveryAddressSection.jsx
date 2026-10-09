@@ -8,6 +8,7 @@ import { useLoadScript } from '@react-google-maps/api';
 import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
 import { DeliveryServiceInfo } from './DeliveryServiceInfo';
 import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
+import { applySelectedAddress } from '@/utils/addressHelpers';
 
 const libraries = ['places'];
 
@@ -122,7 +123,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
   };
 
   const handleAddressSelect = (details) => {
-    const newAddress = { ...details, isVerified: true, unverifiedAccepted: false };
+    const newAddress = applySelectedAddress(details);
     setAddonsData(prev => ({ ...prev, deliveryAddress: newAddress }));
     calculateDistance(newAddress);
   };

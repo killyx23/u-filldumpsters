@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { getFollowUpReasonLabel, isFollowUpHold } from '@/utils/followUpResolution';
 import { hasPaymentDelta, isActionItemVerificationBooking } from '@/utils/paymentDelta';
+import { ThingsForTheDay } from '@/components/admin/ThingsForTheDay';
 
 const ActionItemCard = ({ title, icon, items, onCardClick, emptyText }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg cursor-pointer hover:bg-white/10 transition-colors" onClick={() => onCardClick(title, items)}>
@@ -206,6 +207,7 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, onUpdat
                     emptyText="No bookings are flagged."
                 />
             </div>
+            <ThingsForTheDay bookings={bookings || []} />
         </>
     );
 };

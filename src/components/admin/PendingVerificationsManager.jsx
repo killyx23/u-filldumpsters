@@ -9,6 +9,7 @@ import { format, parseISO } from 'date-fns';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { VerificationImageDisplay } from '@/components/VerificationImageDisplay';
 import { reinstatePinTrackingPatch, expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
+import { loadCancellationFee } from '@/utils/cancellationFee';
 
 export const PendingVerificationsManager = () => {
   const { user } = useAuth();
@@ -18,13 +19,15 @@ export const PendingVerificationsManager = () => {
   const [isApproveDialogOpen, setIsApproveDialogOpen] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [cancelFee, setCancelFee] = useState(null);
+  const [loadingFee, setLoadingFee] = useState(false);
 
   const fetchPendingVerifications = async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, customers(*)')
+        .select('*, customers(*), stripe_payment_info(*)')
         .eq('pending_address_verification', true)
         .order('pending_verification_date', { ascending: false });
 
@@ -52,14 +55,34 @@ export const PendingVerificationsManager = () => {
         .from('bookings')
         .update({
           pending_address_verification: false,
+          unverified_address: null,
+          pending_verification_reason: null,
           address_verified_by_admin: adminEmail,
           address_verified_date: new Date().toISOString(),
           status: 'Confirmed',
+          addons: {
+            ...(selectedBooking.addons || {}),
+            pending_address_verification: false,
+          },
           ...reinstatePinTrackingPatch(prevStatus, 'Confirmed'),
         })
         .eq('id', selectedBooking.id);
 
       if (updateError) throw updateError;
+
+      if (selectedBooking.customer_id) {
+        const { error: customerError } = await supabase
+          .from('customers')
+          .update({
+            street: selectedBooking.street,
+            city: selectedBooking.city,
+            state: selectedBooking.state,
+            zip: selectedBooking.zip,
+            unverified_address: false,
+          })
+          .eq('id', selectedBooking.customer_id);
+        if (customerError) throw customerError;
+      }
 
       if (prevStatus === 'pending_review') {
         await expireActiveRentalAccessCodesForOrder(selectedBooking.id);
@@ -86,27 +109,83 @@ export const PendingVerificationsManager = () => {
     }
   };
 
+  const openCancelDialog = async (booking) => {
+    setSelectedBooking(booking);
+    setCancelFee(null);
+    setIsCancelDialogOpen(true);
+    setLoadingFee(true);
+    try {
+      setCancelFee(await loadCancellationFee(booking));
+    } catch (error) {
+      toast({ title: "Could not load cancellation fee", description: error.message, variant: "destructive" });
+    } finally {
+      setLoadingFee(false);
+    }
+  };
+
+  const paymentChargeId = (booking) => {
+    const info = Array.isArray(booking?.stripe_payment_info)
+      ? booking.stripe_payment_info[0]
+      : booking?.stripe_payment_info;
+    return info?.stripe_charge_id || null;
+  };
+
   const handleCancel = async (refundType) => {
     if (!selectedBooking) return;
     setActionLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('refund-payment', {
-        body: { bookingId: selectedBooking.id, refundType }
-      });
+      const total = Number(selectedBooking.total_price || 0);
+      const feeAmount = refundType === 'partial' ? Number(cancelFee?.feeAmount || 0) : 0;
+      const refundAmount = parseFloat(Math.max(0, total - feeAmount).toFixed(2));
+      const chargeId = paymentChargeId(selectedBooking);
+      const reason = refundType === 'partial'
+        ? `Invalid address. Cancellation fee ${cancelFee?.percentage ?? 0}% ($${feeAmount.toFixed(2)}) retained per admin pricing.`
+        : 'Invalid address. Full refund issued.';
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (refundAmount > 0) {
+        if (!chargeId) {
+          throw new Error('This booking is missing a Stripe Charge ID and cannot be refunded automatically.');
+        }
+        const { data, error } = await supabase.functions.invoke('refund-payment', {
+          body: {
+            bookingId: selectedBooking.id,
+            amount: refundAmount,
+            reason,
+            chargeId,
+          }
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+      } else {
+        const { error } = await supabase.from('bookings').update({ status: 'Cancelled' }).eq('id', selectedBooking.id);
+        if (error) throw error;
+      }
+
+      await supabase.from('bookings').update({
+        cancellation_details: {
+          fee_amount: feeAmount,
+          refund_amount: refundAmount,
+          reason,
+          cancel_source: 'address_verification',
+          approved_at: new Date().toISOString(),
+        },
+      }).eq('id', selectedBooking.id);
+
       expireActiveRentalAccessCodesForOrder(selectedBooking.id, 'admin');
       const adminEmail = user?.email || 'admin';
       await supabase.from('customer_notes').insert({
         customer_id: selectedBooking.customer_id,
         booking_id: selectedBooking.id,
         source: 'Address Verification Rejection',
-        content: `Booking cancelled by ${adminEmail} due to invalid address. Refund type: ${refundType}.`,
+        content: `Booking cancelled by ${adminEmail} due to invalid address. Refund $${refundAmount.toFixed(2)}, fee $${feeAmount.toFixed(2)}.`,
         author_type: 'admin'
       });
 
-      toast({ title: "Booking Cancelled", description: "The booking was cancelled and refund processed." });
+      await supabase.functions.invoke('send-booking-confirmation', {
+        body: { bookingId: selectedBooking.id },
+      });
+
+      toast({ title: "Booking Cancelled", description: "The booking was cancelled and the refund was processed." });
       fetchPendingVerifications();
       setIsCancelDialogOpen(false);
     } catch (error) {
@@ -159,6 +238,12 @@ export const PendingVerificationsManager = () => {
                       <AlertTriangle className="h-4 w-4 mr-1 mt-0.5 flex-shrink-0" />
                       <span className="break-words max-w-xs">{booking.unverified_address}</span>
                     </div>
+                    {booking.pending_verification_reason && (
+                      <p className="text-xs text-gray-300 mt-2 max-w-xs">
+                        <span className="text-gray-400">Customer statement: </span>
+                        {booking.pending_verification_reason}
+                      </p>
+                    )}
                     <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(booking.unverified_address)}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline mt-1 flex items-center">
                       View on Map <ExternalLink className="h-3 w-3 ml-1" />
                     </a>
@@ -171,7 +256,7 @@ export const PendingVerificationsManager = () => {
                       <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => { setSelectedBooking(booking); setIsApproveDialogOpen(true); }}>
                         Verify & Approve
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => { setSelectedBooking(booking); setIsCancelDialogOpen(true); }}>
+                      <Button size="sm" variant="destructive" onClick={() => openCancelDialog(booking)}>
                         Cancel
                       </Button>
                     </div>
@@ -232,10 +317,16 @@ export const PendingVerificationsManager = () => {
                   <div className="text-xs text-gray-400 font-normal">Refund the entire amount back to the customer's card.</div>
                 </div>
               </Button>
-              <Button variant="outline" className="w-full justify-start text-left h-auto py-3 border-red-500/50 hover:bg-red-900/20" onClick={() => handleCancel('partial')} disabled={actionLoading}>
+              <Button variant="outline" className="w-full justify-start text-left h-auto py-3 border-red-500/50 hover:bg-red-900/20" onClick={() => handleCancel('partial')} disabled={actionLoading || loadingFee || !cancelFee}>
                 <div>
                   <div className="font-bold text-red-400">Apply Cancellation Fee (Partial Refund)</div>
-                  <div className="text-xs text-gray-400 font-normal">Deduct standard cancellation fees according to policy.</div>
+                  <div className="text-xs text-gray-400 font-normal">
+                    {loadingFee
+                      ? 'Loading the fee from admin pricing...'
+                      : cancelFee
+                        ? `Keep ${cancelFee.percentage}% ($${cancelFee.feeAmount.toFixed(2)}) and refund $${cancelFee.refundAmount.toFixed(2)}. ${cancelFee.feeType === 'late' ? 'Late fee, within 24 hours of the appointment.' : 'Advance fee, more than 24 hours before the appointment.'}`
+                        : 'Could not load the cancellation fee.'}
+                  </div>
                 </div>
               </Button>
             </div>

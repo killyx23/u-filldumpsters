@@ -103,9 +103,15 @@ const CONFIRMED_STATUSES = new Set(["Confirmed", "confirmed", "Completed", "comp
 const resolveActionRequiredKind = (booking: {
   status?: string | null;
   was_verification_skipped?: boolean | null;
+  pending_address_verification?: boolean | null;
   addons?: Record<string, unknown> | null;
-}): "pending_verification" | "pending_review" | null => {
+}): "pending_verification" | "pending_review" | "pending_address" | null => {
   const status = String(booking.status || "");
+  const addressPending = Boolean(
+    booking.pending_address_verification ||
+    booking.addons?.pending_address_verification
+  );
+  if (addressPending && !CONFIRMED_STATUSES.has(status)) return "pending_address";
   if (status === "pending_verification") return "pending_verification";
   if (status === "pending_review") return "pending_review";
   const skipped = Boolean(
@@ -116,6 +122,27 @@ const resolveActionRequiredKind = (booking: {
   if (skipped && !CONFIRMED_STATUSES.has(status)) return "pending_verification";
   return null;
 };
+
+async function addressCancellationFeeNote(supabase, booking): Promise<string> {
+  const fees: Record<string, number> = { advance_cancel_percentage: 10, late_cancel_percentage: 50 };
+  const { data } = await supabase.from("charges_and_fees").select("fee_key, fee_value");
+  for (const row of data || []) {
+    if (row?.fee_key === "advance_cancel_percentage" || row?.fee_key === "late_cancel_percentage") {
+      const value = Number(row.fee_value);
+      if (Number.isFinite(value)) fees[row.fee_key] = value;
+    }
+  }
+  const dateStr = booking.drop_off_date ? String(booking.drop_off_date) : "";
+  const window = parseBookingTimeSlot(booking.drop_off_time_slot, 0);
+  const start = window?.start || { hour: 8, minute: 0, second: 0 };
+  const appointmentAt = dateStr ? businessWallTimeToUtc(dateStr, start) : null;
+  const hoursUntil = appointmentAt ? (appointmentAt.getTime() - Date.now()) / (1000 * 60 * 60) : null;
+  const isLate = hoursUntil !== null && hoursUntil <= 24;
+  const percentage = isLate ? fees.late_cancel_percentage : fees.advance_cancel_percentage;
+  const total = Number(booking.total_price || 0);
+  const feeAmount = (percentage / 100) * total;
+  return `${percentage}% (${formatCurrency(feeAmount)})`;
+}
 
 const getVerificationDeadlineInfo = (booking: {
   drop_off_date?: string | null;
@@ -745,9 +772,10 @@ const generateActionRequiredEmailHTML = (
   insuranceAmount = 0,
   siteUrl = normalizeSiteUrl(),
   options: {
-    kind: "pending_verification" | "pending_review";
+    kind: "pending_verification" | "pending_review" | "pending_address";
     hoursRemaining: number | null;
     isPastDeadline: boolean;
+    cancellationFeeNote?: string | null;
   },
 ) => {
   const grandTotal = resolveReceiptPricing(booking, insuranceAmount).total;
@@ -774,8 +802,25 @@ const generateActionRequiredEmailHTML = (
     : `${formatDate(booking.pickup_date)} ${deliveryWindowPickup}`;
 
   const isVerification = options.kind === "pending_verification";
+  const isAddress = options.kind === "pending_address";
   const hoursLabel = options.hoursRemaining === 1 ? "1 hour" : `${options.hoursRemaining} hours`;
-  const deadlineBanner = isVerification
+  const feeNote = options.cancellationFeeNote
+    ? ` You will be charged a cancellation fee of ${options.cancellationFeeNote}.`
+    : " You will be charged a cancellation fee.";
+  const licenseAlsoSkipped = Boolean(
+    booking.was_verification_skipped ||
+    booking.addons?.verificationSkipped ||
+    booking.addons?.wasVerificationSkipped
+  );
+  const unverifiedAddress = booking.unverified_address
+    || `${deliveryAddress.street || booking.street || ""}, ${deliveryAddress.city || booking.city || ""}, ${deliveryAddress.state || booking.state || ""} ${deliveryAddress.zip || booking.zip || ""}`.trim();
+  const deadlineBanner = isAddress
+    ? (options.isPastDeadline
+      ? `The address deadline has passed. Your order will be canceled unless the address is corrected or approved.${feeNote}`
+      : options.hoursRemaining != null
+        ? `You have <strong>${hoursLabel}</strong> to correct this address or submit it for review. It must be done at least ${VERIFICATION_LEAD_HOURS} hours before your ${eventNoun}, or the order will be canceled and a cancellation fee will be charged.`
+        : `This address must be corrected or reviewed at least ${VERIFICATION_LEAD_HOURS} hours before your ${eventNoun}, or the order will be canceled and a cancellation fee will be charged.`)
+    : isVerification
     ? (options.isPastDeadline
       ? `Your verification deadline has passed. Complete this immediately or your scheduled ${eventNoun} may be delayed or cancelled.`
       : options.hoursRemaining != null
@@ -783,8 +828,14 @@ const generateActionRequiredEmailHTML = (
         : `Documents are required at least ${VERIFICATION_LEAD_HOURS} hours before your scheduled ${eventNoun}, or your ${eventNoun} may be delayed or cancelled.`)
     : "Your booking is on hold until we finish reviewing your address. We will follow up if anything else is needed.";
 
-  const actionTitle = isVerification ? "Action Required — Finish Verification" : "Action Required — Booking On Hold";
-  const actionIntro = isVerification
+  const actionTitle = isAddress
+    ? "Action Required — Address Needs Review"
+    : isVerification
+      ? "Action Required — Finish Verification"
+      : "Action Required — Booking On Hold";
+  const actionIntro = isAddress
+    ? `We received your payment, but your booking is <strong>not confirmed yet</strong>. The address <strong>${unverifiedAddress}</strong> could not be verified and is pending until you correct it in the Customer Portal or our team approves it.${licenseAlsoSkipped ? " You also still need to submit your license plate, driver’s license (front and back), and auto insurance." : ""}`
+    : isVerification
     ? "We received your payment, but your booking is <strong>not confirmed yet</strong>. You skipped driver and vehicle verification, so we still need your towing vehicle license plate, driver’s license (front and back), and auto insurance."
     : "We received your payment, but your booking is <strong>not confirmed yet</strong>. Your address still needs review before we can lock in the reservation.";
 
@@ -815,6 +866,15 @@ const generateActionRequiredEmailHTML = (
           <li>Towing vehicle license plate</li>
           <li>Driver’s license — front and back</li>
           <li>Current auto insurance document</li>
+        </ul>
+      </div>
+      ` : ""}
+      ${isAddress ? `
+      <div style="margin: 20px 0; padding: 16px 18px; background-color: #fff7ed; border: 1px solid #fdba74; border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; color: #9a3412; font-weight: bold;">What to do in the Customer Portal:</p>
+        <ul style="margin: 0; padding-left: 20px; color: #7c2d12; line-height: 1.7;">
+          <li>Search for the correct address and choose a Google-validated result, or</li>
+          <li>Write why the address cannot be validated through Google so our team can review it</li>
         </ul>
       </div>
       ` : ""}
@@ -1695,9 +1755,12 @@ Deno.serve(async (req)=>{
       booking.status === "Cancelled" &&
       (booking.refund_details || booking.cancellation_details);
     const actionRequiredKind = isCancelledRefund ? null : resolveActionRequiredKind(booking);
-    const deadlineInfo = actionRequiredKind === "pending_verification"
+    const deadlineInfo = actionRequiredKind === "pending_verification" || actionRequiredKind === "pending_address"
       ? getVerificationDeadlineInfo(booking)
       : { hoursRemaining: null as number | null, isPastDeadline: false };
+    const cancellationFeeNote = actionRequiredKind === "pending_address" && deadlineInfo.isPastDeadline
+      ? await addressCancellationFeeNote(supabase, booking)
+      : null;
     const emailKind = isCancelledRefund
       ? "refund"
       : actionRequiredKind || "confirmation";
@@ -1749,12 +1812,15 @@ Deno.serve(async (req)=>{
           kind: actionRequiredKind,
           hoursRemaining: deadlineInfo.hoursRemaining,
           isPastDeadline: deadlineInfo.isPastDeadline,
+          cancellationFeeNote,
         })
         : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
     const subject = isCancelledRefund
       ? `Refund Confirmation #${booking.id} — U-Fill Dumpsters`
       : actionRequiredKind === "pending_verification"
         ? `Action Required: Finish verification for Booking #${booking.id} — U-Fill Dumpsters`
+        : actionRequiredKind === "pending_address"
+          ? `Action Required: Address needs to be fixed for Booking #${booking.id} — U-Fill Dumpsters`
         : actionRequiredKind === "pending_review"
           ? `Action Required: Booking #${booking.id} is on hold — U-Fill Dumpsters`
           : `Booking Confirmation #${booking.id} - U-Fill Dumpsters`;

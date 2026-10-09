@@ -113,8 +113,11 @@ export const BookingConfirmation = () => {
   };
 
   const resolveEmailKind = (emailType, booking = bookingDetails) => {
-    if (emailType === 'pending_verification' || emailType === 'pending_review' || emailType === 'confirmation' || emailType === 'refund') {
+    if (emailType === 'pending_verification' || emailType === 'pending_review' || emailType === 'pending_address' || emailType === 'confirmation' || emailType === 'refund') {
       return emailType;
+    }
+    if (booking?.pending_address_verification || booking?.addons?.pending_address_verification) {
+      return 'pending_address';
     }
     const status = booking?.status;
     if (status === 'pending_verification') return 'pending_verification';
@@ -131,6 +134,12 @@ export const BookingConfirmation = () => {
       return {
         title: 'Action Required Email Sent',
         description: 'We emailed instructions to finish your ID, license, and insurance verification.',
+      };
+    }
+    if (emailKind === 'pending_address') {
+      return {
+        title: 'Action Required Email Sent',
+        description: 'We emailed you that the address needs to be corrected or reviewed.',
       };
     }
     if (emailKind === 'pending_review') {
@@ -651,7 +660,12 @@ export const BookingConfirmation = () => {
   const isPendingReview =
     sentEmailType === 'pending_review' ||
     bookingDetails.status === 'pending_review';
-  const isActionRequired = isPendingVerification || isPendingReview;
+  const addressPending = Boolean(
+    bookingDetails.pending_address_verification ||
+    bookingDetails.addons?.pending_address_verification ||
+    sentEmailType === 'pending_address'
+  );
+  const isActionRequired = isPendingVerification || isPendingReview || addressPending;
 
   const FinalizeBanner = () => (
     <div className={`p-5 rounded-xl mb-8 text-left flex items-start shadow-lg transition-all duration-500 ${
@@ -748,7 +762,9 @@ export const BookingConfirmation = () => {
             {isActionRequired ? 'Action Required' : 'Booking Confirmed!'}
           </h1>
           <p className="text-xl text-blue-200 mb-8">
-            {isActionRequired
+            {addressPending
+              ? `Thank you for choosing U-Fill Dumpsters. Payment for order #${bookingDetails.id} was received, but the address could not be verified.`
+              : isActionRequired
               ? `Thank you for choosing U-Fill Dumpsters. Payment for order #${bookingDetails.id} was received — finish verification to confirm your booking.`
               : `Thank you for choosing U-Fill Dumpsters. Your order #${bookingDetails.id} is secured.`}
           </p>
@@ -866,6 +882,20 @@ export const BookingConfirmation = () => {
               )}
             </div>
           </div>
+
+          {addressPending && (
+            <div className="bg-orange-900/40 border border-orange-500/50 p-5 rounded-xl mb-6 text-left shadow-lg">
+              <h3 className="text-lg font-bold text-orange-300 mb-2 flex items-center">
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Action Required — Fix the Address
+              </h3>
+              <p className="text-orange-100/90 text-sm leading-relaxed">
+                This address is not verified and the booking stays pending until you correct it in the Customer Portal
+                or our team approves it. If Google cannot validate the address, write why. This has to be done at least
+                12 hours before your appointment, or the order can be canceled and a cancellation fee charged.
+              </p>
+            </div>
+          )}
 
           {isPendingVerification && (
             <div className="bg-orange-900/40 border border-orange-500/50 p-5 rounded-xl mb-6 text-left shadow-lg">
