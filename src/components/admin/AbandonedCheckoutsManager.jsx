@@ -267,8 +267,8 @@ export const AbandonedCheckoutsManager = () => {
                             <p><span className="text-gray-400">Service:</span> {serviceLabel}</p>
                             <p><span className="text-gray-400">Equipment:</span> {equipmentSummary(row)}</p>
                             <p>
-                              <span className="text-gray-400">Insurance:</span>{' '}
-                              {row.addons?.insurance === 'accept' ? 'Accepted' : 'Declined / n/a'}
+                              <span className="text-gray-400">HPP:</span>{' '}
+                              {row.addons?.insurance === 'accept' ? 'Accept (HPP)' : 'Decline (HPP) / n/a'}
                             </p>
                             <p>
                               <span className="text-gray-400">Driveway:</span>{' '}

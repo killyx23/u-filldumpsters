@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useResources } from '@/hooks/useResources';
+import { CustomerRentalDocuments } from '@/components/customer-portal/CustomerRentalDocuments';
+import { filterCustomerRentalDocuments } from '@/utils/customerRentalDocuments';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, Loader2, PlayCircle, FileText, BookOpen } from 'lucide-react';
@@ -7,7 +9,7 @@ import { useNavigate } from 'react-router-dom';
 
 const CATEGORIES = ['All', 'Video', 'Document', 'Guide'];
 
-export const CustomerPortalResourcesPage = () => {
+export const CustomerPortalResourcesPage = ({ bookings = [], customerData = null }) => {
   const { getResources, loading } = useResources();
   const [resources, setResources] = useState([]);
   const [filteredResources, setFilteredResources] = useState([]);
@@ -39,6 +41,11 @@ export const CustomerPortalResourcesPage = () => {
     }
     setFilteredResources(result);
   }, [activeCategory, searchQuery, resources]);
+
+  const matchingCustomerDocuments = filterCustomerRentalDocuments(bookings, {
+    category: activeCategory,
+    searchQuery,
+  });
 
   return (
     <div className="space-y-6">
@@ -74,6 +81,13 @@ export const CustomerPortalResourcesPage = () => {
           />
         </div>
       </div>
+
+      <CustomerRentalDocuments
+        bookings={bookings}
+        customerData={customerData}
+        searchQuery={searchQuery}
+        category={activeCategory}
+      />
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -114,12 +128,12 @@ export const CustomerPortalResourcesPage = () => {
             </div>
           ))}
         </div>
-      ) : (
+      ) : matchingCustomerDocuments.length === 0 ? (
         <div className="text-center py-20 bg-black/20 rounded-xl border border-white/10">
           <h3 className="text-xl text-white mb-2">No resources found</h3>
           <p className="text-gray-400">Try adjusting your search or category filters.</p>
         </div>
-      )}
+      ) : null}
     </div>
   );
 };

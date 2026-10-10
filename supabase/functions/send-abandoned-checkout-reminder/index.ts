@@ -96,7 +96,7 @@ function equipmentListHtml(addons: Record<string, unknown>): string {
 
 function protectionListHtml(addons: Record<string, unknown>, plan: Record<string, unknown>): string {
   const bits: string[] = [];
-  if (addons?.insurance === "accept") bits.push("Rental Insurance");
+  if (addons?.insurance === "accept") bits.push("Hardware Protection Plan");
   if (Number(plan?.id) === 1 && addons?.drivewayProtection === "accept") bits.push("Driveway Protection");
   if (bits.length === 0) return "";
   return `<p style="margin:12px 0 0;color:#374151;font-size:14px;"><strong>Protection:</strong> ${bits.join(" · ")}</p>`;

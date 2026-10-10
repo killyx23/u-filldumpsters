@@ -70,7 +70,7 @@ export const CommunicationHub = ({
                 </TabsContent>
 
                 <TabsContent value="tickets" className="mt-4">
-                    <SupportTickets customer={customer} notes={notes} onNewNote={onNewNote} />
+                    <SupportTickets customer={customer} bookings={bookings} notes={notes} onNewNote={onNewNote} />
                 </TabsContent>
 
                 <TabsContent value="reviews" className="mt-4">
@@ -219,34 +219,228 @@ const ChatInterface = ({ customer }) => {
     );
 };
 
-const SupportTickets = ({ customer, notes, onNewNote }) => {
+const CLAIM_PHOTO_LIMIT = 8;
+
+const ClaimPhotoPreview = ({ file, onRemove }) => {
+    const [url, setUrl] = useState('');
+
+    useEffect(() => {
+        const objectUrl = URL.createObjectURL(file);
+        setUrl(objectUrl);
+        return () => URL.revokeObjectURL(objectUrl);
+    }, [file]);
+
+    return (
+        <div className="relative overflow-hidden rounded-md border border-white/15 bg-black/40">
+            {url && <img src={url} alt={file.name} className="h-24 w-full object-cover" />}
+            <div className="flex items-center justify-between gap-2 px-2 py-1">
+                <span className="truncate text-xs text-gray-300">{file.name}</span>
+                <button type="button" className="shrink-0 text-xs text-red-300" onClick={onRemove}>
+                    Remove
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const ticketField = (content, label) => {
+    const match = String(content).match(new RegExp(`\\*\\*${label}:\\*\\*\\s*([^\\n]*)`));
+    return match?.[1]?.trim() || '';
+};
+
+const ticketPhotoPaths = (content = '') => {
+    const raw = ticketField(content, 'PHOTOS');
+    if (!raw) return [];
+    return raw.split('|').map((path) => path.trim()).filter(Boolean);
+};
+
+const ticketDescription = (content = '') => {
+    const text = String(content);
+    const splitAt = text.indexOf('\n\n');
+    const body = (splitAt >= 0 ? text.slice(splitAt + 2) : text).trim();
+    return body.replace(/\*\*[A-Z_]+:\*\*[^\n]*/g, '').trim();
+};
+
+const formatTicketWhen = (value) => {
+    if (!value) return '';
+    const parsed = parseISO(String(value));
+    if (Number.isNaN(parsed.getTime())) return '';
+    return format(parsed, 'PPP p');
+};
+
+const presentTicket = (ticket) => {
+    const content = ticket.content || '';
+    const subject = ticketField(content, 'TICKET') || 'Support ticket';
+    const bookingId = ticketField(content, 'BOOKING') || ticket.booking_id || '';
+    const hpp = ticketField(content, 'HPP_CLAIM');
+    const notice = formatTicketWhen(ticketField(content, 'NOTICE_AT') || ticket.created_at);
+    const photos = ticketPhotoPaths(content);
+    return {
+        subject,
+        bookingId,
+        hpp,
+        notice,
+        photos,
+        description: ticketDescription(content),
+        isClaim: Boolean(hpp),
+    };
+};
+
+const SupportTickets = ({ customer, bookings = [], notes, onNewNote }) => {
     const [subject, setSubject] = useState('');
     const [description, setDescription] = useState('');
+    const [isClaim, setIsClaim] = useState(false);
+    const [bookingId, setBookingId] = useState('');
+    const [photos, setPhotos] = useState([]);
+    const [hppByBooking, setHppByBooking] = useState({});
+    const [claimsById, setClaimsById] = useState({});
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const photoInputRef = useRef(null);
 
-    // Support tickets rightfully stay in customer_notes
     const ticketNotes = notes.filter(n => n.source === 'Support Ticket').sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    const selectedHpp = hppByBooking[String(bookingId)];
+
+    useEffect(() => {
+        if (!customer?.id) return undefined;
+        let active = true;
+        supabase
+            .from('booking_protection_plans')
+            .select('booking_id, election, cancelled_at')
+            .eq('customer_id', customer.id)
+            .eq('plan_type', 'rental_insurance')
+            .then(({ data, error }) => {
+                if (!active || error) return;
+                const next = {};
+                for (const row of data || []) {
+                    next[String(row.booking_id)] = row.election === 'accept' && !row.cancelled_at;
+                }
+                setHppByBooking(next);
+            });
+        return () => {
+            active = false;
+        };
+    }, [customer?.id]);
+
+    useEffect(() => {
+        if (!customer?.id) return undefined;
+        let active = true;
+        supabase
+            .from('protection_plan_claims')
+            .select('id, status, claim_amount, covered_amount, customer_charge_amount, amount_charged')
+            .eq('customer_id', customer.id)
+            .then(({ data, error }) => {
+                if (!active || error) return;
+                const next = {};
+                for (const row of data || []) next[String(row.id)] = row;
+                setClaimsById(next);
+            });
+        return () => {
+            active = false;
+        };
+    }, [customer?.id, notes]);
+
+    const resetClaimFields = () => {
+        setPhotos([]);
+        setBookingId('');
+        if (photoInputRef.current) photoInputRef.current.value = '';
+    };
+
+    const handlePhotoSelect = (event) => {
+        const files = Array.from(event.target.files || []);
+        if (!files.length) return;
+        const combined = [...photos, ...files].slice(0, CLAIM_PHOTO_LIMIT);
+        if (photos.length + files.length > CLAIM_PHOTO_LIMIT) {
+            toast({ title: 'Photo limit', description: `You can attach up to ${CLAIM_PHOTO_LIMIT} photos.`, variant: 'destructive' });
+        }
+        const invalid = combined.find((file) => file.type && !file.type.startsWith('image/'));
+        if (invalid) {
+            toast({ title: 'Photos only', description: 'Attach image files for the claim.', variant: 'destructive' });
+            event.target.value = '';
+            return;
+        }
+        setPhotos(combined);
+        event.target.value = '';
+    };
+
+    const uploadClaimPhotos = async () => {
+        const uploaded = [];
+        for (let index = 0; index < photos.length; index += 1) {
+            const file = photos[index];
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'photo';
+            const filePath = `${customer.id}/protection-claims/${bookingId}/${Date.now()}-${index}-${safeName}`;
+            const { error } = await supabase.storage.from('customer-uploads').upload(filePath, file);
+            if (error) throw error;
+            uploaded.push({ path: filePath, name: file.name });
+        }
+        return uploaded;
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setIsSubmitting(true);
-        const payload = {
-            customer_id: customer.id,
-            source: 'Support Ticket',
-            content: `**TICKET:** ${subject}\n\n${description}`,
-            author_type: 'customer'
-        };
-
-        const { data, error } = await supabase.from('customer_notes').insert(payload).select().single();
-        if (error) {
-            toast({ title: 'Failed to create ticket', description: error.message, variant: 'destructive' });
-        } else {
-            toast({ title: 'Ticket created', description: 'Support will review this shortly.' });
-            if (onNewNote) onNewNote(data);
-            setSubject('');
-            setDescription('');
+        if (isClaim && (!bookingId || photos.length === 0)) {
+            toast({
+                title: 'Claim details needed',
+                description: 'Choose the booking and attach at least one photo.',
+                variant: 'destructive',
+            });
+            return;
         }
-        setIsSubmitting(false);
+        setIsSubmitting(true);
+        try {
+            if (isClaim) {
+                const uploaded = await uploadClaimPhotos();
+                const { data: rpcData, error } = await supabase.rpc('submit_portal_hardware_claim', {
+                    p_booking_id: Number(bookingId),
+                    p_subject: subject || 'Hardware damage claim',
+                    p_description: description,
+                    p_photos: uploaded,
+                });
+                if (error) throw error;
+                const data = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+                await supabase.functions.invoke('notify-hpp-claim', {
+                    body: data.claim_id
+                        ? { event: 'received', claimId: data.claim_id }
+                        : { event: 'received', noteId: data.note_id },
+                });
+                const note = {
+                    id: data.note_id,
+                    customer_id: customer.id,
+                    booking_id: Number(bookingId),
+                    source: 'Support Ticket',
+                    content: data.content,
+                    author_type: 'customer',
+                    created_at: data.notice_submitted_at || new Date().toISOString(),
+                };
+                toast({
+                    title: 'Claim ticket submitted',
+                    description: data.hpp_accepted
+                        ? 'The ticket time is your written notice. It is in your file for review.'
+                        : 'This booking does not have the Hardware Protection Plan. The ticket and photos were still saved.',
+                });
+                if (onNewNote) onNewNote(note);
+                setSubject('');
+                setDescription('');
+                setIsClaim(false);
+                resetClaimFields();
+            } else {
+                const payload = {
+                    customer_id: customer.id,
+                    source: 'Support Ticket',
+                    content: `**TICKET:** ${subject}\n\n${description}`,
+                    author_type: 'customer',
+                };
+                const { data, error } = await supabase.from('customer_notes').insert(payload).select().single();
+                if (error) throw error;
+                toast({ title: 'Ticket created', description: 'Support will review this shortly.' });
+                if (onNewNote) onNewNote(data);
+                setSubject('');
+                setDescription('');
+            }
+        } catch (error) {
+            toast({ title: 'Failed to create ticket', description: error.message, variant: 'destructive' });
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -254,20 +448,93 @@ const SupportTickets = ({ customer, notes, onNewNote }) => {
             <Card className="bg-white/5 border-white/10 text-white">
                 <CardHeader>
                     <CardTitle className="text-lg">Submit New Ticket</CardTitle>
-                    <CardDescription>For complex issues or claims.</CardDescription>
+                    <CardDescription>For complex issues, or a hardware damage claim with photos.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        <label className="flex items-start gap-3 text-sm text-blue-100">
+                            <input
+                                type="checkbox"
+                                checked={isClaim}
+                                onChange={(event) => {
+                                    const next = event.target.checked;
+                                    setIsClaim(next);
+                                    if (next && !subject) setSubject('Hardware damage claim');
+                                    if (!next) resetClaimFields();
+                                }}
+                                className="mt-1 h-4 w-4 accent-yellow-400"
+                            />
+                            <span>This is a hardware damage claim. The time this ticket is saved is the written notice for the Hardware Protection Plan.</span>
+                        </label>
+                        {isClaim && (
+                            <div className="space-y-3 rounded-md border border-yellow-500/30 bg-black/20 p-3">
+                                <div>
+                                    <label className="text-sm font-medium mb-1 block text-gray-300">Booking</label>
+                                    <select
+                                        value={bookingId}
+                                        onChange={(event) => setBookingId(event.target.value)}
+                                        required
+                                        className="w-full rounded-md border border-white/20 bg-black/30 px-3 py-2 text-white"
+                                    >
+                                        <option value="">Select a booking</option>
+                                        {(bookings || []).map((booking) => (
+                                            <option key={booking.id} value={booking.id}>
+                                                Order #{booking.id}{booking.status ? ` — ${booking.status}` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {bookingId && (
+                                    <p className={selectedHpp ? 'text-sm text-green-300' : 'text-sm text-amber-200'}>
+                                        {selectedHpp
+                                            ? 'Hardware Protection Plan is on this booking. Amounts above the plan can be charged after review.'
+                                            : 'Hardware Protection Plan is not on this booking. Photos and this ticket are still saved to your file.'}
+                                    </p>
+                                )}
+                                <div>
+                                    <label className="text-sm font-medium mb-1 block text-gray-300">Photos of the damage</label>
+                                    <p className="text-xs text-gray-400 mb-2">Add more than one photo. You can select several at once, then add more if you need to. Up to {CLAIM_PHOTO_LIMIT} photos.</p>
+                                    <input
+                                        ref={photoInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        multiple
+                                        onChange={handlePhotoSelect}
+                                        className="hidden"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-white/30 text-white hover:bg-white/10"
+                                        onClick={() => photoInputRef.current?.click()}
+                                    >
+                                        <Upload className="h-4 w-4 mr-2" />
+                                        Add photos
+                                    </Button>
+                                    {photos.length > 0 && (
+                                        <div className="mt-3 grid grid-cols-2 gap-2">
+                                            {photos.map((file, index) => (
+                                                <ClaimPhotoPreview
+                                                    key={`${file.name}-${file.lastModified}-${index}`}
+                                                    file={file}
+                                                    onRemove={() => setPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         <div>
                             <label className="text-sm font-medium mb-1 block text-gray-300">Subject</label>
                             <Input value={subject} onChange={(e) => setSubject(e.target.value)} required className="bg-black/30 border-white/20 text-white" placeholder="E.g., Damage Claim" />
                         </div>
                         <div>
                             <label className="text-sm font-medium mb-1 block text-gray-300">Description</label>
-                            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} required className="bg-black/30 border-white/20 h-32 text-white" placeholder="Provide details..." />
+                            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} required className="bg-black/30 border-white/20 h-32 text-white" placeholder="Describe the damage, when it happened, and what was affected." />
                         </div>
-                        <Button type="submit" disabled={isSubmitting || !subject || !description} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
-                            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Ticket className="w-4 h-4 mr-2" />} Create Ticket
+                        <Button type="submit" disabled={isSubmitting || !subject || !description || (isClaim && (!bookingId || photos.length === 0))} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                            {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2"/> : <Ticket className="w-4 h-4 mr-2" />} {isClaim ? 'Submit claim ticket' : 'Create Ticket'}
                         </Button>
                     </form>
                 </CardContent>
@@ -278,17 +545,51 @@ const SupportTickets = ({ customer, notes, onNewNote }) => {
                 {ticketNotes.length === 0 ? (
                     <p className="text-gray-400 text-sm">No support tickets history.</p>
                 ) : (
-                    ticketNotes.map(ticket => (
+                    ticketNotes.map(ticket => {
+                        const shown = presentTicket(ticket);
+                        const claim = claimsById[ticketField(ticket.content || '', 'CLAIM_ID')];
+                        const finished = claim && claim.status !== 'open';
+                        return (
                         <Card key={ticket.id} className="bg-black/20 border-white/10 text-white">
-                            <CardContent className="p-4">
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">Pending Review</span>
-                                    <span className="text-xs text-gray-500">{format(parseISO(ticket.created_at), 'PPP')}</span>
+                            <CardContent className="p-4 space-y-2">
+                                <div className="flex justify-between items-start gap-3">
+                                    <span className={`text-xs px-2 py-1 rounded ${finished ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                        {finished ? 'Complete' : 'Pending review'}
+                                    </span>
+                                    {shown.notice && <span className="text-xs text-gray-400 text-right">{shown.notice}</span>}
                                 </div>
-                                <p className="text-sm whitespace-pre-wrap mt-2 text-gray-300">{ticket.content}</p>
+                                <p className="text-base font-semibold text-white">{shown.subject}</p>
+                                {shown.isClaim && (
+                                    <p className="text-sm text-blue-100">
+                                        {shown.hpp === 'accepted'
+                                            ? 'Hardware Protection Plan claim'
+                                            : 'Damage report'}
+                                        {shown.bookingId ? ` for order #${shown.bookingId}` : ''}
+                                    </p>
+                                )}
+                                {shown.description && (
+                                    <p className="text-sm whitespace-pre-wrap text-gray-200">{shown.description}</p>
+                                )}
+                                {shown.photos.length > 0 && (
+                                    <p className="text-xs text-gray-400">
+                                        {shown.photos.length} photo{shown.photos.length === 1 ? '' : 's'} attached
+                                    </p>
+                                )}
+                                {finished && (
+                                    <p className="text-sm text-green-100">
+                                        This claim is complete. Charged to the card on file: ${Number(claim.amount_charged || 0).toFixed(2)}.
+                                        The receipt was sent to your email and phone.
+                                    </p>
+                                )}
+                                {shown.isClaim && !finished && (
+                                    <p className="text-sm text-gray-300">
+                                        This claim is pending. Check back here for extra charges, fees, or a decision that it is not covered.
+                                    </p>
+                                )}
                             </CardContent>
                         </Card>
-                    ))
+                        );
+                    })
                 )}
             </div>
         </div>

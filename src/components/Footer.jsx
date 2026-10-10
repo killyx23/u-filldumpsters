@@ -64,6 +64,7 @@ export const Footer = () => {
           <ul className="space-y-2 mb-4">
             <li><Link to="/privacy" className="hover:text-yellow-300 transition-colors">Privacy Policy</Link></li>
             <li><Link to="/terms" className="hover:text-yellow-300 transition-colors">Terms</Link></li>
+            <li><Link to="/hardware-protection-plan" className="hover:text-yellow-300 transition-colors">Hardware Protection Plan</Link></li>
           </ul>
            <p className="text-blue-200">U-Fill Dumpsters LLC is a fully licensed and insured company.</p>
         </div>

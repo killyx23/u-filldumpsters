@@ -30,8 +30,7 @@ export const SmsDisclosure = ({ className = 'text-sm text-blue-200 leading-relax
     >
       Privacy Policy
     </Link>{' '}
-    for how we handle your personal information. Your mobile information will not be sold or shared with third
-    parties.
+    for how we handle your personal information. Your mobile information will not be sold or shared with third parties.
   </p>
 );
 

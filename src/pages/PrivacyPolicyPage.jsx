@@ -1,5 +1,6 @@
 import React from 'react';
 import { Helmet } from 'react-helmet';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import BackButton from '@/components/BackButton';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
@@ -80,6 +81,15 @@ export const PrivacyPolicyPage = () => {
                   support@u-filldumpsters.com
                 </a>
                 .
+              </p>
+            </section>
+
+            <section className="space-y-4">
+              <h2 className="text-2xl font-bold text-yellow-400">Legal</h2>
+              <p>
+                <Link to="/terms" className="text-yellow-300 hover:text-yellow-200 underline">
+                  Terms
+                </Link>
               </p>
             </section>
           </div>

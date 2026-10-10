@@ -16,6 +16,8 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatMoney } from '@/utils/chargesAndFeesConfig';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 export const BookingSummaryReview = ({
@@ -37,6 +39,8 @@ export const BookingSummaryReview = ({
     });
 
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
+    const { fee } = useChargesAndFees();
+    const hppCreditLimit = formatMoney(fee('hardware_protection_plan_cap'));
     const { insurancePrice, taxOptions, drivewayPrice, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
     // Load equipment prices from database (excluding insurance which comes from hook)
@@ -264,7 +268,7 @@ export const BookingSummaryReview = ({
 
     const protectionItems = [];
     if (calculatedTotals.insuranceCost > 0) {
-        protectionItems.push({ label: 'Rental Insurance', amount: calculatedTotals.insuranceCost });
+        protectionItems.push({ label: 'Hardware Protection Plan', amount: calculatedTotals.insuranceCost });
     }
     if (calculatedTotals.drivewayProtectionCost > 0) {
         protectionItems.push({ label: 'Driveway Protection', amount: calculatedTotals.drivewayProtectionCost });
@@ -431,7 +435,7 @@ export const BookingSummaryReview = ({
                                 items={protectionItems}
                                 showInfoButton={true}
                                 infoTitle="Protection Options"
-                                infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
+                                infoDescription={getProtectionOptionsInfoDescription(plan?.name, hppCreditLimit)}
                             />
 
                             {/* 3. Rent Equipment */}

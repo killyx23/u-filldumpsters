@@ -41,7 +41,7 @@ const emptyClaimForm = () => ({
 });
 
 const planTypeLabel = (planType) =>
-  planType === 'driveway_protection' ? 'Driveway Protection' : 'Rental Insurance';
+  planType === 'driveway_protection' ? 'Driveway Protection' : 'Hardware Protection Plan';
 
 const appliesHardwareCap = (planType) => planType === 'rental_insurance';
 
@@ -389,7 +389,12 @@ export const ProtectionPlanHistory = ({ customerId }) => {
   const handleSaveClaim = async () => {
     setSaving(true);
     try {
-      await persistClaim();
+      const saved = await persistClaim();
+      if (saved && (saved.status === 'closed' || saved.status === 'paid')) {
+        await supabase.functions.invoke('notify-hpp-claim', {
+          body: { event: 'completed', claimId: saved.id },
+        });
+      }
       toast({ title: editingClaim ? 'Claim updated' : 'Claim recorded successfully' });
       resetDialog();
       loadData({ silent: true });
@@ -447,6 +452,7 @@ export const ProtectionPlanHistory = ({ customerId }) => {
         .update({
           amount_charged: roundMoney(financials.amountCharged + financials.remaining),
           charge_status: 'charged',
+          status: 'paid',
           stripe_charge_id: chargeData?.latestCharge || null,
           stripe_payment_intent_id: chargeData?.paymentIntentId || null,
           stripe_invoice_id: chargeData?.invoiceId || null,
@@ -458,6 +464,9 @@ export const ProtectionPlanHistory = ({ customerId }) => {
         .single();
       if (updateError) throw updateError;
       toast({ title: 'Card charged', description: chargeData?.message || `Charged ${money(financials.remaining)}.` });
+      await supabase.functions.invoke('notify-hpp-claim', {
+        body: { event: 'completed', claimId: updated.id },
+      });
       return updated;
     } catch (error) {
       toast({
@@ -493,6 +502,25 @@ export const ProtectionPlanHistory = ({ customerId }) => {
 
   const handleChargeSavedClaim = async (claim) => {
     await chargeClaim(claim);
+    loadData({ silent: true });
+  };
+
+  const finishClaim = async (claim) => {
+    const nextStatus = roundMoney(claim.amount_charged) > 0 ? 'paid' : 'closed';
+    const { data, error } = await supabase
+      .from('protection_plan_claims')
+      .update({ status: nextStatus, updated_at: new Date().toISOString() })
+      .eq('id', claim.id)
+      .select('*')
+      .single();
+    if (error) {
+      toast({ title: 'Could not finish claim', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await supabase.functions.invoke('notify-hpp-claim', {
+      body: { event: 'completed', claimId: data.id },
+    });
+    toast({ title: 'Claim complete', description: 'The customer was emailed and texted the outcome.' });
     loadData({ silent: true });
   };
 
@@ -581,6 +609,14 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                               {format(parseISO(`${claim.claim_date}T12:00:00`), 'PPP')} — {money(claim.claim_amount)} ({claim.status})
                               {claim.description ? ` — ${claim.description}` : ''}
                             </p>
+                            {claim.submitted_via === 'portal' && (
+                              <p className="text-sm text-orange-200">
+                                Portal support ticket
+                                {claim.notice_submitted_at
+                                  ? ` · written notice ${format(parseISO(claim.notice_submitted_at), 'PPP p')}`
+                                  : ''}
+                              </p>
+                            )}
                             {financials && (
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-sm">
                                 <p><span className="text-orange-300/80">Credit cap:</span> {money(financials.coverageCap)}</p>
@@ -606,6 +642,15 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                                 <Pencil className="h-4 w-4 mr-2" />
                                 Edit claim
                               </Button>
+                              {claim.status === 'open' && Number(claim.claim_amount) > 0 && (!financials || financials.remaining <= 0) && (
+                                <Button
+                                  size="sm"
+                                  className="bg-green-600 text-white hover:bg-green-500"
+                                  onClick={() => finishClaim(claim)}
+                                >
+                                  Mark complete
+                                </Button>
+                              )}
                               {financials && financials.remaining > 0 && (
                                 <Button
                                   size="sm"
@@ -636,7 +681,7 @@ export const ProtectionPlanHistory = ({ customerId }) => {
                       onClick={() => openClaimDialog(record)}
                     >
                       <Plus className="h-4 w-4 mr-2" />
-                      Log Claim
+                      {usedClaim ? 'Add another claim' : 'Log claim'}
                     </Button>
                   )}
                 </CardContent>
@@ -650,7 +695,7 @@ export const ProtectionPlanHistory = ({ customerId }) => {
         <DialogContent className="bg-gray-900 border-yellow-400 text-white max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingClaim ? 'Edit Claim' : 'Log Claim'} — Order #{selectedRecord?.booking_id}
+              {editingClaim ? 'Edit claim' : (claimsForRecord(selectedRecord?.id).length ? 'Add another claim' : 'Log claim')} — Order #{selectedRecord?.booking_id}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">

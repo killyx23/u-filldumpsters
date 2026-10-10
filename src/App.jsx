@@ -12,6 +12,7 @@ import { HowCanWeDoBetterPage } from '@/pages/HowCanWeDoBetterPage';
 import { AboutPage } from '@/pages/AboutPage';
 import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage';
 import { TermsPage } from '@/pages/TermsPage';
+import { HardwareProtectionPlanPage } from '@/pages/HardwareProtectionPlanPage';
 import { AdminDashboard } from '@/pages/AdminDashboard';
 import { AdminLogin } from '@/pages/AdminLogin';
 import { AdminMfaPage } from '@/pages/AdminMfaPage';
@@ -135,6 +136,7 @@ function App() {
               <Route path="/about" element={<AboutPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
               <Route path="/terms" element={<TermsPage />} />
+              <Route path="/hardware-protection-plan" element={<HardwareProtectionPlanPage />} />
               <Route path="/admin-login" element={<AdminLogin />} />
               <Route path="/admin-mfa" element={<AdminMfaPage />} />
               <Route path="/customer-login" element={<CustomerLogin />} />

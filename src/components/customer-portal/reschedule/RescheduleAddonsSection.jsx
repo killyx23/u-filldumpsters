@@ -532,7 +532,7 @@ export const RescheduleAddonsSection = ({
       <div className="space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
           <h3 className="text-lg font-semibold text-white">
-            {rentalInsurance?.name || 'Rental Insurance'}
+            Hardware Protection Plan
           </h3>
           <button
             type="button"
@@ -557,7 +557,7 @@ export const RescheduleAddonsSection = ({
             value="accept"
             checked={insuranceAccepted}
             onChange={() => handleInsuranceChange('accept')}
-            title="Accept Insurance"
+            title="Accept (HPP)"
             price={insurancePrice}
             description="Protect yourself from damage liability"
             recommended
@@ -567,7 +567,7 @@ export const RescheduleAddonsSection = ({
             value="decline"
             checked={!insuranceAccepted}
             onChange={() => handleInsuranceChange('decline')}
-            title="Decline Insurance"
+            title="Decline (HPP)"
             price={0}
             description="You assume full liability"
             warning
@@ -592,7 +592,7 @@ export const RescheduleAddonsSection = ({
         onOpenChange={setShowInsuranceDeclineWarning}
         onConfirm={confirmDeclineInsurance}
         title="Confirm Your Choice"
-        description="By declining rental insurance, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
+        description="By declining the Hardware Protection Plan, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

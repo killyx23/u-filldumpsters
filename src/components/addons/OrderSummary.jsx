@@ -16,6 +16,8 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatMoney } from '@/utils/chargesAndFeesConfig';
 
 export const OrderSummary = ({
     plan,
@@ -48,6 +50,8 @@ export const OrderSummary = ({
     const [loadingPrices, setLoadingPrices] = useState(false);
     
     const { insurancePrice, taxOptions, drivewayPrice } = useBookingTaxOptions(plan?.id);
+    const { fee } = useChargesAndFees();
+    const hppCreditLimit = formatMoney(fee('hardware_protection_plan_cap'));
     const { taxRate, loading: loadingTaxRate } = useTaxRate();
     
     const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
@@ -450,7 +454,7 @@ export const OrderSummary = ({
 
     const protectionItems = [];
     if (calculatedTotals.insuranceCost > 0) {
-        protectionItems.push({ label: 'Rental Insurance', amount: calculatedTotals.insuranceCost });
+        protectionItems.push({ label: 'Hardware Protection Plan', amount: calculatedTotals.insuranceCost });
     }
     if (calculatedTotals.drivewayProtectionCost > 0) {
         protectionItems.push({ label: 'Driveway Protection', amount: calculatedTotals.drivewayProtectionCost });
@@ -569,7 +573,7 @@ export const OrderSummary = ({
                     items={protectionItems}
                     showInfoButton={true}
                     infoTitle="Protection Options"
-                    infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
+                    infoDescription={getProtectionOptionsInfoDescription(plan?.name, hppCreditLimit)}
                 />
 
                 {/* 3. Rent Equipment */}

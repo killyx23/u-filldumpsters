@@ -18,6 +18,7 @@ import { CustomerVerification } from './CustomerVerification';
 import { CustomerProfileHeader } from './CustomerProfileHeader';
 import { CustomerRewardsOverview } from './CustomerRewardsOverview';
 import { ProtectionPlanHistory } from './ProtectionPlanHistory';
+import { PortalHardwareClaims } from './PortalHardwareClaims';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
 import { hasPaymentDelta, isAddressOnlyVerificationBooking } from '@/utils/paymentDelta';
@@ -326,6 +327,12 @@ export const CustomerDetailView = () => {
                                 ))}
                             </div>
                          )}
+                         <PortalHardwareClaims
+                            customerId={customer.id}
+                            notes={notes}
+                            active={activeTab === 'verification'}
+                            onReviewClaim={() => handleTabChange('protection')}
+                         />
                          <CustomerVerification customer={customer} verificationBookings={verificationBookings} notes={notes} onUpdate={() => fetchCustomerDetails(false)} />
                     </div>
                 </TabsContent>

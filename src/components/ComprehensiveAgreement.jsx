@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
@@ -19,15 +20,43 @@ import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
 import {
   createFeeLookup,
+  createHppFeeLookup,
   DEFAULT_FEES,
+  formatAdminMoney,
+  formatAdminPercent,
+  formatAdminTons,
   formatMoney,
   formatPercent,
   formatTons,
+  readAdminFee,
+  UNAVAILABLE_FEE_TEXT,
   mapFeeRowsToConfig,
 } from '@/utils/chargesAndFeesConfig';
+import { HardwareProtectionPlanTerms, HPP_TERMS_PATH } from '@/components/terms/HardwareProtectionPlanTerms';
 
-const AgreementText = ({ fees }) => {
+export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
   const fee = createFeeLookup(fees);
+  const hppFee = strictFees
+    ? (key) => {
+        if (key === 'hardware_protection_plan_cost') {
+          if (hppPlanPrice == null || hppPlanPrice === '') return null;
+          const amount = Number(hppPlanPrice);
+          return Number.isFinite(amount) ? amount : null;
+        }
+        return readAdminFee(fees, key);
+      }
+    : createHppFeeLookup(fees, hppPlanPrice);
+  const money = (key) => (strictFees ? formatAdminMoney(readAdminFee(fees, key)) : formatMoney(fee(key)));
+  const percent = (key) => {
+    const formatted = strictFees ? formatAdminPercent(readAdminFee(fees, key)) : formatPercent(fee(key));
+    if (formatted === UNAVAILABLE_FEE_TEXT) return formatted;
+    return `${formatted}%`;
+  };
+  const tons = (key) => {
+    const formatted = strictFees ? formatAdminTons(readAdminFee(fees, key)) : formatTons(fee(key));
+    if (formatted === UNAVAILABLE_FEE_TEXT) return formatted;
+    return `${formatted} tons`;
+  };
 
   return (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
@@ -91,7 +120,7 @@ const AgreementText = ({ fees }) => {
         <li>
           <strong>Rental Period &amp; Extensions:</strong> The rental begins on delivery and ends on the scheduled
           pickup. Extensions must be requested at least <strong>24 hours</strong> before the scheduled pickup and are
-          subject to operational availability and an applicable extension fee of {formatMoney(fee('extension_fee'))}.
+          subject to operational availability and an applicable extension fee of {money('extension_fee')}.
         </li>
         <li>
           <strong>Delivery &amp; Pickup Windows:</strong> Standard delivery and pickup windows will be provided at
@@ -112,7 +141,7 @@ const AgreementText = ({ fees }) => {
         <li>
           <strong>Dry Run Fee:</strong> If the Company cannot complete a delivery or pickup due to the Customer&apos;s
           fault (blocked access, parked vehicles, locked gates, unsafe conditions, overfilled bins, or lack of
-          permits), the Customer will be automatically charged a Dry Run fee equal to {formatPercent(fee('dry_run_percentage'))}% of
+          permits), the Customer will be automatically charged a Dry Run fee equal to {percent('dry_run_percentage')} of
           the original service cost, plus any additional dynamic towing or retrieval charges incurred by the Company.
         </li>
         <li>
@@ -129,38 +158,46 @@ const AgreementText = ({ fees }) => {
           add-on protection fees, is due at booking to secure the reservation unless otherwise agreed in writing.
         </li>
         <li>
+          <strong>Right to Change Fees Without Notice:</strong> Every dollar amount, percentage, and rate stated in this
+          Agreement is the amount in effect when it is published. Where a schedule states a minimum fee, that amount is
+          only the least the Customer will be charged, and the actual charge may be higher based on the Company&apos;s
+          then-current cost to obtain the item, supplier availability, and the rate in effect when the charge is
+          assessed. The Company reserves the right to change any fee, rate, or charge at any time without prior notice
+          to the Customer. The amount billed is the amount in effect when the charge is incurred.
+        </li>
+        <li>
           <strong>Dumpster / Trailer Base Rates:</strong> If a Dumpster or Dump Trailer Rental is chosen, the
           base rental price includes one delivery and one pickup. Disposal is billed separately at a rate of{' '}
-          {formatMoney(fee('dump_tonnage_rate'))} per ton based on the actual post-disposal certified scale weight.
+          {money('dump_tonnage_rate')} per ton based on the actual post-disposal certified scale weight.
           Disposal charges are calculated after dump processing and charged to the Customer&apos;s payment method on file.
         </li>
         <li>
           <strong>Overweight &amp; Overage Charges:</strong> Overweight charges for dumpsters are{' '}
-          {formatMoney(fee('dumpster_overweight_rate'))} per ton over the allowed limit of{' '}
-          {formatTons(fee('dumpster_allowed_tons'))} tons. The Dump Trailer overage rate applies past a limit
-          of {formatTons(fee('dump_loader_max_tons'))} tons. The Customer is solely liable for any municipal
+          {money('dumpster_overweight_rate')} per ton over the allowed limit of{' '}
+          {tons('dumpster_allowed_tons')}. The Dump Trailer overage rate applies past a limit
+          of {tons('dump_loader_max_tons')}. The Customer is solely liable for any municipal
           overweight citations or traffic penalties imposed by authorities.
         </li>
         <li>
           <strong>Municipal Dump Fees &amp; Special Item Fees:</strong> The Customer is responsible for municipal dump
-          fees at cost: {formatMoney(fee('base_dump_fee'))} plus {formatMoney(fee('dump_tonnage_rate'))} per ton.
+          fees at cost: {money('base_dump_fee')} plus {money('dump_tonnage_rate')} per ton.
           Special-item disposal fees apply to items requiring special handling (including but not limited to:
           mattresses, electronics, TVs, major appliances, or appliances containing refrigerant unless certified
           professional removal documentation is provided). These items are billed at a dynamic range of{' '}
-          {formatMoney(fee('special_item_fee_min'))} to {formatMoney(fee('special_item_fee_max'))} per item or actual
+          {money('special_item_fee_min')} to {money('special_item_fee_max')} per item or actual
           disposal cost.
         </li>
         <li>
           <strong>Cleaning Fee:</strong> If the Equipment is returned or left in an excessively dirty condition
           requiring specialized cleaning, washing, or pressure washing by the Company, an automatic cleaning fee of{' '}
-          {formatMoney(fee('cleaning_fee'))} will apply.
+          {money('cleaning_fee')} will apply.
         </li>
         <li>
           <strong>Cancellation &amp; Refunds:</strong> Cancellations more than 24 hours before scheduled delivery: A
-          cancellation fee of {formatPercent(fee('advance_cancel_percentage'))}% of the order total is retained; the
+          cancellation fee of {percent('advance_cancel_percentage')} of the order total is retained; the
           remaining balance is refunded. Cancellations 24 hours or less before scheduled delivery: Up to{' '}
-          {formatPercent(fee('late_cancel_percentage'))}% of the order total is charged, and a{' '}
-          {formatPercent(fee('advance_cancel_percentage'))}% cancellation fee of the order total is retained. No-shows
+          {percent('late_cancel_percentage')} of the order total is charged, and a{' '}
+          {percent('advance_cancel_percentage')} cancellation fee of the order total is retained. No-shows
           or refusal of equipment at delivery result in full rental charges. Refunds are processed within 1 to 2
           business days and typically reflect in accounts within 5 to 10 business days. In rare cases, banking
           institutions may take up to 30 days. The Customer may request their Acquirer Reference Number (ARN) through
@@ -168,9 +205,9 @@ const AgreementText = ({ fees }) => {
         </li>
         <li>
           <strong>Rescheduling:</strong> Rescheduling more than 24 hours before the scheduled appointment may incur a
-          fee of {formatPercent(fee('advance_reschedule_percentage'))}% of the original booking total. Rescheduling
+          fee of {percent('advance_reschedule_percentage')} of the original booking total. Rescheduling
           24 hours or less before the appointment may incur a fee of{' '}
-          {formatPercent(fee('late_reschedule_percentage'))}% of the original booking total. Rescheduling fees are
+          {percent('late_reschedule_percentage')} of the original booking total. Rescheduling fees are
           substantially lower than cancellation fees when the Customer only needs a different date, because releasing
           and rebooking a date reduces loss of business compared with a full cancellation. Upon confirmation of a
           reschedule, original dates may be released to other customers. If a rescheduled booking is later cancelled,
@@ -181,8 +218,7 @@ const AgreementText = ({ fees }) => {
       <h3 className="text-lg text-yellow-300">SECTION 4: WEIGHT LIMITS, LOADING, &amp; SPECIAL SERVICES</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Weight &amp; Moisture:</strong> Dumpsters are rated for up to {formatTons(fee('dumpster_allowed_tons'))}{' '}
-          tons. Dump Trailers have a max capacity limit of {formatTons(fee('dump_loader_max_tons'))} tons.
+          <strong>Weight &amp; Moisture:</strong> Dumpsters are rated for up to {tons('dumpster_allowed_tons')}. Dump Trailers have a max capacity limit of {tons('dump_loader_max_tons')}.
           High-density materials like dirt, soil, concrete, or rock loads must <strong>not exceed halfway up</strong>{' '}
           the trailer/bin walls. The Customer is responsible for the total scale weight regardless of rain, water,
           snow, ice, or other moisture accumulated in the open unit during the Rental Period. Overweight loads are
@@ -204,7 +240,7 @@ const AgreementText = ({ fees }) => {
           <strong>Small Equipment Rental (Wheelbarrows, Hand Trucks, Tools):</strong> The Customer is entirely
           responsible for the condition, theft, loss, or destruction of Small Equipment. Broken or missing items will
           be charged to the payment method on file at full retail replacement cost plus an administrative fee of{' '}
-          {formatPercent(fee('small_equipment_admin_rate'))}%. The Customer assumes all risk of bodily injury arising
+          {percent('small_equipment_admin_rate')}. The Customer assumes all risk of bodily injury arising
           from the operation of Small Equipment.
         </li>
       </ul>
@@ -270,7 +306,7 @@ const AgreementText = ({ fees }) => {
         </li>
         <li>
           <strong>Optional Driveway Protection Plan:</strong> An optional Driveway Protection Plan is available for a
-          fee of {formatMoney(fee('driveway_protection_plan_cost'))}. If declined, the Customer accepts full
+          fee of {money('driveway_protection_plan_cost')}. If declined, the Customer accepts full
           responsibility for potential property damage as described above.
         </li>
         <li>
@@ -299,34 +335,16 @@ const AgreementText = ({ fees }) => {
         </li>
       </ul>
 
-      <h3 className="text-lg text-yellow-300">SECTION 9: INTEGRATED HARDWARE PROTECTION PLAN (HPP) &amp; 100% LIABILITY</h3>
+      <h3 className="text-lg text-yellow-300">SECTION 9: OPTIONAL HARDWARE PROTECTION PLAN (HPP) &amp; 100% LIABILITY</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
           <strong>100% Customer Liability Default:</strong> The Customer is default 100% financially responsible and
           personally liable for any and all damage, destruction, breakdown, loss, or theft of the Equipment during the
-          Rental Period.
-        </li>
-        <li>
-          <strong>Optional HPP Enrollment:</strong> For an optional baseline fee of{' '}
-          {formatMoney(fee('hardware_protection_plan_cost'))}, the Customer may enroll in our Hardware Protection Plan
-          for eligible premium Sure-Trac equipment.
-        </li>
-        <li>
-          <strong>Scope of Limited Coverage:</strong> If elected and paid for at booking, this protection plan reduces
-          the Customer&apos;s out-of-pocket exposure by providing a credit of up to{' '}
-          {formatMoney(fee('hardware_protection_plan_cap'))} toward the actual cost of repairs or parts replacement
-          strictly for accidental hardware damage to the following systems: Auto-Tarping Systems and mechanical
-          linkages, Wireless Remote Systems and internal electrical receivers, Hydraulic Lift Systems, pumps, rams,
-          cylinders, and fluid lines, Winch assemblies and integrated trailer safety lighting.
-        </li>
-        <li>
-          <strong>Strict Exclusions &amp; Customer Responsibility for Balance:</strong> The Customer remains 100%
-          financially responsible for any repair costs exceeding the {formatMoney(fee('hardware_protection_plan_cap'))}{' '}
-          credit cap, and the HPP provides ZERO COVERAGE for the following scenarios: tire damage, overloading and
-          improper operation, gross negligence, unauthorized operators, intentional damage, cosmetic and structural bin
-          damage, and property exclusions outside the roll-off trailer.
+          Rental Period. The optional Hardware Protection Plan below reduces that exposure only for the eligible systems,
+          credit limit, and conditions stated in this Section 9.
         </li>
       </ul>
+      <HardwareProtectionPlanTerms fee={hppFee} />
 
       <h3 className="text-lg text-yellow-300">SECTION 10: MANDATORY CREDIT CARD AUTHORIZATION &amp; INSUFFICIENT FUNDS</h3>
       <ul className="list-disc list-inside space-y-2">
@@ -399,7 +417,11 @@ const AgreementText = ({ fees }) => {
           The Company warrants that it does not sell, rent, lease, trade, or distribute the Customer&apos;s personal data,
           contact information, phone numbers, or email addresses to any third-party marketing companies, brokers, or
           external entities. All information collected is utilized exclusively for the internal business operations,
-          customer service, and direct marketing initiatives of the Company.
+          customer service, and direct marketing initiatives of the Company. See the{' '}
+          <Link to="/privacy" target="_blank" rel="noopener noreferrer" className="text-yellow-300 underline">
+            Privacy Policy
+          </Link>
+          .
         </li>
       </ul>
 
@@ -459,6 +481,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
   const [missingFields, setMissingFields] = useState(() => new Set());
   const [fees, setFees] = useState(DEFAULT_FEES);
   const [feeRows, setFeeRows] = useState([]);
+  const [hppPlanPrice, setHppPlanPrice] = useState(null);
 
   const agreementViewportRef = useRef(null);
   const agreementScrollSectionRef = useRef(null);
@@ -482,17 +505,29 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     let isMounted = true;
 
     const loadFees = async () => {
-      const { data, error: feesError } = await supabase
-        .from('charges_and_fees')
-        .select('fee_key, fee_name, fee_description, fee_value, is_percentage')
-        .order('fee_name', { ascending: true });
+      const [feesResult, planResult] = await Promise.all([
+        supabase
+          .from('charges_and_fees')
+          .select('fee_key, fee_name, fee_description, fee_value, is_percentage')
+          .order('fee_name', { ascending: true }),
+        supabase
+          .from('protection_plans')
+          .select('price')
+          .eq('plan_type', 'rental_insurance')
+          .eq('is_primary', true)
+          .eq('is_active', true)
+          .order('display_order', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+      ]);
 
-      if (feesError || !data) return;
-
-      if (isMounted) {
-        setFeeRows(data);
-        const mapped = mapFeeRowsToConfig(data);
-        setFees((prev) => ({ ...prev, ...mapped }));
+      if (!isMounted) return;
+      if (!feesResult.error && feesResult.data) {
+        setFeeRows(feesResult.data);
+        setFees((prev) => ({ ...prev, ...mapFeeRowsToConfig(feesResult.data) }));
+      }
+      if (!planResult.error && planResult.data?.price != null) {
+        setHppPlanPrice(Number(planResult.data.price));
       }
     };
 
@@ -642,7 +677,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
             }`}
             viewportRef={agreementViewportRef}
           >
-            <AgreementText fees={fees} />
+            <AgreementText fees={fees} hppPlanPrice={hppPlanPrice} />
           </ScrollArea>
           {missingFields.has('scroll') && (
             <p className="text-xs mt-2 font-bold text-red-300">
@@ -683,7 +718,15 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
               comprehensive terms of our <strong>Master Rental &amp; Service Agreement</strong>. If any optional
               insurance, protection, or peace-of-mind coverage is purchased, the Customer remains fully responsible for
               all amounts, losses, liabilities, and damages that exceed the purchased coverage limits, exclusions, or
-              credit caps.
+              credit caps. The full{' '}
+              <a href={HPP_TERMS_PATH} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>
+                Hardware Protection Plan
+              </a>{' '}
+              terms in Section 9 are part of this agreement. See also the{' '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>
+                Privacy Policy
+              </a>
+              .
             </p>
 
             <div className="checkbox-wrapper" style={{ marginTop: '15px', display: 'flex', alignItems: 'flex-start' }}>

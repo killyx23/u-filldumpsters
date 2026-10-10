@@ -3,6 +3,8 @@ import { Shield } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatMoney } from '@/utils/chargesAndFeesConfig';
 
 /**
  * Hardware / rental insurance coverage details dialog (shared by booking + reschedule).
@@ -15,6 +17,8 @@ export function HardwareProtectionInfoDialog({
   customInfoText = null,
 }) {
   const price = Number(insurancePrice) || 0;
+  const { fee } = useChargesAndFees();
+  const creditLimit = formatMoney(fee('hardware_protection_plan_cap'));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -43,7 +47,7 @@ export function HardwareProtectionInfoDialog({
                 <div>
                   <h5 className="font-bold text-white text-lg mb-2">How it Works:</h5>
                   <ul className="list-disc list-inside space-y-1 ml-2">
-                    <li>Provides up to a $500 credit toward repair or replacement costs.</li>
+                    <li>Provides up to a {creditLimit} credit toward repair or replacement costs.</li>
                     <li>
                       Significantly reduces your out-of-pocket expenses for accidental hardware
                       damage.
@@ -78,8 +82,9 @@ export function HardwareProtectionInfoDialog({
                     stated above. It does not cover tire damage due to negligence or misuse. Also,
                     any wear and tear that is beyond expected normal wear, along with any cosmetic
                     scratches, dings, or dents. Including large dents or improper use causing damage
-                    to hinges or the doors, Etc. Coverage applies strictly to the roll-off trailer
-                    itself. It does not cover your tow vehicle, personal property, or driveway, Etc.
+                    to hinges or the doors, Etc. Lost remotes are not part of the coverage. Coverage
+                    applies strictly to the roll-off trailer itself. It does not cover your tow
+                    vehicle, personal property, or driveway, Etc.
                   </p>
                 </div>
               </>

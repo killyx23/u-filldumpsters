@@ -457,7 +457,7 @@ const CheckoutForm = ({
           {(pricingBreakdown.insuranceCost > 0 || pricingBreakdown.drivewayProtectionCost > 0) && (
             <>
               <CategoryHeader icon="🛡️" title="Protection Options" />
-              {pricingBreakdown.insuranceCost > 0 && <BreakdownLine label="Rental Insurance" value={pricingBreakdown.insuranceCost} />}
+              {pricingBreakdown.insuranceCost > 0 && <BreakdownLine label="Hardware Protection Plan" value={pricingBreakdown.insuranceCost} />}
               {pricingBreakdown.drivewayProtectionCost > 0 && <BreakdownLine label="Driveway Protection" value={pricingBreakdown.drivewayProtectionCost} />}
             </>
           )}

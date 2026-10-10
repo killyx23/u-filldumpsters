@@ -719,7 +719,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     const protectionItems = [];
     if (calculatedTotals.insuranceCost > 0) {
-        protectionItems.push({ label: 'Rental Insurance', amount: calculatedTotals.insuranceCost });
+        protectionItems.push({ label: 'Hardware Protection Plan', amount: calculatedTotals.insuranceCost });
     }
     if (calculatedTotals.drivewayProtectionCost > 0) {
         protectionItems.push({ label: 'Driveway Protection', amount: calculatedTotals.drivewayProtectionCost });

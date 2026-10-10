@@ -54,10 +54,10 @@ export const ProtectionSection = ({
         <>
             <AddonSection icon={<Shield className="h-6 w-6" />} title="Protection Options">
                 <div className="space-y-4">
-                    {/* Rental Insurance */}
+                    {/* Hardware Protection Plan */}
                     <div>
                         <div className="flex items-center gap-2 mb-3">
-                            <h4 className="text-lg font-semibold text-white">Rental Insurance</h4>
+                            <h4 className="text-lg font-semibold text-white">Hardware Protection Plan</h4>
                             <button
                                 type="button"
                                 onClick={() => setShowInsuranceInfo(true)}
@@ -77,7 +77,7 @@ export const ProtectionSection = ({
                                 value="accept"
                                 checked={addonsData?.insurance === 'accept'}
                                 onChange={() => handleInsuranceChange('accept')}
-                                title="Accept Insurance"
+                                title="Accept (HPP)"
                                 price={insurancePrice}
                                 description="Protect yourself from damage liability"
                                 recommended
@@ -87,7 +87,7 @@ export const ProtectionSection = ({
                                 value="decline"
                                 checked={addonsData?.insurance === 'decline'}
                                 onChange={() => handleInsuranceChange('decline')}
-                                title="Decline Insurance"
+                                title="Decline (HPP)"
                                 price={0}
                                 description="You assume full liability"
                                 warning

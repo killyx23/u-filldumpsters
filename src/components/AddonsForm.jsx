@@ -625,7 +625,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         onOpenChange={setShowInsuranceDeclineWarning}
         onConfirm={confirmDeclineInsurance}
         title="Confirm Your Choice"
-        description="By declining rental insurance, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
+        description="By declining the Hardware Protection Plan, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
       />
 
       <DeclineWarningDialog 

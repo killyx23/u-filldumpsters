@@ -279,11 +279,11 @@ export const ComprehensiveHistoryDialog = ({
                                     <Section title="Add-ons & Equipment" icon={<Package className="mr-2 h-5 w-5"/>}>
                                         <DetailItem
                                           icon={<ShieldCheck />}
-                                          label="Insurance"
+                                          label="HPP"
                                           value={
                                             booking.status === 'Cancelled' && booking.addons.insurance === 'accept'
-                                              ? 'Cancelled (was accepted)'
-                                              : booking.addons.insurance === 'accept' ? 'Accepted' : 'Declined'
+                                              ? 'Cancelled (was Accept (HPP))'
+                                              : booking.addons.insurance === 'accept' ? 'Accept (HPP)' : 'Decline (HPP)'
                                           }
                                         />
                                         {Number(booking.plan.id) === 1 && (

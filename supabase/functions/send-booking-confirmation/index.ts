@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
 import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
 import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
-import { sendSms } from "../_shared/notify.ts";
+import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 
@@ -932,15 +932,20 @@ const generateActionRequiredEmailHTML = (
       <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
         <h3 style="color: #92400e; margin: 0 0 15px 0; font-size: 18px;">🔑 Customer Portal Access</h3>
         <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Log in to finish verification, view this booking, and track status.</p>
-        <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width: 100%; max-width: 100%; border-collapse: collapse; margin: 0 0 25px 0; table-layout: fixed;">
           <tr>
-            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+            <td style="padding: 14px 16px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; word-break: break-word;">
               <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Portal ID</p>
-              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${customerIdText}</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace; word-break: break-all; overflow-wrap: anywhere;">${customerIdText}</p>
             </td>
-            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+          </tr>
+          <tr>
+            <td style="height: 12px; font-size: 0; line-height: 12px;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding: 14px 16px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; word-break: break-word;">
               <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Phone Number</p>
-              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${phone}</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace; word-break: break-all; overflow-wrap: anywhere;">${phone}</p>
             </td>
           </tr>
         </table>
@@ -974,7 +979,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
   let addonsHTML = "";
   if (addons.insurance === "accept") {
-    addonsHTML += `<li style="padding: 5px 0;">✓ Rental Insurance</li>`;
+    addonsHTML += `<li style="padding: 5px 0;">✓ Hardware Protection Plan</li>`;
   }
   const offersDrivewayProtection = Number(plan?.id) === 1;
   if (offersDrivewayProtection && addons.drivewayProtection === "accept") {
@@ -1180,15 +1185,20 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
         <p style="margin: 0 0 20px 0; color: #78350f; font-size: 15px; line-height: 1.5;">Access your booking details, make changes, and track your rental anytime through our Customer Portal. (Most all questions and changes can be access through the portal)</p>
         <p style="margin: 0 0 20px 0; color: #991b1b; font-size: 14px; line-height: 1.6; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 12px 14px;"><strong>⚠️ Privacy Notice:</strong> This portal information is private and personal. Please keep this email secure and do not share your Portal ID, phone number, or access links with anyone. 🔒</p>
         
-        <table style="width: 100%; border-collapse: separate; border-spacing: 15px 0; margin-bottom: 25px; margin-left: -15px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width: 100%; max-width: 100%; border-collapse: collapse; margin: 0 0 25px 0; table-layout: fixed;">
           <tr>
-            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+            <td style="padding: 14px 16px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; word-break: break-word;">
               <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Portal ID</p>
-              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${customerIdText}</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace; word-break: break-all; overflow-wrap: anywhere;">${customerIdText}</p>
             </td>
-            <td style="padding: 15px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; width: 50%; vertical-align: top;">
+          </tr>
+          <tr>
+            <td style="height: 12px; font-size: 0; line-height: 12px;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding: 14px 16px; background-color: #ffffff; border-radius: 6px; border: 1px solid #fcd34d; word-break: break-word;">
               <p style="margin: 0; color: #9ca3af; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: bold;">Phone Number</p>
-              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace;">${phone}</p>
+              <p style="margin: 8px 0 0 0; color: #1f2937; font-size: 20px; font-weight: bold; font-family: monospace; word-break: break-all; overflow-wrap: anywhere;">${phone}</p>
             </td>
           </tr>
         </table>
@@ -1218,6 +1228,117 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
 </html>
   `;
 };
+const OWNER_ORDER_EMAIL = "brandon@u-filldumpsters.com";
+
+const ownerOrderStatusNote = (emailKind: string) => {
+  if (emailKind === "pending_verification") return "Paid — customer still needs to finish verification";
+  if (emailKind === "pending_address") return "Paid — address needs to be fixed";
+  if (emailKind === "pending_review") return "Paid — booking is on hold for review";
+  return "Paid and confirmed";
+};
+
+const notifyOwnerOfPaidOrder = async (
+  supabase,
+  booking,
+  serviceDetails,
+  insuranceAmount,
+  siteUrl,
+  emailKind: string,
+) => {
+  const claimedAt = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabase
+    .from("bookings")
+    .update({ owner_order_notified_at: claimedAt })
+    .eq("id", booking.id)
+    .is("owner_order_notified_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) {
+    console.error("[send-booking-confirmation] Owner order notice claim failed:", claimError);
+    return { sent: false, error: claimError.message };
+  }
+  if (!claimed) {
+    return { sent: false, skipped: true, reason: "already_notified" };
+  }
+
+  const plan = booking.plan || {};
+  const addons = booking.addons || {};
+  const deliveryAddress = booking.delivery_address || booking.contact_address || {};
+  const customerName = booking.name || `${booking.first_name || ""} ${booking.last_name || ""}`.trim() || "Unknown";
+  const phone = booking.customers?.phone || booking.phone || "N/A";
+  const customerEmail = booking.email || "N/A";
+  const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
+  const selfService = isTrailerSelfService(booking);
+  const pickupScheduleLabel = selfService ? "Pickup by" : "Drop-off";
+  const returnScheduleLabel = selfService ? "Return by" : "Pickup";
+  const pickupScheduleValue = selfService
+    ? `${formatDate(booking.drop_off_date)} ${formatBookingTime(booking.drop_off_time_slot, { isSelfService: true, isReturnBy: false })}`
+    : `${formatDate(booking.drop_off_date)} ${formatDeliveryTimeWindowBetween(booking.drop_off_time_slot)}`;
+  const returnScheduleValue = selfService
+    ? `${formatDate(booking.pickup_date)} ${formatBookingTime(booking.pickup_time_slot, { isSelfService: true, isReturnBy: true })}`
+    : `${formatDate(booking.pickup_date)} ${formatDeliveryTimeWindowBetween(booking.pickup_time_slot)}`;
+  const street = deliveryAddress.street || booking.street || "";
+  const city = deliveryAddress.city || booking.city || "";
+  const state = deliveryAddress.state || booking.state || "";
+  const zip = deliveryAddress.zip || booking.zip || "";
+  const address = [street, [city, state].filter(Boolean).join(", "), zip].filter(Boolean).join(" ") || "N/A";
+  const pricing = resolveReceiptPricing(booking, insuranceAmount);
+  const charged = Number(booking.total_price);
+  const amountPaid = Number.isFinite(charged) && charged > 0 ? charged : pricing.total;
+  const equipment = Array.isArray(addons.equipment) ? addons.equipment : [];
+  const extraLines = [
+    ...equipment.map((item) => `${resolveEquipmentLabel(item)} × ${item.quantity || 1}`),
+    addons.insurance === "accept" ? "Hardware Protection Plan" : "",
+    addons.drivewayProtection === "accept" ? "Driveway Protection" : "",
+  ].filter(Boolean);
+  const chargeRows = pricing.charges
+    .map((line) => `<tr><td style="padding:4px 12px 4px 0;color:#4b5563;">${escapeHtml(line.label)}</td><td style="padding:4px 0;text-align:right;">${formatCurrency(line.amount)}</td></tr>`)
+    .join("");
+  const adminUrl = `${siteUrl}/admin/customer/${encodeURIComponent(String(booking.customer_id || ""))}`;
+  const html = `<!DOCTYPE html>
+<html><body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f3f4f6;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;">
+    <div style="background:#1e3a8a;color:#ffffff;padding:24px;">
+      <p style="margin:0;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;">New paid order</p>
+      <h1 style="margin:8px 0 0;font-size:28px;">Order #${escapeHtml(booking.id)}</h1>
+      <p style="margin:8px 0 0;color:#bfdbfe;">${escapeHtml(ownerOrderStatusNote(emailKind))}</p>
+    </div>
+    <div style="padding:24px;color:#1f2937;line-height:1.5;">
+      <p style="margin:0 0 8px;"><strong>Customer:</strong> ${escapeHtml(customerName)}</p>
+      <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(customerEmail)}</p>
+      <p style="margin:0 0 8px;"><strong>Phone:</strong> ${escapeHtml(phone)}</p>
+      <p style="margin:0 0 8px;"><strong>Service:</strong> ${escapeHtml(serviceName)}</p>
+      <p style="margin:0 0 8px;"><strong>Fulfillment:</strong> ${selfService ? "Customer pickup" : "Delivery"}</p>
+      <p style="margin:0 0 8px;"><strong>${escapeHtml(pickupScheduleLabel)}:</strong> ${escapeHtml(pickupScheduleValue)}</p>
+      <p style="margin:0 0 8px;"><strong>${escapeHtml(returnScheduleLabel)}:</strong> ${escapeHtml(returnScheduleValue)}</p>
+      <p style="margin:0 0 16px;"><strong>Address:</strong> ${escapeHtml(address)}</p>
+      ${extraLines.length ? `<p style="margin:0 0 8px;"><strong>Also included:</strong> ${escapeHtml(extraLines.join(", "))}</p>` : ""}
+      <table style="width:100%;border-collapse:collapse;margin:12px 0 16px;">${chargeRows}</table>
+      <p style="margin:0 0 20px;font-size:20px;"><strong>Amount paid:</strong> ${formatCurrency(amountPaid)}</p>
+      <a href="${adminUrl}" style="display:inline-block;background:#d97706;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 18px;border-radius:6px;">Open this customer in admin</a>
+    </div>
+  </div>
+</body></html>`;
+
+  const result = await sendEmail(
+    OWNER_ORDER_EMAIL,
+    `New paid order #${booking.id} — ${customerName}`,
+    html,
+  );
+  if (!result.success) {
+    await supabase
+      .from("bookings")
+      .update({ owner_order_notified_at: null })
+      .eq("id", booking.id)
+      .eq("owner_order_notified_at", claimedAt);
+    console.error("[send-booking-confirmation] Owner order notice failed:", result.error);
+    return { sent: false, error: result.error || "send failed" };
+  }
+  console.log(`[send-booking-confirmation] Owner order notice sent to ${OWNER_ORDER_EMAIL} for #${booking.id}`);
+  return { sent: true, recipient: OWNER_ORDER_EMAIL };
+};
+
 const sendEmailWithRetry = async (toEmail, subject, htmlContent, maxRetries = 2)=>{
   let lastError = null;
   for(let attempt = 1; attempt <= maxRetries; attempt++){
@@ -1844,6 +1965,16 @@ Deno.serve(async (req)=>{
               : "forced_resend",
         }
         : await sendReferrerThankYouEmail(supabase, booking, siteUrl, timestamp);
+      const ownerOrderNotice = isCancelledRefund
+        ? { sent: false, skipped: true, reason: "cancelled_refund" }
+        : await notifyOwnerOfPaidOrder(
+          supabase,
+          booking,
+          serviceDetails,
+          insuranceAmount,
+          siteUrl,
+          emailKind,
+        );
       return new Response(JSON.stringify({
         success: true,
         message: isCancelledRefund
@@ -1855,6 +1986,7 @@ Deno.serve(async (req)=>{
         recipient: recipientEmail,
         email_type: emailKind,
         referrerThankYou: referrerEmailResult,
+        ownerOrderNotice,
       }), {
         status: 200,
         headers: {

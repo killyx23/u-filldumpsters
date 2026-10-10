@@ -22,6 +22,22 @@ export function buildAccessCodesQrUrl({ token, portalNumber, phone, orderId }) {
   return `${getQrCodeOrigin()}/customer-portal?${params.toString()}`;
 }
 
+export function buildCustomerDocumentQrUrl({ documentKey, portalNumber, phone, orderId }) {
+  const params = new URLSearchParams();
+  params.set('tab', 'resources');
+  params.set('document', normalizeValue(documentKey));
+
+  const normalizedPortal = normalizeValue(portalNumber);
+  const normalizedPhone = normalizeValue(phone);
+  const normalizedOrderId = normalizeValue(orderId);
+
+  if (normalizedPortal) params.set('portal_number', normalizedPortal);
+  if (normalizedPhone) params.set('phone', normalizedPhone);
+  if (normalizedOrderId) params.set('order_id', normalizedOrderId);
+
+  return `${getQrCodeOrigin()}/customer-portal?${params.toString()}`;
+}
+
 export function buildHowToGuidesQrUrl({ token, portalNumber, phone, orderId }) {
   const params = new URLSearchParams();
   params.set('tab', 'resources');

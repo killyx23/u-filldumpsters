@@ -1,6 +1,16 @@
 import React from 'react';
-import { formatMoney, formatPercent, formatTons } from '@/utils/chargesAndFeesConfig';
+import { formatAdminMoney, formatAdminPercent, formatAdminTons, UNAVAILABLE_FEE_TEXT } from '@/utils/chargesAndFeesConfig';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
+
+const percentLabel = (fee, key) => {
+  const formatted = formatAdminPercent(fee(key));
+  return formatted === UNAVAILABLE_FEE_TEXT ? formatted : `${formatted}%`;
+};
+
+const tonsLabel = (fee, key) => {
+  const formatted = formatAdminTons(fee(key));
+  return formatted === UNAVAILABLE_FEE_TEXT ? formatted : `${formatted} tons`;
+};
 
 export const buildTermsSections = (fee) => [
   {
@@ -53,21 +63,21 @@ export const buildTermsSections = (fee) => [
       <>
         <p>
           <strong>Cancellations more than 24 hours before scheduled delivery:</strong>{' '}
-          {formatPercent(fee('advance_cancel_percentage'))}% cancellation fee of the order total retained; balance
+          {percentLabel(fee, 'advance_cancel_percentage')} cancellation fee of the order total retained; balance
           refunded.
         </p>
         <p>
           <strong>Cancellations 24 hours or less before scheduled delivery:</strong> Up to{' '}
-          {formatPercent(fee('late_cancel_percentage'))}% of the order total charged, plus a{' '}
-          {formatPercent(fee('advance_cancel_percentage'))}% cancellation fee of the order total retained.
+          {percentLabel(fee, 'late_cancel_percentage')} of the order total charged, plus a{' '}
+          {percentLabel(fee, 'advance_cancel_percentage')} cancellation fee of the order total retained.
         </p>
         <p>
           <strong>Rescheduling more than 24 hours before the appointment:</strong> A rescheduling fee of{' '}
-          {formatPercent(fee('advance_reschedule_percentage'))}% of the original booking total may apply.
+          {percentLabel(fee, 'advance_reschedule_percentage')} of the original booking total may apply.
         </p>
         <p>
           <strong>Rescheduling 24 hours or less before the appointment:</strong> A rescheduling fee of{' '}
-          {formatPercent(fee('late_reschedule_percentage'))}% of the original booking total may apply. Rescheduling
+          {percentLabel(fee, 'late_reschedule_percentage')} of the original booking total may apply. Rescheduling
           fees are substantially lower than cancelling when you only need a different date, because it reduces loss of
           business compared with a full cancellation.
         </p>
@@ -90,13 +100,13 @@ export const buildTermsSections = (fee) => [
           Dumpster Delivery Rental is chosen, than the following statement is applicable:
         </p>
         <p>
-          Base rental price includes delivery and pickup. <strong>Disposal is billed separately at {formatMoney(fee('dump_tonnage_rate'))} per ton</strong>{' '}
+          Base rental price includes delivery and pickup. <strong>Disposal is billed separately at {formatAdminMoney(fee('dump_tonnage_rate'))} per ton</strong>{' '}
           based on actual post-disposal scale weight.
         </p>
         <p>
           Customer authorizes U-Fill Dumpsters LLC to charge the payment method on file for all disposal charges,
-          overweight fees ({formatMoney(fee('dumpster_overweight_rate'))} per ton over limit), damages, fines, and dry
-          run fees ({formatPercent(fee('dry_run_percentage'))}% of service cost).
+          overweight fees ({formatAdminMoney(fee('dumpster_overweight_rate'))} per ton over limit), damages, fines, and dry
+          run fees ({percentLabel(fee, 'dry_run_percentage')} of service cost).
         </p>
       </>
     ),
@@ -108,8 +118,8 @@ export const buildTermsSections = (fee) => [
     content: (
       <>
         <p>
-          <strong>Weight Limits:</strong> Dumpsters ({formatTons(fee('dumpster_allowed_tons'))} tons), Trailers (
-          {formatTons(fee('dump_loader_max_tons'))} tons). Do not exceed the marked Fill Line. Dirt/soil loads must
+          <strong>Weight Limits:</strong> Dumpsters ({tonsLabel(fee, 'dumpster_allowed_tons')}), Trailers (
+          {tonsLabel(fee, 'dump_loader_max_tons')}). Do not exceed the marked Fill Line. Dirt/soil loads must
           not exceed halfway up trailer walls.
         </p>
         <p>

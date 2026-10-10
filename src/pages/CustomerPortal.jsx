@@ -789,7 +789,7 @@ export const CustomerPortal = () => {
                 )}
 
                 {activeTab === 'resources' && (
-                    <CustomerPortalResourcesPage />
+                    <CustomerPortalResourcesPage bookings={bookings} customerData={customerData} />
                 )}
 
                 {activeTab === 'profile' && (

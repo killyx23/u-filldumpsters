@@ -1,7 +1,9 @@
 import React from 'react';
 import { Helmet } from 'react-helmet';
+import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import BackButton from '@/components/BackButton';
+import { HPP_TERMS_PATH } from '@/components/terms/HardwareProtectionPlanTerms';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
 
 export const TermsPage = () => {
@@ -62,6 +64,21 @@ export const TermsPage = () => {
                 <a href="mailto:support@u-filldumpsters.com" className="text-yellow-300 hover:text-yellow-200 underline">
                   support@u-filldumpsters.com
                 </a>
+                .
+              </p>
+            </section>
+
+            <section className="space-y-4">
+              <h2 className="text-2xl font-bold text-yellow-400">Legal</h2>
+              <p>
+                The rental agreement accepted during checkout includes the optional{' '}
+                <Link to={HPP_TERMS_PATH} className="text-yellow-300 hover:text-yellow-200 underline">
+                  Hardware Protection Plan
+                </Link>
+                . See also the{' '}
+                <Link to="/privacy" className="text-yellow-300 hover:text-yellow-200 underline">
+                  Privacy Policy
+                </Link>
                 .
               </p>
             </section>

@@ -1,8 +1,11 @@
 export const DEFAULT_PROTECTION_OPTIONS_INFO_DESCRIPTION =
   "Insurance covers damage to the rental equipment. Driveway protection prevents damage to your property during delivery.";
 
+export const buildDumpLoaderProtectionOptionsInfoDescription = (creditLimit = '$500.00') =>
+  `🛡️ Sure-Trac Hardware Protection offers up to a ${creditLimit} credit toward repair or replacement costs for accidental damage to key trailer systems, including auto-tarping, wireless remotes, hydraulics, and lighting.\n\nThis plan reduces out-of-pocket expenses, but explicitly excludes damages resulting from misuse, negligence, beyond normal wear and tear, cosmetic issues, and damage to tires or personal property (see the full contract for all details). Lost remotes are not covered.`;
+
 export const DUMP_LOADER_PROTECTION_OPTIONS_INFO_DESCRIPTION =
-  "🛡️ Sure-Trac Hardware Protection offers up to a $500 credit toward repair or replacement costs for accidental damage to key trailer systems, including auto-tarping, wireless remotes, hydraulics, and lighting.\n\nThis plan reduces out-of-pocket expenses, but explicitly excludes damages resulting from misuse, negligence, beyond normal wear and tear, cosmetic issues, and damage to tires or personal property (see the full contract for all details).";
+  buildDumpLoaderProtectionOptionsInfoDescription();
 
 export const isDumpLoaderProtectionInfoService = (serviceName = "") => {
   const normalizedServiceName = serviceName.toLowerCase();
@@ -15,7 +18,7 @@ export const isDumpLoaderProtectionInfoService = (serviceName = "") => {
   );
 };
 
-export const getProtectionOptionsInfoDescription = (serviceName = "") =>
+export const getProtectionOptionsInfoDescription = (serviceName = "", creditLimit) =>
   isDumpLoaderProtectionInfoService(serviceName)
-    ? DUMP_LOADER_PROTECTION_OPTIONS_INFO_DESCRIPTION
+    ? buildDumpLoaderProtectionOptionsInfoDescription(creditLimit)
     : DEFAULT_PROTECTION_OPTIONS_INFO_DESCRIPTION;

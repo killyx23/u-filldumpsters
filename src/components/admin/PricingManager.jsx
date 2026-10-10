@@ -170,7 +170,7 @@ const DumpFeeCard = ({ service, dumpFeeData, onSave }) => {
 };
 
 const InsuranceItemCard = ({ item, onEdit, onDelete, isPrimaryPlan }) => {
-    const typeLabel = item.plan_type === 'driveway_protection' ? 'Driveway Protection' : 'Rental Insurance';
+    const typeLabel = item.plan_type === 'driveway_protection' ? 'Driveway Protection' : 'Hardware Protection Plan';
     return (
         <div className={`bg-white/5 p-4 rounded-lg flex flex-col md:flex-row items-center justify-between gap-4 border transition-colors ${
             isPrimaryPlan ? 'border-purple-500/40 bg-purple-900/10' : 'border-purple-500/20 hover:border-purple-500/40'
@@ -284,7 +284,7 @@ const InsuranceItemForm = ({
                             <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="rental_insurance">Rental Insurance</SelectItem>
+                            <SelectItem value="rental_insurance">Hardware Protection Plan</SelectItem>
                             <SelectItem value="driveway_protection">Driveway Protection</SelectItem>
                         </SelectContent>
                     </Select>
@@ -676,7 +676,7 @@ const TaxConfigurationCard = () => {
                         id="exempt-insurance"
                         checked={exemptInsurance}
                         onCheckedChange={setExemptInsurance}
-                        label="Rental Insurance (damage waiver)"
+                        label="Hardware Protection Plan (damage waiver)"
                         hint="Leave unchecked to tax insurance with the rest of the order"
                     />
                     <ExemptionCheckbox

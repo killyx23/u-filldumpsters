@@ -5,6 +5,8 @@ import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
 import { additionalDayFinePrint, equipmentNumericId, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatMoney } from '@/utils/chargesAndFeesConfig';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
@@ -21,6 +23,8 @@ export const PriceBreakdown = ({
   className = '',
   showLandfillFees = true
 }) => {
+  const { fee } = useChargesAndFees();
+  const hppCreditLimit = formatMoney(fee('hardware_protection_plan_cap'));
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [loading, setLoading] = useState(true);
   const [taxRate, setTaxRate] = useState(7.45);
@@ -176,7 +180,7 @@ export const PriceBreakdown = ({
 
   const protectionItems = [];
   if (calculatedTotals.insuranceCost > 0) {
-    protectionItems.push({ label: 'Rental Insurance', amount: calculatedTotals.insuranceCost });
+    protectionItems.push({ label: 'Hardware Protection Plan', amount: calculatedTotals.insuranceCost });
   }
   if (calculatedTotals.drivewayProtectionCost > 0) {
     protectionItems.push({ label: 'Driveway Protection', amount: calculatedTotals.drivewayProtectionCost });
@@ -270,7 +274,7 @@ export const PriceBreakdown = ({
           items={protectionItems}
           showInfoButton={true}
           infoTitle="Protection Options"
-          infoDescription={getProtectionOptionsInfoDescription(plan?.name)}
+          infoDescription={getProtectionOptionsInfoDescription(plan?.name, hppCreditLimit)}
         />
 
         {/* 3. Rent Equipment */}

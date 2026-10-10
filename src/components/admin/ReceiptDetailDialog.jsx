@@ -145,7 +145,7 @@ import { feeChargeEntries } from '@/utils/feeCharges';
 
                         <section>
                             <h4 className="font-bold text-lg text-yellow-400 mt-4 mb-2">Add-ons & Protection</h4>
-                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Insurance" value={addons.insurance === 'accept' ? `Accepted ($${addonPrices.insurance.toFixed(2)})` : 'Declined'} />
+                            <DetailRow icon={addons.insurance === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="HPP" value={addons.insurance === 'accept' ? `Accept (HPP) ($${addonPrices.insurance.toFixed(2)})` : 'Decline (HPP)'} />
                             {offersDrivewayProtection && <DetailRow icon={addons.drivewayProtection === 'accept' ? <ShieldCheck className="text-green-400"/> : <ShieldOff className="text-red-400"/>} label="Driveway Protection" value={addons.drivewayProtection === 'accept' ? `Accepted ($${addonPrices.drivewayProtection.toFixed(2)})` : 'Declined'} />}
                             {addons.addressVerificationSkipped && <DetailRow icon={<AlertTriangle className="text-orange-400"/>} label="Address Verification" value="Skipped by customer" />}
                             

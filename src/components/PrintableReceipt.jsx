@@ -24,7 +24,7 @@ const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
 
 const LIABILITY_EQUIPMENT_WITH_INSURANCE =
-    'Customer purchased optional Rental Insurance applicable to rented Equipment during the Rental Period. Subject to the terms, limitations, and exclusions of the Rental Agreement, purchased protection may apply a credit toward qualifying accidental damage to covered rental hardware as described in the agreement (including applicable per-incident limits). Customer remains fully responsible for any damage, loss, or theft not covered by the purchased protection and authorizes U-Fill Dumpsters LLC to charge the payment method on file for repair or replacement costs exceeding applicable coverage.';
+    'Customer purchased optional Hardware Protection Plan applicable to rented Equipment during the Rental Period. Subject to the terms, limitations, and exclusions of the Rental Agreement, purchased protection may apply a credit toward qualifying accidental damage to covered rental hardware as described in the agreement (including applicable per-incident limits). Customer remains fully responsible for any damage, loss, or theft not covered by the purchased protection and authorizes U-Fill Dumpsters LLC to charge the payment method on file for repair or replacement costs exceeding applicable coverage.';
 
 const AgreementText = ({ booking, hasInsurance }) => {
     const displayName = (booking?.first_name && booking?.last_name) 
@@ -38,7 +38,7 @@ const AgreementText = ({ booking, hasInsurance }) => {
             <h3 className="font-bold text-sm text-gray-800 flex items-center mb-2"><FileSignature className="mr-2 h-4 w-4"/>Rental Agreement Acknowledgment</h3>
             <p>The following is a summary of the key terms agreed to upon booking. For the full agreement text, please refer to your customer portal or contact support.</p>
             {hasInsurance && (
-                <p><strong>Rental Insurance Purchased:</strong> Customer elected and paid for optional Rental Insurance on this booking as part of the Rental Agreement.</p>
+                <p><strong>Hardware Protection Plan Purchased:</strong> Customer elected and paid for optional Hardware Protection Plan on this booking as part of the Rental Agreement.</p>
             )}
             
             <div className="p-2 border bg-gray-50 rounded-md text-gray-700">
@@ -564,7 +564,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     </tr>
                                     {insuranceCost > 0 && (
                                         <tr className="border-b">
-                                            <td className="py-1 px-6">Rental Insurance</td>
+                                            <td className="py-1 px-6">Hardware Protection Plan</td>
                                             <td className="text-right py-1 pr-3">${insuranceCost.toFixed(2)}</td>
                                         </tr>
                                     )}
@@ -847,8 +847,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                 <h3 className="font-bold text-sm mb-2 border-t pt-4">Disclaimers & Acknowledgements</h3>
                 {was_verification_skipped && <p className="mb-2 font-bold text-orange-700"><strong>Incomplete Verification:</strong> Customer acknowledges that by not providing a valid driver&apos;s license, auto insurance document, and/or license plate of the towing vehicle, this booking is subject to manual review. This may result in delays or cancellation. If cancelled due to failure to verify, applicable cancellation fees will be deducted from any refund as per the rental agreement.</p>}
                 {(addressPending || addons?.addressVerificationSkipped) && <p className="mb-2 font-bold text-orange-700"><strong>Address Not Verified:</strong> The delivery address{unverified_address ? ` (${unverified_address})` : ''} could not be validated. This booking stays pending until the customer corrects it or it is approved. If it is not resolved at least 12 hours before the appointment, the order may be canceled and a cancellation fee will be charged.</p>}
-                {hasInsurance && <p className="mb-2"><strong>Rental Insurance Purchased:</strong> Customer purchased optional Rental Insurance for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
-                {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Insurance Declined:</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
+                {hasInsurance && <p className="mb-2"><strong>Hardware Protection Plan Purchased:</strong> Customer purchased optional Hardware Protection Plan for this booking. Coverage, limitations, and exclusions are governed by the Rental Agreement and any applicable addenda. Customer remains responsible for damage, loss, or costs not covered by the purchased protection, including damage resulting from misuse, overloading, negligence, intentional acts, or prohibited materials.</p>}
+                {!hasInsurance && addons.insurance === 'decline' && <p className="mb-2"><strong>Decline (HPP):</strong> Customer acknowledges and agrees they are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during the rental period.</p>}
                 {offersDrivewayProtection && addons.drivewayProtection === 'decline' && <p className="mb-2"><strong>Driveway Protection Declined:</strong> Customer assumes full liability for any damage, including but not limited to scratches, cracks, or stains, that may occur to the driveway or any other property surface during delivery and pickup.</p>}
                 <AgreementText booking={booking} hasInsurance={hasInsurance} />
                 <p className="text-center mt-4 pt-4 border-t">Thank you for your business! | U-Fill Dumpsters</p>
