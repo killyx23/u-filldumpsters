@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/hooks/use-toast';
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
 export const useResources = () => {
   const { toast } = useToast();
@@ -88,7 +89,7 @@ export const useResources = () => {
       if (err) throw err;
 
       // Generate QR Code URL
-      const qrCodeUrl = `${window.location.origin}/customer-portal/resources/${data.id}`;
+      const qrCodeUrl = `${getAppOrigin()}/customer-portal/resources/${data.id}`;
       const { data: updatedData, error: updateErr } = await supabase
         .from('resources')
         .update({ qr_code_url: qrCodeUrl })

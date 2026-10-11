@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 import { siteImages } from '@/config/siteImages';
+import { getStaffEntryUrl, isCurrentAdminHost } from '@/utils/getAppOrigin';
 
 export const Header = ({ onReorderSelect }) => {
   const navigate = useNavigate();
@@ -19,6 +20,8 @@ export const Header = ({ onReorderSelect }) => {
   const [returningInitialCode, setReturningInitialCode] = useState('');
   const returningUrlHandled = useRef(false);
   const isCustomer = user && !isAdmin;
+  const onAdminHost = isCurrentAdminHost();
+  const staffEntryUrl = getStaffEntryUrl();
 
   const clearReturningUrlParams = useCallback(() => {
     const next = new URLSearchParams(searchParams);
@@ -51,8 +54,12 @@ export const Header = ({ onReorderSelect }) => {
   }, [searchParams]);
 
   const handleAdminClick = () => {
-    navigate('/admin');
     setIsOpen(false);
+    if (onAdminHost || staffEntryUrl.startsWith('/')) {
+      navigate('/admin');
+      return;
+    }
+    window.location.assign(staffEntryUrl);
   };
 
   const handleSignOut = async () => {
@@ -118,6 +125,11 @@ export const Header = ({ onReorderSelect }) => {
   return (
     <>
       <header className="sticky top-0 z-40 w-full bg-white backdrop-blur-md shadow-md border-b border-gray-200/50 transition-all duration-300">
+        <a
+          href={staffEntryUrl}
+          aria-label={onAdminHost ? 'Open the customer site' : 'Staff sign-in'}
+          className="absolute right-3 top-3 z-50 h-2.5 w-2.5 rounded-full bg-stone-500/40 hover:bg-yellow-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-500"
+        />
         <nav className="container mx-auto px-4 h-full">
           <div className="flex items-center justify-between min-h-[140px] md:min-h-[180px] lg:min-h-[200px] relative w-full h-full">
             
@@ -198,6 +210,13 @@ export const Header = ({ onReorderSelect }) => {
                       <div className="pt-6 border-t border-white/20">
                         <AuthButtons mobile={true} />
                       </div>
+                      <a
+                        href={staffEntryUrl}
+                        onClick={closeMenu}
+                        className="pt-2 text-left text-xs text-white/40 hover:text-white/70"
+                      >
+                        {onAdminHost ? 'Customer site' : 'Staff'}
+                      </a>
                     </div>
                   </SheetContent>
                 </Sheet>

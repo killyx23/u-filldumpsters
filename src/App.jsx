@@ -38,6 +38,7 @@ import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortal
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
 import { ScrollToTop } from '@/components/ScrollToTop';
 import { BrevoChat } from '@/components/BrevoChat';
+import { HostSplitGate } from '@/components/HostSplitGate';
 
 const mergeRouteQuery = (to, incomingSearch) => {
   const [path, toQuery = ''] = to.split('?');
@@ -110,6 +111,7 @@ function App() {
       <Router>
         <ScrollToTop />
         <BrevoChat />
+        <HostSplitGate>
         <BookingFlowProvider>
         <Helmet>
           <title>Dumpster Rental | Book Online Today</title>
@@ -203,6 +205,7 @@ function App() {
           <Toaster />
         </div>
         </BookingFlowProvider>
+        </HostSplitGate>
       </Router>
     </SupabaseAuthProvider>
   );

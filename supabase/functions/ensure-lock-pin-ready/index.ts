@@ -16,6 +16,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { bookingNeedsYardLockPin, isDeliveryBooking } from "../_shared/deliveryBooking.ts";
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
@@ -28,18 +29,10 @@ const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 const ALERT_ATTEMPTS = 3;
 
 function cors(req: Request) {
-  const h: Record<string, string> = {
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  return {
+    ...getCorsHeaders(req),
     "Content-Type": "application/json",
   };
-  const origin = req.headers.get("Origin");
-  const allowed = (Deno.env.get("ALLOWED_ORIGINS") || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (origin && allowed.includes(origin)) {
-    h["Access-Control-Allow-Origin"] = origin;
-    h["Vary"] = "Origin";
-  }
-  return h;
 }
 
 function json(headers: Record<string, string>, body: unknown, status = 200) {

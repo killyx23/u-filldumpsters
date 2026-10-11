@@ -13,9 +13,21 @@ function parseAllowedOrigins(): Set<string> {
 
 let cachedOrigins: Set<string> | null = null;
 
+const FIRST_PARTY_ORIGINS = [
+  'https://u-filldumpsters.com',
+  'https://www.u-filldumpsters.com',
+  'https://admin.u-filldumpsters.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://admin.localhost:3000',
+];
+
 function getAllowedOrigins(): Set<string> {
   if (!cachedOrigins) {
     cachedOrigins = parseAllowedOrigins();
+    for (const origin of FIRST_PARTY_ORIGINS) {
+      cachedOrigins.add(origin);
+    }
   }
   return cachedOrigins;
 }

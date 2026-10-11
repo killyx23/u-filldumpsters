@@ -6,6 +6,7 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Key, Send, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { getAppOrigin } from '@/utils/getAppOrigin';
 
 export const ManualPINOverride = ({ booking, onUpdate }) => {
   const [currentPin, setCurrentPin] = useState(null);
@@ -96,7 +97,7 @@ export const ManualPINOverride = ({ booking, onUpdate }) => {
     setSending(true);
 
     try {
-      const portalLink = `${window.location.origin}/customer-portal/login?order_id=${booking.id}&phone=${booking.phone}`;
+      const portalLink = `${getAppOrigin()}/customer-portal/login?order_id=${booking.id}&phone=${booking.phone}`;
 
       // Send notification via edge function
       const { error: emailError } = await supabase.functions.invoke('send-booking-confirmation', {

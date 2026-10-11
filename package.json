@@ -21,7 +21,8 @@
     "test:pin-reconciler": "node tools/test-pin-reconciler-local.mjs",
     "test:scheduled-algopin": "npx --yes tsx tools/mint-scheduled-hourly-algopin.mjs",
     "test:admin-mfa": "node --test src/lib/adminMfa.test.mjs && node tools/test-admin-mfa.mjs",
-    "test:calendar-hints": "node --test src/utils/calendarAvailabilityHints.test.mjs"
+    "test:calendar-hints": "node --test src/utils/calendarAvailabilityHints.test.mjs",
+    "test:host-split": "node --test src/utils/hostSplit.test.mjs"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "^1.2.1",
