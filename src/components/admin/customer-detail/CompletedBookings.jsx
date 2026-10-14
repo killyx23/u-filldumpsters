@@ -11,6 +11,7 @@ import { CheckCircle, Clock, DollarSign, AlertTriangle, Image, XCircle, Calendar
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import {
     getFollowUpReasonLabel,
@@ -275,6 +276,9 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                                 <h4 className="text-xl font-bold text-white">{formatCustomerFacingPlanName(booking.plan?.name) || 'N/A'}</h4>
                                 <p className="text-sm text-blue-200 flex items-center"><Calendar className="mr-2 h-4 w-4"/>Booked on {format(parseISO(booking.created_at), 'Pp')}</p>
                                 <p className="text-sm text-gray-400 mt-1">Booking #{booking.id}</p>
+                                {phoneOrderLabel(booking.addons) && (
+                                    <p className="text-sm text-yellow-300 mt-1">{phoneOrderLabel(booking.addons)}</p>
+                                )}
                             </div>
                             <div className="text-right space-y-2 shrink-0">
                                 {booking.status === 'Rescheduled' ? (

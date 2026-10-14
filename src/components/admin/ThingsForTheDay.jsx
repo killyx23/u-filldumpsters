@@ -189,10 +189,39 @@ const tone = {
     return: 'bg-orange-500/20 text-orange-200 border-orange-400/40',
 };
 
-function DayStopCard({ booking, action, nowMs, onOpen }) {
+function earliestActionMs(booking, actions) {
+    const times = actions
+        .map((action) => targetMs(booking, action))
+        .filter((ms) => Number.isFinite(ms));
+    if (times.length === 0) return NaN;
+    return Math.min(...times);
+}
+
+function StopClock({ booking, action, nowMs }) {
     const ms = targetMs(booking, action);
     const remaining = Number.isFinite(ms) ? ms - nowMs : NaN;
     const overdue = !action.done && Number.isFinite(remaining) && remaining < 0;
+
+    return (
+        <div className={`rounded-lg border px-3 py-2 ${tone[action.key]}`}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide">
+                {action.label}
+                {' · '}
+                {action.done ? 'Finished' : action.countdownLabel}
+            </p>
+            <p className={`text-lg font-bold tabular-nums ${overdue ? 'text-red-300' : ''}`}>
+                {action.done
+                    ? (action.doneAt ? format(new Date(action.doneAt), 'h:mm a') : 'Done')
+                    : overdue
+                        ? `${formatRemaining(-remaining)} overdue`
+                        : (Number.isFinite(remaining) ? formatRemaining(remaining) : 'Time not set')}
+            </p>
+            <p className="text-sm opacity-90">Scheduled {action.when}</p>
+        </div>
+    );
+}
+
+function DayStopCard({ booking, actions, nowMs, onOpen }) {
     const customer = booking.customers || {};
     const phone = contactPhone(booking);
     const email = contactEmail(booking);
@@ -201,6 +230,7 @@ function DayStopCard({ booking, action, nowMs, onOpen }) {
     const inventory = inventoryLines(booking.assigned_inventory_items);
     const price = Number(booking.total_price);
     const image = equipmentImage(booking.plan);
+    const onlyAction = actions.length === 1 ? actions[0] : null;
 
     return (
         <article className="overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-lg">
@@ -214,31 +244,37 @@ function DayStopCard({ booking, action, nowMs, onOpen }) {
                             event.currentTarget.src = siteImages.logo;
                         }}
                     />
-                    <span className={`absolute left-3 top-3 rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${tone[action.key]}`}>
-                        {action.label}
-                    </span>
+                    <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+                        {actions.map((action) => (
+                            <span
+                                key={action.key}
+                                className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide ${tone[action.key]}`}
+                            >
+                                {action.label}
+                            </span>
+                        ))}
+                    </div>
                 </div>
                 <div className="p-5 space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <h3 className="text-xl font-bold text-white">{customerName(booking)}</h3>
-                            <p className="text-sm text-blue-200">
-                                Booking #{booking.id} · {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
-                            </p>
-                        </div>
-                        <div className="text-right">
+                    <div>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <h3 className="text-xl font-bold text-white">{customerName(booking)}</h3>
+                                <p className="text-sm text-blue-200">
+                                    Booking #{booking.id} · {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
+                                </p>
+                            </div>
                             <StatusBadge status={booking.status} booking={booking} />
-                            <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-yellow-400/80">
-                                {action.done ? 'Finished' : action.countdownLabel}
-                            </p>
-                            <p className={`text-lg font-bold tabular-nums ${overdue ? 'text-red-300' : 'text-yellow-300'}`}>
-                                {action.done
-                                    ? (action.doneAt ? format(new Date(action.doneAt), 'h:mm a') : 'Done')
-                                    : overdue
-                                        ? `${formatRemaining(-remaining)} overdue`
-                                        : (Number.isFinite(remaining) ? formatRemaining(remaining) : 'Time not set')}
-                            </p>
-                            <p className="text-sm text-gray-300">Scheduled {action.when}</p>
+                        </div>
+                        <div className={`mt-3 grid gap-3 ${actions.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            {actions.map((action) => (
+                                <StopClock
+                                    key={action.key}
+                                    booking={booking}
+                                    action={action}
+                                    nowMs={nowMs}
+                                />
+                            ))}
                         </div>
                     </div>
 
@@ -252,11 +288,13 @@ function DayStopCard({ booking, action, nowMs, onOpen }) {
                         <Info icon={<MapPin className="h-4 w-4" />} label="Job site">
                             {jobSite(booking)}
                         </Info>
-                        <Info icon={<Clock className="h-4 w-4" />} label="Other stop">
-                            {action.target === 'start'
-                                ? `Pickup ${bookingDateKey(booking.pickup_date) || '—'} · ${timeLabel(booking.pickup_time_slot)}`
-                                : `Drop-off ${bookingDateKey(booking.drop_off_date) || '—'} · ${timeLabel(booking.drop_off_time_slot)}`}
-                        </Info>
+                        {onlyAction && (
+                            <Info icon={<Clock className="h-4 w-4" />} label="Other stop">
+                                {onlyAction.target === 'start'
+                                    ? `Pickup ${bookingDateKey(booking.pickup_date) || '—'} · ${timeLabel(booking.pickup_time_slot)}`
+                                    : `Drop-off ${bookingDateKey(booking.drop_off_date) || '—'} · ${timeLabel(booking.drop_off_time_slot)}`}
+                            </Info>
+                        )}
                         <Info icon={<Truck className="h-4 w-4" />} label="Drive">
                             {miles} one way
                             {customer.travel_time_minutes ? ` · about ${customer.travel_time_minutes} min` : ''}
@@ -339,13 +377,13 @@ export function ThingsForTheDay({ bookings = [] }) {
     const stops = useMemo(() => {
         const rows = [];
         activeBookings.forEach((booking) => {
-            actionForBooking(booking, selectedKey).forEach((action) => {
-                rows.push({ booking, action });
-            });
+            const actions = actionForBooking(booking, selectedKey);
+            if (actions.length === 0) return;
+            rows.push({ booking, actions });
         });
         rows.sort((a, b) => {
-            const aMs = targetMs(a.booking, a.action);
-            const bMs = targetMs(b.booking, b.action);
+            const aMs = earliestActionMs(a.booking, a.actions);
+            const bMs = earliestActionMs(b.booking, b.actions);
             if (!Number.isFinite(aMs)) return 1;
             if (!Number.isFinite(bMs)) return -1;
             return aMs - bMs;
@@ -370,8 +408,9 @@ export function ThingsForTheDay({ bookings = [] }) {
         return counts;
     }, [activeBookings, weekDays]);
 
-    const deliveryCount = stops.filter((stop) => stop.action.key === 'delivery' || stop.action.key === 'customer_pickup').length;
-    const pickupCount = stops.length - deliveryCount;
+    const dayActions = stops.flatMap((stop) => stop.actions);
+    const deliveryCount = dayActions.filter((action) => action.key === 'delivery' || action.key === 'customer_pickup').length;
+    const pickupCount = dayActions.length - deliveryCount;
     const todayKey = toDateKey(new Date());
 
     const openCustomer = (booking) => {
@@ -387,9 +426,9 @@ export function ThingsForTheDay({ bookings = [] }) {
                     <p className="text-blue-200">
                         {format(selected, 'EEEE, MMMM d, yyyy')}
                         {' · '}
-                        {stops.length === 0
+                        {dayActions.length === 0
                             ? 'Nothing scheduled'
-                            : `${stops.length} stop${stops.length === 1 ? '' : 's'} · ${deliveryCount} out · ${pickupCount} back`}
+                            : `${dayActions.length} stop${dayActions.length === 1 ? '' : 's'} · ${deliveryCount} out · ${pickupCount} back`}
                     </p>
                 </div>
                 <Button
@@ -410,11 +449,11 @@ export function ThingsForTheDay({ bookings = [] }) {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    {stops.map(({ booking, action }) => (
+                    {stops.map(({ booking, actions }) => (
                         <DayStopCard
-                            key={`${booking.id}-${action.key}`}
+                            key={booking.id}
                             booking={booking}
-                            action={action}
+                            actions={actions}
                             nowMs={nowMs}
                             onOpen={openCustomer}
                         />

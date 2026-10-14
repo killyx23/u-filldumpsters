@@ -32,6 +32,10 @@ import { AIAssistantTab } from './AIAssistantTab';
 
 const COMMUNICATION_SECTIONS = ['chat', 'reviews', 'tickets', 'ai-assistant'];
 
+const SectionDot = () => (
+    <span className="ml-2 inline-block h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
+);
+
 export const CommunicationHub = ({
     customer,
     bookings,
@@ -41,6 +45,9 @@ export const CommunicationHub = ({
     activeSection = 'chat',
     onSectionChange,
     focusBookingId = null,
+    sectionAlerts = {},
+    reviewStatusKey = '',
+    onReviewSubmitted = null,
 }) => {
     const section = COMMUNICATION_SECTIONS.includes(activeSection) ? activeSection : 'chat';
 
@@ -53,9 +60,18 @@ export const CommunicationHub = ({
 
             <Tabs value={section} onValueChange={(value) => onSectionChange?.(value)} className="w-full">
                 <TabsList className="grid w-full grid-cols-4 bg-black/20 text-white">
-                    <TabsTrigger value="chat"><MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat</TabsTrigger>
-                    <TabsTrigger value="reviews"><Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback</TabsTrigger>
-                    <TabsTrigger value="tickets"><Ticket className="w-4 h-4 mr-2 hidden sm:block"/> Support Tickets</TabsTrigger>
+                    <TabsTrigger value="chat">
+                        <MessageSquare className="w-4 h-4 mr-2 hidden sm:block"/> Direct Chat
+                        {sectionAlerts.chat && <SectionDot />}
+                    </TabsTrigger>
+                    <TabsTrigger value="reviews">
+                        <Star className="w-4 h-4 mr-2 hidden sm:block"/> Feedback
+                        {sectionAlerts.reviews && <SectionDot />}
+                    </TabsTrigger>
+                    <TabsTrigger value="tickets">
+                        <Ticket className="w-4 h-4 mr-2 hidden sm:block"/> Support Tickets
+                        {sectionAlerts.tickets && <SectionDot />}
+                    </TabsTrigger>
                     <TabsTrigger value="ai-assistant" className="data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300">
                         <Bot className="w-4 h-4 mr-2 hidden sm:block"/> AI Assistant
                     </TabsTrigger>
@@ -79,6 +95,8 @@ export const CommunicationHub = ({
                         bookings={bookings}
                         onRefreshData={onRefreshData}
                         focusBookingId={section === 'reviews' ? focusBookingId : null}
+                        reviewStatusKey={reviewStatusKey}
+                        onReviewSubmitted={onReviewSubmitted}
                     />
                 </TabsContent>
             </Tabs>
@@ -596,7 +614,7 @@ const SupportTickets = ({ customer, bookings = [], notes, onNewNote }) => {
     );
 };
 
-const ReviewsSection = ({ customer, bookings, onRefreshData, focusBookingId = null }) => {
+const ReviewsSection = ({ customer, bookings, onRefreshData, focusBookingId = null, reviewStatusKey = '', onReviewSubmitted = null }) => {
     const [reviews, setReviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -633,6 +651,11 @@ const ReviewsSection = ({ customer, bookings, onRefreshData, focusBookingId = nu
     useEffect(() => {
         fetchReviews();
     }, [customer.id]);
+
+    useEffect(() => {
+        if (!reviewStatusKey) return;
+        fetchReviews({ silent: true });
+    }, [reviewStatusKey]);
 
     const reviewedBookingIds = useMemo(() => reviews.map((review) => review.booking_id), [reviews]);
     const unreviewedBookings = useMemo(
@@ -743,6 +766,7 @@ const ReviewsSection = ({ customer, bookings, onRefreshData, focusBookingId = nu
 
             if (created) {
                 setReviews((prev) => [created, ...prev.filter((review) => review.id !== created.id)]);
+                onReviewSubmitted?.(created);
             }
             toast({ title: 'Review submitted', description: PENDING_REVIEW_MESSAGE });
             resetReviewForm();

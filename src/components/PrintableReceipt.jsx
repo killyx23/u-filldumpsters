@@ -18,6 +18,7 @@ import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
+import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equipmentReturnDisplay';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
@@ -510,6 +511,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     {/* Service Details */}
                     <div className="mb-4 p-3 bg-gray-50 rounded">
                         <p className="font-semibold text-lg">{serviceName}</p>
+                        {phoneOrderLabel(addons) && (
+                            <p className="text-sm font-medium text-gray-800 mt-1">{phoneOrderLabel(addons)}</p>
+                        )}
                         {showOneWayDistance && (
                             <p className="text-sm text-gray-600 mt-1">
                                 Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}

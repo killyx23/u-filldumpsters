@@ -13,7 +13,7 @@ import {
     getVerificationDeadlineInfo,
 } from '@/utils/verificationDeadline';
 import { loadCancellationFee } from '@/utils/cancellationFee';
-import { getPendingReviews, getUnreviewedBookings, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
+import { getUnreviewedBookings } from '@/utils/reviewEligibility';
 
 const AttentionRequiredDialog = ({ open, onOpenChange, items, onNavigateToTab }) => {
   return (
@@ -196,18 +196,6 @@ export const PortalDashboard = ({ bookings, customerReviews = [], lastUpdated, o
           ? 'A completed rental is ready for feedback if you want to leave one.'
           : `${unreviewedBookings.length} completed rentals are ready for feedback if you want to leave one.`,
         nextStep: 'Open Communication and choose Feedback to write your review.',
-        targetTab: 'messages',
-        targetSection: 'reviews',
-      });
-    }
-    const pendingReviews = getPendingReviews(customerReviews);
-    if (pendingReviews.length > 0) {
-      attention.push({
-        id: 'reviews-pending-approval',
-        severity: 'info',
-        title: pendingReviews.length === 1 ? 'Feedback pending' : `Feedback pending (${pendingReviews.length})`,
-        description: PENDING_REVIEW_MESSAGE,
-        nextStep: 'Open Communication and choose Feedback to check the status.',
         targetTab: 'messages',
         targetSection: 'reviews',
       });

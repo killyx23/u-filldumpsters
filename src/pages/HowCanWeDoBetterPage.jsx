@@ -11,6 +11,10 @@ import { useToast } from '@/components/ui/use-toast';
 import BackButton from '@/components/BackButton';
 import { Check, Loader2, StickyNote } from 'lucide-react';
 
+function isOtherOption(option) {
+  return String(option ?? '').trim().toLowerCase() === 'other';
+}
+
 function contactPrefillHref(customer) {
   const params = new URLSearchParams();
   const email = customer?.email?.trim();
@@ -62,6 +66,7 @@ export const HowCanWeDoBetterPage = () => {
   const [error, setError] = useState('');
   const [form, setForm] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [otherDetails, setOtherDetails] = useState({});
   const [comments, setComments] = useState('');
   const [mode, setMode] = useState('form'); // form | done
 
@@ -113,6 +118,14 @@ export const HowCanWeDoBetterPage = () => {
 
   const setAnswer = (fieldKey, value) => {
     setAnswers((prev) => ({ ...prev, [fieldKey]: value }));
+    if (!isOtherOption(value)) {
+      setOtherDetails((prev) => {
+        if (!prev[fieldKey]) return prev;
+        const next = { ...prev };
+        delete next[fieldKey];
+        return next;
+      });
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -131,6 +144,21 @@ export const HowCanWeDoBetterPage = () => {
       }
     }
 
+    const payload = { ...answers };
+    for (const q of questions) {
+      if (q.input_type === 'short_text' || !isOtherOption(answers[q.field_key])) continue;
+      const detail = String(otherDetails[q.field_key] || '').trim();
+      if (!detail) {
+        toast({
+          variant: 'destructive',
+          title: 'Almost there',
+          description: `Please tell us what you mean by Other for: ${q.prompt}`,
+        });
+        return;
+      }
+      payload[q.field_key] = `Other: ${detail}`;
+    }
+
     if (!comments.trim()) {
       toast({
         variant: 'destructive',
@@ -143,7 +171,7 @@ export const HowCanWeDoBetterPage = () => {
     setSubmitting(true);
     const { data, error: rpcError } = await supabase.rpc('submit_feedback_response', {
       p_token: token,
-      p_answers: answers,
+      p_answers: payload,
       p_comments: comments.trim(),
     });
     setSubmitting(false);
@@ -278,6 +306,17 @@ export const HowCanWeDoBetterPage = () => {
                           })}
                         </div>
                       )}
+                      {q.input_type !== 'short_text' && isOtherOption(answers[q.field_key]) ? (
+                        <Input
+                          value={otherDetails[q.field_key] || ''}
+                          onChange={(e) =>
+                            setOtherDetails((prev) => ({ ...prev, [q.field_key]: e.target.value }))
+                          }
+                          className="mt-3 border-white/20 bg-slate-950/60 text-white placeholder:text-gray-400"
+                          placeholder="Please tell us what Other means"
+                          aria-label={`What do you mean by Other for ${q.prompt}`}
+                        />
+                      ) : null}
                     </section>
                   ))}
 

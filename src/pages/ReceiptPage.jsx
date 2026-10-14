@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, XCircle, Home, Receipt, AlertTriangle, Download, Package, Truck, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
 export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
+    const { bookingId: bookingIdFromPath } = useParams();
     const [status, setStatus] = useState('loading');
     const [error, setError] = useState('');
     const [bookingData, setBookingData] = useState(null);
@@ -24,7 +25,7 @@ export const ReceiptPage = () => {
     const [calculatingMileage, setCalculatingMileage] = useState(true);
 
     useEffect(() => {
-        const bookingId = searchParams.get('bookingId');
+        const bookingId = searchParams.get('bookingId') || bookingIdFromPath;
 
         if (!bookingId) {
             setStatus('error');
@@ -338,7 +339,7 @@ export const ReceiptPage = () => {
         };
 
         fetchDetailsAndCalculate();
-    }, [searchParams]);
+    }, [searchParams, bookingIdFromPath]);
 
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('en-US', {

@@ -1,5 +1,5 @@
 import { differenceInHours, isValid } from 'date-fns';
-import { getPickupWindowTimes } from '@/utils/bookingPickupWindow';
+import { getPickupWindowTimes } from './bookingPickupWindow.js';
 
 /** License / insurance docs must be submitted at least this many hours before pickup. */
 export const VERIFICATION_LEAD_HOURS = 12;

@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History, AlertTriangle, CreditCard, MapPin, Ban } from 'lucide-react';
+import { Car, ShieldAlert, FileText, Check, X, DollarSign, Loader2, Edit, Save, MessageSquare, CheckCircle, History, AlertTriangle, CreditCard, MapPin, Ban, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
@@ -30,12 +30,76 @@ import { Textarea } from '@/components/ui/textarea';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { assertRescheduleStock, syncBookingEquipment } from '@/utils/equipmentInventoryManager';
 import { loadCancellationFee } from '@/utils/cancellationFee';
+import { getVerificationDeadlineInfo, VERIFICATION_LEAD_HOURS } from '@/utils/verificationDeadline';
 
 const DEFAULT_CANCELLATION_DESCRIPTION =
     'Your cancellation has been approved; you should expect a refund minus any cancellation fees.';
 
 const LATE_FEE_NOTE_WITHIN_24H =
     'This rescheduling fee was charged because your request was submitted within 24 hours of your original scheduled appointment, per our rescheduling policy.';
+
+function formatCountdown(ms) {
+    if (ms <= 0) return '00:00:00';
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const clock = [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
+    return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+function PendingVerificationBrief({ booking, customer }) {
+    const [now, setNow] = useState(() => new Date());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
+    const deadline = getVerificationDeadlineInfo(booking, now);
+    const msLeft = deadline.deadlineAt ? deadline.deadlineAt.getTime() - now.getTime() : null;
+    const pastDue = deadline.isPastDeadline;
+    const orderedAt = booking.created_at && isValid(parseISO(booking.created_at))
+        ? format(parseISO(booking.created_at), 'MMM d, yyyy h:mm a')
+        : 'Time not recorded';
+    const appointment = deadline.appointmentAt
+        ? format(deadline.appointmentAt, 'MMM d, yyyy h:mm a')
+        : 'Appointment time not set';
+    const total = Number(booking.total_price || 0);
+    const serviceName = formatCustomerFacingPlanName(booking.plan?.name || booking.service_name) || 'Rental';
+    const phone = customer?.phone || booking.phone || '';
+
+    return (
+        <div className={`mt-3 rounded-md border p-3 space-y-2 ${pastDue ? 'border-red-500/60 bg-red-950/50' : 'border-yellow-500/40 bg-black/25'}`}>
+            <p className="text-sm text-white">
+                <span className="font-semibold text-yellow-200">{serviceName}</span>
+                <span className="text-gray-300"> · Order total </span>
+                <span className="font-semibold text-yellow-300">${total.toFixed(2)}</span>
+            </p>
+            <p className="text-xs text-gray-200 flex items-center">
+                <Clock className="h-3.5 w-3.5 mr-1.5 text-yellow-300" />
+                Ordered {orderedAt}
+            </p>
+            <p className="text-xs text-gray-200">Booking starts {appointment}</p>
+            {msLeft == null ? (
+                <p className="text-xs text-orange-200">No booking start time is on file, so the 12-hour deadline cannot be counted down.</p>
+            ) : pastDue ? (
+                <p className="text-sm font-semibold text-red-200">
+                    The 12-hour mark is up. Documents are still missing. Cancel and refund this order unless you have already reached the customer.
+                </p>
+            ) : (
+                <p className="text-sm font-semibold text-yellow-100">
+                    <Clock className="inline h-4 w-4 mr-1.5" />
+                    {formatCountdown(msLeft)} until the {VERIFICATION_LEAD_HOURS}-hour mark
+                </p>
+            )}
+            <p className="text-xs text-gray-300">
+                Still needed: license plate, both sides of the driver license, and proof of insurance.
+                {total > 0 ? ` This order is $${total.toFixed(2)}.` : ''} Call{phone ? ` ${phone}` : ' the customer'} before that mark if the total is large enough that you want to talk to them before cancelling.
+            </p>
+        </div>
+    );
+}
 
 const LATE_FEE_NOTE_OUTSIDE_24H =
     'This rescheduling fee was applied to your booking per our scheduling policy for this change request.';
@@ -1936,7 +2000,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     title: "text-orange-300 font-bold",
                     icon: <FileText className="mr-2 h-4 w-4"/>,
                     titleText: "New Booking Verification #",
-                    nextStep: "Verify customer docs and approve/reject."
+                    nextStep: "Documents are still missing. Check the order total and the countdown to the 12-hour mark, call if the order is large, then approve or cancel and refund."
                 };
         }
     };
@@ -2108,6 +2172,9 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                 <p className="text-xs text-yellow-200 mt-2">
                                     <strong>Next step:</strong> {styles.nextStep}
                                 </p>
+                                {booking.status === 'pending_verification' && (
+                                    <PendingVerificationBrief booking={booking} customer={customer} />
+                                )}
                                 {pendingAddress && requestedAddressDisplay && (
                                     <div className="mt-3 rounded-md border border-orange-500/40 bg-black/20 p-3 space-y-2">
                                         <p className="text-xs font-semibold text-orange-200 flex items-center">

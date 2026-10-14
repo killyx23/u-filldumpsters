@@ -31,6 +31,26 @@ import { ReturningCustomerLoyaltyBadge } from '@/components/ReturningCustomerLoy
 import { PortalLoyaltySummary } from '@/components/customer-portal/PortalLoyaltySummary';
 import { PortalReferralsSection } from '@/components/customer-portal/PortalReferralsSection';
 import { ReturningCustomerBenefits } from '@/components/ReturningCustomerBenefits';
+import { getPortalMenuAlerts, isUnreadTicketReply } from '@/utils/portalMenuAlerts';
+
+const PORTAL_TAB_ALIASES = {
+    communication: 'messages',
+    feedback: 'messages',
+    reviews: 'messages',
+    guides: 'resources',
+    'how-to': 'resources',
+    'how-to-guides': 'resources',
+    receipts: 'documents',
+};
+
+function readPortalLocation(searchParams) {
+    const rawTab = searchParams.get('tab') || 'dashboard';
+    const tab = PORTAL_TAB_ALIASES[rawTab] || rawTab;
+    const rawSection = searchParams.get('section');
+    const section = rawSection
+        || ((rawTab === 'communication' || rawTab === 'feedback' || rawTab === 'reviews') ? 'reviews' : 'chat');
+    return { tab, section };
+}
 
 const isPortalAuthError = (error, data) => {
     const message = String(data?.error || data?.msg || error?.message || '').toLowerCase();
@@ -62,8 +82,8 @@ export const CustomerPortal = () => {
     const [loginPhone, setLoginPhone] = useState('');
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'dashboard');
-    const [communicationSection, setCommunicationSection] = useState(searchParams.get('section') || 'chat');
+    const [activeTab, setActiveTab] = useState(() => readPortalLocation(searchParams).tab);
+    const [communicationSection, setCommunicationSection] = useState(() => readPortalLocation(searchParams).section);
     const [reviewFocusBookingId, setReviewFocusBookingId] = useState(() => {
         const raw = searchParams.get('reviewBooking');
         const parsed = Number(raw);
@@ -71,11 +91,11 @@ export const CustomerPortal = () => {
     });
 
     useEffect(() => {
-        const tabFromUrl = searchParams.get('tab');
-        if (tabFromUrl) {
-            setActiveTab(tabFromUrl);
+        const fromUrl = readPortalLocation(searchParams);
+        if (searchParams.get('tab')) {
+            setActiveTab(fromUrl.tab);
         }
-        setCommunicationSection(searchParams.get('section') || 'chat');
+        setCommunicationSection(fromUrl.section);
         const reviewBooking = searchParams.get('reviewBooking');
         const parsedReviewBooking = Number(reviewBooking);
         setReviewFocusBookingId(reviewBooking && Number.isFinite(parsedReviewBooking) ? parsedReviewBooking : null);
@@ -84,6 +104,7 @@ export const CustomerPortal = () => {
     const [bookings, setBookings] = useState([]);
     const [customerReviews, setCustomerReviews] = useState([]);
     const [notes, setNotes] = useState([]);
+    const [adminChat, setAdminChat] = useState([]);
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState(new Date());
 
@@ -246,6 +267,33 @@ export const CustomerPortal = () => {
         });
     };
 
+    const refreshCustomerReviews = useCallback(async (customerId) => {
+        const { data: reviewRows, error: reviewError } = await supabase
+            .from('reviews')
+            .select('id, booking_id, is_public')
+            .eq('customer_id', customerId);
+
+        if (reviewError) {
+            console.error('[CustomerPortal] Failed to load reviews:', reviewError);
+            return;
+        }
+        setCustomerReviews(reviewRows || []);
+    }, []);
+
+    const refreshAdminChat = useCallback(async (customerId) => {
+        const { data: chatRows, error: chatError } = await supabase
+            .from('chat_messages')
+            .select('id, sender_type, is_read')
+            .eq('customer_id', customerId)
+            .eq('sender_type', 'admin');
+
+        if (chatError) {
+            console.error('[CustomerPortal] Failed to load support chat:', chatError);
+            return;
+        }
+        setAdminChat(chatRows || []);
+    }, []);
+
     const fetchData = useCallback(async (isInitialLoad = true) => {
         const timestamp = new Date().toISOString();
         
@@ -349,19 +397,13 @@ export const CustomerPortal = () => {
             setLastUpdated(new Date());
 
             if (data.customer?.id) {
-                const { data: reviewRows, error: reviewError } = await supabase
-                    .from('reviews')
-                    .select('id, booking_id, is_public')
-                    .eq('customer_id', data.customer.id);
-
-                if (reviewError) {
-                    console.error(`[${timestamp}] [CustomerPortal] Failed to load review booking ids:`, reviewError);
-                    setCustomerReviews([]);
-                } else {
-                    setCustomerReviews(reviewRows || []);
-                }
+                await Promise.all([
+                    refreshCustomerReviews(data.customer.id),
+                    refreshAdminChat(data.customer.id),
+                ]);
             } else {
                 setCustomerReviews([]);
+                setAdminChat([]);
             }
 
         } catch (error) {
@@ -389,7 +431,7 @@ export const CustomerPortal = () => {
         } finally {
             if (isInitialLoad) setLoading(false);
         }
-    }, [user, session]);
+    }, [user, session, refreshCustomerReviews, refreshAdminChat]);
 
     useEffect(() => {
         const timestamp = new Date().toISOString();
@@ -506,6 +548,32 @@ export const CustomerPortal = () => {
                     toast({ title: "New Message", description: "You have a new message from support." });
                 }
             })
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'customer_notes',
+                filter: `customer_id=eq.${customerData.id}`
+            }, (payload) => {
+                setNotes((prev) => prev.map((note) => (
+                    note.id === payload.new.id ? { ...note, ...payload.new } : note
+                )));
+            })
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'reviews',
+                filter: `customer_id=eq.${customerData.id}`
+            }, () => {
+                refreshCustomerReviews(customerData.id);
+            })
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'chat_messages',
+                filter: `customer_id=eq.${customerData.id}`
+            }, () => {
+                refreshAdminChat(customerData.id);
+            })
             .on('postgres_changes', { 
                 event: '*', 
                 schema: 'public', 
@@ -522,7 +590,33 @@ export const CustomerPortal = () => {
             console.log('[CustomerPortal] Cleaning up realtime subscriptions');
             supabase.removeChannel(channel);
         };
-    }, [customerData, fetchData]);
+    }, [customerData, fetchData, refreshCustomerReviews, refreshAdminChat]);
+
+    useEffect(() => {
+        if (!customerData?.id || activeTab !== 'messages' || communicationSection !== 'chat') return;
+        const unreadIds = adminChat.filter((message) => message.is_read !== true).map((message) => message.id);
+        if (unreadIds.length === 0) return;
+
+        setAdminChat((prev) => prev.map((message) => (
+            unreadIds.includes(message.id) ? { ...message, is_read: true } : message
+        )));
+        supabase.from('chat_messages').update({ is_read: true }).in('id', unreadIds).then(({ error }) => {
+            if (error) console.error('[CustomerPortal] Failed to mark chat read:', error);
+        });
+    }, [activeTab, communicationSection, customerData?.id, adminChat]);
+
+    useEffect(() => {
+        if (!customerData?.id || activeTab !== 'messages' || communicationSection !== 'tickets') return;
+        const unreadIds = notes.filter(isUnreadTicketReply).map((note) => note.id);
+        if (unreadIds.length === 0) return;
+
+        setNotes((prev) => prev.map((note) => (
+            unreadIds.includes(note.id) ? { ...note, is_read: true } : note
+        )));
+        supabase.from('customer_notes').update({ is_read: true }).in('id', unreadIds).then(({ error }) => {
+            if (error) console.error('[CustomerPortal] Failed to mark ticket replies read:', error);
+        });
+    }, [activeTab, communicationSection, customerData?.id, notes]);
 
     const handleLoginSubmit = async (e) => {
         e.preventDefault();
@@ -647,8 +741,16 @@ export const CustomerPortal = () => {
 
     console.log('[CustomerPortal] Rendering portal content for tab:', activeTab);
 
-    const hasUnreadMessages = notes.some(n => !n.is_read && n.author_type === 'admin');
-    const hasPendingVerifications = bookings.some(b => b.pending_address_verification) || customerData.has_incomplete_verification;
+    const menuAlerts = getPortalMenuAlerts({
+        bookings,
+        customer: customerData,
+        customerReviews,
+        notes,
+        chatMessages: adminChat,
+        messagesTabOpen: activeTab === 'messages',
+        openSection: communicationSection,
+    });
+    const reviewStatusKey = customerReviews.map((review) => `${review.id}:${review.is_public ? 1 : 0}`).join(',');
 
     // Get last 3 completed bookings for quick reorder
     const recentCompletedBookings = bookings
@@ -662,8 +764,7 @@ export const CustomerPortal = () => {
             <PortalNavigation 
                 activeTab={activeTab} 
                 onTabChange={handleTabChange} 
-                hasUnreadMessages={hasUnreadMessages}
-                hasPendingVerifications={hasPendingVerifications}
+                alerts={menuAlerts}
             />
 
             <div className="flex-1 lg:pl-4 min-w-0">
@@ -829,6 +930,15 @@ export const CustomerPortal = () => {
                             })
                         }
                         focusBookingId={reviewFocusBookingId}
+                        sectionAlerts={menuAlerts.sections}
+                        reviewStatusKey={reviewStatusKey}
+                        onReviewSubmitted={(review) => {
+                            setCustomerReviews((prev) => (
+                                prev.some((row) => String(row.booking_id) === String(review.booking_id))
+                                    ? prev
+                                    : [...prev, { id: review.id, booking_id: review.booking_id, is_public: false }]
+                            ));
+                        }}
                     />
                 )}
                 <UiControlGuide

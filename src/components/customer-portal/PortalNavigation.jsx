@@ -16,7 +16,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
-export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, hasPendingVerifications }) => {
+const ALERT_COLOR = {
+  dashboard: 'bg-yellow-400',
+  bookings: 'bg-orange-500',
+  verification: 'bg-orange-500',
+  messages: 'bg-red-500',
+};
+
+export const PortalNavigation = ({ activeTab, onTabChange, alerts = {} }) => {
   const navItems = [
     { id: 'welcome', label: 'Welcome', icon: Award },
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -27,21 +34,13 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
     { id: 'documents', label: 'Your Receipts', icon: FileText },
     { id: 'resources', label: 'How-To Guides & Documents', icon: BookOpen },
     { id: 'profile', label: 'Profile', icon: User },
-    { 
-      id: 'verification', 
-      label: 'Verification', 
-      icon: ShieldCheck, 
-      alert: hasPendingVerifications,
-      alertColor: 'bg-orange-500' 
-    },
-    { 
-      id: 'messages', 
-      label: 'Communication', 
-      icon: MessageSquare, 
-      alert: hasUnreadMessages,
-      alertColor: 'bg-red-500'
-    }
-  ];
+    { id: 'verification', label: 'Verification', icon: ShieldCheck },
+    { id: 'messages', label: 'Communication', icon: MessageSquare },
+  ].map((item) => ({
+    ...item,
+    alert: Boolean(alerts[item.id]),
+    alertColor: ALERT_COLOR[item.id] || 'bg-red-500',
+  }));
 
   const NavContent = () => (
     <div className="flex flex-col h-full py-4 space-y-2">
@@ -83,8 +82,11 @@ export const PortalNavigation = ({ activeTab, onTabChange, hasUnreadMessages, ha
         </h2>
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10">
+            <Button variant="ghost" size="icon" className="relative text-white hover:bg-white/10">
               <Menu className="h-6 w-6" />
+              {alerts.any && (
+                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+              )}
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-[280px] bg-gray-900 border-r border-white/10 p-0 text-white">

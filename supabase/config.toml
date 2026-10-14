@@ -368,6 +368,10 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+[functions.phone-order-acceptance]
+# Customers open this from an email or text without an account.
+verify_jwt = false
+
 [functions.igloohome-webhook]
 # Igloohome authenticates with the x-igloocompany-sha256 signature, not a JWT.
 # With the default verify_jwt = true the gateway 401s every delivery before the

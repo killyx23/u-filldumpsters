@@ -24,6 +24,7 @@ const CHAT_NOTE_SOURCES = new Set([
     'Reschedule Approved',
     'Address Change',
     'Contact Form Inquiry',
+    'Phone order',
     // 'How Can We Do Better' intentionally omitted — rich chat card already shows survey answers
 ]);
 

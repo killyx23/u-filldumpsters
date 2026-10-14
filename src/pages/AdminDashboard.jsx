@@ -24,7 +24,8 @@ import { ReferralsManager } from '@/components/admin/ReferralsManager';
 import { AbandonedCheckoutsManager } from '@/components/admin/AbandonedCheckoutsManager';
 import { HowCanWeDoBetterManager } from '@/components/admin/HowCanWeDoBetterManager';
 import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, Boxes, MailWarning, MessageCircle } from 'lucide-react';
+import { PhoneOrderDesk } from '@/components/admin/phone-order/PhoneOrderDesk';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, Boxes, MailWarning, MessageCircle, Phone } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
@@ -254,6 +255,9 @@ export const AdminDashboard = () => {
 
                 <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
                     <TabsList className="flex flex-wrap justify-start mb-4 bg-gray-800 p-2 rounded-lg gap-1 h-auto">
+                        <TabsTrigger value="phone-orders" className="py-2 bg-yellow-900/20 data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
+                            <Phone className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Phone orders</span>
+                        </TabsTrigger>
                         <TabsTrigger value="action-items" className="relative py-2">
                             <AlertTriangle className="w-4 h-4 mr-1 lg:mr-2" /> <span className="hidden lg:inline">Action Items</span>
                             {actionItemCount > 0 && (
@@ -305,6 +309,7 @@ export const AdminDashboard = () => {
                         <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>
                     ) : (
                         <>
+                            <TabsContent value="phone-orders"><PhoneOrderDesk /></TabsContent>
                             <TabsContent value="action-items">
                                 <ActionItemsManager
                                     bookings={bookings}

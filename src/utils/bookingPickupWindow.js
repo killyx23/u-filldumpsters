@@ -1,5 +1,5 @@
 import { parseISO, isValid, set, subHours, isAfter, isBefore } from 'date-fns';
-import { parseBookingTimeToDate } from '@/utils/timeWindowFormatter';
+import { parseBookingTimeToDate } from './timeWindowFormatter.js';
 
 /**
  * Combine booking date (YYYY-MM-DD) and time slot into a single Date.

@@ -33,6 +33,7 @@ import AccessCodesPage from '@/pages/AccessCodesPage';
 import LockLifecycleTestPage from '@/pages/LockLifecycleTestPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 import { PaymentPage } from '@/pages/PaymentPage';
+import { OrderAcceptPage } from '@/pages/OrderAcceptPage';
 import CustomerPortalBookingDetail from '@/pages/CustomerPortalBookingDetail';
 import { CustomerPortalGuard } from '@/components/customer-portal/CustomerPortalGuard';
 import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/CustomerPortalResourceDetailPage';
@@ -145,11 +146,13 @@ function App() {
               <Route path="/login" element={<CustomerLogin />} />
               <Route path="/customer-portal-login" element={<CustomerPortalLogin />} />
               <Route path="/booking-confirmation" element={<BookingConfirmation />} />
+              <Route path="/receipt" element={<ReceiptPage />} />
               <Route path="/receipt/:bookingId" element={<ReceiptPage />} />
               <Route path="/products" element={<ProductShowcasePage />} />
               <Route path="/verify" element={<VerifyRedirect />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/payment" element={<PaymentPage />} />
+              <Route path="/order-accept/:token" element={<OrderAcceptPage />} />
               <Route path="/confirmation" element={<BookingConfirmation />} />
               
               <Route path="/resources" element={<ResourceLibraryPage />} />

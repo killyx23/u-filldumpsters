@@ -29,6 +29,14 @@ import { hasVerifiedEmailSession, markVerifiedEmailSession } from '@/utils/check
 const IDLE_CHECK_MS = 5 * 1000;
 const COMPLETION_POLL_MS = 10 * 1000;
 
+/** This tab is already on payment for this pending checkout, so it owns the order. */
+function paymentTabOwnsPending(pendingId) {
+  if (typeof window === 'undefined' || !pendingId) return false;
+  if (!window.location.pathname.startsWith('/payment')) return false;
+  const urlId = new URLSearchParams(window.location.search).get('bookingId');
+  return Boolean(urlId) && urlId === String(pendingId);
+}
+
 /** Server view of a checkout: converted yet, and verified yet (any device). */
 async function readCheckoutProgress(pendingId) {
   if (!pendingId) return null;
@@ -271,6 +279,9 @@ export function useCheckoutIdleGuard({
           ) {
             if (progress.email) {
               markVerifiedEmailSession(progress.email, pendingId);
+            }
+            if (paymentTabOwnsPending(pendingId)) {
+              return { success: true, skipped: true, skippedReason: 'payment_tab', reason };
             }
             notifyEmailVerifiedElsewhere({
               pendingId,
@@ -549,6 +560,7 @@ export function useCheckoutIdleGuard({
           !hasVerifiedEmailSession(progress.email, pendingId)
         ) {
           markVerifiedEmailSession(progress.email, pendingId);
+          if (paymentTabOwnsPending(pendingId)) return;
           notifyEmailVerifiedElsewhereRef.current?.({
             pendingId,
             email: progress.email,
@@ -565,6 +577,10 @@ export function useCheckoutIdleGuard({
       const localPending = pendingTokenRef.current;
       if (event.pendingId && localPending && event.pendingId !== localPending) return;
       if (event.type === 'verified') {
+        if (paymentTabOwnsPending(event.pendingId || localPending)) {
+          if (event.email) markVerifiedEmailSession(event.email, event.pendingId || localPending);
+          return;
+        }
         // Email-link tab owns checkout; this tab stands down to homepage.
         notifyEmailVerifiedElsewhereRef.current?.({
           pendingId: event.pendingId || localPending,

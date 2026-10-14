@@ -152,7 +152,7 @@ Deno.serve(async (req) => {
 
     const siteUrl = normalizeSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
     const portalUrl = `${siteUrl}/customer-portal`;
-    const reviewUrl = `${siteUrl}/customer-portal?tab=communication`;
+    const reviewUrl = `${siteUrl}/customer-portal?tab=messages&section=reviews`;
 
     let referralUrl: string | null = null;
     let referralBalance = 0;

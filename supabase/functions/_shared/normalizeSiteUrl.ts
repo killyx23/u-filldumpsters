@@ -57,17 +57,32 @@ function canonicalizePublicOrigin(origin: string): string {
   return origin.replace(/\/$/, "");
 }
 
+/** True when this function is running against local Supabase, not the hosted project. */
+function isLocalSupabaseRuntime(): boolean {
+  const raw = (Deno.env.get("SUPABASE_URL") || "").trim();
+  if (!raw) return false;
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    return isUnreachableCustomerHostname(host) || isInternalSupabaseHostname(host);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Public site origin for links in customer emails.
- * Always emit a phone-reachable production URL — never localhost / LAN / WSL.
- * (If the code was created on local Supabase, the phone can still open the page and
- * tap Resend to get a fresh production code.)
+ * Production rewrites localhost / LAN to the live site so a phone can open the link.
+ * Local Supabase must keep the local origin: the survey token only exists in that
+ * database, and a live-site link shows Contact us instead of the form.
  */
 export function resolvePublicSiteUrl(url?: string | null): string {
   const normalized = normalizeSiteUrl(url);
   try {
     const host = new URL(normalized).hostname;
     if (isUnreachableCustomerHostname(host)) {
+      if (isLocalSupabaseRuntime()) {
+        return normalized.replace(/\/$/, "");
+      }
       return DEFAULT_SITE_URL;
     }
     return canonicalizePublicOrigin(normalized);

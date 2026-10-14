@@ -21,6 +21,7 @@ import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/ut
 import { feeIsCharged } from '@/utils/feeCharges';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
 
 /** Rental add-ons that must be checked back into inventory (not purchases like gloves). */
@@ -894,6 +895,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <div>
                                 <h3 className="text-2xl font-bold text-white">Active Rental Details</h3>
                                 <p className="text-blue-200">Booking ID: {booking.id}</p>
+                                {phoneOrderLabel(booking.addons) && (
+                                    <p className="text-sm text-yellow-300">{phoneOrderLabel(booking.addons)}</p>
+                                )}
                             </div>
                             <div className="flex flex-col items-end">
                                 <StatusBadge status={booking.status} booking={booking} />

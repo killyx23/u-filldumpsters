@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
 
     const siteUrl = normalizeSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
     const portalUrl = `${siteUrl}/customer-portal`;
-    const guidesUrl = `${siteUrl}/customer-portal?tab=guides`;
+    const guidesUrl = `${siteUrl}/customer-portal?tab=resources`;
     const window = getBookingWindow(booking);
     const returnDeadline = booking.pickup_time_slot
       ? `${booking.pickup_date} ${formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot}`

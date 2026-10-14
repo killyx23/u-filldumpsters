@@ -147,7 +147,8 @@ Deno.serve(async (req) => {
       .eq('booking_id', bookingId);
 
     await supabaseAdmin.from('abandoned_checkouts').delete().eq('booking_id', bookingId);
-    await supabaseAdmin.from('feedback_tokens').delete().eq('booking_id', bookingId);
+    // feedback_tokens.booking_id is ON DELETE SET NULL, so the emailed
+    // survey link stays valid after this booking is removed.
     await supabaseAdmin.from('unsubscribe_tokens').delete().eq('booking_id', bookingId);
 
     // Clear self-referential reschedule links (no ON DELETE action)

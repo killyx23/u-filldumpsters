@@ -18,6 +18,7 @@ import {
   Percent,
 } from 'lucide-react';
 import { TaxCollectionModule } from './financial/TaxCollectionModule';
+import { PhoneOrderAdjustments } from '@/components/admin/phone-order/PhoneOrderAdjustments';
 
 export const FinancialBooksManager = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -126,11 +127,12 @@ export const FinancialBooksManager = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="audit" className="mt-6">
+        <TabsContent value="audit" className="mt-6 space-y-6">
+          <PhoneOrderAdjustments />
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 text-center">
             <History className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">Audit Trail</h3>
-            <p className="text-gray-400">Complete change history and compliance reporting</p>
+            <h3 className="text-xl font-semibold text-white mb-2">Other audit modules</h3>
+            <p className="text-gray-400">The rest of the financial change history is still being built.</p>
             <p className="text-sm text-yellow-400 mt-4">Module under development</p>
           </div>
         </TabsContent>

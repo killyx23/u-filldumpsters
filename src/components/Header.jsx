@@ -128,7 +128,7 @@ export const Header = ({ onReorderSelect }) => {
         <a
           href={staffEntryUrl}
           aria-label={onAdminHost ? 'Open the customer site' : 'Staff sign-in'}
-          className="absolute right-3 top-3 z-50 h-2.5 w-2.5 rounded-full bg-stone-500/40 hover:bg-yellow-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-500"
+          className="absolute right-3 top-3 z-50 h-2.5 w-2.5 rounded-full bg-stone-50 hover:bg-stone-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-300"
         />
         <nav className="container mx-auto px-4 h-full">
           <div className="flex items-center justify-between min-h-[140px] md:min-h-[180px] lg:min-h-[200px] relative w-full h-full">
@@ -210,13 +210,6 @@ export const Header = ({ onReorderSelect }) => {
                       <div className="pt-6 border-t border-white/20">
                         <AuthButtons mobile={true} />
                       </div>
-                      <a
-                        href={staffEntryUrl}
-                        onClick={closeMenu}
-                        className="pt-2 text-left text-xs text-white/40 hover:text-white/70"
-                      >
-                        {onAdminHost ? 'Customer site' : 'Staff'}
-                      </a>
                     </div>
                   </SheetContent>
                 </Sheet>

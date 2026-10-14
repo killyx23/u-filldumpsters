@@ -467,7 +467,7 @@ Deno.serve(async (req) => {
     }
 
     console.log(
-      `[end-unfinished-checkout] booking=${bookingId} reason=${reason} crm=${abandonedCheckoutId} email=${emailResult.success} reused_token=${reused} restocked=${finalizeResult?.restocked}`,
+      `[end-unfinished-checkout] booking=${bookingId} reason=${reason} crm=${abandonedCheckoutId} email=${emailResult.success} reused_token=${reused} restocked=${finalizeResult?.restocked} site=${siteUrl}`,
     );
 
     return jsonResponse(corsHeaders, {
