@@ -45,6 +45,16 @@ const ActionItemsDialog = ({ isOpen, onOpenChange, title, items, onNavigate, onR
             }
             case 'flagged': {
                 const hold = isFollowUpHold(item.follow_up_resolution);
+                if (item.status === 'late_return') {
+                    const amount = Number(item.fees?.late_return?.amount);
+                    const fee = Number.isFinite(amount) ? ` Late fee $${amount.toFixed(2)} needs to be charged.` : '';
+                    return `Booking #${item.id} for ${item.customers?.name || 'N/A'} was returned late.${fee}`;
+                }
+                if (item.status === 'failure_to_return') {
+                    const amount = Number(item.fees?.failure_to_return?.amount);
+                    const fee = Number.isFinite(amount) ? ` Failure-to-return charges $${amount.toFixed(2)} need to be charged.` : '';
+                    return `Booking #${item.id} for ${item.customers?.name || 'N/A'} failed to return.${fee}`;
+                }
                 if (hold) {
                     return `Booking #${item.id} for ${item.customers?.name || 'N/A'}: repair before next rental${item.follow_up_resolution?.reason ? ` — ${getFollowUpReasonLabel(item.follow_up_resolution.reason)}` : ''}.`;
                 }
@@ -54,6 +64,9 @@ const ActionItemsDialog = ({ isOpen, onOpenChange, title, items, onNavigate, onR
                 return `Booking #${item.id} for ${item.customers?.name || 'N/A'}: Cancellation request pending review.`;
             case 'payment':
                 return `Booking #${item.id} for ${item.customers?.name || 'N/A'} is pending payment.`;
+            case 'pin_failsafe':
+                return item.pin_failsafe_note
+                    || `Booking #${item.id} for ${item.customers?.name || 'N/A'} was sent an AlgoPIN because the custom PIN was not confirmed before pickup.`;
             case 'unread_notes':
                 return `Customer ${item.name} has unread messages.`;
             default:
@@ -123,9 +136,14 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, onUpdat
     const [resolveBooking, setResolveBooking] = useState(null);
 
     const flaggedForFollowUp = bookings
-        ? bookings
-            .filter(b => b.status === 'flagged' || b.status === 'cancellation_pending')
-            .map(b => ({ ...b, type: b.status === 'cancellation_pending' ? 'cancellation' : 'flagged' }))
+        ? [
+            ...bookings
+                .filter(b => b.status === 'flagged' || b.status === 'cancellation_pending' || b.status === 'late_return' || b.status === 'failure_to_return')
+                .map(b => ({ ...b, type: b.status === 'cancellation_pending' ? 'cancellation' : 'flagged' })),
+            ...bookings
+                .filter(b => b.pin_failsafe_at && b.status !== 'Cancelled' && b.status !== 'Completed')
+                .map(b => ({ ...b, type: 'pin_failsafe' })),
+          ]
         : [];
     const pendingVerification = bookings
         ? bookings
@@ -149,7 +167,10 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, onUpdat
 
         let tab = 'profile';
         if (item.type === 'verification') tab = 'verification';
-        if (item.type === 'flagged') tab = 'history';
+        if (item.type === 'flagged') {
+            tab = item.status === 'late_return' || item.status === 'failure_to_return' ? 'rentals' : 'history';
+        }
+        if (item.type === 'pin_failsafe') tab = 'rentals';
         if (item.type === 'cancellation') tab = 'verification';
         if (item.type === 'unread_notes') tab = 'notes';
 

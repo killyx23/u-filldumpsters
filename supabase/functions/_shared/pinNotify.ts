@@ -18,6 +18,7 @@ async function invokePinEmail(
   pin: string,
   startTime: string,
   endTime: string,
+  pinFailsafe = false,
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
     body: {
@@ -26,6 +27,7 @@ async function invokePinEmail(
       pin,
       start_time: startTime,
       end_time: endTime,
+      pin_failsafe: pinFailsafe,
     },
   });
   if (error || data?.success === false) {
@@ -60,7 +62,15 @@ export async function notifyPinReady(
   }
   if (!claimed) return;
 
-  const sent = await invokePinEmail(supabase, bookingId, "pin_update", pin, startTime, endTime);
+  const sent = await invokePinEmail(
+    supabase,
+    bookingId,
+    "pin_update",
+    pin,
+    startTime,
+    endTime,
+    Boolean(booking.pin_failsafe_at),
+  );
   if (!sent.ok) {
     console.error(`[pinNotify] Email notification failed for booking #${bookingId}:`, sent.error);
     await supabase

@@ -384,6 +384,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p>Return was {entry.original_pickup_date}. It is now {entry.new_pickup_date} by {formatReceiptTime(entry.new_pickup_time || pickup_time_slot, { isReturnBy: isSelfService })}.</p>
                                 <p>Have it back, locked, and secured by that time.</p>
                                 <p>{entry.days} extra day{Number(entry.days) === 1 ? '' : 's'} · Charged ${Number(entry.amount || 0).toFixed(2)}</p>
+                                {entry.original_pin && <p>Original code {entry.original_pin} is valid until its original end.</p>}
+                                {entry.extension_pin && <p>Return code {entry.extension_pin}.</p>}
+                                {entry.activation_required && <p>Enter the return code once during the first 24 hours after it starts, or it will not work for the rest of the extension.</p>}
                             </div>
                         ))}
                         {(() => {

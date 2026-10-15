@@ -12,7 +12,8 @@ export const GooglePlacesAutocomplete = ({
   onChange, 
   onAddressSelect, 
   placeholder = "Start typing your address...",
-  required = false
+  required = false,
+  verified = false,
 }) => {
   const [manualMode, setManualMode] = useState(false);
   const [showVerificationDialog, setShowVerificationDialog] = useState(false);
@@ -33,6 +34,8 @@ export const GooglePlacesAutocomplete = ({
   const [isOpen, setIsOpen] = useState(false);
   const [noMatch, setNoMatch] = useState(false);
   const selectedFromGoogle = useRef(false);
+  const userEdited = useRef(false);
+  const searchRequested = useRef(false);
   const [inputValue, setInputValue] = useState(value || "");
   const [debouncedInputValue, setDebouncedInputValue] = useState(value || "");
   const wrapperRef = useRef(null);
@@ -78,25 +81,31 @@ export const GooglePlacesAutocomplete = ({
     if (manualMode) return;
     
     if (debouncedInputValue && isOpen && debouncedInputValue.trim().length >= 2) {
+      searchRequested.current = true;
       fetchSuggestions(debouncedInputValue);
     } else if (!debouncedInputValue || debouncedInputValue.trim().length < 2) {
+      searchRequested.current = false;
       clearSuggestions();
     }
   }, [debouncedInputValue, fetchSuggestions, clearSuggestions, isOpen, manualMode]);
 
   useEffect(() => {
-    if (manualMode || selectedFromGoogle.current) return;
+    if (manualMode || selectedFromGoogle.current || (verified && !userEdited.current) || !searchRequested.current) {
+      setNoMatch(false);
+      return;
+    }
     const query = debouncedInputValue?.trim() || '';
     if (query.length >= 2 && !loading && suggestions.length === 0 && !apiError) {
       setNoMatch(true);
     } else if (suggestions.length > 0 || query.length < 2) {
       setNoMatch(false);
     }
-  }, [debouncedInputValue, loading, suggestions.length, apiError, manualMode]);
+  }, [debouncedInputValue, loading, suggestions.length, apiError, manualMode, isOpen, verified]);
 
   const handleInputChange = (e) => {
     const val = e.target.value;
     selectedFromGoogle.current = false;
+    userEdited.current = true;
     setNoMatch(false);
     setInputValue(val);
     onChange(val);

@@ -63,6 +63,8 @@ export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, o
         case 'in_transit':
         case 'Delivered':
         case 'waiting_to_be_returned':
+        case 'late_return':
+        case 'failure_to_return':
             return { text: 'Active Rental', class: 'badge-in-transit', icon: <Truck className="h-3 w-3" /> };
         case 'pending_checklist':
             return { text: isPickup ? 'Returned' : 'Pending Checklist', class: 'badge-delivered', icon: <CheckCircle className="h-3 w-3" /> };

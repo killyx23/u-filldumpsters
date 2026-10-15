@@ -170,7 +170,7 @@ export const AdminDashboard = () => {
 
     const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
     const actionItemCount = (bookings.filter((b) =>
-        isActionItemVerificationBooking(b) || (b.status === 'flagged' && !b.pending_address_verification)
+        isActionItemVerificationBooking(b) || b.pin_failsafe_at || ((b.status === 'flagged' || b.status === 'late_return' || b.status === 'failure_to_return') && !b.pending_address_verification)
     ).length) + customersWithUnreadNotes.length;
 
     return (

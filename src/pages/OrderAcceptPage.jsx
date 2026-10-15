@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -16,6 +16,13 @@ import { DEFAULT_FEES, mapFeeRowsToConfig } from '@/utils/chargesAndFeesConfig';
 import { money } from '@/utils/phoneOrderQuote';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import {
+  clearOrderAcceptDraft,
+  consumeSmsReturnPending,
+  currentReturnPath,
+  readOrderAcceptDraft,
+  writeOrderAcceptDraft,
+} from '@/utils/smsFormReturn';
 
 function continueAfterAccept(redirect, email, pendingId) {
   if (redirect && String(redirect).startsWith('/payment')) {
@@ -26,6 +33,9 @@ function continueAfterAccept(redirect, email, pendingId) {
 
 export function OrderAcceptPage() {
   const { token } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [draftReady, setDraftReady] = useState(false);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
   const [scrolled, setScrolled] = useState(false);
@@ -35,6 +45,7 @@ export function OrderAcceptPage() {
   const [signatureDate, setSignatureDate] = useState(() => format(new Date(), 'PPP'));
   const [orderTexts, setOrderTexts] = useState(false);
   const [marketingTexts, setMarketingTexts] = useState(false);
+  const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [licensePlate, setLicensePlate] = useState('');
   const [deferDocuments, setDeferDocuments] = useState(false);
   const [files, setFiles] = useState({ front: null, back: null, insurance: null });
@@ -58,11 +69,65 @@ export function OrderAcceptPage() {
         }
         setSummary(data.summary);
         if (data.summary?.savedLicensePlate) {
-          setLicensePlate(String(data.summary.savedLicensePlate).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7));
+          const savedPlate = String(data.summary.savedLicensePlate).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+          setLicensePlate((current) => current || savedPlate);
         }
       });
     return () => { cancelled = true; };
   }, [token]);
+
+  useLayoutEffect(() => {
+    if (draftReady) return;
+    const shouldRestore = location.state?.resumeDraft === true || consumeSmsReturnPending(currentReturnPath(location));
+    if (shouldRestore) {
+      const draft = readOrderAcceptDraft(token);
+      if (draft) {
+        setScrolled(draft.scrolled === true);
+        setSummaryAccepted(draft.summaryAccepted === true);
+        setTermsAccepted(draft.termsAccepted === true);
+        setSignatureName(draft.signatureName || '');
+        setSignatureDate(draft.signatureDate || format(new Date(), 'PPP'));
+        setOrderTexts(draft.orderTexts === true);
+        setMarketingTexts(draft.marketingTexts === true);
+        setPoliciesAccepted(draft.policiesAccepted === true);
+        setLicensePlate(draft.licensePlate || '');
+        setDeferDocuments(draft.deferDocuments === true);
+      }
+      if (location.state?.resumeDraft) {
+        navigate(location.pathname, { replace: true, state: {} });
+      }
+    }
+    setDraftReady(true);
+  }, [draftReady, location.pathname, location.state, navigate, token]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    writeOrderAcceptDraft(token, {
+      scrolled,
+      summaryAccepted,
+      termsAccepted,
+      signatureName,
+      signatureDate,
+      orderTexts,
+      marketingTexts,
+      policiesAccepted,
+      licensePlate,
+      deferDocuments,
+    });
+  }, [
+    token,
+    scrolled,
+    summaryAccepted,
+    termsAccepted,
+    signatureName,
+    signatureDate,
+    orderTexts,
+    marketingTexts,
+    policiesAccepted,
+    licensePlate,
+    deferDocuments,
+    draftReady,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,6 +215,7 @@ export function OrderAcceptPage() {
       });
       if (invokeError || data?.error) throw new Error(await parseEdgeFunctionError(invokeError, data));
       if (data.redirect) {
+        clearOrderAcceptDraft();
         continueAfterAccept(data.redirect, summary.email, summary.pendingId);
         return;
       }
@@ -173,7 +239,7 @@ export function OrderAcceptPage() {
     <div className="mx-auto max-w-3xl px-4 py-8 text-white">
       <p className="text-xs uppercase tracking-[0.22em] text-yellow-400">U-Fill Dumpsters</p>
       <h1 className="mt-2 text-3xl font-semibold">Confirm your booking</h1>
-      <p className="mt-2 text-gray-300">Read the same master agreement used for an online booking, then accept it.</p>
+      <p className="mt-2 text-gray-300">Read the same Terms and Conditions used for an online booking, then accept them.</p>
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
         <h2 className="text-lg">{summary.serviceName}</h2>
@@ -197,12 +263,12 @@ export function OrderAcceptPage() {
           <AgreementText fees={fees} hppPlanPrice={hppPlanPrice} />
         </div>
       </ScrollArea>
-      {!scrolled && <p className="mt-2 text-xs text-gray-400">Scroll to the bottom of the master agreement to continue.</p>}
+      {!scrolled && <p className="mt-2 text-xs text-gray-400">Scroll to the bottom of the Terms and Conditions to continue.</p>}
 
       <section className="mt-6 rounded-lg border-2 border-orange-500 bg-orange-50 p-5 text-slate-800">
         <h2 className="font-bold text-orange-700">Important rental terms summary</h2>
         <p className="mt-2 text-sm leading-relaxed">
-          By checking this box and completing your booking, you explicitly authorize U-Fill Dumpsters LLC to automatically charge your payment method on file for all rental fees, disposal overages, cleanings, and any equipment damage, loss, or theft. You acknowledge that you are default 100% financially liable for all equipment recovery costs, court fees, administrative labor, and loss-of-use penalties if your payment method is declined or if equipment is returned damaged, overfilled, or violating safety transport laws. You certify that you are at least 18 years of age, fully competent to operate or transport the rented equipment, and agree to the comprehensive terms of the Master Rental and Service Agreement. If any optional insurance, protection, or peace-of-mind coverage is purchased, you remain fully responsible for all amounts that exceed the purchased coverage limits. The full Hardware Protection Plan terms are part of this agreement.
+          By checking this box and completing your booking, you explicitly authorize U-Fill Dumpsters LLC to automatically charge your payment method on file for all rental fees, disposal overages, cleanings, and any equipment damage, loss, or theft. You acknowledge that you are default 100% financially liable for all equipment recovery costs, court fees, administrative labor, and loss-of-use penalties if your payment method is declined or if equipment is returned damaged, overfilled, or violating safety transport laws. You certify that you are at least 18 years of age, fully competent to operate or transport the rented equipment, and agree to the comprehensive Terms and Conditions. If any optional insurance, protection, or peace-of-mind coverage is purchased, you remain fully responsible for all amounts that exceed the purchased coverage limits. The full Hardware Protection Plan terms are part of this agreement.
         </p>
         <p className="mt-2 text-sm">
           <a href={HPP_TERMS_PATH} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">Hardware Protection Plan</a>
@@ -217,7 +283,7 @@ export function OrderAcceptPage() {
             checked={summaryAccepted}
             onChange={(event) => setSummaryAccepted(event.target.checked)}
           />
-          I have fully scrolled, read, and explicitly agree to the Important Rental Terms Summary and the complete Master Agreement terms.
+          I have fully scrolled, read, and explicitly agree to the Important Rental Terms Summary and the complete Terms and Conditions.
         </label>
       </section>
 
@@ -277,12 +343,14 @@ export function OrderAcceptPage() {
 
       <section className="mt-6 rounded-lg border border-white/10 p-4">
         <h2 className="text-lg">Text messages</h2>
-        <p className="mt-1 mb-3 text-sm text-gray-300">Email confirmations are always sent. These two choices are optional and start unchecked.</p>
+        <p className="mt-1 mb-3 text-sm text-gray-300">Email confirmations are always sent. Order texts and marketing texts are optional and start unchecked. Agreeing to the Terms and Conditions and Privacy Policy is required to submit this form.</p>
         <SmsOptInFields
           transactional={orderTexts}
           marketing={marketingTexts}
           onTransactionalChange={setOrderTexts}
           onMarketingChange={setMarketingTexts}
+          policiesAccepted={policiesAccepted}
+          onPoliciesAcceptedChange={setPoliciesAccepted}
         />
       </section>
 
@@ -296,7 +364,7 @@ export function OrderAcceptPage() {
       {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
       <Button
         className="mt-6 w-full bg-yellow-400 text-black hover:bg-yellow-300"
-        disabled={busy || !scrolled || !summaryAccepted || !termsAccepted || !signatureDate.trim() || !nameMatches || !documentsReady}
+        disabled={busy || !scrolled || !summaryAccepted || !termsAccepted || !policiesAccepted || !signatureDate.trim() || !nameMatches || !documentsReady}
         onClick={accept}
       >
         {busy ? 'Confirming…' : summary.paymentChoice === 'agent_card' ? 'Accept and finish' : 'Accept and continue to payment'}

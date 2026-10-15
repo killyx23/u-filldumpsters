@@ -1,4 +1,5 @@
 import { getCorsHeaders } from "./cors.ts";
+import { reserveYardPinForBooking } from "../_shared/reserveYardPin.ts";
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -359,6 +360,19 @@ Deno.serve(async (req)=>{
       throw new Error(`Failed to update booking status: ${updateError?.message ?? "unknown"}`);
     }
     log("Booking status updated", finalStatus);
+
+    if (finalStatus === "Confirmed") {
+      try {
+        const reservedPin = await reserveYardPinForBooking(
+          supabase,
+          updatedBooking,
+          Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID") || "",
+        );
+        log("Yard PIN reserve", reservedPin.action);
+      } catch (reserveErr) {
+        console.error("[finalize-booking] yard PIN reserve failed:", reserveErr);
+      }
+    }
 
     // If customer saw the idle "still here" prompt and then paid, mark CRM converted
     if (updatedBooking.addons?.idle_prompt_shown === true) {

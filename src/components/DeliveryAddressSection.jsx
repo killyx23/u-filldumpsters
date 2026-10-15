@@ -256,6 +256,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                         onChange={(val) => handleManualAddressChange('street', val)}
                         onAddressSelect={handleAddressSelect}
                         placeholder="Start typing your delivery address..."
+                        verified={addonsData.deliveryAddress?.isVerified === true}
                     />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

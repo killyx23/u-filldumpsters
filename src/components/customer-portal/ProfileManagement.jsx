@@ -1,5 +1,6 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { User, Mail, Phone, MapPin, Save, Loader2, Key, AlertTriangle } from 'lucide-react';
@@ -9,9 +10,20 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.jsx';
 import { SmsOptInFields } from '@/components/SmsOptInFields';
+import {
+  clearProfileDraft,
+  consumeSmsReturnPending,
+  currentReturnPath,
+  readProfileDraft,
+  writeProfileDraft,
+} from '@/utils/smsFormReturn';
 
 export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [draftReady, setDraftReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const displayFirstName = customer?.first_name || (customer?.name ? customer.name.split(' ')[0] : '');
   const displayLastName = customer?.last_name || (customer?.name ? customer.name.substring(customer.name.indexOf(' ') + 1) : '');
 
@@ -27,6 +39,27 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
       state: customer?.state || '',
       zip: customer?.zip || '',
   });
+
+  useLayoutEffect(() => {
+      if (!customer?.id || draftReady) return;
+      const shouldRestore = location.state?.resumeDraft === true || consumeSmsReturnPending(currentReturnPath(location));
+      if (shouldRestore) {
+          const draft = readProfileDraft(customer.id);
+          if (draft?.formData) {
+              setFormData(draft.formData);
+              setPoliciesAccepted(draft.policiesAccepted === true);
+          }
+          if (location.state?.resumeDraft) {
+              navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+          }
+      }
+      setDraftReady(true);
+  }, [customer?.id, draftReady, location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+      if (!draftReady || !customer?.id) return;
+      writeProfileDraft(customer.id, { policiesAccepted, formData });
+  }, [customer?.id, draftReady, formData, policiesAccepted]);
 
   const handleInputChange = (e) => {
       const { id, value } = e.target;
@@ -46,6 +79,15 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
   const handleSave = async (e) => {
       e.preventDefault();
       if (!customer?.id) return;
+
+      if (!policiesAccepted) {
+          toast({
+              title: "Agreement required",
+              description: "Please agree to the Terms and Conditions and Privacy Policy.",
+              variant: "destructive",
+          });
+          return;
+      }
       
       setIsSaving(true);
       
@@ -63,6 +105,7 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
           toast({ title: "Update Failed", description: error.message, variant: "destructive" });
       } else {
           toast({ title: "Profile Updated!", description: "Your details have been saved successfully." });
+          clearProfileDraft();
           onUpdate();
       }
       setIsSaving(false);
@@ -122,6 +165,8 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
                     marketing={formData.sms_marketing_opt_in}
                     onTransactionalChange={(checked) => setFormData(prev => ({ ...prev, sms_opt_in: checked }))}
                     onMarketingChange={(checked) => setFormData(prev => ({ ...prev, sms_marketing_opt_in: checked }))}
+                    policiesAccepted={policiesAccepted}
+                    onPoliciesAcceptedChange={setPoliciesAccepted}
                 />
 
                 <div className="pt-6 border-t border-white/10 space-y-4">

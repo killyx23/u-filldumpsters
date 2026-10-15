@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { Stripe } from "npm:stripe@15.8.0";
 import { businessWallTimeToUtc, parseClockTime } from "../_shared/parseBookingTimeSlot.ts";
 import { chargeCardOffSession } from "../_shared/cardCharge.ts";
+import { issueExtensionReturnPin } from "../_shared/extensionReturnPin.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -370,12 +371,75 @@ Deno.serve(async (req) => {
       );
     }
 
+    const returnPin = await issueExtensionReturnPin(supabaseAdmin, updated, newPickupDate);
+    let bookingForResponse = updated;
+    if (returnPin.ok && !returnPin.skipped && returnPin.pin) {
+      const pinFields = {
+        original_pin: returnPin.originalPin,
+        original_pin_end: returnPin.originalEnd,
+        extension_pin: returnPin.pin,
+        extension_pin_start: returnPin.start,
+        extension_pin_end: returnPin.end,
+        activation_required: returnPin.activationRequired,
+      };
+      const historyWithPin = [...history, { ...entry, ...pinFields }];
+      const extensionsWithPin = [...extensions, { ...entry, ...pinFields }];
+      const { data: pinned } = await supabaseAdmin
+        .from("bookings")
+        .update({
+          receipt_status_history: historyWithPin,
+          addons: { ...(updated.addons || {}), extensions: extensionsWithPin },
+        })
+        .eq("id", bookingId)
+        .select("*")
+        .single();
+      if (pinned) bookingForResponse = pinned;
+    } else if (!returnPin.ok) {
+      const failMsg =
+        `URGENT: Order #${bookingId} was extended to ${newPickupDate} and charged, ` +
+        `but the return AlgoPIN was not created. ${returnPin.error || ""} ` +
+        `The customer can use the backup return code in the portal.`;
+      if (booking.customer_id) {
+        await supabaseAdmin.from("chat_messages").insert({
+          conversation_id: `cust_${booking.customer_id}`,
+          customer_id: booking.customer_id,
+          booking_id: bookingId,
+          sender_type: "admin",
+          message_content: failMsg,
+          is_read: false,
+          message_severity: "urgent",
+          message_context: { action: "extension_pin_failed", order_id: bookingId, source: "extend-booking" },
+        });
+      }
+      await supabaseAdmin.from("rental_tracking_logs").insert({
+        order_id: bookingId,
+        event_type: "sync_error",
+        event_timestamp: new Date().toISOString(),
+        notes: failMsg,
+      });
+    }
+
     const { data: emailData, error: emailError } = await supabaseAdmin.functions.invoke("send-booking-confirmation", {
-      body: {
-        bookingId,
-        force: true,
-        email: booking.email || booking.customers?.email,
-      },
+      body: returnPin.ok && !returnPin.skipped && returnPin.pin
+        ? {
+          bookingId,
+          email_type: "extension_pin",
+          email: booking.email || booking.customers?.email,
+          extensionPin: returnPin.pin,
+          originalPin: returnPin.originalPin,
+          originalEnd: returnPin.originalEnd,
+          extensionStart: returnPin.start,
+          extensionEnd: returnPin.end,
+          activationRequired: returnPin.activationRequired,
+          amount: total,
+          oldReturn: currentPickup,
+          newReturn: newPickupDate,
+        }
+        : {
+          bookingId,
+          force: true,
+          email: booking.email || booking.customers?.email,
+        },
     });
     if (emailError || emailData?.error) {
       console.error("[extend-booking] confirmation email failed", emailError || emailData?.error);
@@ -383,8 +447,10 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      booking: updated,
+      booking: bookingForResponse,
       extension: entry,
+      returnPin: returnPin.skipped ? null : returnPin,
+      pinWarning: returnPin.ok ? null : (returnPin.error || "Return code was not created. Use the backup code in the portal."),
       emailSent: !emailError && !emailData?.error,
     }), { status: 200, headers });
   } catch (error) {

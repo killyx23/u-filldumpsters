@@ -1381,7 +1381,8 @@ export const BookingForm = ({
                             }
                         }))} 
                         placeholder="Start typing your address..." 
-                        required 
+                        required
+                        verified={bookingData.contactAddress?.isVerified === true}
                       />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

@@ -145,6 +145,23 @@ export function quoteRentalExtension(booking, newPickupDate, availability = {}, 
   };
 }
 
+export function extensionOrderLabel(booking) {
+  const list = listRentalExtensions(booking);
+  if (!list.length) return '';
+  const last = list[list.length - 1];
+  const amount = Number(last.amount);
+  const charged = Number.isFinite(amount) ? ` · $${amount.toFixed(2)}` : '';
+  return `Extended · return ${last.original_pickup_date || '—'} → ${last.new_pickup_date || booking?.pickup_date || '—'}${charged}`;
+}
+
+export function orderChannelLabel(booking) {
+  const extended = extensionOrderLabel(booking);
+  if (extended) return 'Extended';
+  const channel = String(booking?.addons?.orderChannel || '').toLowerCase();
+  if (channel === 'phone') return 'Phone order';
+  return 'Online order';
+}
+
 export function listRentalExtensions(booking) {
   const history = Array.isArray(booking?.receipt_status_history) ? booking.receipt_status_history : [];
   return history.filter((entry) => entry?.action === 'rental_extended');

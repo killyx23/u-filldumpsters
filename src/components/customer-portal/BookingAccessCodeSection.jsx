@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { format, isPast, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { AlertCircle, Clock, Key, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
@@ -38,6 +38,8 @@ function formatDateTime(dateStr, timeSlot) {
 export const BookingAccessCodeSection = ({ booking }) => {
   const [loading, setLoading] = useState(true);
   const [accessCode, setAccessCode] = useState(null);
+  const [accessCodes, setAccessCodes] = useState([]);
+  const [issuingBackup, setIssuingBackup] = useState(false);
   const [generatingPin, setGeneratingPin] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [issuingToLock, setIssuingToLock] = useState(false);
@@ -60,16 +62,19 @@ export const BookingAccessCodeSection = ({ booking }) => {
         .select('*')
         .eq('order_id', bookingId)
         .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('[BookingAccessCodeSection] Access code query error:', error);
         return;
       }
 
-      if (data?.length > 0) {
-        const codeRecord = data[0];
+      const rows = data || [];
+      setAccessCodes(rows);
+      if (rows.length > 0) {
+        const codeRecord = booking?.pin_failsafe_at
+          ? (rows.find((row) => row.pin_type === 'algopin') || rows[0])
+          : (rows.find((row) => row.pin_type === 'bridge_proxied') || rows[0]);
         setAccessCode(codeRecord);
         setIssuingToLock(
           !!codeRecord.access_pin &&
@@ -82,6 +87,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
         }
       } else {
         setAccessCode(null);
+        setAccessCodes([]);
         setIssuingToLock(false);
       }
     } catch (err) {
@@ -90,7 +96,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
       hasLoadedOnceRef.current = true;
       setLoading(false);
     }
-  }, [bookingId, needsCode]);
+  }, [bookingId, needsCode, booking?.pin_failsafe_at]);
 
   useEffect(() => {
     if (bookingId && needsCode) {
@@ -251,22 +257,10 @@ export const BookingAccessCodeSection = ({ booking }) => {
   const pinWindowOpen = isWithinPinGenerationWindow(booking);
   const bookingEnded = isBookingEnded(booking);
   const pinEligibleFrom = new Date(getBookingWindow(booking).pinEligibleFromMs);
-  const pinReady =
-    !!accessCode?.access_pin &&
-    (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
-  const isBackupPin = pinReady && accessCode?.pin_type === 'algopin';
-
-  const rentalExpired =
-    bookingEnded ||
-    (accessCode?.end_time
-      ? (() => {
-          try {
-            return isPast(parseISO(accessCode.end_time));
-          } catch {
-            return false;
-          }
-        })()
-      : false);
+  const pinReady = (accessCodes.length ? accessCodes : accessCode ? [accessCode] : []).some(
+    (code) => code?.access_pin && (code.lock_confirmed_at || code.pin_type === 'algopin'),
+  );
+  const rentalExpired = bookingEnded;
 
   const visibleStartLabel = formatDateTime(booking.drop_off_date, booking.drop_off_time_slot);
   const visibleEndLabel = formatDateTime(booking.pickup_date, booking.pickup_time_slot);
@@ -330,33 +324,70 @@ export const BookingAccessCodeSection = ({ booking }) => {
     );
   }
 
+  const rentalStarted = Boolean(booking.rented_out_at) || getBookingWindow(booking).startMs <= Date.now();
+  const requestBackupCode = async () => {
+    setIssuingBackup(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('issue-return-algopin', {
+        body: { bookingId, callerType: 'customer' },
+      });
+      if (error) throw new Error(await parseEdgeFunctionError(error, data));
+      if (!data?.pin) throw new Error(data?.error || 'Could not create a backup return code.');
+      await fetchAccessCode({ silent: true });
+      toast({
+        title: 'Backup return code ready',
+        description: data.activationRequired
+          ? 'Enter it once on the lock within 24 hours of its start.'
+          : 'Use this code if you need another way back into the trailer.',
+      });
+    } catch (err) {
+      toast({ title: 'Backup code unavailable', description: err.message, variant: 'destructive' });
+    } finally {
+      setIssuingBackup(false);
+    }
+  };
+
   if (pinReady) {
+    const listed = (accessCodes.length ? accessCodes : [accessCode]).filter(
+      (code) => code && (!booking?.pin_failsafe_at || code.pin_type === 'algopin'),
+    );
     return (
       <div className="space-y-3">
-        <div className="bg-black/30 p-4 rounded-lg border border-yellow-400/40 space-y-3">
-          <div className="flex items-center gap-2">
-            <Key className="h-4 w-4 text-yellow-400" />
-            <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold">
-              {isBackupPin ? 'Your Access PIN (Backup)' : 'Your Access PIN'}
-            </p>
-          </div>
-          <div className="bg-slate-950/80 rounded-lg px-4 py-3 text-center border border-white/10">
-            <p className="text-4xl font-bold font-mono text-white tracking-wider">
-              {accessCode.access_pin}
-            </p>
-            <p className="text-xs text-gray-400 mt-2">Enter this code at the lock</p>
-          </div>
-          <p className="text-sm text-gray-300">
-            Valid from{' '}
-            <span className="text-yellow-400 font-medium">{visibleStartLabel}</span>
-            {' '}to{' '}
-            <span className="text-yellow-400 font-medium">{visibleEndLabel}</span>
+        {listed.map((code) => {
+          const hours = code.start_time && code.end_time
+            ? (new Date(code.end_time).getTime() - new Date(code.start_time).getTime()) / (60 * 60 * 1000)
+            : 0;
+              const label = booking?.pin_failsafe_at
+                ? 'Access code'
+                : (code.pin_type === 'algopin' ? 'Return code' : 'Original code');
+          return (
+            <div key={code.id || code.access_pin} className="bg-black/30 p-4 rounded-lg border border-yellow-400/40 space-y-3">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-yellow-400" />
+                <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold">{label}</p>
+              </div>
+              <div className="bg-slate-950/80 rounded-lg px-4 py-3 text-center border border-white/10">
+                <p className="text-4xl font-bold font-mono text-white tracking-wider">{code.access_pin}</p>
+              </div>
+              {code.pin_type === 'algopin' && hours > 24 && (
+                <p className="text-sm text-amber-200">Enter this code once during the first 24 hours after it starts, or it will not work later.</p>
+              )}
+            </div>
+          );
+        })}
+        {booking?.pin_failsafe_at && (
+          <p className="text-sm text-amber-200">
+            This code replaced your custom PIN because the lock did not confirm it before your appointment window.
           </p>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            This access code is valid only during your scheduled rental period. It will not work
-            before or after these times.
-          </p>
-        </div>
+        )}
+        <p className="text-sm text-gray-300">
+          Pickup {visibleStartLabel}. Return by {visibleEndLabel}.
+        </p>
+        {rentalStarted && !bookingEnded && (
+          <Button onClick={requestBackupCode} disabled={issuingBackup} size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black">
+            {issuingBackup ? 'Creating backup code…' : 'Get a backup return code'}
+          </Button>
+        )}
         <BookingLockStatusSection bookingId={bookingId} />
       </div>
     );
@@ -392,6 +423,11 @@ export const BookingAccessCodeSection = ({ booking }) => {
         </div>
       </div>
 
+      {rentalStarted && !bookingEnded && (
+        <Button onClick={requestBackupCode} disabled={issuingBackup} size="sm" className="bg-yellow-500 hover:bg-yellow-600 text-black">
+          {issuingBackup ? 'Creating backup code…' : 'Get a backup return code'}
+        </Button>
+      )}
       <div className="flex flex-col sm:flex-row gap-2">
         <Button
           onClick={handleGeneratePin}

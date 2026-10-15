@@ -31,13 +31,13 @@ export const HardwareProtectionPlanPage = () => {
               Hardware Protection Plan
             </h1>
             <p className="mt-4 text-blue-200">
-              U-Fill Dumpsters LLC · Section 9 of the Master Rental and Service Agreement
+              U-Fill Dumpsters LLC · Section 9 of the Terms and Conditions
             </p>
           </header>
 
           <div className="space-y-6 text-base sm:text-lg text-blue-100 leading-relaxed">
             <p>
-              These terms are part of the Master Rental and Service Agreement accepted at booking. Dollar amounts
+              These terms are part of the Terms and Conditions accepted at booking. Dollar amounts
               follow the current admin pricing for the Hardware Protection Plan and related replacement fees.
             </p>
             <HardwareProtectionPlanTerms fee={fee} />
@@ -48,7 +48,7 @@ export const HardwareProtectionPlanPage = () => {
               </Link>{' '}
               and{' '}
               <Link to="/terms" className="text-yellow-300 hover:text-yellow-200 underline">
-                Terms
+                Terms and Conditions
               </Link>
               .
             </p>

@@ -1,11 +1,13 @@
 import React from 'react';
 import { Helmet } from 'react-helmet';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import BackButton from '@/components/BackButton';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
 
 export const PrivacyPolicyPage = () => {
+  const location = useLocation();
+  const returnTo = location.state?.returnTo;
   return (
     <>
       <Helmet>
@@ -64,7 +66,8 @@ export const PrivacyPolicyPage = () => {
               <h2 className="text-2xl font-bold text-yellow-400">Text messages</h2>
               <p>
                 Text consent is separate from email. Transactional order texts and marketing texts each have their
-                own optional checkbox next to the phone number. Neither box is required or pre-checked.
+                own optional checkbox next to the phone number. Neither box is required or pre-checked. A third
+                checkbox is for agreeing to the Terms and Conditions and this Privacy Policy.
               </p>
               <SmsDisclosure className="text-base sm:text-lg text-blue-100 leading-relaxed" />
             </section>
@@ -72,7 +75,7 @@ export const PrivacyPolicyPage = () => {
             <section className="space-y-4">
               <h2 className="text-2xl font-bold text-yellow-400">Contact</h2>
               <p>
-                U-Fill Dumpsters LLC, 227 West Casi Way, Saratoga Springs, Utah 84045. Phone{' '}
+                U-Fill Dumpsters LLC. Phone{' '}
                 <a href="tel:+18018108832" className="text-yellow-300 hover:text-yellow-200 underline">
                   (801) 810-8832
                 </a>
@@ -87,8 +90,8 @@ export const PrivacyPolicyPage = () => {
             <section className="space-y-4">
               <h2 className="text-2xl font-bold text-yellow-400">Legal</h2>
               <p>
-                <Link to="/terms" className="text-yellow-300 hover:text-yellow-200 underline">
-                  Terms
+                <Link to="/terms" state={returnTo ? { returnTo } : undefined} className="text-yellow-300 hover:text-yellow-200 underline">
+                  Terms and Conditions
                 </Link>
               </p>
             </section>

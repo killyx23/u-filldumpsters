@@ -19,12 +19,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/admin/StatusBadge';
 import { getHeroImageForService, siteImages } from '@/config/siteImages';
+import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinStatus';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { formatAddressDisplay } from '@/utils/addressHelpers';
 import { formatMilesLabel, resolveOneWayMiles } from '@/utils/bookingMileage';
 import { getBookingWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { extensionOrderLabel, orderChannelLabel } from '@/utils/rentalExtension';
 
 const INACTIVE_STATUSES = new Set([
     'Cancelled',
@@ -221,7 +223,7 @@ function StopClock({ booking, action, nowMs }) {
     );
 }
 
-function DayStopCard({ booking, actions, nowMs, onOpen }) {
+function DayStopCard({ booking, actions, nowMs, onOpen, pinCodes, pinsLoading }) {
     const customer = booking.customers || {};
     const phone = contactPhone(booking);
     const email = contactEmail(booking);
@@ -231,6 +233,7 @@ function DayStopCard({ booking, actions, nowMs, onOpen }) {
     const price = Number(booking.total_price);
     const image = equipmentImage(booking.plan);
     const onlyAction = actions.length === 1 ? actions[0] : null;
+    const pickupService = isCustomerPickupService(booking.plan, booking.addons || {});
 
     return (
         <article className="overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-lg">
@@ -263,6 +266,12 @@ function DayStopCard({ booking, actions, nowMs, onOpen }) {
                                 <p className="text-sm text-blue-200">
                                     Booking #{booking.id} · {formatCustomerFacingPlanName(booking.plan?.name) || 'Service'}
                                 </p>
+                                <p className="text-sm font-semibold text-yellow-300">{orderChannelLabel(booking)}</p>
+                                {extensionOrderLabel(booking) && (
+                                    <p className="text-sm text-orange-200">
+                                        New return {bookingDateKey(booking.pickup_date) || '—'} · {timeLabel(booking.pickup_time_slot)}
+                                    </p>
+                                )}
                             </div>
                             <StatusBadge status={booking.status} booking={booking} />
                         </div>
@@ -305,6 +314,14 @@ function DayStopCard({ booking, actions, nowMs, onOpen }) {
                                 ? ` · Plate ${booking.license_plate || customer.license_plate}`
                                 : ''}
                         </Info>
+                        {pickupService && (
+                            <div className="sm:col-span-2 space-y-2">
+                                <LockPinStatus codes={pinCodes} loading={pinsLoading} />
+                                {booking.pin_failsafe_note && (
+                                    <p className="text-sm text-amber-200">{booking.pin_failsafe_note}</p>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {inventory.length > 0 && (
@@ -412,6 +429,13 @@ export function ThingsForTheDay({ bookings = [] }) {
     const deliveryCount = dayActions.filter((action) => action.key === 'delivery' || action.key === 'customer_pickup').length;
     const pickupCount = dayActions.length - deliveryCount;
     const todayKey = toDateKey(new Date());
+    const pickupOrderIds = useMemo(
+        () => stops
+            .filter(({ booking }) => isCustomerPickupService(booking.plan, booking.addons || {}))
+            .map(({ booking }) => booking.id),
+        [stops],
+    );
+    const { byOrder: pinsByOrder, loading: pinsLoading } = useLockPinsByOrder(pickupOrderIds);
 
     const openCustomer = (booking) => {
         if (!booking.customer_id) return;
@@ -456,6 +480,8 @@ export function ThingsForTheDay({ bookings = [] }) {
                             actions={actions}
                             nowMs={nowMs}
                             onOpen={openCustomer}
+                            pinCodes={pinsByOrder[String(booking.id)]}
+                            pinsLoading={pinsLoading}
                         />
                     ))}
                 </div>

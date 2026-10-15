@@ -1,11 +1,27 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { isSafeReturnPath } from '@/utils/smsFormReturn';
 
 const BackButton = ({ className }) => {
     const navigate = useNavigate();
+    const location = useLocation();
+
+    const goBack = () => {
+        const returnTo = location.state?.returnTo;
+        if (isSafeReturnPath(returnTo)) {
+            navigate(returnTo, { state: { resumeDraft: true } });
+            return;
+        }
+        const historyIndex = window.history.state?.idx;
+        if (typeof historyIndex === 'number' && historyIndex > 0) {
+            navigate(-1);
+            return;
+        }
+        navigate('/');
+    };
 
     return (
         <motion.div
@@ -17,7 +33,7 @@ const BackButton = ({ className }) => {
             <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => navigate(-1)}
+                onClick={goBack}
                 className="h-12 w-12 rounded-full text-white hover:bg-white/20 hover:text-yellow-300 transition-colors duration-300"
                 aria-label="Go back to previous page"
             >

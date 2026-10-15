@@ -87,15 +87,19 @@ export const AccessCodesPage = ({ customerData }) => {
         .select('*')
         .eq('order_id', orderId)
         .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .order('created_at', { ascending: false });
 
       if (accessCodeError) {
         console.error(`[${context}] Access code query error:`, accessCodeError);
       }
 
-      if (accessCodeData && accessCodeData.length > 0) {
-        const codeRecord = accessCodeData[0];
+      const visibleCodes = bookingData.pin_failsafe_at
+        ? (accessCodeData || []).filter((row) => row.pin_type === 'algopin')
+        : (accessCodeData || []);
+      if (visibleCodes.length > 0) {
+        const codeRecord = bookingData.pin_failsafe_at
+          ? visibleCodes[0]
+          : (visibleCodes.find((row) => row.pin_type === 'bridge_proxied') || visibleCodes[0]);
         setAccessCode(codeRecord);
         setIssuingToLock(!!codeRecord.access_pin && !codeRecord.lock_confirmed_at && codeRecord.pin_type === 'bridge_proxied');
         if (codeRecord.access_pin && (codeRecord.lock_confirmed_at || codeRecord.pin_type === 'algopin')) {
@@ -553,6 +557,11 @@ export const AccessCodesPage = ({ customerData }) => {
                       <p className="text-sm text-gray-400 mt-3">
                         Enter this code at the lock
                       </p>
+                      {booking?.pin_failsafe_at && (
+                        <p className="text-sm text-amber-200 mt-3 max-w-md mx-auto">
+                          This code replaced your custom PIN because the lock did not confirm it before your appointment window.
+                        </p>
+                      )}
                     </div>
 
                     {(booking?.drop_off_date || accessCode.start_time) && (

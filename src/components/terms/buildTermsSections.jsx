@@ -12,7 +12,9 @@ const tonsLabel = (fee, key) => {
   return formatted === UNAVAILABLE_FEE_TEXT ? formatted : `${formatted} tons`;
 };
 
-export const buildTermsSections = (fee) => [
+export const buildTermsSections = (fee, options = {}) => {
+  const disclosureClassName = options.disclosureClassName || 'text-sm text-gray-300 leading-relaxed';
+  return [
   {
     id: 'email',
     title: 'Email & Text Message Communication',
@@ -30,9 +32,9 @@ export const buildTermsSections = (fee) => [
         <p>
           Text messages are optional and are not part of email consent. Next to the phone number there are two separate
           checkboxes, one for transactional order texts and one for marketing texts. Neither box is required or
-          pre-checked.
+          pre-checked. A third checkbox is for agreeing to the Terms and Conditions and the Privacy Policy.
         </p>
-        <SmsDisclosure className="text-sm text-gray-300 leading-relaxed" />
+        <SmsDisclosure className={disclosureClassName} />
       </>
     ),
   },
@@ -136,4 +138,5 @@ export const buildTermsSections = (fee) => [
       </>
     ),
   },
-];
+  ];
+};

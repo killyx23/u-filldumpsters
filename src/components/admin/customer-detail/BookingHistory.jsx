@@ -12,6 +12,8 @@ import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/dist
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { listRentalExtensions } from '@/utils/rentalExtension';
 import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinStatus';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { additionalDayIncludesPrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 
@@ -81,7 +83,7 @@ const EquipmentLines = ({ booking }) => {
     );
 };
 
-const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
+const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDeleted, adminEmail, pinCodes, pinsLoading }) => {
     const [isSending, setIsSending] = useState(false);
     const receiptRef = useRef();
     
@@ -154,6 +156,15 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
             
             <DistanceWarning booking={booking} customer={customer} />
 
+            {isCustomerPickupService(booking.plan, booking.addons || {}) && (
+                <div className="mt-3 max-w-md">
+                    <LockPinStatus codes={pinCodes} loading={pinsLoading} />
+                    {booking.pin_failsafe_note && (
+                        <p className="mt-2 text-sm text-amber-200">{booking.pin_failsafe_note}</p>
+                    )}
+                </div>
+            )}
+
             {pendingReason && (
                 <div className="mt-2 p-2 bg-orange-900/50 border border-orange-500/50 rounded-md text-sm text-orange-300 flex items-center">
                     <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -167,6 +178,9 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                         <p key={`${entry.at || index}`}>
                             Return {entry.original_pickup_date} → {entry.new_pickup_date}
                             {entry.amount != null ? ` · charged $${Number(entry.amount).toFixed(2)}` : ''}
+                            {entry.original_pin ? ` · original PIN ${entry.original_pin}` : ''}
+                            {entry.extension_pin ? ` · return PIN ${entry.extension_pin}` : ''}
+                            {entry.activation_required ? ' · enter the return PIN once within 24 hours of its start' : ''}
                         </p>
                     ))}
                 </div>
@@ -199,11 +213,16 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
 }
 
 export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
+    const pickupOrderIds = (bookings || [])
+        .filter((booking) => isCustomerPickupService(booking.plan, booking.addons || {}))
+        .map((booking) => booking.id);
+    const { byOrder: pinsByOrder, loading: pinsLoading } = useLockPinsByOrder(pickupOrderIds);
+
     return (
         <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History">
             <div className="space-y-4">
                 {bookings.length > 0 ? bookings.map(booking => (
-                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} adminEmail={adminEmail} />
+                    <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} adminEmail={adminEmail} pinCodes={pinsByOrder[String(booking.id)]} pinsLoading={pinsLoading} />
                 )) : <p className="text-center text-blue-200 py-8">This customer has no booking history.</p>}
             </div>
         </DetailCard>

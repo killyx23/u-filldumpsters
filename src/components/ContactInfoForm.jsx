@@ -20,6 +20,7 @@ export const ContactInfoForm = ({
     isProcessing = false,
 }) => {
     const [phoneWarning, setPhoneWarning] = useState(null);
+    const policiesAccepted = bookingData.smsPoliciesAccepted === true;
     const { isReturning, pastBookingsCount, loading: detectingReturning, detectionError } = useReturningCustomerDetection(
         bookingData.email
     );
@@ -70,6 +71,15 @@ export const ContactInfoForm = ({
         }
 
         if (!validatePhoneNumber()) return;
+
+        if (!policiesAccepted) {
+            toast({
+                title: "Agreement required",
+                description: "Please agree to the Terms and Conditions and Privacy Policy.",
+                variant: "destructive",
+            });
+            return;
+        }
         
         await onSubmit();
     };
@@ -119,6 +129,8 @@ export const ContactInfoForm = ({
                                 marketing={bookingData.smsMarketingOptIn}
                                 onTransactionalChange={(checked) => setBookingData(prev => ({ ...prev, smsTransactionalOptIn: checked }))}
                                 onMarketingChange={(checked) => setBookingData(prev => ({ ...prev, smsMarketingOptIn: checked }))}
+                                policiesAccepted={policiesAccepted}
+                                onPoliciesAcceptedChange={(checked) => setBookingData(prev => ({ ...prev, smsPoliciesAccepted: checked }))}
                             />
                             <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
 
@@ -193,7 +205,8 @@ export const ContactInfoForm = ({
                                         contactAddress: applySelectedAddress(details),
                                     }))} 
                                     placeholder="Start typing your address..." 
-                                    required 
+                                    required
+                                    verified={bookingData.contactAddress?.isVerified === true}
                                 />
                             </div>
                             

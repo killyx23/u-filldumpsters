@@ -77,13 +77,13 @@ export function buildCustomerRentalDocuments(bookings = []) {
   const definitions = [
     {
       key: 'master-rental-agreement',
-      title: 'Master Rental Agreement',
+      title: 'Terms and Conditions',
       description: 'The rental agreement you signed. Service-specific terms apply to the equipment and delivery on your booking.',
       kind: 'master',
     },
     {
       key: 'terms-and-conditions',
-      title: 'Terms and Conditions',
+      title: 'Booking Terms Sections',
       description: 'Every terms section you accepted, plus protection and delivery terms that apply to your rental.',
       kind: 'terms',
     },

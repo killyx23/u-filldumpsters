@@ -18,11 +18,94 @@ import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/dist
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
-import { feeIsCharged } from '@/utils/feeCharges';
+import { feeChargeEntries, feeIsCharged } from '@/utils/feeCharges';
+import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinStatus';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
+import { extensionOrderLabel } from '@/utils/rentalExtension';
 import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
+
+function BackupReturnCodeButton({ bookingId }) {
+    const [busy, setBusy] = useState(false);
+    const mint = async () => {
+        setBusy(true);
+        const { data, error } = await supabase.functions.invoke('issue-return-algopin', {
+            body: { bookingId, callerType: 'admin' },
+        });
+        setBusy(false);
+        if (error || data?.error || !data?.pin) {
+            toast({
+                title: 'Backup code unavailable',
+                description: data?.error || error?.message || 'Could not create a backup return code.',
+                variant: 'destructive',
+            });
+            return;
+        }
+        toast({
+            title: 'Backup return code created',
+            description: data.activationRequired
+                ? `Code ${data.pin}. Enter it once within 24 hours of its start.`
+                : `Code ${data.pin} was sent to the customer.`,
+        });
+    };
+    return (
+        <Button type="button" size="sm" variant="outline" className="mt-2 border-yellow-400/40 text-yellow-200" disabled={busy} onClick={mint}>
+            {busy ? 'Creating backup code…' : 'Backup return code'}
+        </Button>
+    );
+}
+
+function DueFeeCharges({ booking, onUpdate }) {
+    const [chargingKey, setChargingKey] = useState(null);
+    const due = feeChargeEntries(booking.fees).filter(([, fee]) => !feeIsCharged(fee) && (fee.description || fee.lines));
+    if (!due.length) return null;
+
+    const charge = async (key, fee) => {
+        const requestKey = `${booking.id}:${key}`;
+        setChargingKey(requestKey);
+        try {
+            const { data, error } = await supabase.functions.invoke('charge-customer', {
+                body: {
+                    customerId: booking.customer_id,
+                    amount: Number(fee.amount),
+                    description: fee.description || key,
+                    bookingId: booking.id,
+                    feeType: key,
+                },
+            });
+            if (error) {
+                const errContext = await error.context?.json().catch(() => null);
+                throw new Error(errContext?.error || error.message);
+            }
+            if (data?.error) throw new Error(data.error);
+            toast({ title: 'Card charged', description: data?.message || 'The fee was charged.' });
+            onUpdate?.();
+        } catch (err) {
+            toast({ title: 'Charge failed', description: err.message || 'The card was not charged.', variant: 'destructive' });
+        } finally {
+            setChargingKey(null);
+        }
+    };
+
+    return (
+        <div className="mt-4 p-4 rounded-lg border border-red-500/50 bg-red-900/30 space-y-3">
+            <p className="font-semibold text-red-200">Charges due — flagged for follow-up</p>
+            {due.map(([key, fee]) => {
+                const requestKey = `${booking.id}:${key}`;
+                return (
+                    <div key={key} className="text-sm text-red-100 space-y-1">
+                        <p>{fee.description}</p>
+                        <p className="font-semibold">${Number(fee.amount).toFixed(2)}</p>
+                        <Button type="button" size="sm" className="bg-yellow-500 hover:bg-yellow-400 text-gray-900" disabled={chargingKey === requestKey} onClick={() => charge(key, fee)}>
+                            {chargingKey === requestKey ? 'Charging…' : 'Charge card'}
+                        </Button>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
 
 /** Rental add-ons that must be checked back into inventory (not purchases like gloves). */
 const RENTAL_EQUIPMENT_IDS = new Set([1, 2]);
@@ -721,32 +804,10 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
 };
 
 export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, customer = {} }) => {
-    const [pinStatusByOrder, setPinStatusByOrder] = useState({});
-
-    useEffect(() => {
-        const pickupIds = (bookings || [])
-            .filter((b) => isCustomerPickupService(b.plan, b.addons || {}))
-            .map((b) => b.id);
-        if (!pickupIds.length) {
-            setPinStatusByOrder({});
-            return;
-        }
-        let cancelled = false;
-        (async () => {
-            const { data } = await supabase
-                .from('rental_access_codes')
-                .select('order_id, status, lock_confirmed_at, pin_type, access_pin')
-                .in('order_id', pickupIds)
-                .eq('status', 'active');
-            if (cancelled) return;
-            const map = {};
-            for (const row of data || []) {
-                map[row.order_id] = row;
-            }
-            setPinStatusByOrder(map);
-        })();
-        return () => { cancelled = true; };
-    }, [bookings]);
+    const pickupOrderIds = (bookings || [])
+        .filter((b) => isCustomerPickupService(b.plan, b.addons || {}))
+        .map((b) => b.id);
+    const { byOrder: pinsByOrder, loading: pinsLoading } = useLockPinsByOrder(pickupOrderIds);
     if (bookings.length === 0) {
         return (
             <div className="text-center py-12 bg-white/5 rounded-lg">
@@ -895,8 +956,13 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <div>
                                 <h3 className="text-2xl font-bold text-white">Active Rental Details</h3>
                                 <p className="text-blue-200">Booking ID: {booking.id}</p>
-                                {phoneOrderLabel(booking.addons) && (
+                                <DueFeeCharges booking={booking} onUpdate={onUpdate} />
+                                {extensionOrderLabel(booking) ? (
+                                    <p className="text-sm text-yellow-300">{extensionOrderLabel(booking)}</p>
+                                ) : phoneOrderLabel(booking.addons) ? (
                                     <p className="text-sm text-yellow-300">{phoneOrderLabel(booking.addons)}</p>
+                                ) : (
+                                    <p className="text-sm text-gray-300">Online order</p>
                                 )}
                             </div>
                             <div className="flex flex-col items-end">
@@ -905,16 +971,16 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             </div>
                         </div>
 
-                        {isPickup && booking.pin_generated_at && pinStatusByOrder[booking.id] && !pinStatusByOrder[booking.id].lock_confirmed_at && (
-                            <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-                                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                                <span>
-                                    PIN not confirmed on lock
-                                    {pinStatusByOrder[booking.id].access_pin
-                                        ? ` (${pinStatusByOrder[booking.id].access_pin})`
-                                        : ''}
-                                    — bridge delivery pending. Watchdog will retry; AlgoPIN fallback in the final hour.
-                                </span>
+                        {isPickup && (
+                            <div className="mt-3 max-w-md">
+                                <LockPinStatus
+                                    codes={pinsByOrder[String(booking.id)]}
+                                    loading={pinsLoading}
+                                />
+                                {booking.pin_failsafe_note && (
+                                    <p className="mt-2 text-sm text-amber-200">{booking.pin_failsafe_note}</p>
+                                )}
+                                <BackupReturnCodeButton bookingId={booking.id} />
                             </div>
                         )}
 

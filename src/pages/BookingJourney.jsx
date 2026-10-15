@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
 import { Banner } from '@/components/Banner';
@@ -39,6 +39,13 @@ import {
 import { fetchServiceById, resolveReorderPlanSelection } from '@/utils/servicePlan';
 import { setStoredReferralCode } from '@/utils/referralCodeStorage';
 import { clearRememberedPaymentEquipmentHold } from '@/utils/pendingBookingEquipmentHold';
+import {
+  clearBookingDraft,
+  consumeSmsReturnPending,
+  currentReturnPath,
+  readBookingDraft,
+  writeBookingDraft,
+} from '@/utils/smsFormReturn';
 
 const INITIAL_BOOKING_DATA = {
   firstName: '',
@@ -116,6 +123,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
       clearVerifiedEmailSession(bookingData.email, bookingData.pendingToken || null);
     }
     clearRememberedPaymentEquipmentHold();
+    clearBookingDraft();
     setCurrentStep(0);
     setHighestStep(0);
     setSelectedPlan(null);
@@ -188,6 +196,51 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     });
     window.scrollTo(0, 0);
   }, [updateFlowProgress]);
+
+  useLayoutEffect(() => {
+    const shouldRestore = location.state?.resumeDraft === true || consumeSmsReturnPending(currentReturnPath(location));
+    if (!shouldRestore) return;
+    const draft = readBookingDraft();
+    if (!draft) return;
+    setBookingData(draft.bookingData);
+    setSelectedPlan(draft.selectedPlan);
+    setAddonsData(draft.addonsData || INITIAL_ADDONS_DATA);
+    setBasePrice(draft.basePrice || 0);
+    setFinalPrice(draft.finalPrice || 0);
+    setDeliveryService(draft.deliveryService === true);
+    setAgreementFeeSnapshot(draft.agreementFeeSnapshot || []);
+    setShowDiyEquipmentSelection(draft.showDiyEquipmentSelection === true);
+    setCurrentStep(draft.currentStep || 0);
+    setHighestStep(draft.highestStep || draft.currentStep || 0);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    if (currentStep <= 0) return;
+    writeBookingDraft({
+      currentStep,
+      highestStep,
+      showDiyEquipmentSelection,
+      selectedPlan,
+      addonsData,
+      basePrice,
+      finalPrice,
+      deliveryService,
+      agreementFeeSnapshot,
+      bookingData,
+    });
+  }, [
+    currentStep,
+    highestStep,
+    showDiyEquipmentSelection,
+    selectedPlan,
+    addonsData,
+    basePrice,
+    finalPrice,
+    deliveryService,
+    agreementFeeSnapshot,
+    bookingData,
+  ]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

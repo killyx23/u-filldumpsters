@@ -60,7 +60,7 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
 
   return (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
-      <h2 className="text-xl text-center font-bold text-yellow-300">MASTER RENTAL AND SERVICE AGREEMENT</h2>
+      <h2 className="text-xl text-center font-bold text-yellow-300">TERMS AND CONDITIONS</h2>
       <p>
         <strong>IMPORTANT LEGAL NOTICE:</strong> PLEASE READ THIS AGREEMENT IN ITS ENTIRETY BEFORE ACCEPTING. BY
         CHECKING THE ACCEPTANCE BOX, CLICKING "I AGREE," PROVIDING AN ELECTRONIC OR WRITTEN SIGNATURE, OR BY TAKING
@@ -252,8 +252,8 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           materials into the Equipment, including but not limited to: paints, solvents, chemical compounds, asbestos,
           motor oils, fuels, liquids, pesticides, medical or biological waste, radioactive materials, explosives,
           compressed gas cylinders, PCB-containing items, tires (unless explicitly pre-approved in writing), batteries,
-          or appliances containing refrigerant/Freon (unless professional, documented refrigerant evacuation is
-          provided).
+          contaminated soils, or appliances containing refrigerant/Freon (unless professional, documented refrigerant
+          evacuation is provided).
         </li>
         <li>
           <strong>Discovery &amp; Remediation:</strong> Discovery of prohibited items will result in the immediate
@@ -400,10 +400,13 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
       <h3 className="text-lg text-yellow-300">SECTION 12: EXPRESS CONSENT FOR COMMUNICATIONS &amp; PRIVACY PROTECTION</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Express Communication Consent:</strong> By providing an email address during checkout, booking, or
-          sign-up, the Customer consents to email about the rental. Text messages are a separate choice. Transactional
+          <strong>Express Communication Consent:</strong> The Customer must verify the email address provided during
+          checkout to complete the booking. Order confirmations, receipts, and critical updates are sent to that email.
+          By providing an email address during checkout, booking, or sign-up, the Customer consents to email about the
+          rental. Text messages are a separate choice. Transactional
           texts and marketing texts each have their own optional checkbox next to the phone number. Neither checkbox
-          is required or pre-checked, and checking one does not check the other.
+          is required or pre-checked, and checking one does not check the other. A third checkbox is for agreeing to
+          the Terms and Conditions and the Privacy Policy.
         </li>
         <li>
           <strong>Operational &amp; Marketing Scope:</strong> Transactional texts, if opted in, cover booking
@@ -586,7 +589,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
 
     if (!hasScrolledToBottom) {
       missing.add('scroll');
-      messages.push('Scroll to the bottom of the Master Agreement');
+      messages.push('Scroll to the bottom of the Terms and Conditions');
     }
     if (!agreedToSummary) {
       missing.add('summary');
@@ -594,7 +597,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     }
     if (!agreedToTerms) {
       missing.add('terms');
-      messages.push('Check the box to agree to the Rental Agreement');
+      messages.push('Check the box to agree to the Terms and Conditions');
     }
     if (!trimmedSignature) {
       missing.add('signature');
@@ -715,7 +718,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
               administrative labor, and "Loss of Use" penalties if your payment method is declined or if equipment is
               returned damaged, overfilled, or violating safety transport laws. You certify that you are at least 18
               years of age, fully competent to operate or transport the rented equipment, and agree to the
-              comprehensive terms of our <strong>Master Rental &amp; Service Agreement</strong>. If any optional
+              comprehensive terms of our <strong>Terms and Conditions</strong>. If any optional
               insurance, protection, or peace-of-mind coverage is purchased, the Customer remains fully responsible for
               all amounts, losses, liabilities, and damages that exceed the purchased coverage limits, exclusions, or
               credit caps. The full{' '}
@@ -747,12 +750,12 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 style={{ fontSize: '13px', color: '#555', fontWeight: 'bold', cursor: 'pointer' }}
               >
                 I have fully scrolled, read, and explicitly agree to the Important Rental Terms Summary and the
-                complete Master Agreement terms.
+                complete Terms and Conditions.
               </label>
             </div>
             {!hasScrolledToBottom && (
               <p className="text-xs mt-2 font-bold" style={{ color: '#7f1d1d' }}>
-                Scroll to the bottom of the Master Agreement to enable this checkbox.
+                Scroll to the bottom of the Terms and Conditions to enable this checkbox.
               </p>
             )}
             {hasScrolledToBottom && missingFields.has('summary') && (
@@ -811,7 +814,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
             />
             <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
               By checking this box and typing my name below, I agree that I have read, understood, and legally bind
-              myself to the Rental Agreement terms above.
+              myself to the Terms and Conditions above.
             </Label>
           </div>
 

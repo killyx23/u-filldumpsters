@@ -185,7 +185,12 @@ export const ExtendServiceDialog = ({
       setExtendedBooking({ ...booking, ...data.booking, customers: booking.customers || customer });
       setStep('done');
       onExtended?.();
-      toast({ title: 'Rental extended', description: `Charged ${money(quote.total)}.` });
+      toast({
+        title: 'Rental extended',
+        description: data?.pinWarning
+          ? `Charged ${money(quote.total)}. ${data.pinWarning}`
+          : `Charged ${money(quote.total)}. Your return code was emailed.`,
+      });
     } catch (err) {
       toast({
         title: 'Extension was not completed',
