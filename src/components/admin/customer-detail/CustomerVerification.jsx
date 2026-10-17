@@ -2227,16 +2227,17 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                         </div>
                     )}
                     {verificationBookings?.length > 0 ? verificationBookings.map(booking => {
+                        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
                         const styles = pendingAddress && booking.status !== 'pending_review'
                             ? {
                                 container: 'bg-orange-900/30 border-orange-500',
                                 title: 'text-orange-300 font-bold',
+                                icon: <MapPin className="mr-2 h-4 w-4"/>,
                                 titleText: 'Address change needs verification for Booking #',
                                 nextStep: 'Review the current and requested address, then approve or deny. The live address stays the same until you approve it.',
                             }
                             : getVerificationCardStyles(booking.status);
                         const requestNotes = verificationNotes[booking.id] || [];
-                        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
                         const pendingSchedule = booking.status === 'pending_review'
                             ? hasPendingRescheduleRequest(booking)
                             : false;
