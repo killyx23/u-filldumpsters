@@ -1,7 +1,7 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -407,7 +407,7 @@ Deno.serve(async (req) => {
       [...history].reverse().find((e: Record<string, unknown>) => e?.type === "reschedule_request") ||
       null;
 
-    const siteUrl = normalizeSiteUrl(body.site_url);
+    const siteUrl = resolvePublicSiteUrl(body.site_url);
 
     if (isUnderReview) {
       const underReviewHtml = generateRescheduleUnderReviewEmailHTML({

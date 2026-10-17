@@ -6,7 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
       return json(corsHeaders, { success: true, skipped: true });
     }
 
-    const siteUrl = normalizeSiteUrl(Deno.env.get("SITE_URL"));
+    const siteUrl = resolvePublicSiteUrl(Deno.env.get("SITE_URL"));
     const portalUrl = `${siteUrl}/customer-portal?tab=messages&section=tickets`;
     const orderId = claim?.booking_id || note?.booking_id || "";
     const name = customer.name || "there";

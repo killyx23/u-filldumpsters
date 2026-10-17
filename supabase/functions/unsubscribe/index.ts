@@ -7,7 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "../_shared/cors.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 
 function htmlPage(title: string, body: string): Response {
   const html = `<!DOCTYPE html>
@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  const siteUrl = normalizeSiteUrl(null);
+  const siteUrl = resolvePublicSiteUrl(null);
   const contactUrl = `${siteUrl}/contact`;
 
   const supabase = createClient(

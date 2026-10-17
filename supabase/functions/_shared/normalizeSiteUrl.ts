@@ -71,14 +71,18 @@ function isLocalSupabaseRuntime(): boolean {
 
 /**
  * Public site origin for links in customer emails.
- * Production rewrites localhost / LAN to the live site so a phone can open the link.
- * Local Supabase must keep the local origin: the survey token only exists in that
- * database, and a live-site link shows Contact us instead of the form.
+ * Production rewrites localhost / LAN, and any Supabase project host, to the live
+ * site so a phone can open the link. A *.supabase.co origin is the API, not the
+ * website. Local Supabase must keep a local app origin: the survey token only
+ * exists in that database, and a live-site link shows Contact us instead of the form.
  */
 export function resolvePublicSiteUrl(url?: string | null): string {
   const normalized = normalizeSiteUrl(url);
   try {
     const host = new URL(normalized).hostname;
+    if (isSupabaseProjectHostname(host)) {
+      return DEFAULT_SITE_URL;
+    }
     if (isUnreachableCustomerHostname(host)) {
       if (isLocalSupabaseRuntime()) {
         return normalized.replace(/\/$/, "");
@@ -103,6 +107,31 @@ function isInternalSupabaseHostname(hostname: string): boolean {
     host.endsWith(".internal") ||
     host.endsWith(".local")
   );
+}
+
+/**
+ * Hosted Supabase API host. Any website path there returns
+ * {"error":"requested path is invalid"} — never use it as a customer page link.
+ * Local/docker SUPABASE_URL hosts are excluded so local app origins stay usable.
+ */
+function isSupabaseProjectHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "supabase.co" || host.endsWith(".supabase.co")) return true;
+
+  const raw = (Deno.env.get("SUPABASE_URL") || "").trim();
+  if (!raw) return false;
+  try {
+    const supabaseHost = new URL(raw).hostname.toLowerCase();
+    if (
+      isUnreachableCustomerHostname(supabaseHost) ||
+      isInternalSupabaseHostname(supabaseHost)
+    ) {
+      return false;
+    }
+    return host === supabaseHost;
+  } catch {
+    return false;
+  }
 }
 
 /**

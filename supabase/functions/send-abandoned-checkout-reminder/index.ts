@@ -9,7 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { sendEmail } from "../_shared/notify.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 import { formatBookingTime, parseBookingTimeToDate } from "../_shared/formatBookingTime.ts";
 
@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
   );
 
   try {
-    const siteUrl = normalizeSiteUrl();
+    const siteUrl = resolvePublicSiteUrl();
     const now = Date.now();
     const oneHourAgo = new Date(now - 60 * 60 * 1000).toISOString();
     const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000).toISOString();

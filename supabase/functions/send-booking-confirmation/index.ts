@@ -2,7 +2,7 @@ import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { formatBookingTime, formatPlainBookingTime, formatDeliveryTimeWindowBetween } from "../_shared/formatBookingTime.ts";
 import { parseBookingTimeSlot, businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
@@ -770,7 +770,7 @@ const generateActionRequiredEmailHTML = (
   booking,
   serviceDetails,
   insuranceAmount = 0,
-  siteUrl = normalizeSiteUrl(),
+  siteUrl = resolvePublicSiteUrl(),
   options: {
     kind: "pending_verification" | "pending_review" | "pending_address";
     hoursRemaining: number | null;
@@ -964,7 +964,7 @@ const generateActionRequiredEmailHTML = (
   `;
 };
 
-const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = normalizeSiteUrl()) => {
+const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = resolvePublicSiteUrl()) => {
   const grandTotal = resolveReceiptPricing(booking, insuranceAmount).total;
   const plan = booking.plan || {};
   const addons = booking.addons || {};
@@ -1581,7 +1581,7 @@ Deno.serve(async (req)=>{
     const body = await req.json();
     const bookingId = body.bookingId ?? body.booking_id;
     const email = body.email;
-    const siteUrl = normalizeSiteUrl(body.site_url);
+    const siteUrl = resolvePublicSiteUrl(body.site_url);
     const force = body.force === true || body.force_resend === true;
     console.log(`[${timestamp}] [send-booking-confirmation] Parameters - Booking ID: ${bookingId}, Email: ${email}, siteUrl: ${siteUrl}, force: ${force}`);
     if (!bookingId) {

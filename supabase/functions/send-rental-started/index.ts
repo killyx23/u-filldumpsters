@@ -9,7 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { getBookingWindow } from "../_shared/pinTiming.ts";
 
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const siteUrl = normalizeSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
+    const siteUrl = resolvePublicSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
     const portalUrl = `${siteUrl}/customer-portal`;
     const guidesUrl = `${siteUrl}/customer-portal?tab=resources`;
     const window = getBookingWindow(booking);

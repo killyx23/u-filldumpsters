@@ -17,7 +17,7 @@ import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { getBookingWindow } from "../_shared/pinTiming.ts";
 import { businessWallTimeToUtc } from "../_shared/parseBookingTimeSlot.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
-import { normalizeSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 
@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
 
   try {
     const now = new Date();
-    const siteUrl = normalizeSiteUrl(null);
+    const siteUrl = resolvePublicSiteUrl(null);
     const portalUrl = `${siteUrl}/customer-portal`;
     const { data: feeRow } = await supabaseAdmin
       .from("charges_and_fees")
