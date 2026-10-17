@@ -1,6 +1,7 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { buildRescheduleRequestChatMessage } from "../_shared/formatRescheduleChat.ts";
+import { portalCallerOwnsBooking, requirePortalCaller } from "../_shared/phoneOrderAuth.ts";
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -216,22 +217,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing Authorization header" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 401,
-      });
-    }
-
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 401,
-      });
-    }
+    const caller = await requirePortalCaller(req, corsHeaders);
+    if (caller.error) return caller.error;
+    const user = caller.user;
 
     const body = await req.json();
     const bookingId = body.bookingId ?? body.booking_id;
@@ -260,11 +248,11 @@ Deno.serve(async (req) => {
 
     if (bookingError || !booking) throw new Error("Booking not found.");
 
-    const customerDbId = user.user_metadata?.customer_db_id;
-    if (customerDbId != null && Number(customerDbId) !== Number(booking.customer_id)) {
-      console.warn(
-        `[Request Booking Change] customer_db_id mismatch: user ${customerDbId} booking ${booking.customer_id}`
-      );
+    if (!portalCallerOwnsBooking(user, booking)) {
+      return new Response(JSON.stringify({ error: "This booking belongs to another customer." }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 403,
+      });
     }
 
     const noteContent = buildDetailedNote(booking, reason, rescheduleDetails);
@@ -379,6 +367,40 @@ Deno.serve(async (req) => {
       .eq("id", numericBookingId);
 
     if (updateError) throw new Error(`Failed to update booking: ${updateError.message}`);
+
+    if (addressChanged && toAddress) {
+      const customerRow = Array.isArray(booking.customers) ? booking.customers[0] : booking.customers;
+      if (customerRow?.id) {
+        const history = Array.isArray(customerRow.address_history) ? [...customerRow.address_history] : [];
+        const hasOrder = history.some(
+          (entry) => entry?.source === "order" && Number(entry.booking_id) === numericBookingId,
+        );
+        if (!hasOrder && fromAddress) {
+          history.push({
+            source: "order",
+            status: "recorded",
+            address: fromAddress,
+            booking_id: numericBookingId,
+            recorded_at: booking.created_at || requestedAt,
+          });
+        }
+        history.push({
+          source: "reschedule",
+          status: "pending",
+          from_address: fromAddress,
+          to_address: toAddress,
+          booking_id: numericBookingId,
+          requested_at: requestedAt,
+        });
+        const { error: historyError } = await supabaseAdmin
+          .from("customers")
+          .update({ address_history: history })
+          .eq("id", customerRow.id);
+        if (historyError) {
+          console.error(`[Request Booking Change] address history update failed:`, historyError.message);
+        }
+      }
+    }
 
     const hasStructuredReschedule =
       details &&

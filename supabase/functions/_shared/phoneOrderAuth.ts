@@ -42,6 +42,61 @@ export async function requireAdminCaller(req: Request, corsHeaders: Record<strin
   return { user, token };
 }
 
+type PortalAuthUser = {
+  id: string;
+  user_metadata?: Record<string, unknown> | null;
+};
+
+/**
+ * Portal logins are user JWTs. auth.getUser(jwt) on a service-role client
+ * ignores that token and returns Unauthorized. Validate with the anon key.
+ */
+export async function requirePortalCaller(req: Request, corsHeaders: Record<string, string>): Promise<
+  | { user: PortalAuthUser; token: string; error?: undefined }
+  | { error: Response; user?: undefined; token?: undefined }
+> {
+  const authHeader = req.headers.get('Authorization') || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    return { error: jsonError(corsHeaders, 'Missing Authorization header', 401) };
+  }
+
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) {
+    return { error: jsonError(corsHeaders, 'Missing Authorization header', 401) };
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+
+  const { data: { user }, error: authError } = await userClient.auth.getUser();
+  if (authError || !user) {
+    return { error: jsonError(corsHeaders, 'Unauthorized', 401) };
+  }
+
+  return { user, token };
+}
+
+/** True when this portal login owns the booking. */
+export function portalCallerOwnsBooking(
+  user: PortalAuthUser,
+  booking: {
+    customer_id?: unknown;
+    customers?: { user_id?: string | null } | { user_id?: string | null }[] | null;
+  },
+): boolean {
+  const customerDbId = user.user_metadata?.customer_db_id;
+  if (customerDbId != null && customerDbId !== '' && Number(customerDbId) === Number(booking.customer_id)) {
+    return true;
+  }
+
+  const customers = booking.customers;
+  const row = Array.isArray(customers) ? customers[0] : customers;
+  return Boolean(row?.user_id) && row?.user_id === user.id;
+}
+
 export function assertOverridePassword(password: unknown) {
   const configuredPassword = String(Deno.env.get('ADMIN_DELETE_PASSWORD') || '').trim();
   if (configuredPassword) {

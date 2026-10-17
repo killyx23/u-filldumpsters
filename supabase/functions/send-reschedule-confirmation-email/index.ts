@@ -299,6 +299,17 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
     ),
   );
 
+  const addressChanged = Boolean(source.address_changed);
+  const fromAddr = String(source.original_address || "").trim();
+  const toAddr = String(source.new_address || "").trim();
+  const addressBlock =
+    addressChanged || (fromAddr && toAddr && fromAddr !== toAddr)
+      ? sectionBlock("Delivery address", [
+          ["From", fromAddr || "N/A"],
+          ["To", toAddr || "N/A"],
+        ])
+      : "";
+
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Reschedule Request Under Review</title></head>
@@ -335,6 +346,7 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
             ])
           : ""
       }
+      ${addressBlock}
       ${sectionBlock("Requested equipment", addonDetailRows(source.new_addons))}
       ${
         source.pricing || source.new_total
@@ -363,6 +375,59 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
 </html>`;
 };
 
+const generateAddressDecisionEmailHTML = ({
+  customerName,
+  kind,
+  fromAddress,
+  toAddress,
+  siteUrl,
+}: {
+  customerName: string;
+  kind: "under_review" | "approved" | "denied";
+  fromAddress: string;
+  toAddress: string;
+  siteUrl: string;
+}) => {
+  const title =
+    kind === "under_review"
+      ? "Your address change is under review"
+      : kind === "approved"
+        ? "Your address change was approved"
+        : "Your address change was not approved";
+  const intro =
+    kind === "under_review"
+      ? "We received your address change. It is not active yet. Customer service will review it, and we will email you when it is approved or denied."
+      : kind === "approved"
+        ? "Customer service approved your address change. The address below is now the one on your profile and on open orders."
+        : "Customer service did not approve this address change. The address on your account stays the current one.";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><title>${title}</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;">
+    <div style="background:#111827;padding:24px;text-align:center;">
+      <h1 style="margin:0;color:#fbbf24;font-size:22px;">U-Fill Dumpsters</h1>
+    </div>
+    <div style="padding:28px;">
+      <p style="margin:0 0 12px;color:#111827;">Hi ${customerName},</p>
+      <h2 style="margin:0 0 12px;color:#111827;font-size:20px;">${title}</h2>
+      <p style="margin:0 0 16px;color:#374151;line-height:1.5;">${intro}</p>
+      ${sectionBlock("Address", [["From", fromAddress || "N/A"], ["To", toAddress || "N/A"]])}
+      <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
+        <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
+          You can follow this in your Customer Portal under Profile and Communication.
+          ${siteUrl ? ` Portal: <a href="${siteUrl}/customer-portal" style="color:#1d4ed8;">${siteUrl}/customer-portal</a>` : ""}
+        </p>
+      </div>
+    </div>
+    <div style="background:#111827;padding:16px;text-align:center;color:#9ca3af;font-size:12px;">
+      © ${new Date().getFullYear()} U-Fill Dumpsters LLC. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -372,13 +437,91 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const bookingId = body.bookingId ?? body.booking_id;
-    if (!bookingId) throw new Error("bookingId is required");
-
     const emailTypeRaw = String(body.emailType ?? body.email_type ?? "approved").toLowerCase();
+    const addressDecision =
+      emailTypeRaw === "address_under_review" ||
+      emailTypeRaw === "address_approved" ||
+      emailTypeRaw === "address_denied"
+        ? (emailTypeRaw.replace("address_", "") as "under_review" | "approved" | "denied")
+        : null;
+
+    if (!bookingId && !addressDecision) throw new Error("bookingId is required");
+
     const isUnderReview =
       emailTypeRaw === "under_review" || emailTypeRaw === "reschedule_under_review";
 
     const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    const siteUrl = resolvePublicSiteUrl(body.site_url);
+
+    if (addressDecision) {
+      let recipientEmail = String(body.email || "");
+      let customerName = "Customer";
+      let fromAddress = String(body.fromAddress || "");
+      let toAddress = String(body.toAddress || "");
+
+      if (bookingId) {
+        const { data: booking, error } = await supabase
+          .from("bookings")
+          .select("*, customers(*)")
+          .eq("id", bookingId)
+          .single();
+        if (error || !booking) throw new Error("Booking not found");
+        recipientEmail = recipientEmail || booking.email || booking.customers?.email || "";
+        customerName =
+          booking.customers?.name ||
+          [booking.customers?.first_name, booking.customers?.last_name].filter(Boolean).join(" ") ||
+          "Customer";
+        const history = Array.isArray(booking.reschedule_history) ? booking.reschedule_history : [];
+        const pendingAddress = [...history].reverse().find(
+          (entry: Record<string, unknown>) => entry?.type === "address_change",
+        ) as Record<string, unknown> | undefined;
+        const fromObj = pendingAddress?.from_address as Record<string, unknown> | undefined;
+        const toObj = pendingAddress?.to_address as Record<string, unknown> | undefined;
+        fromAddress = fromAddress || String(fromObj?.formatted_address || "");
+        toAddress = toAddress || String(toObj?.formatted_address || "");
+      } else if (body.customerId) {
+        const { data: customer, error } = await supabase
+          .from("customers")
+          .select("*")
+          .eq("id", body.customerId)
+          .single();
+        if (error || !customer) throw new Error("Customer not found");
+        recipientEmail = recipientEmail || customer.email || "";
+        customerName = customer.name || "Customer";
+        const pending = customer.pending_address || {};
+        fromAddress = fromAddress || [customer.street, customer.city, customer.state, customer.zip].filter(Boolean).join(", ");
+        toAddress = toAddress || String(pending.formatted_address || "");
+      }
+
+      if (!recipientEmail) throw new Error("No email address available");
+      const html = generateAddressDecisionEmailHTML({
+        customerName,
+        kind: addressDecision,
+        fromAddress,
+        toAddress,
+        siteUrl,
+      });
+      const subject =
+        addressDecision === "under_review"
+          ? "Address change under review — U-Fill Dumpsters"
+          : addressDecision === "approved"
+            ? "Address change approved — U-Fill Dumpsters"
+            : "Address change not approved — U-Fill Dumpsters";
+      const sent = await sendEmailWithRetry(recipientEmail, subject, html);
+      if (!sent.success) {
+        return new Response(
+          JSON.stringify({ success: false, error: sent.error || "Failed to send address email" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: true, email_type: emailTypeRaw, recipient: recipientEmail }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (!bookingId) throw new Error("bookingId is required");
+
     const { data: booking, error } = await supabase
       .from("bookings")
       .select("*, customers(*)")
@@ -406,8 +549,6 @@ Deno.serve(async (req) => {
       ) ||
       [...history].reverse().find((e: Record<string, unknown>) => e?.type === "reschedule_request") ||
       null;
-
-    const siteUrl = resolvePublicSiteUrl(body.site_url);
 
     if (isUnderReview) {
       const underReviewHtml = generateRescheduleUnderReviewEmailHTML({

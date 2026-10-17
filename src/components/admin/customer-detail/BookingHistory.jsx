@@ -16,6 +16,7 @@ import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinSta
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { additionalDayIncludesPrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
+import { AddressHistorySection } from '@/components/admin/customer-detail/AddressHistorySection';
 
 const DetailCard = ({ icon, title, children }) => (
     <div className="bg-white/5 p-6 rounded-lg shadow-lg">
@@ -146,6 +147,9 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="text-sm text-blue-200 flex items-center mt-1">
                         <MapPin className="mr-2 h-4 w-4"/>Distance (one-way): {formatMilesLabel(oneWayMiles)}
                     </p>
+                    <p className="text-sm text-blue-200 flex items-center mt-1">
+                        <Clock className="mr-2 h-4 w-4"/>Drive time: {booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes ? `${booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes} mins` : 'N/A'}
+                    </p>
                     <p className="text-xs text-gray-400 mt-1">Stripe Charge ID: {stripeChargeId}</p>
                 </div>
                 <div className="text-right">
@@ -212,7 +216,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
     );
 }
 
-export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted, adminEmail }) => {
+export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingDeleted, adminEmail, addressBookings }) => {
     const pickupOrderIds = (bookings || [])
         .filter((booking) => isCustomerPickupService(booking.plan, booking.addons || {}))
         .map((booking) => booking.id);
@@ -221,6 +225,7 @@ export const BookingHistory = ({ bookings, customer, onReceiptSelect, onBookingD
     return (
         <DetailCard icon={<DollarSign className="h-6 w-6 text-yellow-400" />} title="Booking History">
             <div className="space-y-4">
+                <AddressHistorySection customer={customer} bookings={addressBookings || bookings} />
                 {bookings.length > 0 ? bookings.map(booking => (
                     <BookingHistoryItem key={booking.id} booking={booking} customer={customer} onReceiptSelect={onReceiptSelect} onBookingDeleted={onBookingDeleted} adminEmail={adminEmail} pinCodes={pinsByOrder[String(booking.id)]} pinsLoading={pinsLoading} />
                 )) : <p className="text-center text-blue-200 py-8">This customer has no booking history.</p>}

@@ -18,6 +18,7 @@ import {
     isRentalEquipmentId,
 } from '@/utils/equipmentReturnDisplay';
 import { feeChargeEntries } from '@/utils/feeCharges';
+import { AddressHistorySection } from '@/components/admin/customer-detail/AddressHistorySection';
 
 const Section = ({ title, icon, children, className = '' }) => (
     <div className={`border-t border-white/20 pt-4 mt-4 ${className}`}>
@@ -117,6 +118,7 @@ export const ComprehensiveHistoryDialog = ({
                             <DetailItem icon={<MessageSquare />} label="Order texts" value={customer.sms_opt_in === true ? 'Allowed' : 'Not allowed'} />
                             <DetailItem icon={<MessageSquare />} label="Promotions" value={customer.sms_marketing_opt_in === true ? 'Allowed' : 'Not allowed'} />
                             <DetailItem icon={<Home />} label="Address" value={`${customer.street}, ${customer.city}, ${customer.state} ${customer.zip}`} />
+                            <AddressHistorySection customer={customer} bookings={bookings} />
                             <DetailItem icon={<Car />} label="License Plate" value={customer.license_plate || 'Not Provided'} />
                             <DetailItem icon={<ImageIcon />} label="License Images" value={
                                 <div className="flex flex-wrap gap-2">

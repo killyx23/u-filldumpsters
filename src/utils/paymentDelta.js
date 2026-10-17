@@ -1,3 +1,5 @@
+import { getPendingAddressChange } from '@/utils/addressHelpers';
+
 /**
  * True when a booking has an outstanding payment adjustment
  * (e.g. reschedule delta), not a plain unpaid checkout hold.
@@ -45,8 +47,13 @@ export function isAddressOnlyVerificationBooking(booking) {
  * (aligned with CustomerDetailView Verification tab).
  * Address-only holds belong on Verify Address, not here.
  */
+export function hasPendingAddressChange(booking) {
+  return Boolean(getPendingAddressChange(booking?.reschedule_history));
+}
+
 export function isActionItemVerificationBooking(booking) {
   if (!booking) return false;
+  if (hasPendingAddressChange(booking)) return true;
   if (isAddressOnlyVerificationBooking(booking)) return false;
   const status = booking.status;
   if (status === 'pending_verification' || status === 'pending_review') return true;

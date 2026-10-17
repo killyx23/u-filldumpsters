@@ -6,7 +6,7 @@ import { ResolveFollowUpDialog } from '@/components/admin/ResolveFollowUpDialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from '@/components/ui/button';
 import { getFollowUpReasonLabel, isFollowUpHold } from '@/utils/followUpResolution';
-import { hasPaymentDelta, isActionItemVerificationBooking } from '@/utils/paymentDelta';
+import { hasPaymentDelta, hasPendingAddressChange, isActionItemVerificationBooking } from '@/utils/paymentDelta';
 import { ThingsForTheDay } from '@/components/admin/ThingsForTheDay';
 
 const ActionItemCard = ({ title, icon, items, onCardClick, emptyText }) => (
@@ -32,6 +32,12 @@ const ActionItemsDialog = ({ isOpen, onOpenChange, title, items, onNavigate, onR
     const getDetails = (item) => {
         switch (item.type) {
             case 'verification': {
+                if (item.profileAddress) {
+                    return `${item.customers?.name || item.name || 'Customer'} submitted a profile address change that needs verification.`;
+                }
+                if (hasPendingAddressChange(item)) {
+                    return `Booking #${item.id} for ${item.customers?.name || 'N/A'} has an address change that needs verification.`;
+                }
                 if (item.status === 'pending_payment' && hasPaymentDelta(item)) {
                     return `Booking #${item.id} for ${item.customers?.name || 'N/A'} has a pending payment adjustment.`;
                 }
@@ -129,7 +135,7 @@ const ActionItemsDialog = ({ isOpen, onOpenChange, title, items, onNavigate, onR
     );
 };
 
-export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, onUpdate }) => {
+export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, customersWithPendingAddress = [], onUpdate }) => {
     const navigate = useNavigate();
     const [dialogOpen, setDialogOpen] = useState(false);
     const [dialogContent, setDialogContent] = useState({ title: '', items: [] });
@@ -145,11 +151,22 @@ export const ActionItemsManager = ({ bookings, customersWithUnreadNotes, onUpdat
                 .map(b => ({ ...b, type: 'pin_failsafe' })),
           ]
         : [];
-    const pendingVerification = bookings
-        ? bookings
+    const pendingVerification = [
+        ...(bookings || [])
             .filter(isActionItemVerificationBooking)
-            .map(b => ({ ...b, type: 'verification' }))
-        : [];
+            .map(b => ({ ...b, type: 'verification' })),
+        ...(customersWithPendingAddress || [])
+            .filter((customer) => !(bookings || []).some(
+                (booking) => Number(booking.customer_id) === Number(customer.id) && hasPendingAddressChange(booking)
+            ))
+            .map((customer) => ({
+                ...customer,
+                type: 'verification',
+                profileAddress: true,
+                customer_id: customer.id,
+                customers: { name: customer.name },
+            })),
+    ];
     const unreadNotesItems = customersWithUnreadNotes
         ? customersWithUnreadNotes.map(c => ({ ...c, type: 'unread_notes' }))
         : [];

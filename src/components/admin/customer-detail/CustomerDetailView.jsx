@@ -21,7 +21,7 @@ import { ProtectionPlanHistory } from './ProtectionPlanHistory';
 import { PortalHardwareClaims } from './PortalHardwareClaims';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { isActiveBookingForHistory } from '@/utils/bookingArchiveHelper';
-import { hasPaymentDelta, isAddressOnlyVerificationBooking } from '@/utils/paymentDelta';
+import { hasPaymentDelta, hasPendingAddressChange, isAddressOnlyVerificationBooking } from '@/utils/paymentDelta';
 import { AddressVerificationCard } from './AddressVerificationCard';
 import AdminRemoteLockBar from '@/components/admin/AdminRemoteLockBar';
 
@@ -212,11 +212,12 @@ export const CustomerDetailView = () => {
 
     const { activeBookings, completedBookings, verificationBookings, cancelledBookings, rescheduledBookings, pendingAddressBookings, historyActiveBookings } = useMemo(() => {
         if (!bookings) return { activeBookings: [], completedBookings: [], verificationBookings: [], cancelledBookings: [], rescheduledBookings: [], pendingAddressBookings: [], historyActiveBookings: [] };
-        const pendingAddr = bookings.filter(b => b.pending_address_verification);
+        const pendingAddr = bookings.filter((b) => b.pending_address_verification && !hasPendingAddressChange(b));
         // Same helper as History — excludes booking_not_finished (Did Not Finalize), pending_*, etc.
         const active = bookings.filter(isActiveBookingForHistory);
         const completed = bookings.filter(b => b.status === 'Completed' || b.status === 'flagged');
         const verification = bookings.filter((b) => {
+            if (hasPendingAddressChange(b)) return true;
             if (isAddressOnlyVerificationBooking(b)) return false;
             return (
                 b.status === 'pending_verification' ||
@@ -286,7 +287,7 @@ export const CustomerDetailView = () => {
                     </TabsTrigger>
                     <TabsTrigger value="verification" className="relative">
                         <ShieldAlert className="mr-2 h-4 w-4" />Verification
-                        {(pendingAddressBookings.length > 0 || verificationBookings.length > 0) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
+                        {(pendingAddressBookings.length > 0 || verificationBookings.length > 0 || customer?.pending_address) && <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-orange-500 border-2 border-gray-800" />}
                     </TabsTrigger>
                     <TabsTrigger value="protection"><Shield className="mr-2 h-4 w-4" />Protection</TabsTrigger>
                     <TabsTrigger value="rentals"><Clock className="mr-2 h-4 w-4" />Active Rentals</TabsTrigger>
@@ -347,7 +348,7 @@ export const CustomerDetailView = () => {
                     </div>
                 </TabsContent>
                 <TabsContent value="history">
-                    <BookingHistory bookings={historyActiveBookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} adminEmail={user?.email} />
+                    <BookingHistory bookings={historyActiveBookings} addressBookings={bookings} customer={customer} onReceiptSelect={setSelectedBookingForReceipt} onBookingDeleted={() => fetchCustomerDetails(false)} adminEmail={user?.email} />
                     <CompletedBookings
                         bookings={[...completedBookings, ...cancelledBookings, ...rescheduledBookings]}
                         equipment={equipment}

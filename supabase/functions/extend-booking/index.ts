@@ -4,6 +4,7 @@ import { Stripe } from "npm:stripe@15.8.0";
 import { businessWallTimeToUtc, parseClockTime } from "../_shared/parseBookingTimeSlot.ts";
 import { chargeCardOffSession } from "../_shared/cardCharge.ts";
 import { issueExtensionReturnPin } from "../_shared/extensionReturnPin.ts";
+import { portalCallerOwnsBooking, requirePortalCaller } from "../_shared/phoneOrderAuth.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -220,11 +221,9 @@ Deno.serve(async (req) => {
   const fail = (status: number, error: string) => new Response(JSON.stringify({ error }), { status, headers });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return fail(401, "Missing Authorization header");
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) return fail(401, "Unauthorized");
+    const caller = await requirePortalCaller(req, corsHeaders);
+    if (caller.error) return caller.error;
+    const user = caller.user;
 
     const body = await req.json().catch(() => ({}));
     const bookingId = Number(body.bookingId ?? body.booking_id);
@@ -237,13 +236,12 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: bookingError } = await supabaseAdmin
       .from("bookings")
-      .select("*, customers(id, stripe_customer_id, email, name)")
+      .select("*, customers(id, user_id, stripe_customer_id, email, name)")
       .eq("id", bookingId)
       .single();
     if (bookingError || !booking) return fail(404, "Booking not found.");
 
-    const customerDbId = user.user_metadata?.customer_db_id;
-    if (customerDbId == null || Number(customerDbId) !== Number(booking.customer_id)) {
+    if (!portalCallerOwnsBooking(user, booking)) {
       return fail(403, "This booking belongs to another customer.");
     }
     if (booking.returned_at || CLOSED_STATUSES.has(booking.status) || returnDeadlinePassed(booking)) {

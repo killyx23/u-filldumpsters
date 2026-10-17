@@ -11,6 +11,14 @@ import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete.
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { calculateAndSaveDistanceFrontend, formatFullAddress } from '@/utils/distanceCalculationHelper';
+import { addressesAreEqual } from '@/utils/addressHelpers';
+import {
+    addonsWithTrip,
+    addressFromCustomer,
+    appendAddressHistory,
+    isOpenForAddressChange,
+} from '@/utils/addressChangeReview';
+import { ensureBookingMileage } from '@/utils/bookingMileage';
 import { useGoogleMapsLoader } from '@/hooks/useGoogleMapsLoader';
 import { expireActiveRentalAccessCodesForOrder } from '@/utils/bookingPinReinstate';
 
@@ -81,6 +89,36 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
             });
             setManualDistance(result.distance.toString());
             setManualTime(result.travelTime.toString());
+            const { data: rows } = await supabase.from('bookings').select('*').eq('customer_id', customerData.id);
+            const payload = {
+                street: customerData.street,
+                city: customerData.city,
+                state: customerData.state,
+                zip: customerData.zip,
+                formatted_address: formatFullAddress(customerData),
+                isVerified: true,
+            };
+            for (const row of rows || []) {
+                if (!isOpenForAddressChange(row)) continue;
+                await supabase.from('bookings').update({
+                    street: payload.street,
+                    city: payload.city,
+                    state: payload.state,
+                    zip: payload.zip,
+                    delivery_address: payload,
+                    contact_address: payload,
+                    distance_miles: result.distance,
+                    addons: addonsWithTrip(row.addons, result.distance, result.travelTime),
+                }).eq('id', row.id);
+                await ensureBookingMileage(
+                    { ...row, distance_miles: result.distance, delivery_address: payload },
+                    {
+                        customer: { ...customerData, distance_miles: result.distance, travel_time_minutes: result.travelTime },
+                        oneWayMilesOverride: result.distance,
+                        source: 'admin_address',
+                    }
+                );
+            }
             onUpdate();
         } else {
             setTravelInfo({ eta: 'N/A', distance: 'N/A', loading: false, error: result.error });
@@ -186,10 +224,21 @@ export const CustomerProfile = ({ customer, setCustomer, onUpdate, onHistoryClic
                 sms_marketing_opt_in: editedCustomer.sms_marketing_opt_in === true,
             };
             
-            // Clear existing distance data if address changed
-            if (customer.street !== editedCustomer.street || customer.zip !== editedCustomer.zip) {
+            const previousAddress = addressFromCustomer(customer);
+            const nextAddress = addressFromCustomer(editedCustomer);
+            const addressChanged = !addressesAreEqual(previousAddress, nextAddress);
+            if (addressChanged) {
                 customerUpdateData.distance_miles = null;
                 customerUpdateData.travel_time_minutes = null;
+                customerUpdateData.pending_address = null;
+                customerUpdateData.address_history = appendAddressHistory(customer.address_history, {
+                    source: 'admin',
+                    status: 'approved',
+                    from_address: previousAddress,
+                    to_address: nextAddress,
+                    requested_at: new Date().toISOString(),
+                    resolved_at: new Date().toISOString(),
+                });
             }
 
             const { data, error } = await supabase

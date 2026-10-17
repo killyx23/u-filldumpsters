@@ -17,6 +17,7 @@ import {
   readProfileDraft,
   writeProfileDraft,
 } from '@/utils/smsFormReturn';
+import { addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
 
 export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
   const location = useLocation();
@@ -90,19 +91,52 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
       }
       
       setIsSaving(true);
-      
-      const computedFullName = `${formData.first_name} ${formData.last_name}`.trim();
-      const { error } = await supabase
-          .from('customers')
-          .update({ 
-              ...formData, 
-              name: computedFullName,
-              unverified_address: false // Reset flag on explicit save
-          })
-          .eq('id', customer.id);
 
-      if (error) {
-          toast({ title: "Update Failed", description: error.message, variant: "destructive" });
+      const currentAddress = {
+          street: customer.street || '',
+          city: customer.city || '',
+          state: customer.state || '',
+          zip: customer.zip || '',
+      };
+      const nextAddress = {
+          street: formData.street,
+          city: formData.city,
+          state: formData.state,
+          zip: formData.zip,
+      };
+      const addressChanged = !addressesAreEqual(currentAddress, nextAddress);
+
+      const { data, error } = await supabase.functions.invoke('request-profile-address-change', {
+          body: {
+              first_name: formData.first_name,
+              last_name: formData.last_name,
+              email: formData.email,
+              phone: formData.phone,
+              sms_opt_in: formData.sms_opt_in,
+              sms_marketing_opt_in: formData.sms_marketing_opt_in,
+              street: formData.street,
+              city: formData.city,
+              state: formData.state,
+              zip: formData.zip,
+          },
+      });
+
+      if (error || data?.error) {
+          let description = data?.error || error?.message || 'Could not save your profile.';
+          try {
+              const body = await error?.context?.json?.();
+              if (body?.error) description = body.error;
+          } catch {
+              /* use the message already captured */
+          }
+          toast({ title: "Update Failed", description, variant: "destructive" });
+      } else if (addressChanged || data?.addressPending) {
+          toast({
+              title: "Address submitted for review",
+              description: "Your other details were saved. The new address stays pending until customer service approves it. We emailed you that it is under review.",
+          });
+          clearProfileDraft();
+          onUpdate();
       } else {
           toast({ title: "Profile Updated!", description: "Your details have been saved successfully." });
           clearProfileDraft();
@@ -123,16 +157,13 @@ export const ProfileManagement = ({ customer, onUpdate, onNavigateToTab }) => {
           <AlertTriangle className="mr-2 h-5 w-5" /> Important
         </h3>
         <p className="text-orange-200 text-sm leading-relaxed">
-          Changes you make here only apply to <span className="font-semibold">future orders</span>. They do not update orders you have already placed. If you need contact or address changes applied to an existing order, reach out through the{' '}
-          <button
-            type="button"
-            onClick={() => onNavigateToTab?.('messages')}
-            className="font-semibold text-orange-300 underline underline-offset-2 hover:text-orange-100 transition-colors"
-          >
-            Communication Hub
-          </button>
-          {' '}→ <span className="font-semibold">Direct Chat</span> to submit a support request so customer service can update and approve it for that order.
+          Name, email, phone, and text-message choices save right away. An address change is sent to customer service for approval and does not replace the address on file until it is approved. You will get an email that it is under review, and another email when it is approved or denied. Open orders keep their current address until that approval.
         </p>
+        {customer?.pending_address && (
+          <p className="text-orange-100 text-sm mt-3">
+            Waiting for approval: {formatAddressDisplay(customer.pending_address)}
+          </p>
+        )}
       </div>
 
       <Card className="bg-white/5 border-white/10 text-white">

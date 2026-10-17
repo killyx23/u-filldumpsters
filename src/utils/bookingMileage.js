@@ -97,14 +97,23 @@ export async function upsertBookingMileageLog({
 /**
  * Calculate one-way Google miles for an address string.
  */
-export async function calculateOneWayMilesForAddress(addressString) {
+export async function calculateAddressTrip(addressString) {
   if (!addressString || String(addressString).trim().length < 8) {
-    return null;
+    return { miles: null, minutes: null };
   }
   const origin = await getBusinessAddress();
   const result = await calculateDistanceViaGoogleMaps(origin, addressString);
   const miles = Number(result?.distance);
-  return Number.isFinite(miles) && miles > 0 ? miles : null;
+  const minutes = Number(result?.travelTime);
+  return {
+    miles: Number.isFinite(miles) && miles > 0 ? miles : null,
+    minutes: Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : null,
+  };
+}
+
+export async function calculateOneWayMilesForAddress(addressString) {
+  const trip = await calculateAddressTrip(addressString);
+  return trip.miles;
 }
 
 /**

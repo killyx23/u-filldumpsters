@@ -30,7 +30,7 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
 import { runEquipmentPricingMigration } from '@/utils/equipmentPricingMigration';
-import { isActionItemVerificationBooking } from '@/utils/paymentDelta';
+import { hasPendingAddressChange, isActionItemVerificationBooking } from '@/utils/paymentDelta';
 import AdminRemoteLockBar from '@/components/admin/AdminRemoteLockBar';
 
 export const AdminDashboard = () => {
@@ -41,6 +41,7 @@ export const AdminDashboard = () => {
     
     const [bookings, setBookings] = useState([]);
     const [customersWithUnreadNotes, setCustomersWithUnreadNotes] = useState([]);
+    const [customersWithPendingAddress, setCustomersWithPendingAddress] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pricingHealth, setPricingHealth] = useState(null);
     const [showPricingAlert, setShowPricingAlert] = useState(false);
@@ -58,13 +59,24 @@ export const AdminDashboard = () => {
                 .select('*')
                 .eq('has_unread_notes', true);
 
-            const [{ data: bookingsData, error: bookingsError }, { data: unreadNotesData, error: unreadNotesError }] = await Promise.all([bookingsPromise, unreadNotesPromise]);
+            const pendingAddressPromise = supabase
+                .from('customers')
+                .select('id, name, pending_address')
+                .not('pending_address', 'is', null);
+
+            const [
+                { data: bookingsData, error: bookingsError },
+                { data: unreadNotesData, error: unreadNotesError },
+                { data: pendingAddressData, error: pendingAddressError },
+            ] = await Promise.all([bookingsPromise, unreadNotesPromise, pendingAddressPromise]);
 
             if (bookingsError) throw bookingsError;
             if (unreadNotesError) throw unreadNotesError;
+            if (pendingAddressError) throw pendingAddressError;
 
             setBookings(bookingsData || []);
             setCustomersWithUnreadNotes(unreadNotesData || []);
+            setCustomersWithPendingAddress(pendingAddressData || []);
 
         } catch (error) {
             toast({
@@ -102,6 +114,15 @@ export const AdminDashboard = () => {
                 });
             } else {
                 setCustomersWithUnreadNotes(prev => prev.filter(c => c.id !== payload.new.id));
+            }
+            if (payload.new.pending_address) {
+                setCustomersWithPendingAddress((prev) => (
+                    prev.find((c) => c.id === payload.new.id)
+                        ? prev.map((c) => (c.id === payload.new.id ? payload.new : c))
+                        : [...prev, payload.new]
+                ));
+            } else {
+                setCustomersWithPendingAddress((prev) => prev.filter((c) => c.id !== payload.new.id));
             }
         };
 
@@ -171,7 +192,9 @@ export const AdminDashboard = () => {
     const pendingAddressCount = bookings.filter(b => b.pending_address_verification).length;
     const actionItemCount = (bookings.filter((b) =>
         isActionItemVerificationBooking(b) || b.pin_failsafe_at || ((b.status === 'flagged' || b.status === 'late_return' || b.status === 'failure_to_return') && !b.pending_address_verification)
-    ).length) + customersWithUnreadNotes.length;
+    ).length) + customersWithUnreadNotes.length + customersWithPendingAddress.filter((customer) =>
+        !bookings.some((booking) => Number(booking.customer_id) === Number(customer.id) && hasPendingAddressChange(booking))
+    ).length;
 
     return (
         <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
@@ -314,6 +337,7 @@ export const AdminDashboard = () => {
                                 <ActionItemsManager
                                     bookings={bookings}
                                     customersWithUnreadNotes={customersWithUnreadNotes}
+                                    customersWithPendingAddress={customersWithPendingAddress}
                                     onUpdate={() => fetchDashboardData(false)}
                                 />
                             </TabsContent>

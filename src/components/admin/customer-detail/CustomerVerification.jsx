@@ -24,7 +24,17 @@ import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/Cha
 import { quoteRescheduleBreakdown } from '@/utils/rescheduleTaxCalculator';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 import { getBookingDateTime } from '@/utils/bookingPickupWindow';
-import { ensureBookingMileage, calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
+import { ensureBookingMileage, calculateAddressTrip } from '@/utils/bookingMileage';
+import {
+    addonsWithTrip,
+    addressFromCustomer,
+    appendAddressHistory,
+    applyApprovedAddress,
+    denyPendingAddress,
+    isOpenForAddressChange,
+    notifyAddressDecision,
+    settlePendingAddressHistory,
+} from '@/utils/addressChangeReview';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
@@ -1083,132 +1093,166 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             return;
         }
 
-        const approvedAt = new Date().toISOString();
         const scheduleStillPending = hasPendingRescheduleRequest(booking);
         const { data: authData } = await supabase.auth.getUser();
         const adminLabel = authData?.user?.email || 'scheduling department';
-        const addressPayload = {
-            street: toAddress.street,
-            city: toAddress.city,
-            state: toAddress.state,
-            zip: toAddress.zip,
-            formatted_address: toAddress.formatted_address,
-            isVerified: !pendingAddress?.is_manual_address,
-        };
-
-        const bookingUpdate = {
-            street: toAddress.street,
-            city: toAddress.city,
-            state: toAddress.state,
-            zip: toAddress.zip,
-            delivery_address: addressPayload,
-            contact_address: addressPayload,
-            reschedule_history: markAddressChangesApproved(booking.reschedule_history, approvedAt),
-            address_verified_by_admin: adminLabel,
-            address_verified_date: approvedAt,
-            pending_address_verification: false,
-        };
-
-        const toDisplay = formatAddressDisplay(toAddress) || 'N/A';
-        let oneWayMiles = null;
         try {
-            oneWayMiles = await calculateOneWayMilesForAddress(toDisplay);
-        } catch (e) {
-            console.warn('[CustomerVerification] one-way miles calc failed on address approve:', e);
-        }
-        if (oneWayMiles == null && pendingAddress?.distance_miles != null && pendingAddress.distance_miles !== '') {
-            oneWayMiles = Number(pendingAddress.distance_miles);
-        }
-        if (oneWayMiles != null && Number.isFinite(oneWayMiles) && oneWayMiles > 0) {
-            bookingUpdate.distance_miles = Number(oneWayMiles);
-        }
-
-        if (!scheduleStillPending) {
-            bookingUpdate.status = 'Confirmed';
-            bookingUpdate.is_manually_verified = true;
-            bookingUpdate.verification_notes = 'Scheduling approved address change.';
-            Object.assign(bookingUpdate, reinstatePinTrackingPatch(booking.status, 'Confirmed'));
-        }
-
-        const { error } = await supabase.from('bookings').update(bookingUpdate).eq('id', booking.id);
-        if (error) {
+            const result = await applyApprovedAddress({
+                customer,
+                booking,
+                toAddress,
+                fromAddress,
+                pendingEntry: pendingAddress,
+                scheduleStillPending,
+                adminLabel,
+                source: pendingAddress?.source || 'address_change',
+            });
+            if (!scheduleStillPending && result.bookingUpdate.status === 'Confirmed' && booking.status !== 'Confirmed') {
+                await supabase.from('bookings').update({
+                    is_manually_verified: true,
+                    verification_notes: 'Scheduling approved address change.',
+                    ...reinstatePinTrackingPatch(booking.status, 'Confirmed'),
+                }).eq('id', booking.id);
+            }
+            await notifyAddressDecision({
+                customer,
+                bookingId: booking.id,
+                decision: 'approved',
+                fromDisplay: formatAddressDisplay(fromAddress) || 'N/A',
+                toDisplay: result.toDisplay,
+            });
+            toast({
+                title: 'Address Approved',
+                description: scheduleStillPending
+                    ? 'Address updated. Schedule and pricing still need approval.'
+                    : 'Address updated and customer notified.',
+            });
+            onUpdate();
+        } catch (error) {
             toast({ title: 'Address approval failed', description: error.message, variant: 'destructive' });
+        }
+    };
+
+    const handleApproveProfileAddress = async () => {
+        const toAddress = normalizeAddress(customer?.pending_address);
+        const fromAddress = addressFromCustomer(customer);
+        if (!toAddress) return;
+        const approvedAt = new Date().toISOString();
+        try {
+            const trip = await calculateAddressTrip(formatAddressDisplay(toAddress));
+            let history = settlePendingAddressHistory(customer.address_history, {
+                status: 'approved',
+                resolvedAt: approvedAt,
+                toDisplay: formatAddressDisplay(toAddress),
+            });
+            history = appendAddressHistory(history, {
+                source: 'profile',
+                status: 'approved',
+                from_address: fromAddress,
+                to_address: toAddress,
+                requested_at: customer.pending_address?.requested_at || approvedAt,
+                resolved_at: approvedAt,
+            });
+            const customerUpdate = {
+                street: toAddress.street,
+                city: toAddress.city,
+                state: toAddress.state,
+                zip: toAddress.zip,
+                pending_address: null,
+                address_history: history,
+                distance_miles: trip.miles,
+                travel_time_minutes: trip.minutes,
+            };
+            const { error } = await supabase.from('customers').update(customerUpdate).eq('id', customer.id);
+            if (error) throw error;
+            const { data: rows } = await supabase.from('bookings').select('*').eq('customer_id', customer.id);
+            for (const row of rows || []) {
+                if (!isOpenForAddressChange(row)) continue;
+                const payload = {
+                    street: toAddress.street,
+                    city: toAddress.city,
+                    state: toAddress.state,
+                    zip: toAddress.zip,
+                    formatted_address: toAddress.formatted_address,
+                    isVerified: true,
+                };
+                await supabase.from('bookings').update({
+                    street: toAddress.street,
+                    city: toAddress.city,
+                    state: toAddress.state,
+                    zip: toAddress.zip,
+                    delivery_address: payload,
+                    contact_address: payload,
+                    distance_miles: trip.miles,
+                    addons: addonsWithTrip(row.addons, trip.miles, trip.minutes),
+                }).eq('id', row.id);
+                await ensureBookingMileage(
+                    { ...row, distance_miles: trip.miles, delivery_address: payload },
+                    { customer: { ...customer, ...customerUpdate }, oneWayMilesOverride: trip.miles, source: 'profile_address' }
+                );
+            }
+            await notifyAddressDecision({
+                customer,
+                decision: 'approved',
+                fromDisplay: formatAddressDisplay(fromAddress) || 'N/A',
+                toDisplay: formatAddressDisplay(toAddress),
+            });
+            toast({ title: 'Address Approved', description: 'The customer address is updated.' });
+            onUpdate();
+        } catch (error) {
+            toast({ title: 'Address approval failed', description: error.message, variant: 'destructive' });
+        }
+    };
+
+    const handleDenyProfileAddress = async () => {
+        const toAddress = normalizeAddress(customer?.pending_address);
+        const fromAddress = addressFromCustomer(customer);
+        if (!toAddress) return;
+        const deniedAt = new Date().toISOString();
+        const history = settlePendingAddressHistory(customer.address_history, {
+            status: 'denied',
+            resolvedAt: deniedAt,
+            toDisplay: formatAddressDisplay(toAddress),
+        });
+        const { error } = await supabase.from('customers').update({
+            pending_address: null,
+            address_history: history,
+        }).eq('id', customer.id);
+        if (error) {
+            toast({ title: 'Could not deny address change', description: error.message, variant: 'destructive' });
             return;
         }
-
-        const customerUpdate = {
-            street: toAddress.street,
-            city: toAddress.city,
-            state: toAddress.state,
-            zip: toAddress.zip,
-            unverified_address: Boolean(pendingAddress?.is_manual_address),
-        };
-        if (oneWayMiles != null && Number.isFinite(oneWayMiles) && oneWayMiles > 0) {
-            customerUpdate.distance_miles = Number(oneWayMiles);
-            customerUpdate.travel_time_minutes = null;
-        } else {
-            customerUpdate.distance_miles = null;
-            customerUpdate.travel_time_minutes = null;
-        }
-        await supabase.from('customers').update(customerUpdate).eq('id', customer.id);
-
-        try {
-            await ensureBookingMileage(
-                {
-                    ...booking,
-                    ...bookingUpdate,
-                    id: booking.id,
-                    customer_id: customer.id,
-                },
-                {
-                    customer: { ...customer, ...customerUpdate },
-                    oneWayMilesOverride: oneWayMiles,
-                    source: 'reschedule_address',
-                    recalculateIfMissing: !oneWayMiles,
-                }
-            );
-        } catch (mileageErr) {
-            console.warn('[CustomerVerification] mileage log update failed:', mileageErr);
-        }
-
-        const fromDisplay = formatAddressDisplay(fromAddress) || 'N/A';
-        const addressChat = [
-            `Address approved for booking #${booking.id}.`,
-            `From: ${fromDisplay}`,
-            `To: ${toDisplay}`,
-            'Status: Address verified — delivery location updated',
-        ].join('\n');
-
-        await supabase.from('customer_notes').insert({
-            customer_id: customer.id,
-            booking_id: booking.id,
-            source: 'Address Change',
-            content: `Address approved for booking #${booking.id}.\nFrom: ${fromDisplay}\nTo: ${toDisplay}`,
-            author_type: 'admin',
-            is_read: true,
+        await notifyAddressDecision({
+            customer,
+            decision: 'denied',
+            fromDisplay: formatAddressDisplay(fromAddress) || 'N/A',
+            toDisplay: formatAddressDisplay(toAddress),
         });
-
-        await supabase.from('chat_messages').insert({
-            conversation_id: `cust_${customer.id}`,
-            customer_id: customer.id,
-            booking_id: booking.id,
-            sender_type: 'admin',
-            message_content: addressChat,
-            is_read: false,
-            message_severity: 'success',
-            message_context: {
-                action: 'address_approved',
-                booking_id: booking.id,
-            },
-        });
-
-        toast({
-            title: 'Address Approved',
-            description: scheduleStillPending
-                ? 'Address updated. Schedule and pricing still need approval.'
-                : 'Address updated and customer notified.',
-        });
+        toast({ title: 'Address change denied', description: 'The address on file was left unchanged.' });
         onUpdate();
+    };
+
+    const handleDenyAddress = async (booking) => {
+        if (!customer?.id) return;
+        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
+        if (!pendingAddress) {
+            toast({ title: 'No pending address', description: 'There is no address change to deny.', variant: 'destructive' });
+            return;
+        }
+        try {
+            const result = await denyPendingAddress({ customer, booking, pendingEntry: pendingAddress });
+            await notifyAddressDecision({
+                customer,
+                bookingId: booking.id,
+                decision: 'denied',
+                fromDisplay: result.fromDisplay,
+                toDisplay: result.toDisplay,
+            });
+            toast({ title: 'Address change denied', description: 'The address on file was left unchanged.' });
+            onUpdate();
+        } catch (error) {
+            toast({ title: 'Could not deny address change', description: error.message, variant: 'destructive' });
+        }
     };
 
     const handleApprove = async (booking, mode = 'full') => {
@@ -1695,10 +1739,13 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
 
         const applyAddress = Boolean(toAddress) && !scheduleOnly;
         let approvedOneWayMiles = null;
+        let approvedTravelMinutes = null;
         if (applyAddress) {
             const toDisplayForMiles = formatAddressDisplay(toAddress) || '';
             try {
-                approvedOneWayMiles = await calculateOneWayMilesForAddress(toDisplayForMiles);
+                const trip = await calculateAddressTrip(toDisplayForMiles);
+                approvedOneWayMiles = trip.miles;
+                approvedTravelMinutes = trip.minutes;
             } catch (e) {
                 console.warn('[CustomerVerification] one-way miles calc failed on full approve:', e);
             }
@@ -1728,6 +1775,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
                 bookingUpdate.distance_miles = Number(approvedOneWayMiles);
             }
+            bookingUpdate.addons = addonsWithTrip(booking.addons, approvedOneWayMiles, approvedTravelMinutes);
             bookingUpdate.reschedule_history = markAddressChangesApproved(
                 booking.reschedule_history,
                 approvedAt
@@ -1750,6 +1798,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
                 bookingUpdate.distance_miles = Number(approvedOneWayMiles);
             }
+            bookingUpdate.addons = addonsWithTrip(booking.addons, approvedOneWayMiles, approvedTravelMinutes);
         }
 
         const { error } = await supabase
@@ -1793,9 +1842,33 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     zip: toAddress.zip,
                     unverified_address: Boolean(pendingAddress?.is_manual_address),
                 };
+                const toDisplayForHistory = formatAddressDisplay(toAddress);
+                const hadPending = (Array.isArray(customer.address_history) ? customer.address_history : []).some((entry) => {
+                    if (entry?.status !== 'pending') return false;
+                    const entryTo = formatAddressDisplay(entry.to_address).toLowerCase();
+                    return !toDisplayForHistory || !entryTo || entryTo === toDisplayForHistory.toLowerCase();
+                });
+                let nextAddressHistory = settlePendingAddressHistory(customer.address_history, {
+                    status: 'approved',
+                    resolvedAt: approvedAt,
+                    toDisplay: toDisplayForHistory,
+                });
+                if (!hadPending) {
+                    nextAddressHistory = appendAddressHistory(nextAddressHistory, {
+                        source: pendingAddress?.source || 'reschedule',
+                        status: 'approved',
+                        from_address: fromAddress,
+                        to_address: toAddress,
+                        booking_id: booking.id,
+                        requested_at: pendingAddress?.requested_at || approvedAt,
+                        resolved_at: approvedAt,
+                    });
+                }
+                customerUpdate.address_history = nextAddressHistory;
+                customerUpdate.pending_address = null;
                 if (approvedOneWayMiles != null && Number.isFinite(approvedOneWayMiles) && approvedOneWayMiles > 0) {
                     customerUpdate.distance_miles = Number(approvedOneWayMiles);
-                    customerUpdate.travel_time_minutes = null;
+                    customerUpdate.travel_time_minutes = approvedTravelMinutes;
                 } else {
                     customerUpdate.distance_miles = null;
                     customerUpdate.travel_time_minutes = null;
@@ -2141,12 +2214,29 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             <div className="bg-white/5 p-6 rounded-lg shadow-lg">
                 <h3 className="flex items-center text-xl font-bold text-yellow-400 mb-4"><ShieldAlert className="mr-3 h-6 w-6"/>Pending Booking Verifications</h3>
                  <div className="space-y-4">
+                    {customer?.pending_address && !(verificationBookings || []).some((booking) => getPendingAddressChange(booking.reschedule_history)) && (
+                        <div className="bg-orange-900/30 border border-orange-500 p-4 rounded-lg space-y-3">
+                            <p className="text-orange-300 font-bold">Profile address change needs verification</p>
+                            <p className="text-xs text-yellow-200">Approving updates the address kept on the customer profile. Open orders with this same request are listed on their own cards.</p>
+                            <p className="text-xs text-gray-300"><span className="font-semibold text-gray-400">Current:</span> {formatAddressDisplay(addressFromCustomer(customer)) || 'N/A'}</p>
+                            <p className="text-xs text-orange-100"><span className="font-semibold text-orange-300">Requested:</span> {formatAddressDisplay(customer.pending_address)}</p>
+                            <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="destructive" onClick={handleDenyProfileAddress}>Deny Address</Button>
+                                <Button size="sm" className="bg-orange-600 hover:bg-orange-700" onClick={handleApproveProfileAddress}>Approve Address</Button>
+                            </div>
+                        </div>
+                    )}
                     {verificationBookings?.length > 0 ? verificationBookings.map(booking => {
-                        const styles = getVerificationCardStyles(booking.status);
+                        const styles = pendingAddress && booking.status !== 'pending_review'
+                            ? {
+                                container: 'bg-orange-900/30 border-orange-500',
+                                title: 'text-orange-300 font-bold',
+                                titleText: 'Address change needs verification for Booking #',
+                                nextStep: 'Review the current and requested address, then approve or deny. The live address stays the same until you approve it.',
+                            }
+                            : getVerificationCardStyles(booking.status);
                         const requestNotes = verificationNotes[booking.id] || [];
-                        const pendingAddress = booking.status === 'pending_review'
-                            ? getPendingAddressChange(booking.reschedule_history)
-                            : null;
+                        const pendingAddress = getPendingAddressChange(booking.reschedule_history);
                         const pendingSchedule = booking.status === 'pending_review'
                             ? hasPendingRescheduleRequest(booking)
                             : false;
@@ -2309,9 +2399,27 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                             <Button size="sm" variant="destructive" onClick={() => setSelectedBookingForCancelRejection(booking)}><Ban className="mr-2 h-4 w-4"/>Reject Cancellation</Button>
                                             <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => setSelectedBookingForCancelApproval(booking)}><CheckCircle className="mr-2 h-4 w-4"/>Approve Cancellation</Button>
                                         </>
+                                    ) : pendingAddress && requestedAddressDisplay && booking.status !== 'pending_review' ? (
+                                        <>
+                                            <Button size="sm" variant="destructive" onClick={() => handleDenyAddress(booking)}>
+                                                <X className="mr-2 h-4 w-4"/>Deny Address
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                className="bg-orange-600 hover:bg-orange-700"
+                                                onClick={() => handleApprove(booking, 'address')}
+                                            >
+                                                <MapPin className="mr-2 h-4 w-4"/>Approve Address
+                                            </Button>
+                                        </>
                                     ) : booking.status === 'pending_review' ? (
                                         <>
                                             <Button size="sm" variant="destructive" onClick={() => handleCancelClick(booking)}><X className="mr-2 h-4 w-4"/>Cancel & Refund</Button>
+                                            {pendingAddress && requestedAddressDisplay && (
+                                                <Button size="sm" variant="outline" onClick={() => handleDenyAddress(booking)}>
+                                                    Deny Address
+                                                </Button>
+                                            )}
                                             {pendingAddress && requestedAddressDisplay && (
                                                 <Button
                                                     size="sm"
@@ -2345,7 +2453,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                                 </div>
                             </div>
                         )
-                    }) : (
+                    }) : customer?.pending_address ? null : (
                         <p className="text-center text-blue-200 py-8 bg-black/20 rounded-lg border border-white/5">No bookings are pending verification.</p>
                     )}
                 </div>

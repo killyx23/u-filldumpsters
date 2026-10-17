@@ -25,15 +25,28 @@ const MapFrame = ({ src, title, className }) => (
   />
 );
 
-export const PickupDirectionsMap = ({ customerAddress, businessAddress }) => {
+export const PickupDirectionsMap = ({
+  customerAddress,
+  businessAddress,
+  variant = 'toYard',
+}) => {
   const [expanded, setExpanded] = useState(false);
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const toCustomer = variant === 'toCustomer';
+  const origin = toCustomer ? businessAddress : customerAddress;
+  const destination = toCustomer ? customerAddress : businessAddress;
+  const heading = toCustomer ? 'Route to the customer' : 'Live directions to pickup';
+  const caption = toCustomer ? 'From the yard to this address' : 'From your address to our yard';
+  const dialogTitle = toCustomer ? 'Route to the customer' : 'Directions to pickup location';
+  const dialogDescription = toCustomer
+    ? 'Driving directions from the yard to this address. Drive time includes current traffic when Google has it.'
+    : 'Driving directions from your address to our business location.';
 
   if (!customerAddress || !businessAddress) {
     return null;
   }
 
-  const externalUrl = buildDirectionsExternalUrl(customerAddress, businessAddress);
+  const externalUrl = buildDirectionsExternalUrl(origin, destination);
 
   if (!apiKey) {
     return (
@@ -60,14 +73,14 @@ export const PickupDirectionsMap = ({ customerAddress, businessAddress }) => {
     );
   }
 
-  const embedUrl = buildDirectionsEmbedUrl(apiKey, customerAddress, businessAddress);
+  const embedUrl = buildDirectionsEmbedUrl(apiKey, origin, destination);
 
   return (
     <div className="mt-3">
       <p className="text-sm text-gray-400 flex items-center mb-2">
         <Navigation className="mr-2 h-4 w-4 text-blue-400" />
         <span aria-hidden>🚗</span>
-        <span className="ml-1">Live directions to pickup</span>
+        <span className="ml-1">{heading}</span>
       </p>
       <button
         type="button"
@@ -88,7 +101,7 @@ export const PickupDirectionsMap = ({ customerAddress, businessAddress }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-2">
         <p className="text-xs text-gray-400 truncate" title={businessAddress}>
           <MapPin className="inline h-3 w-3 text-yellow-400 mr-1" />
-          From your address to our yard
+          {caption}
         </p>
         <a
           href={externalUrl}
@@ -107,10 +120,10 @@ export const PickupDirectionsMap = ({ customerAddress, businessAddress }) => {
             <DialogTitle className="text-yellow-400 flex items-center gap-2">
               <MapPin className="h-5 w-5" />
               <span aria-hidden>🗺️</span>
-              Directions to pickup location
+              {dialogTitle}
             </DialogTitle>
             <DialogDescription>
-              Driving directions from your address to our business location.
+              {dialogDescription}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md overflow-hidden border border-white/10">

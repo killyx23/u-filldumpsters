@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { SecureDeleteDialog, SecureDamagePhotoDeleteDialog } from '@/components/admin/SecureDeleteDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectionsMap';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
@@ -217,7 +218,7 @@ const DistanceWarning = ({ booking, customer }) => {
         }
     }, [booking, distance]);
 
-    if (!distance || distance <= 30) return null;
+    if (!distance || Number(distance) <= 30) return null;
 
     return (
         <div className="mt-4 p-4 bg-red-900/40 border border-red-500 rounded-lg">
@@ -229,6 +230,49 @@ const DistanceWarning = ({ booking, customer }) => {
                 <span className="flex items-center"><Clock className="mr-1 h-4 w-4 text-red-400" /> {travelTime} mins</span>
                 <span className="flex items-center">Requires extra travel time for delivery & pickup</span>
             </div>
+        </div>
+    );
+};
+
+const DeliveryRoute = ({ booking, customer }) => {
+    const address = booking.delivery_address?.formatted_address
+        || [booking.street, booking.city, booking.state, booking.zip].filter(Boolean).join(', ');
+    const storedMinutes = booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes || null;
+    const [minutes, setMinutes] = useState(storedMinutes);
+    const [origin, setOrigin] = useState('');
+
+    useEffect(() => {
+        let cancelled = false;
+        setMinutes(storedMinutes);
+        getBusinessAddress()
+            .then((value) => {
+                if (!cancelled) setOrigin(value || '');
+                if (!storedMinutes && address && address.length > 10) {
+                    return calculateDistanceViaGoogleMaps(value, address);
+                }
+                return null;
+            })
+            .then((result) => {
+                if (!cancelled && result?.travelTime) setMinutes(result.travelTime);
+            })
+            .catch((error) => console.error('Drive time lookup failed:', error));
+        return () => {
+            cancelled = true;
+        };
+    }, [address, storedMinutes]);
+
+    if (!address || address.length < 8) return null;
+
+    return (
+        <div className="mt-4">
+            <DetailItem icon={<Clock />} label="Drive time (traffic)" value={minutes ? `${minutes} mins` : 'Calculating…'} />
+            {origin && (
+                <PickupDirectionsMap
+                    variant="toCustomer"
+                    customerAddress={address}
+                    businessAddress={origin}
+                />
+            )}
         </div>
     );
 };
@@ -985,6 +1029,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                         )}
 
                         <DistanceWarning booking={booking} customer={customer} />
+                        <DeliveryRoute booking={booking} customer={customer} />
 
                         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             <DetailItem icon={<Package />} label="Service" value={formatCustomerFacingPlanName(booking.plan?.name)} />
