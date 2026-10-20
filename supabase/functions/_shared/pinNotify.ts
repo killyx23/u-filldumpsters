@@ -3,6 +3,7 @@
  *
  * First message (pin_update) is claimed on bookings.pin_notification_sent_at.
  * 1-hour reminder (pin_reminder) is claimed on bookings.pin_reminder_sent_at.
+ * Failsafe miss (pin_unavailable) is claimed on bookings.pin_unavailable_notified_at.
  * Delivery bookings never get PIN mail (see deliveryBooking.ts).
  */
 
@@ -14,10 +15,10 @@ type SupabaseClient = any;
 async function invokePinEmail(
   supabase: SupabaseClient,
   bookingId: unknown,
-  emailType: "pin_update" | "pin_reminder",
-  pin: string,
-  startTime: string,
-  endTime: string,
+  emailType: "pin_update" | "pin_reminder" | "pin_unavailable",
+  pin = "",
+  startTime = "",
+  endTime = "",
   pinFailsafe = false,
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
@@ -126,4 +127,42 @@ export async function notifyPinReminder(
       .eq("id", bookingId)
       .eq("pin_reminder_sent_at", claimedAt);
   }
+}
+
+/** 5:00 AM AlgoPIN failed. Does not set pin_notification_sent_at. */
+export async function notifyPinUnavailable(
+  supabase: SupabaseClient,
+  booking: Record<string, unknown>,
+): Promise<void> {
+  if (isDeliveryBooking(booking)) return;
+  const bookingId = booking.id;
+  if (bookingId == null) return;
+
+  const claimedAt = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabase
+    .from("bookings")
+    .update({ pin_unavailable_notified_at: claimedAt })
+    .eq("id", bookingId)
+    .is("pin_unavailable_notified_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) {
+    console.error(`[pinNotify] Unavailable claim failed for booking #${bookingId}:`, claimError.message);
+    return;
+  }
+  if (!claimed) return;
+
+  const sent = await invokePinEmail(supabase, bookingId, "pin_unavailable");
+  if (!sent.ok) {
+    console.error(`[pinNotify] Unavailable email failed for booking #${bookingId}:`, sent.error);
+    await supabase
+      .from("bookings")
+      .update({ pin_unavailable_notified_at: null })
+      .eq("id", bookingId)
+      .eq("pin_unavailable_notified_at", claimedAt);
+    return;
+  }
+
+  booking.pin_unavailable_notified_at = claimedAt;
 }

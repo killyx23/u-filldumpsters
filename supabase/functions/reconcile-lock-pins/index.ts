@@ -31,7 +31,8 @@ import { ensurePinOnLock, pollJob, deletePinVerified, pushReservedPin } from "..
 import { reserveMissingYardPins, reserveYardPinForBooking } from "../_shared/reserveYardPin.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
-import { notifyPinReady, notifyPinReminder } from "../_shared/pinNotify.ts";
+import { notifyPinReady, notifyPinReminder, notifyPinUnavailable } from "../_shared/pinNotify.ts";
+import { alertAlgoFailsafeFailed } from "../_shared/lockAlerts.ts";
 import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { BUSINESS_TIME_ZONE } from "../_shared/parseBookingTimeSlot.ts";
 
@@ -164,24 +165,32 @@ async function issueAlgoLastResort(
     });
     if (!algo.success) {
       console.warn(`${LOG} AlgoPIN last resort failed for order #${orderId}: ${algo.error}`);
-      const { data: prior } = await supabase
+      const failMsg =
+        `Custom PIN for Order #${orderId} was still unconfirmed at 5:00 AM, and the AlgoPIN failsafe failed. ` +
+        `Pickup: ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}.`;
+      const { data: priorFailsafe } = await supabase
         .from("rental_tracking_logs")
         .select("id")
         .eq("order_id", orderId)
         .eq("event_type", "sync_error")
+        .ilike("notes", "%AlgoPIN failsafe failed%")
         .limit(1)
         .maybeSingle();
-      if (!prior) {
-        const failMsg =
-          `Custom PIN for Order #${orderId} was still unconfirmed at 5:00 AM, and the AlgoPIN failsafe failed. ` +
-          `Pickup: ${booking.drop_off_date} ${booking.drop_off_time_slot || ""}.`;
+      if (!priorFailsafe) {
         await supabase.from("rental_tracking_logs").insert({
           order_id: orderId,
           event_type: "sync_error",
           event_timestamp: new Date().toISOString(),
           notes: failMsg,
         });
+        await alertAlgoFailsafeFailed({
+          orderId,
+          pickupDate: String(booking.drop_off_date || ""),
+          pickupSlot: String(booking.drop_off_time_slot || ""),
+          error: algo.error || null,
+        });
       }
+      await notifyPinUnavailable(supabase, booking);
       issued.push({ orderId, action: "algopin_failed", error: algo.error });
       continue;
     }

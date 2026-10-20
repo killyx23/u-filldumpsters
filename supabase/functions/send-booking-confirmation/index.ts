@@ -1637,7 +1637,7 @@ Deno.serve(async (req)=>{
 
     // PIN email (issued ~12h before pickup). Delivery bookings never get a padlock code.
     const emailType = body.email_type || body.emailType || "confirmation";
-    if (emailType === "pin_update" || emailType === "pin_reminder") {
+    if (emailType === "pin_update" || emailType === "pin_reminder" || emailType === "pin_unavailable") {
       if (isDeliveryBooking(booking)) {
         console.log(`[${timestamp}] [send-booking-confirmation] Skipping ${emailType} for delivery booking #${booking.id}`);
         return new Response(JSON.stringify({
@@ -1815,6 +1815,56 @@ Deno.serve(async (req)=>{
         provider: extensionResult.provider,
         recipient: recipientEmail,
         email_type: "extension_pin",
+        sms: smsResult,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (emailType === "pin_unavailable") {
+      const portalUrl = `${siteUrl}/customer-portal?tab=access-codes`;
+      const contactUrl = `${siteUrl}/contact`;
+      const unavailableHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:22px;">Your access code — Order #${booking.id}</h1>
+    </div>
+    <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
+      <p>Hi ${booking.name || "there"},</p>
+      <p>You can get your access code in the Customer Portal under <strong>Access Codes</strong>.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="${portalUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">Open Access Codes</a>
+      </p>
+      <p>If you have any issues, use <a href="${contactUrl}">Contact</a> in the website menu or the footer.</p>
+    </div>
+  </div>
+</body></html>`;
+      const unavailableSubject = `Your access code for Order #${booking.id} — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_unavailable to ${recipientEmail}`);
+      const unavailableResult = await sendEmailWithRetry(recipientEmail, unavailableSubject, unavailableHtml);
+      if (!unavailableResult.success) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: "Failed to send PIN unavailable email",
+          details: unavailableResult.error,
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const phone = booking.customers?.phone || booking.phone || "";
+      const smsOptIn = booking.customers?.sms_opt_in !== false;
+      const smsContent =
+        `U-Fill Dumpsters: Get your access code for Order #${booking.id} in the Customer Portal under Access Codes: ${portalUrl}. If you have any issues, use Contact in the website menu or footer: ${contactUrl}`;
+      const smsResult = await sendSms(phone, smsContent, { smsOptIn });
+      console.log(`[${timestamp}] [send-booking-confirmation] pin_unavailable SMS:`, smsResult);
+      return new Response(JSON.stringify({
+        success: true,
+        message: "PIN unavailable email sent successfully",
+        provider: unavailableResult.provider,
+        recipient: recipientEmail,
+        email_type: "pin_unavailable",
         sms: smsResult,
       }), {
         status: 200,

@@ -68,3 +68,29 @@ export async function alertBridgeOfflineWhileUnlocked(details: {
   ], "Connectivity was lost while the lock was still unlocked, so further activity will not be reported until the bridge reconnects.");
   await sendEmail(to, `Bridge offline with ${details.label || details.deviceId} unlocked`, html);
 }
+
+const OWNER_ORDER_EMAIL = "brandon@u-filldumpsters.com";
+
+export async function alertAlgoFailsafeFailed(details: {
+  orderId: number;
+  pickupDate?: string | null;
+  pickupSlot?: string | null;
+  error?: string | null;
+}): Promise<void> {
+  const html = wrap("5:00 AM AlgoPIN failsafe failed", "#b91c1c", [
+    ["Order", `#${details.orderId}`],
+    ["Pickup", `${details.pickupDate || "unknown"} ${details.pickupSlot || ""}`.trim()],
+    ["Error", details.error || "Unknown Igloohome error"],
+  ], "The custom PIN was still unconfirmed at 5:00 AM and the AlgoPIN failsafe could not be created. The customer was told to get the code in the Customer Portal under Access Codes.");
+  const result = await sendEmail(
+    OWNER_ORDER_EMAIL,
+    `AlgoPIN failsafe failed for Order #${details.orderId}`,
+    html,
+  );
+  if (!result.success) {
+    console.error(
+      `[lockAlerts] Owner failsafe alert failed for order #${details.orderId}:`,
+      result.error,
+    );
+  }
+}
