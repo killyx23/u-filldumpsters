@@ -19,16 +19,15 @@ import { getCorsHeaders } from "./cors.ts";
 import {
   addGraceHour,
   buildBookingDateUTC,
-  clampIgloohomeStart,
   denverCalendarDate,
-  getHourlyAlgoPinWindow,
+  getAlgoFailsafeWindow,
   getPinActivationStart,
   isBookingEnded,
   isDueForFirstPinNotify,
   isDueForPinReminder,
   PIN_REVOKE_STATUSES,
 } from "../_shared/pinTiming.ts";
-import { createPinVerified, ensurePinOnLock, pollJob, deletePinVerified } from "../_shared/lockPin.ts";
+import { ensurePinOnLock, pollJob, deletePinVerified, pushReservedPin } from "../_shared/lockPin.ts";
 import { reserveMissingYardPins, reserveYardPinForBooking } from "../_shared/reserveYardPin.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
@@ -97,61 +96,6 @@ function isTrailerRental(booking: Record<string, unknown>): boolean {
   return bookingNeedsYardLockPin(booking);
 }
 
-function toIglooIso(value: string): string {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toISOString().replace(/\.\d{3}Z$/, "+00:00");
-}
-
-/** Send the PIN already stored on the row. Never mints a different code. */
-async function pushReservedPin(
-  accessToken: string,
-  lockId: string,
-  bridgeId: string,
-  supabase: SupabaseClient,
-  pinRow: Record<string, unknown>,
-): Promise<{ action: string; error?: string }> {
-  const pin = String(pinRow.access_pin || "");
-  const rowId = pinRow.id;
-  if (!pin || !rowId) return { action: "missing_pin" };
-
-  if (pinRow.pin_id) {
-    const poll = await pollJob(accessToken, String(pinRow.pin_id), 8_000);
-    if (poll.state === "completed") {
-      await supabase
-        .from("rental_access_codes")
-        .update({ lock_confirmed_at: new Date().toISOString() })
-        .eq("id", rowId);
-      return { action: "confirmed_existing" };
-    }
-    if (poll.state === "pending") return { action: "awaiting_confirmation" };
-  }
-
-  const created = await createPinVerified(
-    accessToken,
-    lockId,
-    bridgeId,
-    pin,
-    clampIgloohomeStart(toIglooIso(String(pinRow.start_time || ""))),
-    toIglooIso(String(pinRow.end_time || "")),
-    `Dump Trailer Rental - Order #${pinRow.order_id}`,
-    20_000,
-  );
-  const attempts = Number(pinRow.confirm_attempts || 0) + 1;
-  await supabase
-    .from("rental_access_codes")
-    .update({
-      pin_id: created.jobId || pinRow.pin_id || "",
-      confirm_attempts: attempts,
-      ...(created.state === "completed" ? { lock_confirmed_at: new Date().toISOString() } : {}),
-    })
-    .eq("id", rowId);
-
-  if (created.state === "completed") return { action: "confirmed_existing" };
-  if (created.state === "failed") return { action: "bridge_rejected", error: created.error };
-  return { action: "awaiting_confirmation", error: created.error };
-}
-
 /**
  * Last resort, only inside the 12-hour customer notice window, and only
  * before any PIN email has been sent. Called at 5:00 AM Denver on pickup
@@ -201,7 +145,7 @@ async function issueAlgoLastResort(
     if (activePin.lock_confirmed_at) continue;
     if (activePin.pin_type !== "bridge_proxied") continue;
 
-    const algoWindow = getHourlyAlgoPinWindow(booking as never);
+    const algoWindow = getAlgoFailsafeWindow(booking as never);
     const algo = await createAlgoPinWithVariance({
       supabase,
       accessToken: oauthResult.token,

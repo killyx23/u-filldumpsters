@@ -1,5 +1,6 @@
 import { getCorsHeaders } from "./cors.ts";
 import { reserveYardPinForBooking } from "../_shared/reserveYardPin.ts";
+import { pushReservedPinForOrder } from "../_shared/lockPin.ts";
 import { Stripe } from "npm:stripe@15.8.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -369,6 +370,10 @@ Deno.serve(async (req)=>{
           Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID") || "",
         );
         log("Yard PIN reserve", reservedPin.action);
+        if (reservedPin.action === "reserved") {
+          const pushed = await pushReservedPinForOrder(supabase, Number(bookingId));
+          log("Yard PIN bridge push", pushed);
+        }
       } catch (reserveErr) {
         console.error("[finalize-booking] yard PIN reserve failed:", reserveErr);
       }

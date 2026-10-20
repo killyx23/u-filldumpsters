@@ -338,16 +338,16 @@ export const CustomerPortalDashboard = () => {
                         </p>
                       </div>
 
-                      {accessCode.start_time && accessCode.end_time && (
+                      {booking?.drop_off_date && (
                         <div className="border-t border-white/10 pt-6">
                           <p className="text-white font-medium">
                             Valid from:{' '}
                             <span className="text-yellow-400">
-                              {formatDateTime(accessCode.start_time, null)}
+                              {formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)}
                             </span>
                             {' '}to{' '}
                             <span className="text-yellow-400">
-                              {formatDateTime(accessCode.end_time, null)}
+                              {formatDateTime(booking.pickup_date, booking.pickup_time_slot)}
                             </span>
                           </p>
                         </div>
@@ -373,10 +373,10 @@ export const CustomerPortalDashboard = () => {
                         <div>
                           <h3 className="font-semibold text-blue-900 mb-2 text-lg">Important Information</h3>
                           <p className="text-blue-800 text-base leading-relaxed">
-                            ⏰ This access code is valid <strong>ONLY</strong> during your scheduled rental period from{' '}
-                            <strong>{formatDateTime(accessCode.start_time, null)}</strong> to{' '}
-                            <strong>{formatDateTime(accessCode.end_time, null)}</strong>. 
-                            The code will not work before or after these times. Please ensure you access the trailer within your rental window.
+                            ⏰ This access code is for your scheduled rental period from{' '}
+                            <strong>{formatDateTime(booking?.drop_off_date, booking?.drop_off_time_slot)}</strong> to{' '}
+                            <strong>{formatDateTime(booking?.pickup_date, booking?.pickup_time_slot)}</strong>.
+                            Please access the trailer within your rental window.
                           </p>
                         </div>
                       </div>

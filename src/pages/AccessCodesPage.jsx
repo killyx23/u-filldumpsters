@@ -376,9 +376,7 @@ export const AccessCodesPage = ({ customerData }) => {
   // Customer-visible window uses appointment times (no hidden grace hour on end_time).
   const visibleStartLabel = booking
     ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
-    : accessCode?.start_time
-      ? formatDateTime(accessCode.start_time, null)
-      : 'N/A';
+    : 'N/A';
   const visibleEndLabel = booking
     ? formatDateTime(booking.pickup_date, booking.pickup_time_slot)
     : 'N/A';

@@ -6,6 +6,9 @@
  * All helpers take a time budget so edge invocations stay under the ~150s gateway limit.
  */
 
+import { clampIgloohomeStart } from "./pinTiming.ts";
+import { BRIDGE_PIN_SCOPES, getOAuthToken } from "./iglooAuth.ts";
+
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 
 export type JobState = "completed" | "failed" | "pending";
@@ -389,6 +392,94 @@ export async function ensurePinOnLock(
     polls: created.polls,
     error: created.error,
   };
+}
+
+function toIglooIso(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+}
+
+/** Send the PIN already stored on the row. Never mints a different code or an AlgoPIN. */
+export async function pushReservedPin(
+  accessToken: string,
+  lockId: string,
+  bridgeId: string,
+  supabase: SupabaseClient,
+  pinRow: Record<string, unknown>,
+): Promise<{ action: string; error?: string }> {
+  const pin = String(pinRow.access_pin || "");
+  const rowId = pinRow.id;
+  if (!pin || !rowId) return { action: "missing_pin" };
+
+  if (pinRow.pin_id) {
+    const poll = await pollJob(accessToken, String(pinRow.pin_id), 8_000);
+    if (poll.state === "completed") {
+      await supabase
+        .from("rental_access_codes")
+        .update({ lock_confirmed_at: new Date().toISOString() })
+        .eq("id", rowId);
+      return { action: "confirmed_existing" };
+    }
+    if (poll.state === "pending") return { action: "awaiting_confirmation" };
+  }
+
+  const created = await createPinVerified(
+    accessToken,
+    lockId,
+    bridgeId,
+    pin,
+    clampIgloohomeStart(toIglooIso(String(pinRow.start_time || ""))),
+    toIglooIso(String(pinRow.end_time || "")),
+    `Dump Trailer Rental - Order #${pinRow.order_id}`,
+    20_000,
+  );
+  const attempts = Number(pinRow.confirm_attempts || 0) + 1;
+  await supabase
+    .from("rental_access_codes")
+    .update({
+      pin_id: created.jobId || pinRow.pin_id || "",
+      confirm_attempts: attempts,
+      ...(created.state === "completed" ? { lock_confirmed_at: new Date().toISOString() } : {}),
+    })
+    .eq("id", rowId);
+
+  if (created.state === "completed") return { action: "confirmed_existing" };
+  if (created.state === "failed") return { action: "bridge_rejected", error: created.error };
+  return { action: "awaiting_confirmation", error: created.error };
+}
+
+/**
+ * Checkout-only bridge send for a PIN just saved on this order.
+ * Does not run reconcile-lock-pins and does not create an AlgoPIN.
+ */
+export async function pushReservedPinForOrder(
+  supabase: SupabaseClient,
+  orderId: number,
+): Promise<{ action: string; error?: string }> {
+  const clientId = Deno.env.get("IGLOOHOME_CLIENT_ID");
+  const clientSecret = Deno.env.get("IGLOOHOME_CLIENT_SECRET");
+  const lockId = Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID");
+  const bridgeId = Deno.env.get("IGLOOHOME_BRIDGE_ID");
+  if (!clientId || !clientSecret || !lockId || !bridgeId) {
+    return { action: "missing_igloo_env" };
+  }
+
+  const { data: pinRow, error } = await supabase
+    .from("rental_access_codes")
+    .select("*")
+    .eq("order_id", orderId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { action: "lookup_failed", error: error.message };
+  if (!pinRow) return { action: "missing_pin" };
+
+  const oauthResult = await getOAuthToken(clientId, clientSecret, BRIDGE_PIN_SCOPES);
+  if (!oauthResult.token) return { action: "oauth_failed", error: oauthResult.reason };
+
+  return pushReservedPin(oauthResult.token, lockId, bridgeId, supabase, pinRow);
 }
 
 export { isoNow, IGLOOHOME_API_BASE_URL };

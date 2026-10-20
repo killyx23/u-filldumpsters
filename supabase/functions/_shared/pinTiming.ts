@@ -226,6 +226,23 @@ export function getPinActivationStart(
   return clampIgloohomeStart(activationIso, now);
 }
 
+/**
+ * 5:00 AM failsafe window. Start is one hour before drop-off, then on the hour
+ * (6:00 AM drop-off → 5:00 AM, 10:00 AM drop-off → 9:00 AM). End is the
+ * scheduled return plus one hour, ceiled to the next hour when needed.
+ * The 5:00 AM clock is only when Igloo is asked; it is not this start time.
+ */
+export function getAlgoFailsafeWindow(
+  booking: BookingWindowFields,
+): { startDate: string; endDate: string } {
+  const { startMs, graceEndIso } = getBookingWindow(booking);
+  const hourBefore = Number.isFinite(startMs) ? new Date(startMs - 60 * 60 * 1000).toISOString() : "";
+  return {
+    startDate: formatAlgoPinStartIso(hourBefore),
+    endDate: formatAlgoPinEndIso(graceEndIso),
+  };
+}
+
 /** Hour-aligned hourly AlgoPIN window: activation start → return + grace, ceiled. */
 export function getHourlyAlgoPinWindow(
   booking: BookingWindowFields,
