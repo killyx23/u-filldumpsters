@@ -124,14 +124,6 @@ export const ContactInfoForm = ({
                                 <InputField icon={<User />} type="text" name="lastName" placeholder="Last Name" value={bookingData.lastName} onChange={handleInputChange} onBlur={handleBlur} required />
                             </div>
                             <InputField icon={<Phone />} type="tel" name="phone" placeholder="Phone Number" value={bookingData.phone} onChange={handleInputChange} onBlur={validatePhoneNumber} required />
-                            <SmsOptInFields
-                                transactional={bookingData.smsTransactionalOptIn}
-                                marketing={bookingData.smsMarketingOptIn}
-                                onTransactionalChange={(checked) => setBookingData(prev => ({ ...prev, smsTransactionalOptIn: checked }))}
-                                onMarketingChange={(checked) => setBookingData(prev => ({ ...prev, smsMarketingOptIn: checked }))}
-                                policiesAccepted={policiesAccepted}
-                                onPoliciesAcceptedChange={(checked) => setBookingData(prev => ({ ...prev, smsPoliciesAccepted: checked }))}
-                            />
                             <InputField icon={<Mail />} type="email" name="email" placeholder="Email Address" value={bookingData.email} onChange={handleInputChange} required />
 
                             {detectingReturning && bookingData.email?.includes('@') && (
@@ -216,6 +208,15 @@ export const ContactInfoForm = ({
                                 <InputField icon={<MapPin />} type="text" value={bookingData.contactAddress?.zip || ''} onChange={(e) => handleManualAddressChange('zip', e.target.value)} placeholder="ZIP Code" />
                             </div>
                         </div>
+
+                        <SmsOptInFields
+                            transactional={bookingData.smsTransactionalOptIn}
+                            marketing={bookingData.smsMarketingOptIn}
+                            onTransactionalChange={(checked) => setBookingData(prev => ({ ...prev, smsTransactionalOptIn: checked }))}
+                            onMarketingChange={(checked) => setBookingData(prev => ({ ...prev, smsMarketingOptIn: checked }))}
+                            policiesAccepted={policiesAccepted}
+                            onPoliciesAcceptedChange={(checked) => setBookingData(prev => ({ ...prev, smsPoliciesAccepted: checked }))}
+                        />
 
                         <div className="pt-4">
                             <Button
