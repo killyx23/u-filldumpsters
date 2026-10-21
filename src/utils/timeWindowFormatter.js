@@ -96,7 +96,7 @@ export function formatTimeWindow(timeString, options = {}) {
 }
 
 /**
- * Delivery arrival/pickup copy: "between 6:00 AM and 8:00 AM".
+ * Delivery drop-off and pickup copy: "between 6 AM and 8 AM".
  * Uses an explicit pipe range when present, otherwise a 2-hour window from the start time.
  */
 export function formatTimeWindowBetween(timeString, options = {}) {
@@ -107,11 +107,20 @@ export function formatTimeWindowBetween(timeString, options = {}) {
     isReturnBy: false,
   });
   if (!formatted || formatted === 'Time not specified') return formatted;
-  if (formatted.includes(' - ')) {
-    const [start, end] = formatted.split(' - ');
-    if (start && end) return `between ${start} and ${end}`;
+  return phraseDeliveryWindow(formatted);
+}
+
+function shortenOnTheHour(label) {
+  return String(label || '').replace(/:00(?=\s)/, '').trim();
+}
+
+function phraseDeliveryWindow(formatted) {
+  const body = String(formatted).trim().replace(/^(?:at|between)\s+/i, '');
+  const parts = body.split(/\s+(?:to|-|–)\s+/);
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return `between ${shortenOnTheHour(parts[0])} and ${shortenOnTheHour(parts[1])}`;
   }
-  return formatted;
+  return `between ${shortenOnTheHour(body)}`;
 }
 
 /**

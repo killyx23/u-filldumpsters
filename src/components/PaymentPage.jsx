@@ -15,7 +15,7 @@ import { DeliveryLocationMap } from '@/components/DeliveryLocationMap';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
-import { formatTimeWindow } from '@/utils/timeWindowFormatter';
+import { formatTimeWindow, formatTimeWindowBetween } from '@/utils/timeWindowFormatter';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
@@ -205,7 +205,7 @@ const CheckoutForm = ({
     try {
       const parsedDate = date instanceof Date ? date : parseISO(date.toString());
       if (!isValid(parsedDate)) return "Invalid Date";
-      return format(parsedDate, 'PPP');
+      return format(parsedDate, 'MMMM do, yyyy');
     } catch (e) { return "Invalid Date"; }
   };
 
@@ -370,6 +370,9 @@ const CheckoutForm = ({
         isReturnBy: !isDropOff,
       });
     }
+    if (isDeliveryService) {
+      return formatTimeWindowBetween(timeSlot, timeOptions);
+    }
     return formatTimeWindow(timeSlot, timeOptions);
   };
 
@@ -383,7 +386,7 @@ const CheckoutForm = ({
       const timeLabel = isDropOff ? 'Pickup Start Time' : 'Return by Time';
       return `${formattedDate}\n${timeLabel}: ${time}${yardLocation}`;
     } else {
-      return `${formattedDate} ${isDeliveryService ? 'at' : 'by'} ${time}${yardLocation}`;
+      return `${formattedDate} ${isDeliveryService ? time : `by ${time}`}${yardLocation}`;
     }
   };
 

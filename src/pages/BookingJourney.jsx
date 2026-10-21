@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Toaster } from '@/components/ui/toaster';
 import { Banner } from '@/components/Banner';
@@ -41,9 +41,8 @@ import { setStoredReferralCode } from '@/utils/referralCodeStorage';
 import { clearRememberedPaymentEquipmentHold } from '@/utils/pendingBookingEquipmentHold';
 import {
   clearBookingDraft,
-  consumeSmsReturnPending,
-  currentReturnPath,
-  readBookingDraft,
+  clearSmsReturnPending,
+  readDraftForCurrentReturn,
   writeBookingDraft,
 } from '@/utils/smsFormReturn';
 
@@ -87,17 +86,18 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     requestLeaveBooking,
   } = useBookingFlow();
 
-  const [currentStep, setCurrentStep] = useState(0);
-  const [highestStep, setHighestStep] = useState(0);
-  const [selectedPlan, setSelectedPlan] = useState(null);
-  const [showDiyEquipmentSelection, setShowDiyEquipmentSelection] = useState(false);
-  const [bookingData, setBookingData] = useState(INITIAL_BOOKING_DATA);
-  const [addonsData, setAddonsData] = useState(INITIAL_ADDONS_DATA);
-  const [basePrice, setBasePrice] = useState(0);
-  const [finalPrice, setFinalPrice] = useState(0);
+  const [restoredDraft] = useState(() => readDraftForCurrentReturn());
+  const [currentStep, setCurrentStep] = useState(restoredDraft?.currentStep || 0);
+  const [highestStep, setHighestStep] = useState(restoredDraft?.highestStep || restoredDraft?.currentStep || 0);
+  const [selectedPlan, setSelectedPlan] = useState(restoredDraft?.selectedPlan || null);
+  const [showDiyEquipmentSelection, setShowDiyEquipmentSelection] = useState(restoredDraft?.showDiyEquipmentSelection === true);
+  const [bookingData, setBookingData] = useState(restoredDraft?.bookingData || INITIAL_BOOKING_DATA);
+  const [addonsData, setAddonsData] = useState(restoredDraft?.addonsData || INITIAL_ADDONS_DATA);
+  const [basePrice, setBasePrice] = useState(restoredDraft?.basePrice || 0);
+  const [finalPrice, setFinalPrice] = useState(restoredDraft?.finalPrice || 0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [deliveryService, setDeliveryService] = useState(false);
-  const [agreementFeeSnapshot, setAgreementFeeSnapshot] = useState([]);
+  const [deliveryService, setDeliveryService] = useState(restoredDraft?.deliveryService === true);
+  const [agreementFeeSnapshot, setAgreementFeeSnapshot] = useState(restoredDraft?.agreementFeeSnapshot || []);
 
   const requiresDriverVerification = isCustomerPickupService(selectedPlan, {
     deliveryService,
@@ -197,23 +197,13 @@ function BookingJourney({ reorderData, onReorderApplied }) {
     window.scrollTo(0, 0);
   }, [updateFlowProgress]);
 
-  useLayoutEffect(() => {
-    const shouldRestore = location.state?.resumeDraft === true || consumeSmsReturnPending(currentReturnPath(location));
-    if (!shouldRestore) return;
-    const draft = readBookingDraft();
-    if (!draft) return;
-    setBookingData(draft.bookingData);
-    setSelectedPlan(draft.selectedPlan);
-    setAddonsData(draft.addonsData || INITIAL_ADDONS_DATA);
-    setBasePrice(draft.basePrice || 0);
-    setFinalPrice(draft.finalPrice || 0);
-    setDeliveryService(draft.deliveryService === true);
-    setAgreementFeeSnapshot(draft.agreementFeeSnapshot || []);
-    setShowDiyEquipmentSelection(draft.showDiyEquipmentSelection === true);
-    setCurrentStep(draft.currentStep || 0);
-    setHighestStep(draft.highestStep || draft.currentStep || 0);
-    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
-  }, [location.pathname, location.search, location.state, navigate]);
+  useEffect(() => {
+    if (!restoredDraft) return undefined;
+    const id = window.setTimeout(() => {
+      clearSmsReturnPending();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [restoredDraft]);
 
   useEffect(() => {
     if (currentStep <= 0) return;

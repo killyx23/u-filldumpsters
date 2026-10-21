@@ -979,14 +979,17 @@ export const BookingForm = ({
   
   const renderDescription = () => {
     const dumpFeeData = getFeeForService(currentPlan?.id);
-    const dynamicFee = dumpFeeData?.fee_per_ton ? parseFloat(dumpFeeData.fee_per_ton).toFixed(2) : '45.00';
+    const adminDumpFee = dumpFeeData?.fee_per_ton != null && dumpFeeData.fee_per_ton !== ''
+      ? parseFloat(dumpFeeData.fee_per_ton).toFixed(2)
+      : null;
+    const dynamicFee = adminDumpFee ?? '45.00';
     const dynamicMaxTons = dumpFeeData?.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
 
     if (currentPlan?.id === 4) {
       return (
         <div className="text-blue-200 space-y-4 text-sm leading-relaxed">
           <p>
-            Experience the ultimate convenience with our Dump Trailer Delivery & Removal Service. Perfect for residential or commercial projects, this service eliminates the need for you to own a towing vehicle.
+            Experience the ultimate convenience with our Dump Trailer Delivery & Removal Service. Perfect for residential or commercial projects, this service eliminates the need for you to own a towing vehicle, saving you extra time and money. You won't have to worry about the extra time it takes to dump the material, or the added gas, wear, and tear. This gives you the convenience to focus on your project instead of hauling everything to the dump yourself.
           </p>
           <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3">
             <p className="font-bold text-yellow-400 mb-1">📅 24-Hour Minimum Rental</p>
@@ -1054,9 +1057,9 @@ export const BookingForm = ({
             <p className="font-bold text-white mb-1">Fee Structure:</p>
             <ul className="list-disc list-inside space-y-1">
               <li>Rental: Base rate per day (calculated below)</li>
-              {currentDeliveryFee > 0 && <li>Base Delivery Fee: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></li>}
-              <li>Mileage Charge: Distance-based calculation from our lot</li>
-              <li>Dump Fees: <span className="text-green-400">${dynamicFee} per ton</span></li>
+              <li>Base Delivery Fee{currentDeliveryFee > 0 ? <>: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></> : ''}</li>
+              <li>The first 30 miles plus mileage to the landfill is included in the basic delivery fee.</li>
+              <li>Additional mileage fee at ${Number(currentMileageRate).toFixed(2)}/mile.</li>
               <li>Weight Limit: <span className="text-orange-400">{dynamicMaxTons || 2.5}-ton maximum capacity</span></li>
             </ul>
           </div>
@@ -1314,7 +1317,9 @@ export const BookingForm = ({
                  {currentDeliveryFee > 0 && <span className="ml-4">Delivery Fee: ${currentDeliveryFee.toFixed(2)}</span>}
               </div>
               {(isDelivery || plan?.id === 1) && <p className="text-xs text-yellow-300 italic flex items-center mt-2">
-                   <Truck className="h-4 w-4 mr-1" /> Mileage charge will be calculated in the next step based on distance.
+                   <Truck className="h-4 w-4 mr-1" /> {isDelivery
+                     ? 'The first 30 miles are covered. Additional miles will be calculated on the next step.'
+                     : 'Mileage charge will be calculated in the next step based on distance.'}
                 </p>}
             </div>
           </div>

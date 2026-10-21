@@ -5,7 +5,7 @@ import { GooglePlacesAutocomplete } from './GooglePlacesAutocomplete';
 import { toast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useLoadScript } from '@react-google-maps/api';
-import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
+import { fetchDistanceAndCalculateFee, TRAILER_DYNAMIC_PRICING_NOTE, TRAILER_GREATER_RANGE_NOTE } from '@/services/DistanceCalculationService';
 import { DeliveryServiceInfo } from './DeliveryServiceInfo';
 import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
 import { applySelectedAddress } from '@/utils/addressHelpers';
@@ -31,10 +31,34 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
   const initialCalcAttempted = useRef(false);
 
   const getTooltipText = () => {
+      if (Number(plan?.id) === 4) {
+          return TRAILER_DYNAMIC_PRICING_NOTE;
+      }
       if (plan?.id === 1) {
           return `For the cost of delivery, it includes the first 30 miles for free, and then we take any additional miles from the delivery to the landfill, and from then on, the mileage is determined by the total cost per mile. The fees are based on the current gas price, which is currently ($${mileageRate.toFixed(2)}/mile).`;
       }
-      return `How we calculate the round-trip driving distance is from Saratoga Springs, to the delivery drop off, then to the landfill, and then we take that mileage to determine the cost per mile. The fees are priced based on the current gas price, which is currently ($${mileageRate.toFixed(2)}/mile).`;
+      return `Mileage is the driving distance for delivery, then to the landfill. The rate follows the current gas price ($${mileageRate.toFixed(2)}/mile).`;
+  };
+
+  const renderMileageNotice = (compact) => {
+      const textClass = compact
+        ? 'text-xs text-cyan-300 font-semibold bg-cyan-900/20 inline-block px-2 py-1 rounded border border-cyan-800/50'
+        : 'text-cyan-300 text-sm font-medium';
+      const noteClass = compact ? 'text-xs text-blue-100' : 'text-sm text-blue-100';
+      const isTrailerDelivery = Number(plan?.id) === 4;
+      const deliveryMiles = Number(addonsData.deliveryRoute?.businessToCustomer) || Number(addonsData.oneWayDistanceMiles) || 0;
+      const overageMiles = Math.round((deliveryMiles - 30) * 10) / 10;
+      const overageText = Number.isInteger(overageMiles) ? String(overageMiles) : overageMiles.toFixed(1);
+      return (
+        <div className={compact ? 'mt-2 space-y-1' : 'space-y-2'}>
+          <p className={textClass}>
+            {addonsData.distanceFeeDisplay || `Mileage Fee: $${addonsData.mileageCharge?.toFixed(2)}`}
+          </p>
+          {isTrailerDelivery && overageMiles > 0 && (
+            <p className={noteClass}>The additional {overageText} miles will be charged extra as overage beyond the included mileage.</p>
+          )}
+        </div>
+      );
   };
 
   const calculateDistance = useCallback(async (address) => {
@@ -45,6 +69,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
             ...prev,
             deliveryAddress: { ...address, unverifiedAccepted: true },
             deliveryDistance: 0,
+            deliveryRoute: null,
             oneWayDistanceMiles: 0,
             mileageCharge: 0,
             deliveryFee: 0,
@@ -75,6 +100,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
           ...prev,
           deliveryAddress: address,
           deliveryDistance: 0,
+          deliveryRoute: null,
           oneWayDistanceMiles: 0,
           mileageCharge: 0,
           deliveryFee: 0,
@@ -85,6 +111,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
           ...prev,
           deliveryAddress: address,
           deliveryDistance: result.distance,
+          deliveryRoute: result.deliveryRoute || null,
           oneWayDistanceMiles: oneWayMiles || 0,
           mileageCharge: result.totalFee,
           deliveryFee: result.totalFee,
@@ -100,6 +127,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
         ...prev,
         deliveryAddress: address,
         deliveryDistance: 0,
+        deliveryRoute: null,
         oneWayDistanceMiles: 0,
         mileageCharge: 0,
         deliveryFee: 0,
@@ -192,7 +220,14 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                                 <Info className="h-5 w-5 text-blue-300 hover:text-white transition-colors cursor-help" />
                             </TooltipTrigger>
                             <TooltipContent side="left" sideOffset={10} className="bg-slate-800 text-white border-slate-700 max-w-sm z-[9999] relative shadow-2xl p-4">
-                                <p className="leading-relaxed font-medium">{getTooltipText()}</p>
+                                {Number(plan?.id) === 4 ? (
+                                    <div className="space-y-2 leading-relaxed font-medium">
+                                        <p>{TRAILER_DYNAMIC_PRICING_NOTE}</p>
+                                        <p>{TRAILER_GREATER_RANGE_NOTE}</p>
+                                    </div>
+                                ) : (
+                                    <p className="leading-relaxed font-medium">{getTooltipText()}</p>
+                                )}
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
@@ -231,11 +266,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                                   </Button>
                                 </div>
                             ) : addonsData.deliveryDistance > 0 ? (
-                                <div className="mt-2 space-y-1">
-                                  <p className="text-xs text-cyan-300 font-semibold bg-cyan-900/20 inline-block px-2 py-1 rounded border border-cyan-800/50">
-                                      {addonsData.distanceFeeDisplay || `Mileage Fee: $${addonsData.mileageCharge?.toFixed(2)}`}
-                                  </p>
-                                </div>
+                                renderMileageNotice(true)
                             ) : null}
                         </div>
                     </div>
@@ -309,10 +340,8 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
                       </Button>
                    </div>
                 ) : addonsData.deliveryAddress?.isVerified && addonsData.deliveryDistance > 0 && (
-                    <div className="bg-green-900/30 border border-green-500/30 p-4 rounded-lg space-y-2">
-                        <div className="text-cyan-300 text-sm font-medium">
-                            {addonsData.distanceFeeDisplay || `Mileage Fee: $${addonsData.mileageCharge?.toFixed(2)}`}
-                        </div>
+                    <div className="bg-green-900/30 border border-green-500/30 p-4 rounded-lg">
+                        {renderMileageNotice(false)}
                     </div>
                 )}
 

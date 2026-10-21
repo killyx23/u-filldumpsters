@@ -6,13 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Helmet } from 'react-helmet';
 import { getDumpFeeForService } from '@/utils/getDumpFeeForService';
-import { calculateRoundTripDistance, getBusinessAddress } from '@/utils/distanceCalculationHelper';
+import { calculateDeliveryRoute, calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
+import { TRAILER_DELIVERY_MILEAGE_EXPLANATION, formatTrailerDeliveryMileage, trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
-
-const LANDFILL_ADDRESS = "800 S Allen Ranch Rd, Fairfield, UT 84013";
 
 export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
@@ -216,6 +215,7 @@ export const ReceiptPage = () => {
                 let totalMiles = 0;
                 let mileageCharge = 0;
                 let mileageExplanation = '';
+                let mileageDisplay = '';
 
                 try {
                     // Get customer delivery address
@@ -223,10 +223,22 @@ export const ReceiptPage = () => {
                     const customerAddress = deliveryAddr?.formatted_address || 
                         `${deliveryAddr?.street || booking.street}, ${deliveryAddr?.city || booking.city}, ${deliveryAddr?.state || booking.state} ${deliveryAddr?.zip || booking.zip}`;
 
-                    // Calculate complete round-trip: Business → Customer → Landfill → Business
-                    totalMiles = await calculateRoundTripDistance(customerAddress);
-                    mileageCharge = totalMiles * mileageRate;
-                    mileageExplanation = `Complete route includes delivery to customer, drop-off at landfill, return to business`;
+                    if (resolvedServiceId === 4) {
+                        const route = await calculateDeliveryRoute(customerAddress);
+                        const priced = trailerDeliveryChargeableMiles(route);
+                        totalMiles = priced.businessToCustomer;
+                        mileageCharge = priced.chargeableDistance * mileageRate;
+                        mileageDisplay = formatTrailerDeliveryMileage({
+                            deliveryMiles: priced.businessToCustomer,
+                            chargeableDistance: priced.chargeableDistance,
+                            mileageCharge,
+                        });
+                        mileageExplanation = TRAILER_DELIVERY_MILEAGE_EXPLANATION;
+                    } else {
+                        totalMiles = await calculateRoundTripDistance(customerAddress);
+                        mileageCharge = totalMiles * mileageRate;
+                        mileageExplanation = 'Mileage covers delivery and the drive to the landfill.';
+                    }
 
                     console.log(`[Receipt] 3-Point Route Calculation: ${totalMiles} miles × $${mileageRate}/mile = $${mileageCharge.toFixed(2)}`);
                 } catch (err) {
@@ -266,6 +278,7 @@ export const ReceiptPage = () => {
                         totalMiles,
                         rate: mileageRate,
                         charge: mileageCharge,
+                        displayText: mileageDisplay,
                         explanation: mileageExplanation
                     },
                     addons: {
@@ -440,7 +453,8 @@ export const ReceiptPage = () => {
                                                     <span className="font-semibold text-white">Mileage Charge</span>
                                                 </div>
                                                 <p className="text-xs text-gray-400 mb-1">
-                                                    {receiptDetails.mileage.totalMiles.toFixed(1)} miles × $1 (complete route) @ ${receiptDetails.mileage.rate.toFixed(2)}/mile
+                                                    {receiptDetails.mileage.displayText
+                                                        || `${receiptDetails.mileage.totalMiles.toFixed(1)} miles @ $${receiptDetails.mileage.rate.toFixed(2)}/mile`}
                                                 </p>
                                                 <p className="text-xs text-blue-300 italic">
                                                     {receiptDetails.mileage.explanation}

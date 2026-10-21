@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { formatTimeWindowBetween } from '@/utils/timeWindowFormatter';
 
 const formatTime = (timeString) => {
     if (!timeString) return 'N/A';
@@ -153,8 +154,8 @@ export const BookingDetails = ({ booking, onEdit, onDelete, onSendConfirmation, 
                 <DetailItem label="Address" value={`${booking.street}, ${booking.city}, ${booking.state} ${booking.zip}`} />
                 <DetailItem label="Service" value={formatCustomerFacingPlanName(booking.plan.name)} />
                 {isDeliveryService && <DetailItem label="Service Type" value="Delivery Service" />}
-                <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={`${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
-                <DetailItem label="Pickup" value={`${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
+                <DetailItem label={isDeliveryService ? "Delivery" : "Drop-off"} value={isDeliveryService ? `${format(parseISO(booking.drop_off_date), 'PPP')} ${formatTimeWindowBetween(booking.drop_off_time_slot)}` : `${format(parseISO(booking.drop_off_date), 'PPP')} at ${formatTime(booking.drop_off_time_slot)}`} />
+                <DetailItem label="Pickup" value={isDeliveryService ? `${format(parseISO(booking.pickup_date), 'PPP')} ${formatTimeWindowBetween(booking.pickup_time_slot)}` : `${format(parseISO(booking.pickup_date), 'PPP')} by ${formatTime(booking.pickup_time_slot)}`} />
                 <DetailItem label="Total" value={`$${booking.total_price.toFixed(2)}`} />
                 {isDeliveryService && booking.addons.distanceInfo.totalFee && <DetailItem label="Delivery Fee" value={`$${booking.addons.distanceInfo.totalFee.toFixed(2)}`} />}
                 <DetailItem label="Stripe Payment ID" value={booking.stripe_payment_intent_id || 'N/A'} />

@@ -119,10 +119,10 @@ export const calculateDistanceViaGoogleMaps = async (origin, destination) => {
 };
 
 /**
- * Calculates total round trip distance using Google Maps:
- * Origin -> Destination -> Landfill -> Origin
+ * Route legs for a delivery:
+ * business -> customer, customer -> landfill, landfill -> business.
  */
-export const calculateRoundTripDistance = async (customerAddressStr) => {
+export const calculateDeliveryRoute = async (customerAddressStr) => {
     try {
         await loadGoogleMaps();
     } catch (err) {
@@ -190,13 +190,24 @@ export const calculateRoundTripDistance = async (customerAddressStr) => {
                 const totalMiles = parseFloat((d1 + d2 + d3).toFixed(1));
                 console.log(`[DistanceHelper] Total Round-Trip Distance: ${totalMiles} miles`);
 
-                resolve(totalMiles);
+                resolve({
+                    businessToCustomer: d1,
+                    customerToLandfill: d2,
+                    landfillToBusiness: d3,
+                    totalMiles,
+                });
             } catch (err) {
                 console.error("[DistanceHelper] Parsing response failed:", err);
                 reject(err);
             }
         });
     });
+};
+
+/** Total miles for business -> customer -> landfill -> business. */
+export const calculateRoundTripDistance = async (customerAddressStr) => {
+    const route = await calculateDeliveryRoute(customerAddressStr);
+    return route.totalMiles;
 };
 
 /**

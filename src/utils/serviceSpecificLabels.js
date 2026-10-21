@@ -107,6 +107,10 @@ export function getFullDateTimeLabel(plan, isDelivery, labelType, dateStr, timeS
     return `${dateLabel}: ${dateStr}\n${timeLabel}: ${timeStr}`;
   }
   
-  // All other services show date and time inline
+  const body = String(timeStr || '').trim().replace(/^(?:at|between)\s+/i, '');
+  const parts = body.split(/\s+(?:to|-|–)\s+/);
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return `${dateLabel}: ${dateStr} between ${parts[0].trim()} and ${parts[1].trim()}`;
+  }
   return `${dateLabel}: ${dateStr} at ${timeStr}`;
 }

@@ -93,7 +93,9 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           iconClassName: 'text-yellow-300',
           shortLabel: 'Mileage note',
           summary: 'Distance-based fees',
-          description: 'Delivery mileage is calculated in a later step based on your address.',
+          description: isDelivery
+            ? "The first 30 miles plus the mileage to the landfill are included in the basic delivery fee, and every additional mile beyond that is charged at the mileage rate."
+            : 'Delivery mileage is calculated in a later step based on your address.',
           howToUse: 'Read the note under the price estimate. No action needed until the add-ons step.',
           visible: isDelivery || planId === 1,
         }),

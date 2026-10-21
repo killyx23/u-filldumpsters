@@ -295,7 +295,7 @@ export const OrderSummary = ({
         // Distance-based mileage charge
         const deliveryDistance = Number(addons?.deliveryDistance || 0);
         if (isDeliveryRequired && deliveryDistance > 0) {
-            const feeResult = calculateDistanceAndFee(deliveryDistance, plan?.id, fetchedMileageRate);
+            const feeResult = calculateDistanceAndFee(deliveryDistance, plan?.id, fetchedMileageRate, addons?.deliveryRoute);
             mileageCharge = Number(feeResult.trip_mileage_cost || 0);
         }
 

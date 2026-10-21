@@ -13,6 +13,7 @@ import {
   roundMoney,
 } from '@/utils/rentalEquipmentPricing';
 import { quoteAddonForComparison } from '@/utils/rescheduleComparison';
+import { trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
 
@@ -91,6 +92,8 @@ export async function calculateRescheduleCosts({
   days,
   addonsList = [],
   distanceMiles = 0,
+  route = null,
+  presetMileageCharge = null,
   taxRate = 0,
   taxOptions = {},
   insurancePrice = 0,
@@ -117,8 +120,17 @@ export async function calculateRescheduleCosts({
   const mileageRate = Number(service.mileage_rate || 0.85);
 
   let mileageCharge = 0;
-  if (isDelivery && distanceMiles > 0) {
-    mileageCharge = distanceMiles * 2 * mileageRate;
+  if (presetMileageCharge != null && Number.isFinite(Number(presetMileageCharge))) {
+    mileageCharge = Number(presetMileageCharge);
+  } else if (isDelivery && (distanceMiles > 0 || route)) {
+    if (Number(service.id) === 4 && route) {
+      const priced = trailerDeliveryChargeableMiles(route);
+      mileageCharge = priced.chargeableDistance * mileageRate;
+    } else if (Number(service.id) === 4) {
+      mileageCharge = Math.max(0, Number(distanceMiles) - 30) * mileageRate;
+    } else {
+      mileageCharge = Number(distanceMiles) * 2 * mileageRate;
+    }
   }
 
   const equipmentPrices = {};

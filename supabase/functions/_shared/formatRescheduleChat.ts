@@ -1,4 +1,4 @@
-import { formatPlainBookingTime } from "./formatBookingTime.ts";
+import { formatDeliveryTimeWindowBetween, formatPlainBookingTime } from "./formatBookingTime.ts";
 
 function formatFriendlyDate(value: unknown): string | null {
   if (!value) return null;
@@ -29,7 +29,13 @@ function formatFriendlyDate(value: unknown): string | null {
 function formatFriendlyDateTime(dateValue: unknown, timeValue: unknown): string | null {
   const datePart = formatFriendlyDate(dateValue);
   const timePart = timeValue ? formatPlainBookingTime(String(timeValue)) : null;
-  if (datePart && timePart && timePart !== "N/A") return `${datePart} at ${timePart}`;
+  if (datePart && timePart && timePart !== "N/A") {
+    const raw = String(timeValue);
+    if (raw.includes("|") || /\s(?:to|-|–)\s/.test(String(timePart))) {
+      return `${datePart} ${formatDeliveryTimeWindowBetween(raw)}`;
+    }
+    return `${datePart} at ${timePart}`;
+  }
   return datePart || (timePart !== "N/A" ? timePart : null) || null;
 }
 

@@ -336,7 +336,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
     }
 
-    const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate);
+    const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate, addonsData?.deliveryRoute);
     const resolvedMileageCharge = calculatedMileageCharge !== undefined ? calculatedMileageCharge : (feeResult.trip_mileage_cost || 0);
 
     const updatedAddons = {

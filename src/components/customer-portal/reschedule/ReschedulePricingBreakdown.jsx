@@ -5,7 +5,8 @@ import { Receipt, Loader2, ArrowRight, AlertCircle, RefreshCw } from 'lucide-rea
 import { supabase } from '@/lib/customSupabaseClient';
 import { calculateDays, buildOriginalAddonsList } from '@/utils/rescheduleCalculations';
 import { alignComparisonAddons } from '@/utils/rescheduleComparison';
-import { calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
+import { calculateDeliveryRoute, calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
+import { TRAILER_DELIVERY_MILEAGE_EXPLANATION, trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
 import { Button } from '@/components/ui/button';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
@@ -204,21 +205,33 @@ export const ReschedulePricingBreakdown = ({
                 let originalTotalMiles = 0;
                 let originalMileageCharge = 0;
 
-                if (originalIsDelivery) {
-                    const storedMiles = booking.customers?.distance_miles;
-                    if (storedMiles && !isNaN(storedMiles)) {
-                        originalTotalMiles = parseFloat(storedMiles);
-                        originalMileageCharge = originalTotalMiles * originalMileageRate;
-                    } else {
-                        try {
-                            const deliveryAddr = booking.delivery_address || booking.contact_address;
-                            const customerAddress = deliveryAddr?.formatted_address ||
-                                `${deliveryAddr?.street || booking.street}, ${deliveryAddr?.city || booking.city}, ${deliveryAddr?.state || booking.state} ${deliveryAddr?.zip || booking.zip}`;
+                let originalRoute = null;
+                const originalDeliveryAddr = booking.delivery_address || booking.contact_address;
+                const originalCustomerAddress = originalDeliveryAddr?.formatted_address ||
+                    `${originalDeliveryAddr?.street || booking.street}, ${originalDeliveryAddr?.city || booking.city}, ${originalDeliveryAddr?.state || booking.state} ${originalDeliveryAddr?.zip || booking.zip}`;
 
-                            originalTotalMiles = await calculateRoundTripDistance(customerAddress);
-                            originalMileageCharge = originalTotalMiles * originalMileageRate;
+                if (originalIsDelivery) {
+                    if (Number(originalService.id) === 4) {
+                        try {
+                            originalRoute = await calculateDeliveryRoute(originalCustomerAddress);
+                            const priced = trailerDeliveryChargeableMiles(originalRoute);
+                            originalTotalMiles = priced.chargeableDistance;
+                            originalMileageCharge = priced.chargeableDistance * originalMileageRate;
                         } catch (err) {
                             console.warn('[ReschedulePricing] Mileage calculation failed, using 0:', err);
+                        }
+                    } else {
+                        const storedMiles = booking.customers?.distance_miles;
+                        if (storedMiles && !isNaN(storedMiles)) {
+                            originalTotalMiles = parseFloat(storedMiles);
+                            originalMileageCharge = originalTotalMiles * originalMileageRate;
+                        } else {
+                            try {
+                                originalTotalMiles = await calculateRoundTripDistance(originalCustomerAddress);
+                                originalMileageCharge = originalTotalMiles * originalMileageRate;
+                            } catch (err) {
+                                console.warn('[ReschedulePricing] Mileage calculation failed, using 0:', err);
+                            }
                         }
                     }
                 }
@@ -248,6 +261,7 @@ export const ReschedulePricingBreakdown = ({
                     days: originalDays,
                     addonsList: originalAddonsForCalc,
                     distanceMiles: originalDistanceForCalc,
+                    route: originalRoute,
                     taxRate,
                     taxOptions: {
                         ...taxOptions,
@@ -290,19 +304,40 @@ export const ReschedulePricingBreakdown = ({
                 const newAddressStr = verifiedAddress || originalAddressStr;
                 const isSameAddress = originalAddressStr === newAddressStr;
 
-                let newMileageCharge = 0;
+                let newMileageCharge = null;
                 let newMileageExplanation = '';
                 let newMileageDistance = 0;
                 let newDistanceForCalc = 0;
+                let newRoute = null;
 
                 if (isNewDeliveryService) {
+                    const trailerDelivery = Number(newService.id) === 4;
                     if (isSameAddress) {
                         newMileageCharge = originalCostsData.mileageCharge;
                         newMileageDistance = originalCostsData.mileageDistance;
                         newDistanceForCalc = Number(booking.customers?.distance_miles) || originalTotalMiles;
-                        newMileageExplanation = `Locked from original (${newMileageDistance.toFixed(2)} mi @ $${newMileageRate.toFixed(2)}/mi)`;
+                        newRoute = originalRoute;
+                        newMileageExplanation = trailerDelivery
+                            ? TRAILER_DELIVERY_MILEAGE_EXPLANATION
+                            : `Locked from original (${newMileageDistance.toFixed(2)} mi @ $${newMileageRate.toFixed(2)}/mi)`;
                     } else if (isManualAddress) {
                         newMileageExplanation = 'Pending manual address verification';
+                    } else if (trailerDelivery) {
+                        try {
+                            newRoute = await calculateDeliveryRoute(newAddressStr);
+                            const priced = trailerDeliveryChargeableMiles(newRoute);
+                            const calculatedCharge = priced.chargeableDistance * newMileageRate;
+                            newMileageCharge = Math.min(calculatedCharge, originalCostsData.mileageCharge);
+                            newMileageDistance = newMileageCharge === calculatedCharge ? priced.chargeableDistance : originalCostsData.mileageDistance;
+                            newDistanceForCalc = priced.businessToCustomer;
+                            newMileageExplanation = TRAILER_DELIVERY_MILEAGE_EXPLANATION;
+                        } catch (err) {
+                            console.error('[ReschedulePricing] New mileage calc failed:', err);
+                            newMileageCharge = originalCostsData.mileageCharge;
+                            newMileageDistance = originalCostsData.mileageDistance;
+                            newDistanceForCalc = Number(booking.customers?.distance_miles) || originalTotalMiles;
+                            newMileageExplanation = TRAILER_DELIVERY_MILEAGE_EXPLANATION;
+                        }
                     } else {
                         try {
                             const calculatedMiles = await calculateRoundTripDistance(newAddressStr);
@@ -333,6 +368,8 @@ export const ReschedulePricingBreakdown = ({
                     days: newDays,
                     addonsList: newAddonsList || [],
                     distanceMiles: isNewDeliveryService ? (newDistanceForCalc || distanceMiles) : 0,
+                    route: newRoute,
+                    presetMileageCharge: newMileageCharge,
                     taxRate,
                     taxOptions,
                     insurancePrice,
@@ -351,7 +388,7 @@ export const ReschedulePricingBreakdown = ({
                 const newCostsData = {
                     baseRentalCost: newCostResult.baseRentalCost,
                     deliveryFee: newDeliveryFeeApplied,
-                    mileageCharge: isNewDeliveryService ? (isManualAddress ? 0 : newMileageCharge || newCostResult.mileageCharge) : 0,
+                    mileageCharge: isNewDeliveryService ? (isManualAddress ? 0 : (newMileageCharge ?? newCostResult.mileageCharge)) : 0,
                     mileageDistance: isNewDeliveryService ? newMileageDistance : 0,
                     mileageRate: newMileageRate,
                     addonsTotal: sumSide('next'),
@@ -476,9 +513,11 @@ export const ReschedulePricingBreakdown = ({
                             alignedAddons={alignedAddons}
                             showDelivery={showDelivery}
                             showMileage={showMileage}
-                            mileageNote={originalDetailedCosts.mileageCharge > 0
+                            mileageNote={Number(originalService?.id) === 4
+                                ? TRAILER_DELIVERY_MILEAGE_EXPLANATION
+                                : (originalDetailedCosts.mileageCharge > 0
                                 ? `${Number(originalDetailedCosts.mileageDistance || 0).toFixed(2)} miles (complete route) @ $${Number(originalDetailedCosts.mileageRate || 0).toFixed(2)}/mile`
-                                : 'Not included'}
+                                : 'Not included')}
                             discountRows={discountRows.map((row) => ({ key: row.key, label: row.label, amount: row.originalAmount }))}
                             taxLabel={taxLabel}
                             currencyInfo={currencyInfo}

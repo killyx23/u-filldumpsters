@@ -26,6 +26,7 @@ import { formatAddressDisplay } from '@/utils/addressHelpers';
 import { formatMilesLabel, resolveOneWayMiles } from '@/utils/bookingMileage';
 import { getBookingWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { formatTimeWindowBetween } from '@/utils/timeWindowFormatter';
 import { extensionOrderLabel, orderChannelLabel } from '@/utils/rentalExtension';
 
 const INACTIVE_STATUSES = new Set([
@@ -114,7 +115,7 @@ function actionForBooking(booking, dateKey) {
                 countdownLabel: 'Until delivery',
                 done: Boolean(booking.delivered_at),
                 doneAt: booking.delivered_at,
-                when: timeLabel(booking.drop_off_time_slot),
+                when: formatTimeWindowBetween(booking.drop_off_time_slot),
                 target: 'start',
             });
     }
@@ -136,7 +137,7 @@ function actionForBooking(booking, dateKey) {
                 countdownLabel: 'Until we pick it up',
                 done: Boolean(booking.picked_up_at),
                 doneAt: booking.picked_up_at,
-                when: timeLabel(booking.pickup_time_slot),
+                when: formatTimeWindowBetween(booking.pickup_time_slot),
                 target: 'end',
             });
     }

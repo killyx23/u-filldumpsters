@@ -1,4 +1,32 @@
-import { calculateRoundTripDistance } from '../utils/distanceCalculationHelper';
+import { calculateDeliveryRoute } from '../utils/distanceCalculationHelper';
+
+export const TRAILER_DELIVERY_MILEAGE_EXPLANATION =
+    "The first 30 miles plus the mileage to the landfill are included in the basic delivery fee, and every additional mile beyond that is charged at the mileage rate.";
+
+export const TRAILER_DYNAMIC_PRICING_NOTE =
+    "This is dynamic pricing, set to stay competitive and to save you a couple plus hours you would otherwise spend.";
+
+export const TRAILER_GREATER_RANGE_NOTE =
+    "Adding a mileage fee lets us reach farther distances at a competitive price, so we can offer our convenient delivery services to the greater valley.";
+
+function formatMileCount(miles) {
+    const rounded = Math.round(Math.max(0, Number(miles) || 0) * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/** Customer-facing mileage line. Overage is billed separately from this sentence. */
+export function formatTrailerDeliveryMileage({ deliveryMiles }) {
+    return `Mileage to delivery is ${formatMileCount(deliveryMiles)} miles.`;
+}
+
+/** The first 30 miles to delivery are included. Every mile past that is charged at the mileage rate. */
+export function trailerDeliveryChargeableMiles(route) {
+    const businessToCustomer = Math.max(0, Number(route?.businessToCustomer) || 0);
+    const customerToLandfill = Math.max(0, Number(route?.customerToLandfill) || 0);
+    const includedMiles = 30;
+    const chargeableDistance = Math.max(0, Number((businessToCustomer - includedMiles).toFixed(1)));
+    return { businessToCustomer, customerToLandfill, includedMiles, chargeableDistance };
+}
 
 const cache = new Map();
 
@@ -11,17 +39,22 @@ const cache = new Map();
  * @param {number} dbRate - Mileage rate fetched from the DB (defaults to 0.85 if omitted)
  * @returns {Object} Fee calculation details and display strings
  */
-export const calculateDistanceAndFee = (distance, planId, dbRate = null) => {
-    if (!distance || distance <= 0) {
+export const calculateDistanceAndFee = (distance, planId, dbRate = null, route = null) => {
+    const numericPlanId = Number(planId);
+    const feePerMile = dbRate !== null && dbRate !== undefined ? Number(dbRate) : 0.85;
+    const trailerSplit = numericPlanId === 4 && route ? trailerDeliveryChargeableMiles(route) : null;
+
+    if ((!distance || distance <= 0) && !trailerSplit) {
         return { distance: 0, total_distance: 0, total_miles: 0, feePerMile: 0, mileage_rate: 0, freeDistance: 0, chargeableDistance: 0, totalFee: 0, mileage_charge: 0, trip_mileage_cost: 0, displayText: '' };
     }
     
-    const feePerMile = dbRate !== null && dbRate !== undefined ? Number(dbRate) : 0.85;
+    // Dumpster (1) includes the first 30 miles of the full route.
+    // Dump trailer delivery (4) includes the first 30 miles to the delivery address.
+    const freeDistance = trailerSplit ? trailerSplit.includedMiles : (numericPlanId === 1 ? 30 : 0);
     
-    // Set free miles strictly based on plan.
-    const freeDistance = planId === 1 ? 30 : 0;
-    
-    const chargeableDistance = Math.max(0, distance - freeDistance);
+    const chargeableDistance = trailerSplit
+        ? trailerSplit.chargeableDistance
+        : Math.max(0, distance - freeDistance);
     
     // trip_mileage_cost calculation (strictly miles * rate, NO flat fees mixed in)
     const trip_mileage_cost = feePerMile > 0 ? chargeableDistance * feePerMile : 0;
@@ -29,7 +62,13 @@ export const calculateDistanceAndFee = (distance, planId, dbRate = null) => {
     console.log(`[DistanceCalculation] Plan ID: ${planId}, Total Distance: ${distance}mi, Free: ${freeDistance}mi, Chargeable: ${chargeableDistance}mi, Rate: $${feePerMile}/mi, Trip Mileage Cost: $${trip_mileage_cost}`);
 
     let displayText = '';
-    if (planId === 1 && freeDistance > 0) {
+    if (numericPlanId === 4) {
+        displayText = formatTrailerDeliveryMileage({
+            deliveryMiles: trailerSplit ? trailerSplit.businessToCustomer : distance,
+            chargeableDistance,
+            mileageCharge: trip_mileage_cost,
+        });
+    } else if (numericPlanId === 1 && freeDistance > 0) {
         displayText = `Mileage Charge: $${trip_mileage_cost.toFixed(2)} (${distance.toFixed(2)} miles total, ${freeDistance} miles free, $${feePerMile.toFixed(2)}/mile)`;
     } else {
         displayText = `Mileage Charge: $${trip_mileage_cost.toFixed(2)} (${distance.toFixed(2)} miles total, $${feePerMile.toFixed(2)}/mile)`;
@@ -75,14 +114,16 @@ export const fetchDistanceAndCalculateFee = async (address, planId, dbRate) => {
     try {
         console.log(`[DistanceCalculation] Fetching distance for: ${addressStr}`);
         // calculateRoundTripDistance internal logic uses business_settings for origin
-        const totalDistanceMiles = await calculateRoundTripDistance(addressStr);
+        const route = await calculateDeliveryRoute(addressStr);
+        const totalDistanceMiles = route.totalMiles;
         
-        const feeData = calculateDistanceAndFee(totalDistanceMiles, planId, dbRate);
+        const feeData = calculateDistanceAndFee(totalDistanceMiles, planId, dbRate, route);
 
         const result = {
             distance: totalDistanceMiles,
             total_distance: totalDistanceMiles,
             total_miles: totalDistanceMiles,
+            deliveryRoute: route,
             mileageFee: feeData.trip_mileage_cost,
             mileage_charge: feeData.trip_mileage_cost,
             totalFee: feeData.trip_mileage_cost,

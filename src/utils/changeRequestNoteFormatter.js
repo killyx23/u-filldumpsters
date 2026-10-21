@@ -57,13 +57,22 @@ export function formatFriendlyTime(timeValue) {
   return converted || raw;
 }
 
+function joinDateAndDeliveryWindow(datePart, timePart) {
+  const body = String(timePart).trim().replace(/^(?:at|between)\s+/i, '');
+  const parts = body.split(/\s+(?:to|-|–)\s+/);
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return `${datePart} between ${parts[0].trim()} and ${parts[1].trim()}`;
+  }
+  return `${datePart} at ${timePart}`;
+}
+
 /**
- * Combine date + time into "Aug 2, 2026 at 6:00 AM".
+ * Combine date + time into "Aug 2, 2026 at 6:00 AM", or a delivery window as "between 6 AM and 8 AM".
  */
 export function formatFriendlyDateTime(dateValue, timeValue) {
   const datePart = formatFriendlyDate(dateValue);
   const timePart = formatFriendlyTime(timeValue);
-  if (datePart && timePart) return `${datePart} at ${timePart}`;
+  if (datePart && timePart) return joinDateAndDeliveryWindow(datePart, timePart);
   return datePart || timePart || null;
 }
 

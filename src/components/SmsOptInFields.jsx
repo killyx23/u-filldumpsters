@@ -4,8 +4,8 @@ import { currentReturnPath, markSmsReturnPending } from '@/utils/smsFormReturn';
 
 export const SMS_BUSINESS_NAME = 'U-Fill Dumpsters';
 export const SMS_SUPPORT_EMAIL = 'support@u-filldumpsters.com';
-export const SMS_SUPPORT_PHONE = '(801) 810-8832';
-export const SMS_SUPPORT_PHONE_TEL = '+18018108832';
+export const SMS_SUPPORT_PHONE = '(855) 591-7723';
+export const SMS_SUPPORT_PHONE_TEL = '+18555917723';
 
 const linkClass = 'text-yellow-300 hover:text-yellow-200 underline';
 

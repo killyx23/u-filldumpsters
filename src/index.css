@@ -223,10 +223,10 @@
 @keyframes see-more-link-pulse {
   0%,
   100% {
-    color: rgb(96 165 250); /* blue-400 — light blue */
+    color: rgb(250 204 21); /* yellow-400 — bright yellow */
   }
   50% {
-    color: rgb(30 58 138); /* blue-900 — dark blue */
+    color: rgb(254 249 195); /* yellow-100 — brighter flash */
   }
 }
 
@@ -235,7 +235,7 @@
 }
 
 .animate-see-more-pulse:hover {
-  color: rgb(147 197 253); /* blue-300 — brighter on hover */
+  color: rgb(254 240 138); /* yellow-200 */
   animation-play-state: paused;
 }
 

@@ -3,6 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, Info } from 'lucide-react';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { TRAILER_DELIVERY_MILEAGE_EXPLANATION } from '@/services/DistanceCalculationService';
+
+const isTrailerDelivery = (service) => Number(service?.id) === 4;
 
 export const DeliveryServiceInfo = ({ isOpen, onClose, planId = 2 }) => {
     const [service, setService] = useState(null);
@@ -56,16 +59,35 @@ export const DeliveryServiceInfo = ({ isOpen, onClose, planId = 2 }) => {
                             </div>
                             <div className="flex items-start">
                                 <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                <p><strong>Mileage charge of ${formatCurrency(service?.mileage_rate)}</strong> per mile (round trip). {service?.id === 1 && <span className="text-green-400 ml-1">(First 30 miles are free!)</span>}</p>
+                                {isTrailerDelivery(service) ? (
+                                    <p>{TRAILER_DELIVERY_MILEAGE_EXPLANATION}</p>
+                                ) : (
+                                    <p><strong>Mileage charge of ${formatCurrency(service?.mileage_rate)}</strong> per mile (round trip). {service?.id === 1 && <span className="text-green-400 ml-1">(First 30 miles are free!)</span>}</p>
+                                )}
                             </div>
-                            <div className="flex items-start">
-                                <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                <p><strong>Dump fees:</strong> ${dynamicFee} per ton{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.</p>
-                            </div>
+                            {isTrailerDelivery(service) && (
+                                <div className="flex items-start">
+                                    <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
+                                    <p>Mileage rate ${formatCurrency(service?.mileage_rate)}/mile.</p>
+                                </div>
+                            )}
+                            {isTrailerDelivery(service) ? (
+                                <div className="flex items-start">
+                                    <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
+                                    <p>The dump will be charged $45 per ton.</p>
+                                </div>
+                            ) : (
+                                <div className="flex items-start">
+                                    <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
+                                    <p><strong>Dump fees:</strong> ${dynamicFee} per ton{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.</p>
+                                </div>
+                            )}
                         </div>
-                        <p className="text-sm text-gray-400 mt-4 italic bg-black/20 p-3 rounded border border-white/5">
-                            Note: All fees are calculated based on our latest dynamically updated rates and apply to your total driving distance.
-                        </p>
+                        {!isTrailerDelivery(service) && (
+                            <p className="text-sm text-gray-400 mt-4 italic bg-black/20 p-3 rounded border border-white/5">
+                                Note: All fees are calculated based on our latest dynamically updated rates and apply to your total driving distance.
+                            </p>
+                        )}
                     </div>
                 )}
             </DialogContent>

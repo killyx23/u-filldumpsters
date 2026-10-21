@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectionsMap';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
+import { formatTimeWindowBetween } from '@/utils/timeWindowFormatter';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
 import { feeChargeEntries, feeIsCharged } from '@/utils/feeCharges';
@@ -983,8 +984,12 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                 const referralDollarsPending = Number(booking.addons?.referralDollarsPending || 0);
                 const referralDollarsRedeemed = Number(booking.addons?.referralDollarsToRedeem || 0);
                 const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
-                const dropOffTimeLabel = convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A';
-                const pickupTimeLabel = convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A';
+                const dropOffTimeLabel = isCustomerPickupService(booking.plan, booking.addons || {})
+                  ? (convertTo12Hour(booking.drop_off_time_slot) || booking.drop_off_time_slot || 'N/A')
+                  : formatTimeWindowBetween(booking.drop_off_time_slot);
+                const pickupTimeLabel = isCustomerPickupService(booking.plan, booking.addons || {})
+                  ? (convertTo12Hour(booking.pickup_time_slot) || booking.pickup_time_slot || 'N/A')
+                  : formatTimeWindowBetween(booking.pickup_time_slot);
                 const oneWayMiles = resolveOneWayMiles(booking, customer);
                 const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
 
@@ -1035,8 +1040,8 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             <DetailItem icon={<Package />} label="Service" value={formatCustomerFacingPlanName(booking.plan?.name)} />
                             <DetailItem icon={<DollarSign />} label="Total Price" value={`$${totalPrice}`} />
                             <DetailItem icon={<Calendar />} label="Booked On" value={booking.created_at ? format(parseISO(booking.created_at), 'Pp') : 'N/A'} />
-                            <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} at ${dropOffTimeLabel}`} />
-                            <DetailItem icon={<Clock />} label={isPickup ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} at ${pickupTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Pickup Time' : 'Drop-off Time'} value={`${booking.drop_off_date ? format(parseISO(booking.drop_off_date), 'PPP') : 'N/A'} ${isPickup ? `at ${dropOffTimeLabel}` : dropOffTimeLabel}`} />
+                            <DetailItem icon={<Clock />} label={isPickup ? 'Return Time' : 'Pickup Time'} value={`${booking.pickup_date ? format(parseISO(booking.pickup_date), 'PPP') : 'N/A'} ${isPickup ? `at ${pickupTimeLabel}` : pickupTimeLabel}`} />
                             <DetailItem icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(oneWayMiles)} />
                             <DetailItem icon={<Hash />} label="Stripe Customer ID" value={stripeCustomerId} />
                             <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />

@@ -20,6 +20,22 @@ export function markSmsReturnPending(path) {
   }
 }
 
+export function peekSmsReturnPending(path) {
+  try {
+    return sessionStorage.getItem(RETURN_PENDING_KEY) === path;
+  } catch {
+    return false;
+  }
+}
+
+export function clearSmsReturnPending() {
+  try {
+    sessionStorage.removeItem(RETURN_PENDING_KEY);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function consumeSmsReturnPending(path) {
   try {
     const pending = sessionStorage.getItem(RETURN_PENDING_KEY);
@@ -29,6 +45,16 @@ export function consumeSmsReturnPending(path) {
   } catch {
     return false;
   }
+}
+
+/** Draft saved before opening Terms or Privacy, if this visit should return to it. */
+export function readDraftForCurrentReturn() {
+  if (typeof window === 'undefined') return null;
+  const path = `${window.location.pathname}${window.location.search}`;
+  const historyState = window.history.state?.usr;
+  const shouldRestore = historyState?.resumeDraft === true || peekSmsReturnPending(path);
+  if (!shouldRestore) return null;
+  return readBookingDraft();
 }
 
 function readJson(key) {

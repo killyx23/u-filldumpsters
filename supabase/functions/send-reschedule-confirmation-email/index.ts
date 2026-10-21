@@ -1,6 +1,6 @@
 import { getCorsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-import { formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
+import { formatDeliveryTimeWindowBetween, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 
@@ -42,7 +42,13 @@ const formatDate = (dateString: unknown) => {
 const formatDateTime = (dateValue: unknown, timeValue: unknown) => {
   const datePart = formatDate(dateValue);
   const timePart = timeValue ? formatPlainBookingTime(String(timeValue)) : null;
-  if (datePart !== "N/A" && timePart && timePart !== "N/A") return `${datePart} at ${timePart}`;
+  if (datePart !== "N/A" && timePart && timePart !== "N/A") {
+    const raw = String(timeValue);
+    if (raw.includes("|") || /\s(?:to|-|–)\s/.test(String(timePart))) {
+      return `${datePart} ${formatDeliveryTimeWindowBetween(raw)}`;
+    }
+    return `${datePart} at ${timePart}`;
+  }
   return datePart;
 };
 

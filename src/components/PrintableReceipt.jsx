@@ -309,7 +309,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const calculatedTotal = resolveBookingGrandTotal(booking) || subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
-    const freeMiles = currentPlan.id === 1 ? 30 : 0;
+    const freeMiles = currentPlan.id === 1 || currentPlan.id === 4 ? 30 : 0;
+    const trailerDeliveryIncludedMiles = currentPlan.id === 4;
     const totalMiles = addons.distanceInfo?.miles || addons.distanceInfo?.roundTripMiles || addons.deliveryDistance || 0;
     const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
 
@@ -558,7 +559,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             
                             {tripMileageCost > 0 && (
                                 <tr className="border-b">
-                                    <td className="py-1 px-6">Mileage Charge ({totalMiles.toFixed(2)} miles{freeMiles > 0 ? `, ${freeMiles} free` : ''})</td>
+                                    <td className="py-1 px-6">{trailerDeliveryIncludedMiles
+                                        ? "Mileage Charge (the first 30 miles plus the mileage to the landfill are included in the basic delivery fee; every additional mile beyond that is charged at the mileage rate)"
+                                        : `Mileage Charge (${totalMiles.toFixed(2)} miles${freeMiles > 0 ? `, ${freeMiles} free` : ''})`}</td>
                                     <td className="text-right py-1 pr-3">${tripMileageCost.toFixed(2)}</td>
                                 </tr>
                             )}

@@ -100,11 +100,22 @@ export function formatBookingTime(
   return formatted;
 }
 
-/** Delivery copy: "between 6:00 AM and 8:00 AM" (pipe range or 2-hour window from start). */
+function formatDeliveryClock(date: Date): string {
+  return formatClock(date).replace(/:00(?=\s)/, "");
+}
+
+/** Delivery drop-off and pickup copy: "between 6 AM and 8 AM". */
 export function formatDeliveryTimeWindowBetween(timeString: string): string {
   const window = parseDeliveryWindow(timeString);
-  if (!window) return timeString || "N/A";
-  return `between ${formatClock(window.start)} and ${formatClock(window.end)}`;
+  if (window) {
+    return `between ${formatDeliveryClock(window.start)} and ${formatDeliveryClock(window.end)}`;
+  }
+  const body = String(timeString || "").trim().replace(/^(?:at|between)\s+/i, "");
+  const parts = body.split(/\s+(?:to|-|–)\s+/);
+  if (parts.length === 2 && parts[0] && parts[1]) {
+    return `between ${parts[0].trim()} and ${parts[1].trim()}`;
+  }
+  return timeString || "N/A";
 }
 
 /** 12-hour time only (no "after" / "by" prefix) for copy that already includes those words. */
