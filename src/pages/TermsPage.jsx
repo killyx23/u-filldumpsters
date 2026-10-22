@@ -38,7 +38,7 @@ export const TermsPage = () => {
         >
           <header className="mb-10">
             <h1 className="text-4xl sm:text-5xl font-bold text-yellow-400 tracking-tight">Terms and Conditions</h1>
-            <p className="mt-4 text-blue-200">U-Fill Dumpsters LLC · Last updated October 15, 2026</p>
+            <p className="mt-4 text-blue-200">U-Fill Dumpsters LLC · Last updated October 22, 2026</p>
           </header>
 
           <div className="space-y-8 text-base sm:text-lg text-blue-100 leading-relaxed">

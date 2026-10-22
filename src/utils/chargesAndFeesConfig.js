@@ -22,6 +22,8 @@ export const DEFAULT_FEES = {
   hpp_missing_lighting_fixture_fee: 75,
   hpp_missing_hydraulic_hose_fee: 100,
   hpp_missing_tarp_assembly_fee: 250,
+  overload_fee: 150,
+  environmental_cleanup_fee: 250,
 };
 
 export const HPP_ENROLLMENT_FEE_KEY = 'hardware_protection_plan_cost';

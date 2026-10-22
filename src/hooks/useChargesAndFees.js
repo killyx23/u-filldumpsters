@@ -13,6 +13,16 @@ const DEFAULT_FEE_META = {
     fee_description:
       'Percentage of the original booking total charged when a reschedule is requested within 24 hours of the original appointment. Higher than the advance reschedule fee because last-minute date changes often cannot be filled by another customer.',
   },
+  overload_fee: {
+    fee_name: 'Overload Fee',
+    fee_description:
+      'Flat dollar amount charged when a dumpster or trailer is loaded past the weight limit or the heavy-material height limit.',
+  },
+  environmental_cleanup_fee: {
+    fee_name: 'Environmental Clean-up Fee',
+    fee_description:
+      'Flat dollar amount charged when prohibited or hazardous materials are found in the equipment, before the actual disposal cost.',
+  },
 };
 
 export const useChargesAndFees = () => {

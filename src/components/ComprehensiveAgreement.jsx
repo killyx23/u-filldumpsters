@@ -57,6 +57,14 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
     if (formatted === UNAVAILABLE_FEE_TEXT) return formatted;
     return `${formatted} tons`;
   };
+  const publishedMoney = (key) => {
+    const raw = fees != null && Object.prototype.hasOwnProperty.call(fees, key) ? fees[key] : null;
+    const amount = Number(raw);
+    if (raw == null || raw === '' || !Number.isFinite(amount)) {
+      return 'the amount then in effect on the Company fee schedule';
+    }
+    return strictFees ? formatAdminMoney(amount) : formatMoney(amount);
+  };
 
   return (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
@@ -127,11 +135,12 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           booking. Timed deliveries or after-hours requests may incur additional dynamic fees.
         </li>
         <li>
-          <strong>Placement &amp; Access:</strong> The Customer must provide a safe, stable placement site on private
-          property unless street/curb placement with required municipal permits has been pre-agreed. The site must be
-          clear of overhead obstructions (wires, branches) and structurally able to support the weight of the
-          Equipment and delivery vehicles. The Customer is solely responsible for obtaining any permits for
-          public/street placement and ensuring compliance with local ordinances.
+          <strong>Placement &amp; Access:</strong> The Customer assumes all responsibility for designating the location
+          where a dumpster or dump trailer is placed. The Customer warrants that any designated location is structurally
+          capable of supporting the weight of the Equipment and the delivery and haul-away trucks. The site must be on
+          private property unless street or curb placement with required municipal permits has been pre-agreed, and it
+          must be clear of overhead obstructions (wires, branches). The Customer is solely responsible for obtaining any
+          permits for public or street placement and ensuring compliance with local ordinances.
         </li>
         <li>
           <strong>Stuck Vehicles:</strong> If a Company vehicle or trailer becomes stuck due to unstable ground
@@ -181,9 +190,9 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
         <li>
           <strong>Municipal Dump Fees &amp; Special Item Fees:</strong> The Customer is responsible for municipal dump
           fees at cost: {money('base_dump_fee')} plus {money('dump_tonnage_rate')} per ton.
-          Special-item disposal fees apply to items requiring special handling (including but not limited to:
-          mattresses, electronics, TVs, major appliances, or appliances containing refrigerant unless certified
-          professional removal documentation is provided). These items are billed at a dynamic range of{' '}
+          Special-item disposal fees apply to mattresses, box springs, televisions (charged per television), and
+          major appliances that do not contain refrigerant. How those items must be handled is stated in Section 5.
+          These items are billed at a dynamic range of{' '}
           {money('special_item_fee_min')} to {money('special_item_fee_max')} per item or actual
           disposal cost.
         </li>
@@ -218,11 +227,27 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
       <h3 className="text-lg text-yellow-300">SECTION 4: WEIGHT LIMITS, LOADING, &amp; SPECIAL SERVICES</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Weight &amp; Moisture:</strong> Dumpsters are rated for up to {tons('dumpster_allowed_tons')}. Dump Trailers have a max capacity limit of {tons('dump_loader_max_tons')}.
-          High-density materials like dirt, soil, concrete, or rock loads must <strong>not exceed halfway up</strong>{' '}
-          the trailer/bin walls. The Customer is responsible for the total scale weight regardless of rain, water,
-          snow, ice, or other moisture accumulated in the open unit during the Rental Period. Overweight loads are
-          subject to immediate additional fees and the refusal of pickup until corrected by the Customer.
+          <strong>Maximum Weight Allowance:</strong> The maximum allowable cargo weight depends on the rental type
+          selected during checkout. If the Customer tows or hauls the Equipment, the absolute maximum cargo weight is 5
+          tons (10,000 lbs). If the Company delivers and hauls the load to the dump (valet service), the absolute
+          maximum cargo weight is 2.5 tons (5,000 lbs).
+        </li>
+        <li>
+          <strong>Heavy Material Height Restrictions:</strong> Dirt, rock, sand, asphalt, concrete, brick, tile, sod,
+          and river rock are extremely dense. They may be loaded only in the rental types that allow them, and only
+          within the weight limits in this section. Heavy materials in Customer-towed Equipment (5-ton limit) must never
+          fill the trailer more than halfway (50%) full. Heavy materials in Company-delivered Equipment (2.5-ton limit)
+          must never fill the dumpster or trailer more than one-fourth (25%) full.
+        </li>
+        <li>
+          <strong>Overload Penalties &amp; Damages:</strong> If the Equipment is overloaded beyond those limits, or
+          filled past the heavy-material height restrictions, the Customer agrees to pay an immediate Overload Fee of{' '}
+          {publishedMoney('overload_fee')}, plus any additional dump fees, fines, or citations issued by state or DOT
+          authorities. The Customer is 100% financially responsible for mechanical damage caused by overloading,
+          including bent axles, suspension damage, blown tires, or failed wheel bearings. The Company may refuse to transport an overloaded
+          unit until the Customer removes the excess weight at the Customer&apos;s own expense. The Customer is also
+          responsible for the total scale weight regardless of rain, water, snow, ice, or other moisture accumulated in
+          an open unit during the Rental Period.
         </li>
         <li>
           <strong>Loading &amp; Fill Line:</strong> Do not exceed the marked Fill Line. Do not place materials that may
@@ -248,19 +273,65 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
       <h3 className="text-lg text-yellow-300">SECTION 5: PROHIBITED MATERIALS &amp; ENVIRONMENTAL LAW</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Prohibited Materials (Enhanced):</strong> The Customer shall <strong>NOT</strong> place hazardous
-          materials into the Equipment, including but not limited to: paints, solvents, chemical compounds, asbestos,
-          motor oils, fuels, liquids, pesticides, medical or biological waste, radioactive materials, explosives,
-          compressed gas cylinders, PCB-containing items, tires (unless explicitly pre-approved in writing), batteries,
-          contaminated soils, or appliances containing refrigerant/Freon (unless professional, documented refrigerant
-          evacuation is provided).
+          <strong>Prohibited Materials:</strong> To protect the equipment, ensure safety, and comply with landfill
+          regulations, the Customer shall <strong>NOT</strong> place the banned materials in this section into a
+          dumpster or trailer.
+          <ul className="list-disc pl-6 mt-2 space-y-2">
+            <li>
+              <strong>Hazardous materials, chemicals, and liquids.</strong> Wet paint, paint thinners, lacquers,
+              stains, varnishes, wood preservatives, and stripping chemicals. Dry, completely hardened paint in cans
+              with the lids off is usually acceptable. Automotive fluids, including motor oil, transmission fluid,
+              brake fluid, power steering fluid, engine coolant and antifreeze, gasoline, diesel, and grease.
+              Flammables and explosives, including propane tanks whether empty or full, oxygen cylinders, aerosol cans,
+              fireworks, ammunition, explosives, fuel tanks, and other compressed gas cylinders. Industrial cleaners,
+              pool chemicals, pesticides, herbicides, fertilizers, poisons, acids, and contaminated soils. Radioactive
+              materials.
+            </li>
+            <li>
+              <strong>Refrigerant appliances.</strong> Refrigerators, freezers, air conditioners, water coolers,
+              dehumidifiers, and any other appliance containing cooling refrigerant, unless professional, documented
+              refrigerant evacuation is provided.
+            </li>
+            <li>
+              <strong>Electronics and e-waste.</strong> Computer monitors, laptops, cell phones, printers, DVD players,
+              VCRs, and gaming consoles. Televisions are not in this ban; they are covered below.
+            </li>
+            <li>
+              <strong>Batteries.</strong> Car batteries, including lead-acid batteries, lithium-ion batteries,
+              motorcycle batteries, and large industrial batteries.
+            </li>
+            <li>
+              <strong>Lighting.</strong> Fluorescent light tubes, light ballasts, and mercury-containing switches.
+            </li>
+            <li>
+              <strong>Tires.</strong> Whole automotive, truck, trailer, and heavy-equipment tires.
+            </li>
+            <li>
+              <strong>Asbestos.</strong> Insulation, siding, ceiling tiles, fireproofing, and any other material
+              containing asbestos.
+            </li>
+            <li>
+              <strong>Medical and biohazardous waste.</strong> Infectious waste, syringes and needles, medical
+              garments, and animal carcasses.
+            </li>
+          </ul>
         </li>
         <li>
-          <strong>Discovery &amp; Remediation:</strong> Discovery of prohibited items will result in the immediate
-          termination of the rental and comprehensive remediation at the Customer&apos;s full expense. Costs for
-          environmental cleanup, proper disposal of hazardous waste, and any physical damage to the equipment will be
-          assessed and billed. Daily rental fees will continue to accumulate against the Customer&apos;s account until the
-          Equipment is thoroughly cleared by proper authorities and returned to active service.
+          <strong>Mattresses, box springs, and televisions:</strong> Mattresses and box springs may be disposed of
+          through the Company, but they cannot be placed in the dumpster or trailer under any circumstances. They are
+          hauled in a truck bed and charged under the special-item disposal fee in Section 3. The Customer must bring
+          them to the curb for pickup. A mattress or box spring found inside the dumpster or trailer is a prohibited
+          load and is also subject to the clean-up charges in this section. Televisions may be accepted only when the
+          separate per-television special-item fee in Section 3 is paid.
+        </li>
+        <li>
+          <strong>Clean-up &amp; Environmental Liability:</strong> If prohibited or hazardous items are found, the rental
+          may be terminated immediately. The Customer will be charged an Environmental Clean-up Fee of{' '}
+          {publishedMoney('environmental_cleanup_fee')}, plus the actual cost of professional hazardous disposal, landfill
+          penalties, sorting fines, and any physical damage to the Equipment. The Customer assumes 100% financial and
+          legal liability for any environmental EPA violations or state or local fines resulting from dumping prohibited
+          materials. Daily rental fees continue until the Equipment is cleared by the proper authorities and returned to
+          active service.
         </li>
         <li>
           <strong>Disposal Laws &amp; Inspections:</strong> The Customer warrants compliance with all federal, state,
@@ -297,27 +368,42 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
       <h3 className="text-lg text-yellow-300">SECTION 7: PROPERTY DAMAGE, COMPLIANCE, &amp; TOWING SAFETY LAWS</h3>
       <ul className="list-disc list-inside space-y-2">
         <li>
-          <strong>Subsurface &amp; Property Damage Disclaimer:</strong> The Company is not liable for damage to
-          undisclosed or inadequately protected subsurface structures. The Customer explicitly acknowledges that
-          delivery vehicles, heavy roll-off trailers, dump bins, skid steers, and excavators are exceptionally heavy.
-          The Company is not liable for scuffing, cracking, indentation, marking, or structural surface damage to
-          asphalt, concrete driveways, pavers, lawns, or landscaping resulting from Equipment weight or material
-          placement.
+          <strong>&quot;AS-IS&quot; Condition &amp; Customer Inspection:</strong> By taking possession of the Equipment,
+          the Customer agrees they have fully inspected the rented items, including but not limited to heavy machinery,
+          dumpsters, dump trailers, tires, brakes, hitch mechanisms, electrical connections, hubs, and wheel bearings.
+          The Customer accepts the Equipment completely &quot;AS-IS&quot; and acknowledges it is in good, safe, and
+          operable condition.
+        </li>
+        <li>
+          <strong>Absolute Release for Property Damage:</strong> The Company is not liable for damage to undisclosed or
+          inadequately protected subsurface structures. The Customer acknowledges that heavy equipment, dumpsters, and
+          dump trailers can cause severe damage to surfaces. The Customer releases the Company from any and all
+          liability for damage to driveways, asphalt, concrete, sidewalks, lawns, landscaping, sprinkler systems,
+          fences, pavers, or underground utilities (including water, gas, power, or septic lines) resulting from the
+          weight, placement, delivery, dropping, or removal of the Equipment.
+        </li>
+        <li>
+          <strong>Surface Protection:</strong> If the Customer is concerned about driveway damage, it is the
+          Customer&apos;s sole responsibility to provide and lay down protective plywood or boards before delivery. The
+          Company does not guarantee that protective materials will prevent damage and remains released from that
+          liability.
         </li>
         <li>
           <strong>Optional Driveway Protection Plan:</strong> An optional Driveway Protection Plan is available for a
           fee of {money('driveway_protection_plan_cost')}. If declined, the Customer accepts full
-          responsibility for potential property damage as described above.
+          responsibility for potential property damage as described above. Purchase of that plan does not cancel the
+          surface-protection and property-damage release in this Section.
         </li>
         <li>
-          <strong>Towing Safety &amp; Transport Compliance:</strong> The Customer assumes 100% compliance responsibility
-          for any Equipment they tow or transport. The Customer warrants they have inspected and verified the presence
-          and proper function of all required safety items, including but not limited to: high-tensile safety chains,
-          proper breakaway switches, secure hitch connections, and compliance towing towels/pads to secure components.
-          The Customer warrants that they fully understand how to safely utilize the Equipment and agree to strictly
-          follow all local, state, and federal transport laws, legal lighting configurations, wiring setups, and speed
-          constraints. The Company accepts zero liability for roadside citations, accidents, or loose cargo during
-          transport.
+          <strong>Towing &amp; Roadside Risks:</strong> The Customer assumes full responsibility for safely coupling any
+          trailer to a properly rated tow vehicle, and for monitoring the Equipment during transport and operation. The
+          Customer acknowledges that mechanical components, including tires, axles, and wheel bearings, can fail
+          unexpectedly because of overloading, uneven weight distribution, or road conditions. The Company is not liable
+          for roadside breakdowns, highway accidents, towing delays, tire failures, roadside citations, or loose cargo
+          once the Equipment leaves the Company&apos;s possession. The Customer warrants they have inspected and verified
+          required safety items, including high-tensile safety chains, breakaway switches, secure hitch connections, and
+          compliance towing towels or pads, and that they will follow all local, state, and federal transport laws,
+          lighting, wiring, and speed limits.
         </li>
       </ul>
 
@@ -332,6 +418,28 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           <strong>Damage Assessment:</strong> Any structural warping, bending, deep gouging, component loss, mechanical
           failure, or dynamic degradation discovered upon return shall be deemed direct Customer damage and will be
           billed at full parts and field labor repair rates.
+        </li>
+        <li>
+          <strong>Theft and Complete Loss:</strong> If the Equipment is stolen, lost, or destroyed during the Rental
+          Period, the Customer agrees to pay the Company the full replacement value of the Equipment, plus any lost
+          rental revenue. The Customer must file a report with local law enforcement and provide a copy to the Company
+          within 24 hours of discovery.
+        </li>
+        <li>
+          <strong>Equipment Security Requirements:</strong> The Customer agrees to keep the Equipment secured at all
+          times when not in use. For towable trailers, the Customer must use a coupler lock, wheel boot, or park the
+          trailer in a locked, secure enclosure.
+        </li>
+        <li>
+          <strong>Tire Damage and Flat Tires:</strong> The Customer is 100% responsible for all tire damage during the
+          Rental Period, including flats, punctures, blowouts, and sidewall damage. If a tire is punctured by debris or
+          a stray nail on a job site or driveway while in the Customer&apos;s possession, the Customer is responsible for
+          the repair or replacement cost with a matching tire of equal quality.
+        </li>
+        <li>
+          <strong>Prohibited Field Repairs:</strong> The Customer shall not attempt any major mechanical or structural
+          repairs, including adjusting wheel bearings, replacing axles, or welding, without the Company&apos;s express
+          written consent.
         </li>
       </ul>
 
@@ -377,11 +485,10 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           associated with the possession, transport, and operation of the Equipment.
         </li>
         <li>
-          <strong>Waiver of Liability:</strong> Except to the extent caused by the Company&apos;s gross negligence or
-          willful misconduct, the Customer hereby releases, waives, and forever discharges the Company, its owners,
-          officers, family representatives, and employees from any and all liability, claims, losses, or lawsuits
-          arising out of the operation, transportation, failure, structural placement, malfunction, or presence of the
-          Equipment or Services.
+          <strong>Waiver of Ordinary Negligence:</strong> To the maximum extent permitted by Utah law, the Customer
+          explicitly releases, waives, and discharges the Company, its members, and employees from any and all
+          liability, claims, or lawsuits for personal injury, death, or property damage resulting from the ordinary
+          negligence of the Company regarding the inspection, maintenance, selection, or delivery of the Equipment.
         </li>
         <li>
           <strong>Company Legal Fees Exemption:</strong> The Company shall NEVER be liable for any legal fees, defense

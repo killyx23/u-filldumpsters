@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
 import { Bot, Send, Loader2, MessageSquare, AlertCircle, CheckCircle } from 'lucide-react';
 import { fetchFAQs, fetchKnowledgeBase, findRelevantAnswer, shouldShowFAQAnswer, submitFallbackMessage } from '@/services/AIAssistantService';
+import { stripHtml } from '@/utils/faqAnswer';
 import { BusinessHoursDisplay } from './BusinessHoursDisplay';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -99,7 +100,7 @@ export const AIAssistant = ({ customer }) => {
           content = entry.content;
           relatedQuestion = entry.title;
         } else {
-          content = entry.answer;
+          content = stripHtml(entry.answer);
           relatedQuestion = entry.question;
         }
 

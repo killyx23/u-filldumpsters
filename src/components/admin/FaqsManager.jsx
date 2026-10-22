@@ -1,34 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Plus, Edit, Trash2, Save, GripVertical, Smile } from 'lucide-react';
+import { Loader2, Plus, Edit, Trash2, Save, GripVertical, ArrowUp, ArrowDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import EmojiPicker from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FaqRichAnswerEditor } from '@/components/admin/FaqRichAnswerEditor';
+import { answerHasContent, stripHtml } from '@/utils/faqAnswer';
 
 const FaqForm = ({ faq, onSave, onCancel, open }) => {
     const [question, setQuestion] = useState('');
     const [answer, setAnswer] = useState('');
+    const [sessionKey, setSessionKey] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (open) {
             setQuestion(faq?.question || '');
             setAnswer(faq?.answer || '');
+            setSessionKey(`${faq?.id || 'new'}-${Date.now()}`);
         }
     }, [faq, open]);
 
-    const onEmojiClick = (emojiObject) => {
-        setAnswer(prevAnswer => prevAnswer + emojiObject.emoji);
-    };
-
     const handleSave = async () => {
-        if (!question.trim() || !answer.trim()) {
+        if (!question.trim() || !answerHasContent(answer)) {
             toast({ title: "Validation Error", description: "Question and answer cannot be empty.", variant: "destructive" });
             return;
         }
@@ -38,11 +35,11 @@ const FaqForm = ({ faq, onSave, onCancel, open }) => {
     };
 
     return (
-        <DialogContent className="bg-gray-900 border-yellow-400 text-white">
+        <DialogContent className="bg-gray-900 border-yellow-400 text-white max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
                 <DialogTitle>{faq ? 'Edit FAQ' : 'Create New FAQ'}</DialogTitle>
                 <DialogDescription>
-                    Fill in the details for the frequently asked question.
+                    Write the answer with formatting, colors, and tables. Use the comparison-table button for a side-by-side chart.
                 </DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4">
@@ -50,19 +47,11 @@ const FaqForm = ({ faq, onSave, onCancel, open }) => {
                     <Label htmlFor="question">Question</Label>
                     <Input id="question" value={question} onChange={e => setQuestion(e.target.value)} className="bg-white/10" />
                 </div>
-                <div className="relative">
+                <div>
                     <Label htmlFor="answer">Answer</Label>
-                    <Textarea id="answer" value={answer} onChange={e => setAnswer(e.target.value)} rows={6} className="bg-white/10 pr-10" />
-                     <Popover>
-                        <PopoverTrigger asChild>
-                            <Button size="icon" variant="ghost" className="absolute bottom-2 right-1 text-gray-400 hover:text-white">
-                                <Smile className="h-5 w-5" />
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0 border-0 bg-transparent mb-2">
-                            <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" />
-                        </PopoverContent>
-                    </Popover>
+                    {open && sessionKey ? (
+                        <FaqRichAnswerEditor sessionKey={sessionKey} value={answer} onChange={setAnswer} />
+                    ) : null}
                 </div>
             </div>
             <DialogFooter>
@@ -83,6 +72,9 @@ export const FaqsManager = () => {
     const [editingFaq, setEditingFaq] = useState(null);
     const [draggedItem, setDraggedItem] = useState(null);
     const [dragOverItem, setDragOverItem] = useState(null);
+    const [savingOrder, setSavingOrder] = useState(false);
+    const draggedIndexRef = useRef(null);
+    const dragOverIndexRef = useRef(null);
 
     const fetchFaqs = useCallback(async () => {
         setLoading(true);
@@ -135,33 +127,46 @@ export const FaqsManager = () => {
         }
     };
 
-    const handleDragEnd = async () => {
-        if (draggedItem === null || dragOverItem === null || draggedItem === dragOverItem) {
-            setDraggedItem(null);
-            setDragOverItem(null);
+    const persistOrder = async (items) => {
+        setFaqs(items);
+        setSavingOrder(true);
+        const results = await Promise.all(
+            items.map((faq, index) =>
+                supabase.from('faqs').update({ position: index }).eq('id', faq.id)
+            )
+        );
+        const failed = results.find((result) => result.error);
+        setSavingOrder(false);
+        if (failed) {
+            toast({ title: 'Failed to reorder FAQs', description: failed.error.message, variant: 'destructive' });
+            fetchFaqs();
             return;
         }
+        toast({ title: 'Order saved!' });
+    };
 
-        let items = [...faqs];
-        const draggedContent = items.splice(draggedItem, 1)[0];
-        items.splice(dragOverItem, 0, draggedContent);
+    const moveFaq = (index, direction) => {
+        const target = index + direction;
+        if (savingOrder || target < 0 || target >= faqs.length) return;
+        const items = [...faqs];
+        const [moved] = items.splice(index, 1);
+        items.splice(target, 0, moved);
+        persistOrder(items);
+    };
 
-        setFaqs(items);
-
-        const updates = items.map((faq, index) => ({
-            id: faq.id,
-            position: index,
-        }));
-
-        const { error } = await supabase.from('faqs').upsert(updates);
-        if (error) {
-            toast({ title: 'Failed to reorder FAQs', description: error.message, variant: 'destructive' });
-            fetchFaqs(); // Revert on error
-        } else {
-            toast({ title: 'Order saved!' });
-        }
+    const handleDragEnd = () => {
+        const from = draggedIndexRef.current;
+        const to = dragOverIndexRef.current;
+        draggedIndexRef.current = null;
+        dragOverIndexRef.current = null;
         setDraggedItem(null);
         setDragOverItem(null);
+        if (from === null || to === null || from === to || savingOrder) return;
+
+        const items = [...faqs];
+        const [moved] = items.splice(from, 1);
+        items.splice(to, 0, moved);
+        persistOrder(items);
     };
 
     if (loading) {
@@ -185,21 +190,53 @@ export const FaqsManager = () => {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className={`bg-white/5 p-4 rounded-lg flex items-center justify-between gap-4 ${draggedItem === index ? 'opacity-50' : ''}`}
-                            draggable
-                            onDragStart={() => setDraggedItem(index)}
-                            onDragEnter={() => setDragOverItem(index)}
-                            onDragEnd={handleDragEnd}
-                            onDragOver={(e) => e.preventDefault()}
+                            className={`bg-white/5 p-4 rounded-lg flex items-center justify-between gap-4 ${draggedItem === index ? 'opacity-50' : ''} ${dragOverItem === index && draggedItem !== index ? 'ring-2 ring-yellow-400' : ''}`}
+                            onDragEnter={() => {
+                                dragOverIndexRef.current = index;
+                                setDragOverItem(index);
+                            }}
+                            onDragOver={(event) => event.preventDefault()}
                         >
                             <div className="flex items-center gap-4 flex-grow">
-                                <GripVertical className="h-5 w-5 text-gray-400 cursor-grab" />
+                                <div
+                                    draggable={!savingOrder}
+                                    aria-label="Drag to reorder"
+                                    className="cursor-grab text-gray-400 active:cursor-grabbing"
+                                    onDragStart={(event) => {
+                                        event.dataTransfer.effectAllowed = 'move';
+                                        event.dataTransfer.setData('text/plain', String(index));
+                                        draggedIndexRef.current = index;
+                                        dragOverIndexRef.current = index;
+                                        setDraggedItem(index);
+                                    }}
+                                    onDragEnd={handleDragEnd}
+                                >
+                                    <GripVertical className="h-5 w-5" />
+                                </div>
                                 <div className="flex-grow">
                                     <p className="font-bold">{faq.question}</p>
-                                    <p className="text-sm text-blue-200 line-clamp-1">{faq.answer}</p>
+                                    <p className="text-sm text-blue-200 line-clamp-1">{stripHtml(faq.answer)}</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    aria-label="Move up"
+                                    disabled={savingOrder || index === 0}
+                                    onClick={() => moveFaq(index, -1)}
+                                >
+                                    <ArrowUp className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    aria-label="Move down"
+                                    disabled={savingOrder || index === faqs.length - 1}
+                                    onClick={() => moveFaq(index, 1)}
+                                >
+                                    <ArrowDown className="h-4 w-4" />
+                                </Button>
                                 <Button variant="outline" size="sm" onClick={() => { setEditingFaq(faq); setIsFormOpen(true); }}>
                                     <Edit className="mr-2 h-4 w-4" /> Edit
                                 </Button>

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/customSupabaseClient';
+import { stripHtml } from '@/utils/faqAnswer';
 
 /**
  * AI Assistant Service
@@ -142,7 +143,7 @@ export const findRelevantAnswer = async (question, knowledgeBase = null, faqs = 
     if (faqs && faqs.length > 0) {
       const faqScored = faqs.map(faq => {
         const faqQuestionTokens = tokenize(faq.question);
-        const faqAnswerTokens = tokenize(faq.answer);
+        const faqAnswerTokens = tokenize(stripHtml(faq.answer));
         
         const questionSimilarity = calculateJaccardSimilarity(questionTokens, faqQuestionTokens);
         const answerSimilarity = calculateJaccardSimilarity(questionTokens, faqAnswerTokens);
@@ -191,7 +192,7 @@ export const findRelevantFAQ = (question, faqs) => {
 
   const scored = faqs.map(faq => {
     const faqQuestionTokens = tokenize(faq.question);
-    const faqAnswerTokens = tokenize(faq.answer);
+    const faqAnswerTokens = tokenize(stripHtml(faq.answer));
     
     const questionSimilarity = calculateJaccardSimilarity(questionTokens, faqQuestionTokens);
     const answerSimilarity = calculateJaccardSimilarity(questionTokens, faqAnswerTokens);

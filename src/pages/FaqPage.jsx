@@ -5,6 +5,8 @@ import { ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import { isHtmlAnswer } from '@/utils/faqAnswer';
+import { sanitizeFaqAnswer } from '@/utils/sanitizeFaqAnswer';
 
 const FaqItem = ({ q, a, isOpen, onClick }) => {
   return (
@@ -22,7 +24,14 @@ const FaqItem = ({ q, a, isOpen, onClick }) => {
         transition={{ duration: 0.3 }}
         className="overflow-hidden"
       >
-        <p className="text-blue-200 whitespace-pre-wrap">{a}</p>
+        {isHtmlAnswer(a) ? (
+          <div
+            className="faq-answer overflow-x-auto"
+            dangerouslySetInnerHTML={{ __html: sanitizeFaqAnswer(a) }}
+          />
+        ) : (
+          <p className="text-blue-200 whitespace-pre-wrap">{a}</p>
+        )}
       </motion.div>
     </div>
   );
