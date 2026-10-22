@@ -5,9 +5,10 @@
  * 2) GET /devices/{id}/activity — reads stored unlock/lock history
  * 3) Match PINs → bookings, apply rented/returned state machine
  *
- * The cron still ticks every 5 minutes, but the bridge is only woken while a
+ * The cron still ticks every 5 minutes. The bridge is only woken while a
  * pickup is waiting for its first unlock, while a return is due, or while a
- * lock is still recorded as open. POST { "force": true } always wakes it.
+ * lock is still recorded as open, and at most once an hour. POST { "force": true }
+ * always wakes it.
  *
  * Probe mode: POST { "probe": true } or ?probe=1 — returns raw payloads
  * without applying state changes.
@@ -36,6 +37,7 @@ import {
 } from "../_shared/iglooAuth.ts";
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
+const ACTIVITY_PULL_MIN_MS = 60 * 60 * 1000;
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -229,6 +231,27 @@ Deno.serve(async (req) => {
         });
       }
       console.log(`[sync-lock-activity] Waking bridge for ${wake}`);
+
+      const { data: pullRow } = await supabase
+        .from("lock_devices")
+        .select("activity_pulled_at")
+        .eq("device_id", lockId)
+        .maybeSingle();
+      const lastPullMs = pullRow?.activity_pulled_at
+        ? new Date(String(pullRow.activity_pulled_at)).getTime()
+        : NaN;
+      if (Number.isFinite(lastPullMs) && Date.now() - lastPullMs < ACTIVITY_PULL_MIN_MS) {
+        const swept = await sweepGraceHourReturns(supabase);
+        console.log("[sync-lock-activity] Bridge left asleep; last GET_LOGS was under an hour ago");
+        return jsonResponse({
+          success: true,
+          skipped: true,
+          reason: "activity_pulled_recently",
+          wake,
+          lastPulledAt: pullRow?.activity_pulled_at,
+          graceHourClosed: swept,
+        });
+      }
     }
 
     const oauth = await getActivitySyncToken(clientId, clientSecret);
@@ -242,6 +265,16 @@ Deno.serve(async (req) => {
     const accessToken = oauth.token;
 
     const jobCreate = await createActivityLogJob(accessToken, lockId, bridgeId);
+    if (jobCreate.success) {
+      const pulledAt = new Date().toISOString();
+      const { error: stampError } = await supabase
+        .from("lock_devices")
+        .update({ activity_pulled_at: pulledAt })
+        .eq("device_id", lockId);
+      if (stampError) {
+        console.error("[sync-lock-activity] activity_pulled_at stamp failed:", stampError.message);
+      }
+    }
     if (!jobCreate.success) {
       const forbidden = /403|401|Forbidden/i.test(String(jobCreate.error || ""));
       return jsonResponse({
