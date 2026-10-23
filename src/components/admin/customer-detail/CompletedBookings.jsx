@@ -309,6 +309,13 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                              <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                             {isCustomerPickupService(booking.plan, booking.addons || {}) && (
+                               <DetailItem
+                                 icon={<CheckCircle className={booking.return_lock_at ? 'text-green-400' : 'text-gray-500'} />}
+                                 label="Final lock close (fee time)"
+                                 value={booking.return_lock_at ? format(parseISO(booking.return_lock_at), 'Pp') : 'Not recorded'}
+                               />
+                             )}
                              {(() => {
                                  const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
                                  const pickedUpAt = isPickup

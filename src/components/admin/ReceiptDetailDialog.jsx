@@ -126,6 +126,13 @@ import { feeChargeEntries } from '@/utils/feeCharges';
                             <DetailRow icon={<Clock />} label={isSelfService ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} ${formatTime(pickup_time_slot, { isReturnBy: isSelfService })}`} />
                             {pickedUpAt && <DetailRow icon={<Clock />} label="Picked Up On" value={format(parseISO(pickedUpAt), 'Pp')} />}
                             {booking.returned_at && <DetailRow icon={<Clock />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                            {isSelfService && (
+                              <DetailRow
+                                icon={<Clock />}
+                                label="Final lock close (fee time)"
+                                value={booking.return_lock_at ? format(parseISO(booking.return_lock_at), 'Pp') : 'Not recorded'}
+                              />
+                            )}
                         </section>
 
                         {rescheduleApproval && (

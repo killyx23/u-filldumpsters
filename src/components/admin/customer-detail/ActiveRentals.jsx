@@ -27,6 +27,7 @@ import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { extensionOrderLabel } from '@/utils/rentalExtension';
 import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
+import { ManualYardReturnDialog } from '@/components/admin/customer-detail/ManualYardReturnDialog';
 
 function BackupReturnCodeButton({ bookingId }) {
     const [busy, setBusy] = useState(false);
@@ -878,7 +879,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
     };
 
     const STATUS_UPDATE_SELECT =
-        'id, status, rented_out_at, delivered_at, returned_at, picked_up_at';
+        'id, status, rented_out_at, delivered_at, returned_at, return_lock_at, picked_up_at';
 
     const handleStatusUpdate = async (bookingId, newStatus, timestampField) => {
         let updates = { status: newStatus };
@@ -918,9 +919,9 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
 
         let updates = { status: newStatus };
         switch (newStatus) {
-            case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null }; break;
+            case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null, return_lock_at: null }; break;
             case 'Delivered':
-                 updates = { ...updates, picked_up_at: null, returned_at: null };
+                 updates = { ...updates, picked_up_at: null, returned_at: null, return_lock_at: null };
                  const bookingForDelivered = bookings.find(b => b.id === bookingId);
                  const timestampField = isCustomerPickupService(bookingForDelivered?.plan, bookingForDelivered?.addons || {}) ? 'rented_out_at' : 'delivered_at';
                  if (!bookingForDelivered?.[timestampField]) updates[timestampField] = new Date().toISOString();
@@ -1097,11 +1098,18 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                     value={format(parseISO(booking.returned_at), 'Pp')}
                                   />
                                 )}
+                                {isPickup && (
+                                  <DetailItem
+                                    icon={<CheckCircle className={booking.return_lock_at ? 'text-green-400' : 'text-gray-500'} />}
+                                    label="Final lock close (fee time)"
+                                    value={booking.return_lock_at ? format(parseISO(booking.return_lock_at), 'Pp') : 'Not recorded'}
+                                  />
+                                )}
                                 {isPickup && !booking.rented_out_at && (
                                   <p className="text-xs text-blue-200/80 italic">Waiting for first unlock via Wi-Fi bridge — or mark rented manually.</p>
                                 )}
                                 {isPickup && booking.rented_out_at && !booking.returned_at && (
-                                  <p className="text-xs text-blue-200/80 italic">Rental in progress. Final lock at/after return time will mark Returned automatically.</p>
+                                  <p className="text-xs text-blue-200/80 italic">A lock close from two hours before the return time marks this returned. If the trailer is in the yard but out of Bluetooth range, mark it returned with a photo or gate scan.</p>
                                 )}
                             </div>
                            
@@ -1115,7 +1123,11 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                             {isPickup && (
                                 <>
                                     <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'Delivered', 'rented_out_at')} disabled={!!booking.rented_out_at}>Mark as Rented</Button>
-                                    <Button size="sm" onClick={() => handleStatusUpdate(booking.id, 'pending_checklist', 'returned_at')} disabled={!booking.rented_out_at || !!booking.returned_at}>Mark as Returned</Button>
+                                    <ManualYardReturnDialog
+                                      booking={booking}
+                                      onDone={onUpdate}
+                                      disabled={!booking.rented_out_at || !!booking.returned_at}
+                                    />
                                 </>
                             )}
                              <DropdownMenu>

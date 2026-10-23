@@ -9,6 +9,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { logBookingChargeHistory } from '@/utils/bookingChargeHistory';
 import { AlertTriangle, Clock, DollarSign, Save } from 'lucide-react';
 import { format, differenceInMinutes } from 'date-fns';
+import { getPickupWindowTimes } from '@/utils/bookingPickupWindow';
 
 export const OverdueFeeManagement = ({ booking, onUpdate }) => {
   const [overdueFee, setOverdueFee] = useState('');
@@ -35,8 +36,13 @@ export const OverdueFeeManagement = ({ booking, onUpdate }) => {
         console.error('[OverdueFeeManagement] Error checking return status:', error);
       }
 
-      const scheduledReturnTime = new Date(booking.pickup_date);
-      const actualReturnTime = lockEvent ? new Date(lockEvent.event_timestamp) : null;
+      const scheduledReturnTime = getPickupWindowTimes(booking).returnBy || new Date(booking.pickup_date);
+      const lockClose = booking.return_lock_at || null;
+      const actualReturnTime = lockClose
+        ? new Date(lockClose)
+        : lockEvent
+          ? new Date(lockEvent.event_timestamp)
+          : null;
       const now = new Date();
 
       // Calculate if overdue
@@ -49,7 +55,8 @@ export const OverdueFeeManagement = ({ booking, onUpdate }) => {
         actual: actualReturnTime,
         is_overdue: minutesOverdue > 30,
         minutes_overdue: minutesOverdue,
-        has_lock_event: !!lockEvent
+        has_lock_event: Boolean(lockClose || lockEvent),
+        lock_close: lockClose,
       });
 
     } catch (error) {
@@ -172,7 +179,7 @@ export const OverdueFeeManagement = ({ booking, onUpdate }) => {
           </div>
 
           <div className="bg-white/5 p-4 rounded-lg">
-            <p className="text-sm text-gray-400 mb-1">Actual Return</p>
+            <p className="text-sm text-gray-400 mb-1">{returnStatus.lock_close ? 'Final lock close (fee time)' : 'Actual Return'}</p>
             <p className="text-white font-bold">
               {returnStatus.actual 
                 ? format(returnStatus.actual, 'MMM d, yyyy h:mm a')

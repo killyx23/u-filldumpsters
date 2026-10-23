@@ -268,6 +268,13 @@ export const ComprehensiveHistoryDialog = ({
                                                         label="Returned On"
                                                         value={booking.returned_at ? format(parseISO(booking.returned_at), 'Pp') : 'N/A'}
                                                     />
+                                                    {isPickup && (
+                                                      <DetailItem
+                                                        icon={<CheckCircle className={booking.return_lock_at ? 'text-green-400' : 'text-gray-500'} />}
+                                                        label="Final lock close (fee time)"
+                                                        value={booking.return_lock_at ? format(parseISO(booking.return_lock_at), 'Pp') : 'Not recorded'}
+                                                      />
+                                                    )}
                                                 </>
                                             );
                                         })()}
