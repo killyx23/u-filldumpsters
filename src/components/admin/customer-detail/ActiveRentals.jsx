@@ -59,14 +59,57 @@ function BackupReturnCodeButton({ bookingId }) {
     );
 }
 
+const DISMISSABLE_FEES = {
+    late_return: 'Dismiss late fee',
+    failure_to_return: 'Dismiss non-return fee',
+};
+
 function DueFeeCharges({ booking, onUpdate }) {
-    const [chargingKey, setChargingKey] = useState(null);
+    const [busyKey, setBusyKey] = useState(null);
     const due = feeChargeEntries(booking.fees).filter(([, fee]) => !feeIsCharged(fee) && (fee.description || fee.lines));
     if (!due.length) return null;
 
+    const dismiss = async (key) => {
+        const requestKey = `${booking.id}:${key}:dismiss`;
+        setBusyKey(requestKey);
+        try {
+            const fees = { ...(booking.fees || {}) };
+            delete fees[key];
+            const addons = { ...(booking.addons || {}) };
+            const dismissed = Array.isArray(addons.dismissedFees) ? [...addons.dismissedFees] : [];
+            if (!dismissed.includes(key)) dismissed.push(key);
+            addons.dismissedFees = dismissed;
+            const updates = { fees, addons };
+            if (booking.follow_up_resolution?.reason === key) {
+                updates.follow_up_resolution = null;
+            }
+            if (booking.status === key) {
+                updates.status = booking.returned_at ? 'pending_checklist' : 'Delivered';
+            }
+            const { error } = await supabase
+                .from('bookings')
+                .update(updates)
+                .eq('id', booking.id);
+            if (error) throw error;
+            toast({
+                title: 'Fee dismissed',
+                description: 'That fee was removed from this booking and will not be charged.',
+            });
+            onUpdate?.();
+        } catch (err) {
+            toast({
+                title: 'Could not dismiss fee',
+                description: err.message || 'The fee is still on the booking.',
+                variant: 'destructive',
+            });
+        } finally {
+            setBusyKey(null);
+        }
+    };
+
     const charge = async (key, fee) => {
         const requestKey = `${booking.id}:${key}`;
-        setChargingKey(requestKey);
+        setBusyKey(requestKey);
         try {
             const { data, error } = await supabase.functions.invoke('charge-customer', {
                 body: {
@@ -87,7 +130,7 @@ function DueFeeCharges({ booking, onUpdate }) {
         } catch (err) {
             toast({ title: 'Charge failed', description: err.message || 'The card was not charged.', variant: 'destructive' });
         } finally {
-            setChargingKey(null);
+            setBusyKey(null);
         }
     };
 
@@ -100,9 +143,16 @@ function DueFeeCharges({ booking, onUpdate }) {
                     <div key={key} className="text-sm text-red-100 space-y-1">
                         <p>{fee.description}</p>
                         <p className="font-semibold">${Number(fee.amount).toFixed(2)}</p>
-                        <Button type="button" size="sm" className="bg-yellow-500 hover:bg-yellow-400 text-gray-900" disabled={chargingKey === requestKey} onClick={() => charge(key, fee)}>
-                            {chargingKey === requestKey ? 'Charging…' : 'Charge card'}
-                        </Button>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                            <Button type="button" size="sm" className="bg-yellow-500 hover:bg-yellow-400 text-gray-900" disabled={busyKey != null} onClick={() => charge(key, fee)}>
+                                {busyKey === requestKey ? 'Charging…' : 'Charge card'}
+                            </Button>
+                            {DISMISSABLE_FEES[key] && (
+                                <Button type="button" size="sm" variant="outline" className="border-red-300/40 text-red-100" disabled={busyKey != null} onClick={() => dismiss(key)}>
+                                    {busyKey === `${requestKey}:dismiss` ? 'Dismissing…' : DISMISSABLE_FEES[key]}
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 );
             })}

@@ -230,6 +230,12 @@ Deno.serve(async (req) => {
         orderId,
       });
       const fees = (booking.fees && typeof booking.fees === "object") ? booking.fees : {};
+      const dismissed = new Set(
+        Array.isArray(booking.addons?.dismissedFees) ? booking.addons.dismissedFees : [],
+      );
+      // An admin dismissed a false late flag. Do not write that fee again, and do
+      // not escalate it into the failure-to-return fee.
+      if (dismissed.has("late_return")) continue;
 
       if (!booking.late_return_notice_at) {
         const pinEnd = new Date(now.getTime() + TWO_HOURS_MS).toISOString();
@@ -294,6 +300,7 @@ Deno.serve(async (req) => {
 
       const codeMs = new Date(booking.late_return_algopin_at || booking.late_return_notice_at).getTime();
       if (now.getTime() < codeMs + TWO_HOURS_MS) continue;
+      if (dismissed.has("failure_to_return")) continue;
 
       const windowEnd = deadline && deadline.getTime() > now.getTime() + 60 * 60 * 1000
         ? deadline
