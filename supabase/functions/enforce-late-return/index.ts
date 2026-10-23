@@ -6,6 +6,10 @@
  * return code. Those two hours start then. A return or a portal extension in
  * that window leaves only the late fee.
  *
+ * Before any late fee or stolen flag, stored lock closes are reconciled. A
+ * trailer whose latest event is a close inside the return window is marked
+ * returned and is not charged.
+ *
  * If the rental is still out when the two hours end, the failure-to-return
  * charges are recorded and a code through 5:00 AM Mountain Time is sent.
  * Admin charges both fees from the customer file. Nothing is charged here.
@@ -21,6 +25,7 @@ import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
+import { sweepGraceHourReturns } from "../_shared/lockEventState.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -113,6 +118,8 @@ function failureLines(booking: Record<string, unknown>, catalogRates: Record<num
 }
 
 function stillOut(booking: Record<string, unknown>, now: Date) {
+  // Lock close, after-11 reconciliation, or a yard mark-returned all set
+  // returned_at. That ends the late-fee and stolen-notice path immediately.
   if (booking.returned_at) return false;
   if (STOP_STATUSES.has(String(booking.status || ""))) return false;
   if (!booking.rented_out_at) return false;
@@ -188,6 +195,10 @@ Deno.serve(async (req) => {
 
   try {
     const now = new Date();
+    const reconciled = await sweepGraceHourReturns(supabaseAdmin, now);
+    if (reconciled > 0) {
+      console.log(`[enforce-late-return] Reconciled ${reconciled} return(s) before fees`);
+    }
     const siteUrl = resolvePublicSiteUrl(null);
     const { data: feeRow } = await supabaseAdmin
       .from("charges_and_fees")

@@ -1,6 +1,6 @@
 {
+	"$schema": "./jsconfig.schema.json",
 	"compilerOptions": {
-		"baseUrl": ".",
 		"paths": {
 			"@/*": ["./src/*"]
 		}

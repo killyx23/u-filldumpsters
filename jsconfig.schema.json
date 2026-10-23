@@ -1,0 +1,15 @@
+{
+	"title": "JSON schema for the JavaScript configuration file",
+	"type": "object",
+	"allowTrailingCommas": true,
+	"properties": {
+		"$schema": { "type": "string" },
+		"compilerOptions": { "type": "object" },
+		"include": { "type": "array", "items": { "type": "string" } },
+		"exclude": { "type": "array", "items": { "type": "string" } },
+		"extends": {},
+		"files": { "type": "array", "items": { "type": "string" } },
+		"references": { "type": "array" },
+		"typeAcquisition": { "type": "object" }
+	}
+}

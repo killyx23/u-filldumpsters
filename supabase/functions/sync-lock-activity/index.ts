@@ -7,8 +7,14 @@
  *
  * The cron still ticks every 5 minutes. The bridge is only woken while a
  * pickup is waiting for its first unlock, while a return is due, or while a
- * lock is still recorded as open, and at most once an hour. POST { "force": true }
- * always wakes it.
+ * lock is still recorded as open. Pickup and idle locks are pulled at most
+ * once an hour. While a return is still out, the lock is pulled every 15
+ * minutes from two hours before the due time, every 5 minutes from 30 minutes
+ * before through the grace hour (10:30 PM–midnight when due at 11), every 10
+ * minutes for the next two hours (midnight–2:00 AM), then every 15 minutes
+ * until 24 hours after the due time. The instant a return is recorded, that
+ * booking drops out of the wake and none of those checks continue.
+ * POST { "force": true } always wakes it.
  *
  * Probe mode: POST { "probe": true } or ?probe=1 — returns raw payloads
  * without applying state changes.
@@ -22,10 +28,11 @@ import {
   parseActivityLogsFromPayload,
   isEmptyActivityLogPayload,
 } from "../_shared/iglooActivity.ts";
-import { BOOKING_WINDOW_COLUMNS } from "../_shared/pinTiming.ts";
+import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "../_shared/pinTiming.ts";
 import {
   applyLockEvent,
   bookingNeedsBridgeWake,
+  returnPollMinMs,
   sweepGraceHourReturns,
 } from "../_shared/lockEventState.ts";
 import { isManualAutolockClose, recordDeviceEvents } from "../_shared/lockDeviceState.ts";
@@ -38,6 +45,8 @@ import {
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 const ACTIVITY_PULL_MIN_MS = 60 * 60 * 1000;
+
+type BridgeWake = { reason: string; pollMinMs: number };
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -133,7 +142,8 @@ async function pollJobStatus(
 async function bridgeWakeReason(
   // deno-lint-ignore no-explicit-any
   supabase: any,
-): Promise<string | null> {
+): Promise<BridgeWake | null> {
+  const nowMs = Date.now();
   const { data: openDevice } = await supabase
     .from("lock_devices")
     .select("device_id")
@@ -141,7 +151,6 @@ async function bridgeWakeReason(
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
-  if (openDevice?.device_id) return "lock_still_open";
 
   const { data: bookings, error } = await supabase
     .from("bookings")
@@ -150,13 +159,23 @@ async function bridgeWakeReason(
     .not("status", "in", '("Cancelled","Completed","flagged")');
   if (error) {
     console.error("[sync-lock-activity] wake query failed:", error.message);
-    return "wake_query_failed";
+    return { reason: "wake_query_failed", pollMinMs: ACTIVITY_PULL_MIN_MS };
   }
+
+  let reason: string | null = openDevice?.device_id ? "lock_still_open" : null;
+  let pollMinMs = ACTIVITY_PULL_MIN_MS;
   for (const booking of bookings ?? []) {
-    const reason = bookingNeedsBridgeWake(booking);
-    if (reason) return reason;
+    const wake = bookingNeedsBridgeWake(booking);
+    if (wake === "return") {
+      reason = "return";
+      const tier = returnPollMinMs(nowMs, getBookingWindow(booking).endMs);
+      if (tier != null && tier < pollMinMs) pollMinMs = tier;
+    } else if (wake && !reason) {
+      reason = wake;
+    }
   }
-  return null;
+  if (!reason) return null;
+  return { reason, pollMinMs };
 }
 
 function syncEmptyHint(activityRows: number, eventsParsed: number): string | undefined {
@@ -219,18 +238,18 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceKey);
 
     if (!probe && !force) {
+      const sweptEarly = await sweepGraceHourReturns(supabase);
       const wake = await bridgeWakeReason(supabase);
       if (!wake) {
-        const swept = await sweepGraceHourReturns(supabase);
         console.log("[sync-lock-activity] Bridge left asleep; no pickup or return window");
         return jsonResponse({
           success: true,
           skipped: true,
           reason: "bridge_idle",
-          graceHourClosed: swept,
+          graceHourClosed: sweptEarly,
         });
       }
-      console.log(`[sync-lock-activity] Waking bridge for ${wake}`);
+      console.log(`[sync-lock-activity] Waking bridge for ${wake.reason} (poll every ${wake.pollMinMs / 60000} min)`);
 
       const { data: pullRow } = await supabase
         .from("lock_devices")
@@ -240,16 +259,16 @@ Deno.serve(async (req) => {
       const lastPullMs = pullRow?.activity_pulled_at
         ? new Date(String(pullRow.activity_pulled_at)).getTime()
         : NaN;
-      if (Number.isFinite(lastPullMs) && Date.now() - lastPullMs < ACTIVITY_PULL_MIN_MS) {
-        const swept = await sweepGraceHourReturns(supabase);
-        console.log("[sync-lock-activity] Bridge left asleep; last GET_LOGS was under an hour ago");
+      if (Number.isFinite(lastPullMs) && Date.now() - lastPullMs < wake.pollMinMs) {
+        console.log("[sync-lock-activity] Bridge left asleep; last GET_LOGS is still inside the poll interval");
         return jsonResponse({
           success: true,
           skipped: true,
           reason: "activity_pulled_recently",
-          wake,
+          wake: wake.reason,
+          pollMinMs: wake.pollMinMs,
           lastPulledAt: pullRow?.activity_pulled_at,
-          graceHourClosed: swept,
+          graceHourClosed: sweptEarly,
         });
       }
     }

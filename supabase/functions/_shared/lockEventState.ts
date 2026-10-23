@@ -2,14 +2,16 @@
  * Lock-event state machine for self-pickup rentals.
  * - First unlock at/after booking start → Mark Rented (status Delivered + rented_out_at)
  *   and send the rental-started email/SMS.
- * - The auto-lock a couple of minutes after an unlock only closes the lock icon.
- * - A later lock finishes the rental once the scheduled return time has arrived,
- *   including a lock that happened earlier while the trailer was away.
- * - The sweep uses that later lock when the clock reaches the scheduled return
- *   and nobody has to open the lock again.
+ * - Each open and close moves the lock's running state. Only the latest event counts.
+ * - A close is a return only inside the return window: from two hours before the
+ *   due time onward. Pickup-time lock fiddling is outside that window.
+ * - An automatic lock inside the window counts. The 9:36 PM close on order 1369
+ *   is a return, not an ignored auto-lock.
+ * - After the due time, the sweep reconciles any close the live path missed.
+ *   Late fees and stolen flags wait until that pass has run.
  */
 
-import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "./pinTiming.ts";
+import { BOOKING_WINDOW_COLUMNS, getBookingWindow, RETURN_GRACE_MS } from "./pinTiming.ts";
 import { isDeliveryBooking } from "./deliveryBooking.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -32,6 +34,54 @@ export const PICKUP_LISTEN_TAIL_MS = 12 * 60 * 60 * 1000;
 export const RETURN_LISTEN_LEAD_MS = 2 * 60 * 60 * 1000;
 /** Stop the return wake a day after the scheduled end if they still have not come back. */
 export const RETURN_LISTEN_TAIL_MS = 24 * 60 * 60 * 1000;
+/** 5-minute checks start this long before the due time (10:30 when due is 11). */
+export const RETURN_POLL_FAST_LEAD_MS = 30 * 60 * 1000;
+/** 10-minute checks run for this long after the grace hour ends (midnight–2:00 AM). */
+export const RETURN_POLL_POST_GRACE_MS = 2 * 60 * 60 * 1000;
+export const RETURN_POLL_RELAXED_MS = 15 * 60 * 1000;
+export const RETURN_POLL_TIGHT_MS = 5 * 60 * 1000;
+export const RETURN_POLL_AFTER_MIDNIGHT_MS = 10 * 60 * 1000;
+
+/**
+ * How often to pull the lock while a return is still out.
+ * Null means this booking is outside the watch (use the hourly cap, or skip).
+ * For an 11:00 PM due time:
+ *   9:00–10:30 PM every 15 minutes,
+ *   10:30 PM–midnight every 5 minutes,
+ *   midnight–2:00 AM every 10 minutes,
+ *   2:00 AM until 24 hours after the due time every 15 minutes.
+ * A recorded return is not passed in here: callers drop the booking first.
+ */
+export function returnPollMinMs(nowMs: number, endMs: number): number | null {
+  if (!Number.isFinite(nowMs) || !Number.isFinite(endMs)) return null;
+  const windowStart = endMs - RETURN_LISTEN_LEAD_MS;
+  const watchEnd = endMs + RETURN_LISTEN_TAIL_MS;
+  if (nowMs < windowStart || nowMs >= watchEnd) return null;
+  const fastStart = endMs - RETURN_POLL_FAST_LEAD_MS;
+  const graceEnd = endMs + RETURN_GRACE_MS;
+  const afterTwo = graceEnd + RETURN_POLL_POST_GRACE_MS;
+  if (nowMs >= afterTwo) return RETURN_POLL_RELAXED_MS;
+  if (nowMs >= graceEnd) return RETURN_POLL_AFTER_MIDNIGHT_MS;
+  if (nowMs >= fastStart) return RETURN_POLL_TIGHT_MS;
+  return RETURN_POLL_RELAXED_MS;
+}
+
+/**
+ * A close counts as a return only inside the return window, and only after the
+ * rental has started. The window opens two hours before the due time and stays
+ * open afterward, so a 9:36 PM automatic lock is a return and a 3:32 PM pickup
+ * close is not.
+ */
+export function closeCountsAsReturn(
+  lockMs: number,
+  endMs: number,
+  rentedOutMs: number | null,
+): boolean {
+  if (!Number.isFinite(lockMs) || !Number.isFinite(endMs)) return false;
+  if (lockMs < endMs - RETURN_LISTEN_LEAD_MS) return false;
+  if (rentedOutMs !== null && lockMs <= rentedOutMs) return false;
+  return true;
+}
 
 export type BridgeWakeReason = "pickup" | "return";
 
@@ -49,9 +99,15 @@ export function bookingNeedsBridgeWake(
   now: Date = new Date(),
 ): BridgeWakeReason | null {
   if (!isCustomerPickupBooking(booking)) return null;
+  // A recorded return ends every return check for this booking.
   if (booking.returned_at) return null;
   const status = String(booking.status || "");
-  if (status === "Cancelled" || status === "Completed" || status === "flagged") return null;
+  if (
+    status === "Cancelled" ||
+    status === "Completed" ||
+    status === "flagged" ||
+    status === "pending_checklist"
+  ) return null;
 
   const window = getBookingWindow(booking);
   const nowMs = now.getTime();
@@ -171,17 +227,20 @@ async function markReturned(
   eventTimestamp: string,
 ): Promise<boolean> {
   if (!booking.rented_out_at || booking.returned_at) return false;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("bookings")
     .update({
       returned_at: eventTimestamp,
+      return_lock_at: eventTimestamp,
       status: "pending_checklist",
     })
     .eq("id", booking.id)
     .is("returned_at", null)
-    .not("rented_out_at", "is", null);
-  if (error) {
-    console.error(`[lockEventState] markReturned failed for #${booking.id}:`, error);
+    .not("rented_out_at", "is", null)
+    .select("id")
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.error(`[lockEventState] markReturned failed for #${booking.id}:`, error);
     return false;
   }
   console.log(`[lockEventState] Booking #${booking.id} marked Returned at ${eventTimestamp}`);
@@ -238,22 +297,37 @@ export async function applyLockEvent(
     return inserted ? "logged_unlock" : "duplicate_unlock";
   }
 
-  const pairedUnlockMs = await latestUnlockMsBefore(supabase, event.orderId, eventMs);
-  if (pairedUnlockMs !== null && isAutolockDwell(pairedUnlockMs, eventMs)) {
-    return inserted ? "logged_autolock" : "duplicate_autolock";
+  const rentedOutMs = booking.rented_out_at
+    ? new Date(String(booking.rented_out_at)).getTime()
+    : null;
+  const inReturnWindow = closeCountsAsReturn(eventMs, window.endMs, rentedOutMs);
+
+  // Pickup-time auto-locks stay outside the return window and never finish the rental.
+  if (!inReturnWindow) {
+    const pairedUnlockMs = await latestUnlockMsBefore(supabase, event.orderId, eventMs);
+    if (pairedUnlockMs !== null && isAutolockDwell(pairedUnlockMs, eventMs)) {
+      return inserted ? "logged_autolock" : "duplicate_autolock";
+    }
+    return inserted ? "logged_lock" : "duplicate_lock";
   }
 
-  // A later close, once the scheduled return has arrived. The close itself may
-  // have happened earlier, while the trailer was away from the bridge.
-  if (
-    eventMs >= window.endMs &&
-    booking.rented_out_at &&
-    !booking.returned_at
-  ) {
-    await markReturned(supabase, booking, event.eventTimestamp);
-    return "marked_returned";
+  if (!booking.rented_out_at || booking.returned_at) {
+    return inserted ? "logged_lock" : "duplicate_lock";
   }
-  return inserted ? "logged_lock" : "duplicate_lock";
+
+  // Only the latest event counts. An automatic lock inside the window is a
+  // return when nothing newer has opened the lock again.
+  const latest = await latestTrackingEvent(supabase, event.orderId);
+  if (!latest || latest.event_type !== "lock") {
+    return inserted ? "logged_lock_not_latest" : "duplicate_lock";
+  }
+  const latestMs = new Date(latest.event_timestamp).getTime();
+  if (!closeCountsAsReturn(latestMs, window.endMs, rentedOutMs)) {
+    return inserted ? "logged_lock" : "duplicate_lock";
+  }
+
+  await markReturned(supabase, booking, latest.event_timestamp);
+  return "marked_returned";
 }
 
 async function latestUnlockMsBefore(
@@ -275,10 +349,25 @@ async function latestUnlockMsBefore(
   return Number.isNaN(ms) ? null : ms;
 }
 
+async function latestTrackingEvent(
+  supabase: SupabaseClient,
+  orderId: number,
+): Promise<{ event_type: string; event_timestamp: string } | null> {
+  const { data } = await supabase
+    .from("rental_tracking_logs")
+    .select("event_type, event_timestamp")
+    .eq("order_id", orderId)
+    .in("event_type", ["unlock", "lock"])
+    .order("event_timestamp", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data?.event_timestamp || !data?.event_type) return null;
+  return data;
+}
+
 /**
- * Once the scheduled return time has arrived, finish a rental from its latest
- * real lock. The pickup auto-lock does not count. An earlier close from while
- * the trailer was away does, so they do not have to open the lock again.
+ * After the due time, finish any rental whose latest event is a close inside
+ * the return window. Automatic locks count. This runs before late fees.
  */
 export async function sweepGraceHourReturns(
   supabase: SupabaseClient,
@@ -306,22 +395,15 @@ export async function sweepGraceHourReturns(
     const window = getBookingWindow(booking);
     if (nowMs < window.endMs) continue;
 
-    const { data: lockEvent } = await supabase
-      .from("rental_tracking_logs")
-      .select("event_timestamp")
-      .eq("order_id", booking.id)
-      .eq("event_type", "lock")
-      .order("event_timestamp", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const latest = await latestTrackingEvent(supabase, Number(booking.id));
+    if (!latest || latest.event_type !== "lock") continue;
+    const lockMs = new Date(latest.event_timestamp).getTime();
+    const rentedOutMs = booking.rented_out_at
+      ? new Date(String(booking.rented_out_at)).getTime()
+      : null;
+    if (!closeCountsAsReturn(lockMs, window.endMs, rentedOutMs)) continue;
 
-    if (!lockEvent?.event_timestamp) continue;
-    const lockMs = new Date(lockEvent.event_timestamp).getTime();
-    if (Number.isNaN(lockMs)) continue;
-    const pairedUnlockMs = await latestUnlockMsBefore(supabase, Number(booking.id), lockMs);
-    if (pairedUnlockMs !== null && isAutolockDwell(pairedUnlockMs, lockMs)) continue;
-
-    const ok = await markReturned(supabase, booking, lockEvent.event_timestamp);
+    const ok = await markReturned(supabase, booking, latest.event_timestamp);
     if (ok) closed += 1;
   }
 
