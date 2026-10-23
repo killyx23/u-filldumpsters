@@ -12,6 +12,7 @@ import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { getBookingWindow } from "../_shared/pinTiming.ts";
+import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -114,8 +115,18 @@ Deno.serve(async (req) => {
     }
 
     const siteUrl = resolvePublicSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
-    const portalUrl = `${siteUrl}/customer-portal`;
-    const guidesUrl = `${siteUrl}/customer-portal?tab=resources`;
+    const portalLogin = portalCredentialsFromBooking(booking);
+    const portalUrl = buildCustomerPortalUrl(siteUrl, {
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId,
+    });
+    const guidesUrl = buildCustomerPortalUrl(siteUrl, {
+      tab: "resources",
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId,
+    });
     const window = getBookingWindow(booking);
     const returnDeadline = booking.pickup_time_slot
       ? `${booking.pickup_date} ${formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot}`

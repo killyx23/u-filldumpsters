@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getCorsHeaders } from "./cors.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { buildCustomerPortalUrl } from "../_shared/portalLink.ts";
 
 const brevoApiKey = Deno.env.get('BREVO_API_KEY');
 const fromEmail = Deno.env.get('BREVO_FROM_EMAIL');
@@ -43,8 +44,11 @@ Deno.serve(async (req)=>{
         phone: customer.phone
       }
     });
-    const rawPhone = customer.phone.replace(/\D/g, '');
-    const loginUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customer.customer_id_text)}&phone=${encodeURIComponent(rawPhone)}`;
+    const rawPhone = String(customer.phone || "").replace(/\D/g, "");
+    const loginUrl = buildCustomerPortalUrl(siteUrl, {
+      portalNumber: customer.customer_id_text,
+      phone: rawPhone || customer.phone,
+    });
     const emailHtml = `
       <!DOCTYPE html>
       <html>
@@ -69,7 +73,7 @@ Deno.serve(async (req)=>{
             <strong>Phone Number (Password):</strong> ${customer.phone}
           </div>
           
-          <p>Click the button below to go to the login page with your details pre-filled. You will just need to click the "Login" button.</p>
+          <p>Click the button below to open your customer portal. It signs you in with the Customer ID and phone number above.</p>
           <a href="${loginUrl}" class="button">Go to Customer Portal</a>
           
           <div class="footer">

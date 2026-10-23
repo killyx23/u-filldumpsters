@@ -21,6 +21,7 @@ import { bookingNeedsYardLockPin, isDeliveryBooking } from "../_shared/deliveryB
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { addGraceHour, buildBookingDateUTC, canIssueHourlyAlgoPin, getHourlyAlgoPinWindow, getPinActivationStart, isDueForFirstPinNotify } from "../_shared/pinTiming.ts";
+import { buildCustomerPortalUrl } from "../_shared/portalLink.ts";
 
 const IGLOO_API = "https://api.igloodeveloper.co/igloohome";
 const PIN_LEAD_MS = 12 * 60 * 60 * 1000;
@@ -148,7 +149,7 @@ async function notifyPinReady(
   try {
     const { data: customer } = await supabase
       .from("customers")
-      .select("phone, sms_opt_in")
+      .select("phone, sms_opt_in, customer_id_text")
       .eq("id", booking.customer_id)
       .maybeSingle();
     const phone = customer?.phone || booking.phone || "";
@@ -161,8 +162,14 @@ async function notifyPinReady(
       : null;
     if (!to) return;
     const site = (Deno.env.get("SITE_URL") || "https://u-filldumpsters.com").replace(/\/$/, "");
+    const viewUrl = buildCustomerPortalUrl(site, {
+      tab: "access-codes",
+      portalNumber: customer?.customer_id_text,
+      phone,
+      orderId: booking.id,
+    });
     const content =
-      `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. View: ${site}/customer-portal?tab=access-codes`;
+      `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. View: ${viewUrl}`;
     const key = Deno.env.get("BREVO_API_KEY");
     if (!key) return;
     await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {

@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { formatDeliveryTimeWindowBetween, formatPlainBookingTime } from "../_shared/formatBookingTime.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
+import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -176,8 +177,9 @@ const generateRescheduleEmailHTML = (opts: {
   amountProcessed: number;
   snapshot: Record<string, unknown> | null;
   siteUrl: string;
+  portalUrl: string;
 }) => {
-  const { booking, customerName, originalTotal, newTotal, delta, stripeType, stripeTransactionId, amountProcessed, snapshot, siteUrl } = opts;
+  const { booking, customerName, originalTotal, newTotal, delta, stripeType, stripeTransactionId, amountProcessed, snapshot, siteUrl, portalUrl } = opts;
   const snap = snapshot || {};
   const receiptHistory = Array.isArray(booking.receipt_status_history) ? booking.receipt_status_history : [];
   const latestApproval = [...receiptHistory].reverse().find((e: Record<string, unknown>) => e?.action === "reschedule_approved") || null;
@@ -259,7 +261,7 @@ const generateRescheduleEmailHTML = (opts: {
       <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
         <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
           You can review this booking anytime in your Customer Portal under Communication and Receipts.
-          ${siteUrl ? ` Portal: <a href="${siteUrl}" style="color:#1d4ed8;">${siteUrl}</a>` : ""}
+          ${portalUrl ? ` Portal: <a href="${portalUrl}" style="color:#1d4ed8;">${portalUrl}</a>` : ""}
         </p>
       </div>
       <div style="margin-top:24px;text-align:center;color:#6b7280;font-size:13px;">
@@ -279,8 +281,9 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
   customerName: string;
   snapshot: Record<string, unknown> | null;
   siteUrl: string;
+  portalUrl: string;
 }) => {
-  const { booking, customerName, snapshot, siteUrl } = opts;
+  const { booking, customerName, snapshot, siteUrl, portalUrl } = opts;
   const source = (snapshot || {}) as Record<string, unknown>;
 
   const currentDrop = formatDateTime(
@@ -366,7 +369,7 @@ const generateRescheduleUnderReviewEmailHTML = (opts: {
       <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
         <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
           You can track this request anytime in your Customer Portal under Bookings and Communication.
-          ${siteUrl ? ` Portal: <a href="${siteUrl}/customer-portal" style="color:#1d4ed8;">${siteUrl}/customer-portal</a>` : ""}
+          ${portalUrl ? ` Portal: <a href="${portalUrl}" style="color:#1d4ed8;">${portalUrl}</a>` : ""}
         </p>
       </div>
       <div style="margin-top:24px;text-align:center;color:#6b7280;font-size:13px;">
@@ -386,13 +389,13 @@ const generateAddressDecisionEmailHTML = ({
   kind,
   fromAddress,
   toAddress,
-  siteUrl,
+  portalUrl,
 }: {
   customerName: string;
   kind: "under_review" | "approved" | "denied";
   fromAddress: string;
   toAddress: string;
-  siteUrl: string;
+  portalUrl: string;
 }) => {
   const title =
     kind === "under_review"
@@ -422,7 +425,7 @@ const generateAddressDecisionEmailHTML = ({
       <div style="margin-top:24px;padding:16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;">
         <p style="margin:0;color:#1e40af;font-size:14px;line-height:1.5;">
           You can follow this in your Customer Portal under Profile and Communication.
-          ${siteUrl ? ` Portal: <a href="${siteUrl}/customer-portal" style="color:#1d4ed8;">${siteUrl}/customer-portal</a>` : ""}
+          ${portalUrl ? ` Portal: <a href="${portalUrl}" style="color:#1d4ed8;">${portalUrl}</a>` : ""}
         </p>
       </div>
     </div>
@@ -464,6 +467,8 @@ Deno.serve(async (req) => {
       let customerName = "Customer";
       let fromAddress = String(body.fromAddress || "");
       let toAddress = String(body.toAddress || "");
+      let addressBooking: { id?: unknown; customers?: { customer_id_text?: string | null; phone?: string | null } | null; phone?: string | null } | null = null;
+      let addressCustomer: { customer_id_text?: string | null; phone?: string | null } | null = null;
 
       if (bookingId) {
         const { data: booking, error } = await supabase
@@ -472,6 +477,7 @@ Deno.serve(async (req) => {
           .eq("id", bookingId)
           .single();
         if (error || !booking) throw new Error("Booking not found");
+        addressBooking = booking;
         recipientEmail = recipientEmail || booking.email || booking.customers?.email || "";
         customerName =
           booking.customers?.name ||
@@ -492,6 +498,7 @@ Deno.serve(async (req) => {
           .eq("id", body.customerId)
           .single();
         if (error || !customer) throw new Error("Customer not found");
+        addressCustomer = customer;
         recipientEmail = recipientEmail || customer.email || "";
         customerName = customer.name || "Customer";
         const pending = customer.pending_address || {};
@@ -500,12 +507,22 @@ Deno.serve(async (req) => {
       }
 
       if (!recipientEmail) throw new Error("No email address available");
+      const addressLogin = addressBooking
+        ? portalCredentialsFromBooking(addressBooking)
+        : {
+            portalNumber: String(addressCustomer?.customer_id_text || ""),
+            phone: String(addressCustomer?.phone || ""),
+          };
       const html = generateAddressDecisionEmailHTML({
         customerName,
         kind: addressDecision,
         fromAddress,
         toAddress,
-        siteUrl,
+        portalUrl: buildCustomerPortalUrl(siteUrl, {
+          portalNumber: addressLogin.portalNumber,
+          phone: addressLogin.phone,
+          orderId: addressBooking?.id,
+        }),
       });
       const subject =
         addressDecision === "under_review"
@@ -556,12 +573,20 @@ Deno.serve(async (req) => {
       [...history].reverse().find((e: Record<string, unknown>) => e?.type === "reschedule_request") ||
       null;
 
+    const portalLogin = portalCredentialsFromBooking(booking);
+    const portalUrl = buildCustomerPortalUrl(siteUrl, {
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId: booking.id,
+    });
+
     if (isUnderReview) {
       const underReviewHtml = generateRescheduleUnderReviewEmailHTML({
         booking,
         customerName,
         snapshot: pendingSnapshot,
         siteUrl,
+        portalUrl,
       });
       const underReviewSubject =
         `Reschedule Request Under Review #${booking.id} — U-Fill Dumpsters`;
@@ -621,6 +646,7 @@ Deno.serve(async (req) => {
       amountProcessed,
       snapshot,
       siteUrl,
+      portalUrl,
     });
 
     const subject = `Reschedule approved – Booking #${booking.id} — U-Fill Dumpsters`;

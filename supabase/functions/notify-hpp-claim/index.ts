@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { buildCustomerPortalUrl } from "../_shared/portalLink.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -77,7 +78,7 @@ Deno.serve(async (req) => {
 
     const { data: customer, error: customerError } = await admin
       .from("customers")
-      .select("id, name, email, phone, user_id, sms_opt_in")
+      .select("id, name, email, phone, user_id, sms_opt_in, customer_id_text")
       .eq("id", ownerId)
       .maybeSingle();
     if (customerError) throw customerError;
@@ -95,8 +96,14 @@ Deno.serve(async (req) => {
     }
 
     const siteUrl = resolvePublicSiteUrl(Deno.env.get("SITE_URL"));
-    const portalUrl = `${siteUrl}/customer-portal?tab=messages&section=tickets`;
     const orderId = claim?.booking_id || note?.booking_id || "";
+    const portalUrl = buildCustomerPortalUrl(siteUrl, {
+      tab: "messages",
+      section: "tickets",
+      portalNumber: customer.customer_id_text,
+      phone: customer.phone,
+      orderId,
+    });
     const name = customer.name || "there";
     const photoCount = Array.isArray(claim?.proof_photos) ? claim.proof_photos.length : 0;
 
@@ -128,7 +135,7 @@ Deno.serve(async (req) => {
         </ul>
         <p>This email is your receipt of the outcome. The same record, including the photos, is stored on your customer file.</p>
         <p><a href="${portalUrl}">View the claim in your portal</a></p>`;
-      sms = `U-Fill Dumpsters: Your damage claim for order #${orderId} is complete and no longer pending. Charged to your card: ${charged}. Details were emailed to you.`;
+      sms = `U-Fill Dumpsters: Your damage claim for order #${orderId} is complete and no longer pending. Charged to your card: ${charged}. View: ${portalUrl}`;
     }
 
     const emailResult = customer.email

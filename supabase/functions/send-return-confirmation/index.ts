@@ -12,6 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
+import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -151,8 +152,19 @@ Deno.serve(async (req) => {
     const smsOptIn = customer.sms_opt_in !== false;
 
     const siteUrl = resolvePublicSiteUrl(body.site_url || Deno.env.get("SITE_URL"));
-    const portalUrl = `${siteUrl}/customer-portal`;
-    const reviewUrl = `${siteUrl}/customer-portal?tab=messages&section=reviews`;
+    const portalLogin = portalCredentialsFromBooking(booking);
+    const portalUrl = buildCustomerPortalUrl(siteUrl, {
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId,
+    });
+    const reviewUrl = buildCustomerPortalUrl(siteUrl, {
+      tab: "messages",
+      section: "reviews",
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId,
+    });
 
     let referralUrl: string | null = null;
     let referralBalance = 0;

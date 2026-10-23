@@ -12,6 +12,7 @@
  */
 
 import { getCorsHeaders } from "./cors.ts";
+import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { getBookingWindow } from "../_shared/pinTiming.ts";
@@ -188,7 +189,6 @@ Deno.serve(async (req) => {
   try {
     const now = new Date();
     const siteUrl = resolvePublicSiteUrl(null);
-    const portalUrl = `${siteUrl}/customer-portal`;
     const { data: feeRow } = await supabaseAdmin
       .from("charges_and_fees")
       .select("fee_value")
@@ -198,7 +198,7 @@ Deno.serve(async (req) => {
 
     const { data: bookings, error } = await supabaseAdmin
       .from("bookings")
-      .select("*, customers(email, phone, sms_opt_in, name)")
+      .select("*, customers(email, phone, sms_opt_in, name, customer_id_text)")
       .not("rented_out_at", "is", null)
       .is("returned_at", null)
       .is("failure_to_return_notice_at", null);
@@ -212,6 +212,12 @@ Deno.serve(async (req) => {
       const deadline = nextMorningFiveAm(String(booking.pickup_date || ""));
       const deadlineLabel = deadline ? denverLabel(deadline) : "5:00 AM Mountain Time the next morning";
       const name = booking.name || booking.customers?.name || "there";
+      const portalLogin = portalCredentialsFromBooking(booking);
+      const portalUrl = buildCustomerPortalUrl(siteUrl, {
+        portalNumber: portalLogin.portalNumber,
+        phone: portalLogin.phone || booking.phone,
+        orderId,
+      });
       const fees = (booking.fees && typeof booking.fees === "object") ? booking.fees : {};
 
       if (!booking.late_return_notice_at) {

@@ -6,6 +6,7 @@ import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
+import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 
 const VERIFICATION_LEAD_HOURS = 12;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -784,7 +785,11 @@ const generateActionRequiredEmailHTML = (
   const customerIdText = booking.customers?.customer_id_text || "N/A";
   const phone = booking.customers?.phone || booking.phone || "N/A";
   const rawPhone = String(phone).replace(/\D/g, "");
-  const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+  const portalUrl = buildCustomerPortalUrl(siteUrl, {
+    portalNumber: customerIdText,
+    phone: rawPhone || phone,
+    orderId: booking.id,
+  });
   const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
   const selfService = isTrailerSelfService(booking);
   const eventNoun = selfService ? "pickup" : "delivery";
@@ -973,7 +978,11 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const phone = booking.customers?.phone || booking.phone || 'N/A';
   const rawPhone = String(phone).replace(/\D/g, '');
   console.log(` site url: ${siteUrl}`);
-  const portalUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+  const portalUrl = buildCustomerPortalUrl(siteUrl, {
+    portalNumber: customerIdText,
+    phone: rawPhone || phone,
+    orderId: booking.id,
+  });
   console.log(`portal URL: ${portalUrl}`);
   const serviceName = formatCustomerFacingPlanName(serviceDetails?.name || plan.name || "N/A");
   const serviceType = serviceDetails?.service_type || plan.service_type || "";
@@ -1544,7 +1553,10 @@ const sendReferrerThankYouEmail = async (supabase, booking, siteUrl, timestamp) 
       return { sent: false, skipped: false, reason: "referrer_login_incomplete" };
     }
 
-    const loginUrl = `${siteUrl}/customer-login?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(rawPhone)}`;
+    const loginUrl = buildCustomerPortalUrl(siteUrl, {
+      portalNumber: customerIdText,
+      phone: rawPhone,
+    });
     const html = buildReferrerThankYouEmailHTML({
       referrerName: referrer.name,
       bonusDollars: pendingDollars,
@@ -1621,6 +1633,13 @@ Deno.serve(async (req)=>{
       serviceDetails = service;
     }
     console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully planId=${booking.plan?.id} serviceType=${booking.plan?.service_type}`);
+    const portalLogin = portalCredentialsFromBooking(booking);
+    const accessCodesUrl = buildCustomerPortalUrl(siteUrl, {
+      tab: "access-codes",
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId: booking.id,
+    });
     const recipientEmail = email || booking.email;
     if (!recipientEmail) {
       console.error(`[${timestamp}] [send-booking-confirmation] ERROR: No email address available`);
@@ -1688,7 +1707,7 @@ Deno.serve(async (req)=>{
       <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
       <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+        <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
@@ -1713,8 +1732,8 @@ Deno.serve(async (req)=>{
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
       const smsContent = pinFailsafe
-        ? `U-Fill Dumpsters: Your access PIN for Order #${booking.id} was updated because the original code could not be verified before your appointment. Your code is ${pin}. Activates ${activationLabel}. View: ${siteUrl}/customer-portal?tab=access-codes`
-        : `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. Activates ${activationLabel}. View: ${siteUrl}/customer-portal?tab=access-codes`;
+        ? `U-Fill Dumpsters: Your access PIN for Order #${booking.id} was updated because the original code could not be verified before your appointment. Your code is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`
+        : `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_update SMS:`, smsResult);
 
@@ -1776,7 +1795,7 @@ Deno.serve(async (req)=>{
       ${activationNote}
       <p style="color:#6b7280;font-size:13px;">Have the trailer back, locked, and secured by the new return time. A backup return code is available in the customer portal if this one is not entered correctly.</p>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+        <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
@@ -1823,7 +1842,7 @@ Deno.serve(async (req)=>{
     }
 
     if (emailType === "pin_unavailable") {
-      const portalUrl = `${siteUrl}/customer-portal?tab=access-codes`;
+      const portalUrl = `${accessCodesUrl}`;
       const contactUrl = `${siteUrl}/contact`;
       const unavailableHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
@@ -1896,7 +1915,7 @@ Deno.serve(async (req)=>{
         <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
       </div>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${siteUrl}/customer-portal?tab=access-codes" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+        <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
@@ -1918,7 +1937,7 @@ Deno.serve(async (req)=>{
       const smsOptIn = booking.customers?.sms_opt_in !== false;
       const smsContent =
         `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. ` +
-        `View: ${siteUrl}/customer-portal?tab=access-codes`;
+        `View: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_reminder SMS:`, smsResult);
       const remindedAt = new Date().toISOString();

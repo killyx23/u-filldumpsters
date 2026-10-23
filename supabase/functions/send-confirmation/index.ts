@@ -2,10 +2,11 @@
 // Update: remove the secondary receipt link; keep a single portal link or a single direct receipt link (if provided)
 import { createClient } from 'npm:@supabase/supabase-js@2.45.1';
 import { getCorsHeaders } from './cors.ts';
+import { resolvePublicSiteUrl } from '../_shared/normalizeSiteUrl.ts';
+import { buildCustomerPortalUrl } from '../_shared/portalLink.ts';
 const BREVO_API_KEY = (Deno.env.get('BREVO_API_KEY') ?? '').trim();
 const FROM_EMAIL = (Deno.env.get('BREVO_FROM_EMAIL') ?? '').trim();
 // Optional URLs
-const PORTAL_URL = (Deno.env.get('PORTAL_URL') ?? 'https://www.u-filldumpsters.com/login').trim();
 const RECEIPT_URL = (Deno.env.get('RECEIPT_URL') ?? 'https://www.u-filldumpsters.com/receipt').trim();
 const MAX_ATTACHMENT_BASE64_BYTES = 8 * 1024 * 1024; // 8MB
 Deno.serve(async (req)=>{
@@ -88,7 +89,11 @@ Deno.serve(async (req)=>{
       }, 422);
     }
     // Build links (single link preference)
-    const portalLink = `${PORTAL_URL}?cid=${encodeURIComponent(customerIdText)}&phone=${encodeURIComponent(phone)}`;
+    const portalLink = buildCustomerPortalUrl(resolvePublicSiteUrl(null), {
+      portalNumber: customerIdText,
+      phone,
+      orderId: booking.id,
+    });
     const receiptLink = RECEIPT_URL ? `${RECEIPT_URL}?bookingId=${encodeURIComponent(String(booking.id))}` : '';
     // Try to generate PDF; only attach if valid
     const { pdfBase64, pdfDiagnostics } = await tryGeneratePdf(admin, bookingId);
