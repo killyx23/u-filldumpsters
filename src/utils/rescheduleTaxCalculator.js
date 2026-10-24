@@ -14,6 +14,7 @@ import {
 } from '@/utils/rentalEquipmentPricing';
 import { quoteAddonForComparison } from '@/utils/rescheduleComparison';
 import { trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
+import { catalogBaseRental } from '@/utils/phoneOrderQuote';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
 
@@ -67,21 +68,19 @@ export function addonsListToAddonsData(addonsList = [], { deliveryFee = 0, milea
   return addonsData;
 }
 
+/** Reschedule day counts are inclusive. Rock counts the first day only when drop-off and pickup are one day apart. */
+function countedServiceDays(service, inclusiveDays) {
+  const days = Math.max(1, Number(inclusiveDays) || 1);
+  const id = Number(service?.id);
+  if (id === 3) return days <= 1 ? 1 : days - 1;
+  return days;
+}
+
 export function calculateBaseRentalCost(service, days) {
   if (!service) return 0;
-  const basePrice = Number(service.base_price) || 0;
   const id = Number(service.id);
-
-  if (id === 1) {
-    return days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
-  }
-  if (id === 2 || id === 4 || id === 5 || id === 8) {
-    return basePrice * days;
-  }
-  if (id === 3) {
-    return basePrice;
-  }
-  return basePrice * days;
+  const counted = countedServiceDays(service, days);
+  return catalogBaseRental({ ...service, id }, counted);
 }
 
 /**

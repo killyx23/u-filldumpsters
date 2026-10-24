@@ -13,12 +13,18 @@ import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
 import { clearProtectionPlansCache } from '@/utils/protectionPlans';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
-const ServicePricingCard = ({ service, onSave }) => {
+const CUSTOM_PROMO = '__custom__';
+
+const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [price, setPrice] = useState(service.base_price || 0);
     const [unit, setUnit] = useState(service.price_unit || '/day');
     const [deliveryFee, setDeliveryFee] = useState(service.delivery_fee || 0);
     const [mileageRate, setMileageRate] = useState(service.mileage_rate !== undefined && service.mileage_rate !== null ? service.mileage_rate : 0.85);
+    const [dailyRate, setDailyRate] = useState(service.additional_day_rate || 0);
+    const [showPromo, setShowPromo] = useState(Boolean(service.show_promo_label));
+    const [promoChoice, setPromoChoice] = useState(service.promo_label_id ? String(service.promo_label_id) : '');
+    const [customPromo, setCustomPromo] = useState('');
 
     const isDeliveryService = service.id === 4 || service.id === 1;
 
@@ -27,11 +33,22 @@ const ServicePricingCard = ({ service, onSave }) => {
         setUnit(service.price_unit || '/day');
         setDeliveryFee(service.delivery_fee || 0);
         setMileageRate(service.mileage_rate !== undefined && service.mileage_rate !== null ? service.mileage_rate : 0.85);
+        setDailyRate(service.additional_day_rate || 0);
+        setShowPromo(Boolean(service.show_promo_label));
+        setPromoChoice(service.promo_label_id ? String(service.promo_label_id) : '');
+        setCustomPromo('');
     }, [service]);
 
     const handleSave = async () => {
         try {
             setIsSaving(true);
+            let promoLabelId = promoChoice && promoChoice !== CUSTOM_PROMO ? Number(promoChoice) : null;
+            if (promoChoice === CUSTOM_PROMO && (showPromo || customPromo.trim())) {
+                const created = await onCreateLabel(customPromo);
+                promoLabelId = created?.id ?? null;
+                if (promoLabelId) setPromoChoice(String(promoLabelId));
+                setCustomPromo('');
+            }
             const updatePayload = {
                 base_price: parseFloat(price) || 0,
                 price_unit: unit || '',
@@ -39,12 +56,15 @@ const ServicePricingCard = ({ service, onSave }) => {
                 homepage_price: parseFloat(price) || 0,
                 homepage_price_unit: unit || '',
                 mileage_rate: parseFloat(mileageRate) || 0,
-                delivery_fee: parseFloat(deliveryFee) || 0
+                delivery_fee: parseFloat(deliveryFee) || 0,
+                ...(service.id === 4 ? { additional_day_rate: parseFloat(dailyRate) || 0 } : {}),
+                show_promo_label: Boolean(showPromo && promoLabelId),
+                promo_label_id: promoLabelId,
             };
             await onSave(service.id, updatePayload);
         } catch (error) {
             console.error("Error preparing save data:", error);
-            toast({ title: "Validation Error", description: "Please check your input values.", variant: "destructive" });
+            toast({ title: "Could not save pricing", description: error.message || "Please check your input values.", variant: "destructive" });
         } finally {
             setIsSaving(false);
         }
@@ -66,6 +86,20 @@ const ServicePricingCard = ({ service, onSave }) => {
                         disabled={isSaving}
                     />
                 </div>
+                {service.id === 4 && (
+                    <div className="flex items-center gap-2">
+                        <Label>Daily rate:</Label>
+                        <Input
+                            type="number"
+                            step="0.01"
+                            value={dailyRate}
+                            onChange={(e) => setDailyRate(e.target.value)}
+                            className="w-24 bg-white/10 text-white"
+                            placeholder="0.00"
+                            disabled={isSaving}
+                        />
+                    </div>
+                )}
                 <div className="flex items-center gap-2">
                     <Label>Unit:</Label>
                      <Input 
@@ -78,6 +112,35 @@ const ServicePricingCard = ({ service, onSave }) => {
                     />
                 </div>
                
+                <div className="flex items-center gap-2">
+                    <Checkbox
+                        id={`promo-${service.id}`}
+                        checked={showPromo}
+                        onCheckedChange={(checked) => setShowPromo(checked === true)}
+                        disabled={isSaving}
+                    />
+                    <Label htmlFor={`promo-${service.id}`}>Deal label</Label>
+                    <Select value={promoChoice || undefined} onValueChange={setPromoChoice} disabled={isSaving}>
+                        <SelectTrigger className="w-44 bg-white/10 text-white">
+                            <SelectValue placeholder="Choose a label" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {(promoLabels || []).map((row) => (
+                                <SelectItem key={row.id} value={String(row.id)}>{row.label}</SelectItem>
+                            ))}
+                            <SelectItem value={CUSTOM_PROMO}>Custom label…</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    {promoChoice === CUSTOM_PROMO && (
+                        <Input
+                            value={customPromo}
+                            onChange={(e) => setCustomPromo(e.target.value)}
+                            className="w-40 bg-white/10 text-white"
+                            placeholder="Type a label"
+                            disabled={isSaving}
+                        />
+                    )}
+                </div>
                 {isDeliveryService && (
                     <>
                         <div className="flex items-center gap-2">
@@ -858,6 +921,7 @@ export const PricingManager = () => {
     const [services, setServices] = useState([]);
     const [protectionPlans, setProtectionPlans] = useState([]);
     const [coupons, setCoupons] = useState([]);
+    const [promoLabels, setPromoLabels] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isCouponFormOpen, setIsCouponFormOpen] = useState(false);
     const [editingCoupon, setEditingCoupon] = useState(null);
@@ -900,8 +964,9 @@ export const PricingManager = () => {
                     .order('id');
             }
 
-            const [couponsRes, plansRes] = await Promise.all([
+            const [couponsRes, labelsRes, plansRes] = await Promise.all([
                 supabase.from('coupons').select('*').order('created_at', { ascending: false }),
+                supabase.from('pricing_promo_labels').select('id, label').order('label'),
                 supabase
                     .from('protection_plans')
                     .select('*, protection_plan_services(service_id)')
@@ -911,6 +976,8 @@ export const PricingManager = () => {
             if (servicesRes.error) throw servicesRes.error;
             if (couponsRes.error) throw couponsRes.error;
             if (plansRes.error) throw plansRes.error;
+            if (labelsRes.error) throw labelsRes.error;
+            setPromoLabels(labelsRes.data || []);
 
             const serviceData = servicesRes.data || [];
             const regularServices = serviceData.filter(
@@ -957,6 +1024,34 @@ export const PricingManager = () => {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    const handleCreatePromoLabel = async (raw) => {
+        const label = String(raw || '').trim();
+        if (!label) throw new Error('Type a label before saving.');
+        const existing = promoLabels.find((row) => row.label.toLowerCase() === label.toLowerCase());
+        if (existing) return existing;
+
+        const { data, error } = await supabase
+            .from('pricing_promo_labels')
+            .insert({ label })
+            .select('id, label')
+            .single();
+        if (error) {
+            if (error.code === '23505') {
+                const { data: row, error: readError } = await supabase
+                    .from('pricing_promo_labels')
+                    .select('id, label')
+                    .eq('label', label)
+                    .single();
+                if (readError) throw readError;
+                setPromoLabels((prev) => [...prev, row].sort((a, b) => a.label.localeCompare(b.label)));
+                return row;
+            }
+            throw error;
+        }
+        setPromoLabels((prev) => [...prev, data].sort((a, b) => a.label.localeCompare(b.label)));
+        return data;
+    };
 
     const handleSaveService = async (id, updateData) => {
         try {
@@ -1150,7 +1245,13 @@ export const PricingManager = () => {
                 <h2 className="text-2xl font-bold mb-4 text-white">Service Pricing</h2>
                 <div className="space-y-4">
                     {rentableServices.map(service => (
-                        <ServicePricingCard key={service.id} service={service} onSave={handleSaveService} />
+                        <ServicePricingCard
+                            key={service.id}
+                            service={service}
+                            promoLabels={promoLabels}
+                            onCreateLabel={handleCreatePromoLabel}
+                            onSave={handleSaveService}
+                        />
                     ))}
                 </div>
             </div>

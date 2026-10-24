@@ -11,6 +11,8 @@ import { TRAILER_DELIVERY_MILEAGE_EXPLANATION, formatTrailerDeliveryMileage, tra
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { activePromoLabel } from '@/utils/servicePlan';
+import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
 
 export const ReceiptPage = () => {
@@ -293,6 +295,7 @@ export const ReceiptPage = () => {
                     subtotal,
                     tax,
                     total,
+                    promoLabel: activePromoLabel(booking.plan),
                     dropOffDate: booking.drop_off_date,
                     pickupDate: booking.pickup_date
                 });
@@ -566,6 +569,9 @@ export const ReceiptPage = () => {
                                         <span className="font-semibold">{formatCurrency(receiptDetails.tax)}</span>
                                     </div>
                                     
+                                    <div className="flex justify-end">
+                                        <PromoTotalLabel label={receiptDetails.promoLabel} />
+                                    </div>
                                     <div className="flex justify-between items-center bg-yellow-500/10 p-4 rounded-lg border-2 border-yellow-500/30 mt-4">
                                         <span className="text-xl font-bold text-white">Total with Tax</span>
                                         <span className="text-3xl font-black text-yellow-400">{formatCurrency(receiptDetails.total)}</span>

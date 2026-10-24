@@ -18,8 +18,9 @@ import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
-import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
+import { catalogBaseRental, phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equipmentReturnDisplay';
+import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -132,6 +133,18 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
             generateToken();
         }
     }, [booking]);
+
+    if (isUnfinishedUnpaidBooking(booking)) {
+        return (
+            <div ref={ref} className="p-8 font-sans text-gray-800 bg-white">
+                <h2 className="text-2xl font-semibold text-gray-900">Booking not finished</h2>
+                <p className="mt-3 text-gray-700">
+                    This booking was not finished and no payment was taken, so there is no receipt
+                    {booking?.id ? ` for booking #${booking.id}` : ''}.
+                </p>
+            </div>
+        );
+    }
     
     if (!booking || !booking.customers || !booking.plan || loading) {
         return <div className="p-8">Loading receipt...</div>;
@@ -208,12 +221,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         ? quotedBasePrice
         : (currentPlan.base_price || 0);
     if (!(Number.isFinite(quotedBasePrice) && quotedBasePrice > 0)) {
-        if (currentPlan.id === 1 && duration === 7) {
-            baseServicePrice = 500;
-        } else if (currentPlan.id === 1) {
-            baseServicePrice = currentPlan.base_price + (Math.max(0, duration - 1) * 50);
-        } else if (currentPlan.id === 2 || currentPlan.id === 4) {
+        const countedDays = currentPlan.id === 3
+            ? Math.max(1, duration <= 1 ? 1 : duration - 1)
+            : duration;
+        if (currentPlan.id === 4 && currentPlan.additional_day_rate == null) {
             baseServicePrice = (currentPlan.base_price || 0) * duration;
+        } else {
+            baseServicePrice = catalogBaseRental({ ...currentPlan, id: currentPlan.id }, countedDays);
         }
     }
 

@@ -1,6 +1,26 @@
 import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { formatAdminMoney, formatAdminPercent, UNAVAILABLE_FEE_TEXT } from '@/utils/chargesAndFeesConfig';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
+import { currentReturnPath } from '@/utils/smsFormReturn';
+import { MASTER_RENTAL_AGREEMENT_PATH } from '@/pages/MasterRentalAgreementPage';
+
+const MasterAgreementLink = ({ className, children }) => {
+  const location = useLocation();
+  const inBooking = location.pathname === '/';
+  return (
+    <Link
+      to={MASTER_RENTAL_AGREEMENT_PATH}
+      state={{
+        returnTo: currentReturnPath(location),
+        resumeBooking: inBooking,
+      }}
+      className={className}
+    >
+      {children}
+    </Link>
+  );
+};
 
 const percentLabel = (fee, key) => {
   const formatted = formatAdminPercent(fee(key));
@@ -75,6 +95,17 @@ export const buildTermsSections = (fee, options = {}) => {
           <strong>Indemnification.</strong> The Customer agrees to defend, indemnify, and hold harmless the Company from
           any and all third-party claims, lawsuits, or financial losses, including attorney fees, arising directly or
           indirectly out of the Customer&apos;s possession, towing, operation, or placement of the equipment.
+        </p>
+        <p>
+          <strong>Insurance &amp; Towing Compliance:</strong> I agree that I am solely responsible for verifying that my
+          auto insurance covers this rented equipment, and I assume full legal and financial liability for all towing
+          operations, state laws, weight limits, and government tickets/fines. I acknowledge that I have read and accept
+          the complete, detailed terms regarding insurance and towing{' '}
+          <span className="text-white">rules in the</span>{' '}
+          <MasterAgreementLink className="text-yellow-400 hover:text-yellow-300 underline">
+            Master Rental Agreement (see here)
+          </MasterAgreementLink>
+          .
         </p>
         <p>
           <strong>2. Dumpster and trailer property damage waiver.</strong>

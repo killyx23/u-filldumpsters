@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, addMonths, endOfMonth, format, parse, parseISO, startOfDay, startOfMonth } from 'date-fns';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useElements, useStripe } from '@stripe/react-stripe-js';
@@ -38,6 +38,7 @@ import { isPickupDateBlockedByRange } from '@/utils/calendarAvailabilityHints';
 import { bookableFromInventoryRow } from '@/utils/equipmentInventoryManager';
 import { describeBookingCapacityError, isBookingCapacityError } from '@/utils/bookingCapacityError';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
+import { ApplianceDisposalAgreementDialog, MattressDisposalAgreementDialog } from '@/components/addons/MattressDisposalAgreementDialog';
 import {
   catalogBaseRental,
   money,
@@ -317,6 +318,11 @@ export function PhoneOrderDesk() {
   const [address, setAddress] = useState(emptyAddress);
   const [services, setServices] = useState([]);
   const [qty, setQty] = useState({});
+  const [showMattressAgreement, setShowMattressAgreement] = useState(false);
+  const [showApplianceAgreement, setShowApplianceAgreement] = useState(false);
+  const pendingMattressQty = useRef(0);
+  const pendingApplianceQty = useRef(0);
+  const ignoreQtyUntil = useRef(0);
   const [stockNote, setStockNote] = useState({});
   const [equipmentPrices, setEquipmentPrices] = useState({});
   const [coupon, setCoupon] = useState(null);
@@ -672,8 +678,7 @@ export function PhoneOrderDesk() {
     });
   };
 
-  const changeQty = (item, value) => {
-    const requested = Math.max(0, Number(value) || 0);
+  const commitQty = (item, requested) => {
     const max = stockMax[item.id];
     const capped = !unlock && Number.isFinite(max) ? Math.min(requested, max) : requested;
     setQty((prev) => ({ ...prev, [item.id]: capped }));
@@ -690,6 +695,47 @@ export function PhoneOrderDesk() {
       return;
     }
     setStockNote((prev) => ({ ...prev, [item.id]: '' }));
+  };
+
+  const changeQty = (item, value) => {
+    if ((Number(item.id) === 4 || Number(item.id) === 6) && Date.now() < ignoreQtyUntil.current) return;
+    const requested = Math.max(0, Number(value) || 0);
+    const current = Number(qty[item.id] || 0);
+    if (Number(item.id) === 4 && requested > 0 && current <= 0) {
+      const max = stockMax[item.id];
+      if (!unlock && max === 0) {
+        commitQty(item, requested);
+        return;
+      }
+      pendingMattressQty.current = requested;
+      setShowMattressAgreement(true);
+      return;
+    }
+    if (Number(item.id) === 6 && requested > 0 && current <= 0) {
+      const max = stockMax[item.id];
+      if (!unlock && max === 0) {
+        commitQty(item, requested);
+        return;
+      }
+      pendingApplianceQty.current = requested;
+      setShowApplianceAgreement(true);
+      return;
+    }
+    commitQty(item, requested);
+  };
+
+  const confirmMattressDisposal = () => {
+    const item = ADDONS.find((entry) => entry.id === 4);
+    if (!item) return;
+    ignoreQtyUntil.current = Date.now() + 500;
+    commitQty(item, pendingMattressQty.current || 1);
+  };
+
+  const confirmApplianceDisposal = () => {
+    const item = ADDONS.find((entry) => entry.id === 6);
+    if (!item) return;
+    ignoreQtyUntil.current = Date.now() + 500;
+    commitQty(item, pendingApplianceQty.current || 1);
   };
 
   const applyCoupon = async () => {
@@ -1464,6 +1510,18 @@ export function PhoneOrderDesk() {
           </aside>
         </div>
       )}
+
+      <MattressDisposalAgreementDialog
+        open={showMattressAgreement}
+        onOpenChange={setShowMattressAgreement}
+        onAgree={confirmMattressDisposal}
+      />
+
+      <ApplianceDisposalAgreementDialog
+        open={showApplianceAgreement}
+        onOpenChange={setShowApplianceAgreement}
+        onAgree={confirmApplianceDisposal}
+      />
 
       <UnlockManualDialog
         open={unlockOpen}

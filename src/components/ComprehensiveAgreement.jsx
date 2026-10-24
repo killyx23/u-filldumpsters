@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import {
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
+import { currentReturnPath, markSmsReturnPending } from '@/utils/smsFormReturn';
 import {
   createFeeLookup,
   createHppFeeLookup,
@@ -405,6 +406,38 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           compliance towing towels or pads, and that they will follow all local, state, and federal transport laws,
           lighting, wiring, and speed limits.
         </li>
+        <li>
+          <strong>Insurance, Towing Compliance, and Lessee Liability</strong>
+          <ol className="list-decimal list-inside space-y-2 mt-2">
+            <li>
+              <strong>Insurance Requirements &amp; Sufficiency:</strong> The Renter (Lessee) assumes sole and exclusive
+              responsibility for providing adequate insurance coverage for the duration of the rental period. The
+              Company (Lessor) does not provide primary auto liability, comprehensive, or collision insurance for
+              towing activities. The Renter is solely responsible for contacting their own automotive insurance
+              provider prior to hooking up or moving the equipment to ensure that physical damage, liability, and
+              towing/trailering coverages extend fully to the rented equipment. Failure to secure adequate insurance
+              coverage is at the Renter&apos;s sole expense, risk, and liability.
+            </li>
+            <li>
+              <strong>Legal Compliance &amp; Towing Regulations:</strong> The Renter represents and warrants that they
+              possess a valid driver&apos;s license, the requisite mechanical knowledge, and the physical capability to
+              safely operate the towing vehicle and the rented equipment. The Renter assumes absolute responsibility
+              for knowing, understanding, and complying with all applicable local, state, and federal laws, traffic
+              regulations, and department of transportation (DOT) requirements regarding towing, weight limits, load
+              securing, hitch sizing, and vehicle operation.
+            </li>
+            <li>
+              <strong>Indemnification &amp; Liability for Violations:</strong> The Renter shall be solely and fully
+              responsible for any and all consequences resulting from a failure to comply with insurance or legal
+              requirements. This includes, but is not limited to, full financial and legal responsibility for government
+              tickets and citations (including highway speeding tickets, overweight trailer tickets, improper parking
+              citations, and local municipality code fines), toll road violations, impound fees, traffic fines, legal
+              fees, court costs, and third-party property damage or personal injury claims. The Renter agrees to defend,
+              indemnify, and hold harmless U-Fill Dumpsters LLC from any claims, losses, or liabilities arising directly
+              or indirectly from the Renter&apos;s operation, towing, transport, positioning, or use of the equipment.
+            </li>
+          </ol>
+        </li>
       </ul>
 
       <h3 className="text-lg text-yellow-300">SECTION 8: STRICT EQUIPMENT RETURN CONDITION &amp; LOSS OF USE</h3>
@@ -420,21 +453,26 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           billed at full parts and field labor repair rates.
         </li>
         <li>
-          <strong>Theft and Complete Loss:</strong> If the Equipment is stolen, lost, or destroyed during the Rental
-          Period, the Customer agrees to pay the Company the full replacement value of the Equipment, plus any lost
-          rental revenue. The Customer must file a report with local law enforcement and provide a copy to the Company
-          within 24 hours of discovery.
+          <strong>Theft and Complete Loss:</strong> If the Equipment, including dumpsters, trailers, machinery,
+          attachments, locks, accessories, or components, is stolen, lost, vandalized, or destroyed during the Rental
+          Period, the Customer agrees to pay the Company the full retail replacement value of those items, plus any lost
+          rental revenue. The Customer must immediately file a police report and provide a copy to the Company within
+          24 hours of discovery.
         </li>
         <li>
-          <strong>Equipment Security Requirements:</strong> The Customer agrees to keep the Equipment secured at all
-          times when not in use. For towable trailers, the Customer must use a coupler lock, wheel boot, or park the
-          trailer in a locked, secure enclosure.
+          <strong>Equipment Security Requirements:</strong> The Customer assumes absolute financial responsibility for
+          the physical security of all rented Equipment, including dumpsters, trailers, machinery, attachments, locks,
+          and accessories, from delivery or pickup until it is returned to or retrieved by the Company. The Customer
+          agrees to keep the Equipment secured at all times when not in use. For towable trailers, the Customer must use
+          a coupler lock, wheel chocks, or park the trailer in a locked, secure enclosure.
         </li>
         <li>
-          <strong>Tire Damage and Flat Tires:</strong> The Customer is 100% responsible for all tire damage during the
-          Rental Period, including flats, punctures, blowouts, and sidewall damage. If a tire is punctured by debris or
-          a stray nail on a job site or driveway while in the Customer&apos;s possession, the Customer is responsible for
-          the repair or replacement cost with a matching tire of equal quality.
+          <strong>Tire Damage and Flat Tires:</strong> The Company provides trailers and machinery with tires in good,
+          serviceable condition at delivery or pickup. After that, the Customer is solely responsible for tire integrity
+          and is 100% responsible for all tire damage during the Rental Period, including flats, punctures, blowouts,
+          and sidewall damage. The Customer must pay for roadside assistance, tire repairs, and identical-brand
+          replacements needed to return the trailer or machinery to operational status, including when a tire is
+          punctured by debris or a stray nail on a job site or driveway.
         </li>
         <li>
           <strong>Prohibited Field Repairs:</strong> The Customer shall not attempt any major mechanical or structural
@@ -582,6 +620,12 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
 };
 
 export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProcessing }) => {
+  const location = useLocation();
+  const returnTo = currentReturnPath(location);
+  const openSavedStep = (event) => {
+    event.stopPropagation();
+    markSmsReturnPending(returnTo);
+  };
   const [signature, setSignature] = useState('');
   const [signatureDate, setSignatureDate] = useState(() => format(new Date(), 'PPP'));
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -829,13 +873,23 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
               insurance, protection, or peace-of-mind coverage is purchased, the Customer remains fully responsible for
               all amounts, losses, liabilities, and damages that exceed the purchased coverage limits, exclusions, or
               credit caps. The full{' '}
-              <a href={HPP_TERMS_PATH} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>
+              <Link
+                to={HPP_TERMS_PATH}
+                state={{ returnTo }}
+                onClick={openSavedStep}
+                style={{ color: '#1d4ed8' }}
+              >
                 Hardware Protection Plan
-              </a>{' '}
+              </Link>{' '}
               terms in Section 9 are part of this agreement. See also the{' '}
-              <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8' }}>
+              <Link
+                to="/privacy"
+                state={{ returnTo }}
+                onClick={openSavedStep}
+                style={{ color: '#1d4ed8' }}
+              >
                 Privacy Policy
-              </a>
+              </Link>
               .
             </p>
 

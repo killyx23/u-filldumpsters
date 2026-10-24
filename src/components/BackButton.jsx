@@ -5,11 +5,15 @@ import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { isSafeReturnPath } from '@/utils/smsFormReturn';
 
-const BackButton = ({ className }) => {
+const BackButton = ({ className, onBack }) => {
     const navigate = useNavigate();
     const location = useLocation();
 
     const goBack = () => {
+        if (onBack) {
+            onBack({ navigate, location });
+            return;
+        }
         const returnTo = location.state?.returnTo;
         if (isSafeReturnPath(returnTo)) {
             navigate(returnTo, { state: { resumeDraft: true } });

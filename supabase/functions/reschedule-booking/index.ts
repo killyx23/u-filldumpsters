@@ -8,7 +8,11 @@ const calculatePrice = (plan, startDate, endDate, isDelivery)=>{
   let duration = differenceInCalendarDays(new Date(endDate), new Date(startDate));
   if (duration < 1) duration = 1;
   let total = 0;
-  if (plan.id === 2 && !isDelivery) {
+  if (plan.id === 4) {
+    const rate = Number(plan.additional_day_rate) || 0;
+    const trailerDays = Math.max(1, differenceInCalendarDays(new Date(endDate), new Date(startDate)) + 1);
+    total = Number(plan.base_price || 0) + Math.max(0, trailerDays - 1) * rate;
+  } else if (plan.id === 2 && !isDelivery) {
     const weeks = Math.floor(duration / 7);
     const days = duration % 7;
     total = weeks * weeklyRate + days * dailyRate;

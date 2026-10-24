@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PackagePlus, Loader2, Shield, Truck, HardHat, ShoppingCart, Trash2, Tv, Box, Plus, Minus, Info, CheckCircle2 } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -10,6 +10,7 @@ import { RadioGroup } from '@/components/ui/radio-group';
 import { RadioCard } from '@/components/addons/RadioCard';
 import { HardwareProtectionInfoDialog } from '@/components/addons/HardwareProtectionInfoDialog';
 import { DeclineWarningDialog } from '@/components/addons/DeclineWarningDialog';
+import { isMattressDisposalAddon, isApplianceDisposalAddon, MattressDisposalAgreementDialog, ApplianceDisposalAgreementDialog } from '@/components/addons/MattressDisposalAgreementDialog';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useProtectionPlans } from '@/hooks/useProtectionPlans';
 import { toast } from '@/components/ui/use-toast';
@@ -58,6 +59,11 @@ export const RescheduleAddonsSection = ({
   const [originalAddonsMap, setOriginalAddonsMap] = useState(new Map());
   const [showInsuranceInfo, setShowInsuranceInfo] = useState(false);
   const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
+  const [showMattressAgreement, setShowMattressAgreement] = useState(false);
+  const [showApplianceAgreement, setShowApplianceAgreement] = useState(false);
+  const pendingMattressAction = useRef(null);
+  const pendingApplianceAction = useRef(null);
+  const ignoreAddonInteractionUntil = useRef(0);
   const [insuranceChoiceLocked, setInsuranceChoiceLocked] = useState(false);
   const serviceId = selectedService?.id ?? originalBooking?.plan?.id ?? null;
   const { insurancePrice, rentalInsurance } = useInsurancePricing(serviceId);
@@ -336,7 +342,38 @@ export const RescheduleAddonsSection = ({
     return originalQty + free;
   };
 
-  const handleToggle = async (addon) => {
+  const confirmMattressDisposal = () => {
+    ignoreAddonInteractionUntil.current = Date.now() + 500;
+    const action = pendingMattressAction.current;
+    pendingMattressAction.current = null;
+    action?.();
+  };
+
+  const requireMattressAgreement = (action) => {
+    pendingMattressAction.current = action;
+    setShowMattressAgreement(true);
+  };
+
+  const confirmApplianceDisposal = () => {
+    ignoreAddonInteractionUntil.current = Date.now() + 500;
+    const action = pendingApplianceAction.current;
+    pendingApplianceAction.current = null;
+    action?.();
+  };
+
+  const requireApplianceAgreement = (action) => {
+    pendingApplianceAction.current = action;
+    setShowApplianceAgreement(true);
+  };
+
+  const handleToggle = async (addon, agreementAccepted = false) => {
+    if (
+      !agreementAccepted
+      && (isMattressDisposalAddon(addon) || isApplianceDisposalAddon(addon))
+      && Date.now() < ignoreAddonInteractionUntil.current
+    ) {
+      return;
+    }
     const isCurrentlySelected = selectedAddonsList.some(a => 
       a.id === addon.id || 
       (a.name && addon.name && a.name.toLowerCase() === addon.name.toLowerCase())
@@ -345,6 +382,14 @@ export const RescheduleAddonsSection = ({
     const originalItem = originalAddonsMap.get(addon.id);
     
     if (!isCurrentlySelected) {
+      if (isMattressDisposalAddon(addon) && !agreementAccepted) {
+        requireMattressAgreement(() => handleToggle(addon, true));
+        return;
+      }
+      if (isApplianceDisposalAddon(addon) && !agreementAccepted) {
+        requireApplianceAgreement(() => handleToggle(addon, true));
+        return;
+      }
       const ceiling = stockCeiling(addon);
       let quantityToAdd = originalItem ? originalItem.quantity : 1;
       if (ceiling != null) {
@@ -400,7 +445,28 @@ export const RescheduleAddonsSection = ({
     }
   };
 
-  const handleQuantityChange = async (addon, newQuantity) => {
+  const handleQuantityChange = async (addon, newQuantity, agreementAccepted = false) => {
+    if (
+      !agreementAccepted
+      && (isMattressDisposalAddon(addon) || isApplianceDisposalAddon(addon))
+      && Date.now() < ignoreAddonInteractionUntil.current
+    ) {
+      return;
+    }
+    const current = selectedAddonsList.find(a =>
+      a.id === addon.id ||
+      (a.name && addon.name && a.name.toLowerCase() === addon.name.toLowerCase())
+    );
+    const currentQty = Number(current?.quantity || 0);
+    const requested = Math.max(0, parseInt(newQuantity, 10) || 0);
+    if (isMattressDisposalAddon(addon) && requested > 0 && currentQty <= 0 && !agreementAccepted) {
+      requireMattressAgreement(() => handleQuantityChange(addon, requested, true));
+      return;
+    }
+    if (isApplianceDisposalAddon(addon) && requested > 0 && currentQty <= 0 && !agreementAccepted) {
+      requireApplianceAgreement(() => handleQuantityChange(addon, requested, true));
+      return;
+    }
     const ceiling = stockCeiling(addon);
     let qty = Math.max(0, parseInt(newQuantity, 10) || 0);
     if (ceiling != null) {
@@ -445,14 +511,17 @@ export const RescheduleAddonsSection = ({
       return updated;
     });
 
-    setSelectedAddonsList(prev => 
-      prev.map(a => {
-        if (a.id === addon.id || (a.name && addon.name && a.name.toLowerCase() === addon.name.toLowerCase())) {
-          return { ...a, quantity: qty };
-        }
-        return a;
-      })
-    );
+    setSelectedAddonsList(prev => {
+      const matches = (entry) => entry.id === addon.id || (entry.name && addon.name && entry.name.toLowerCase() === addon.name.toLowerCase());
+      if (!prev.some(matches)) {
+        return [...prev, {
+          ...addon,
+          quantity: qty,
+          additionalDayPrice: addon.additionalDayPrice ?? 0,
+        }];
+      }
+      return prev.map((entry) => (matches(entry) ? { ...entry, quantity: qty } : entry));
+    });
   };
 
   const incrementQuantity = (addon) => {
@@ -593,6 +662,18 @@ export const RescheduleAddonsSection = ({
         onConfirm={confirmDeclineInsurance}
         title="Confirm Your Choice"
         description="By declining the Hardware Protection Plan, you acknowledge and agree that you are fully responsible for any and all damages that may occur to the rental unit, trailer, and all its components during your rental period. You will be billed for the full cost of repairs or replacement."
+      />
+
+      <MattressDisposalAgreementDialog
+        open={showMattressAgreement}
+        onOpenChange={setShowMattressAgreement}
+        onAgree={confirmMattressDisposal}
+      />
+
+      <ApplianceDisposalAgreementDialog
+        open={showApplianceAgreement}
+        onOpenChange={setShowApplianceAgreement}
+        onAgree={confirmApplianceDisposal}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

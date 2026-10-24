@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle } from 'lucide-react';
 import { differenceInDays } from 'date-fns';
+import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
 import { supabase } from '@/lib/customSupabaseClient';
 import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 import { getTaxRate } from '@/utils/getTaxRate';
@@ -91,26 +92,22 @@ export const ReschedulePricingBreakdownDisplay = ({
             const calculateCosts = () => {
                 if (!newService) return null;
 
-                const basePrice = Number(newService.base_price) || 0;
                 const deliveryFee = Number(newService.delivery_fee) || 0;
                 const mileageRate = Number(newService.mileage_rate) || 0.85;
                 
                 // Calculate days
                 let days = 1;
                 if (newDropOffDate && newPickupDate) {
-                    days = differenceInDays(newPickupDate, newDropOffDate) + 1;
-                    days = Math.max(1, days);
+                    if (Number(newService.id) === 3 || Number(newService.id) === 4) {
+                        days = rentalDaysForPlan(newService.id, newDropOffDate, newPickupDate);
+                    } else {
+                        days = differenceInDays(newPickupDate, newDropOffDate) + 1;
+                        days = Math.max(1, days);
+                    }
                 }
 
                 // Calculate BASE rental cost (without delivery or mileage)
-                let baseRentalCost = 0;
-                if (newService.id === 1) {
-                    baseRentalCost = days === 7 ? 500 : basePrice + Math.max(0, days - 1) * 50;
-                } else if (newService.id === 2 || newService.id === 4) {
-                    baseRentalCost = basePrice * days;
-                } else if (newService.id === 3) {
-                    baseRentalCost = basePrice;
-                }
+                const baseRentalCost = catalogBaseRental(newService, days);
 
                 // Delivery fee for delivery services
                 const isDeliveryService = newService.id === 1 || newService.id === 4 || newService.id === 3;

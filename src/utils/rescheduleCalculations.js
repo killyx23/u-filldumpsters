@@ -140,9 +140,9 @@ export const calculateDays = (dropOff, pickup) => {
     if (!dropOff || !pickup) return 1;
     const start = typeof dropOff === 'string' ? parseISO(dropOff) : dropOff;
     const end = typeof pickup === 'string' ? parseISO(pickup) : pickup;
-    
+
     if (!isValid(start) || !isValid(end)) return 1;
-    
+
     const days = differenceInDays(end, start) + 1;
     return Math.max(1, days);
 };
@@ -361,7 +361,8 @@ export async function calculateComprehensivePricing(
   mileageDistance = 0,
   deliveryFee = 0,
   insurancePrice = 0,
-  priceSnapshot = null
+  priceSnapshot = null,
+  additionalDayRate = 0
 ) {
   let baseRentalCost = 0;
   
@@ -370,9 +371,9 @@ export async function calculateComprehensivePricing(
   } else if (serviceId === 2) {
     baseRentalCost = basePrice * numberOfDays;
   } else if (serviceId === 3) {
-    baseRentalCost = basePrice;
-  } else if (serviceId === 4) {
     baseRentalCost = basePrice * numberOfDays;
+  } else if (serviceId === 4) {
+    baseRentalCost = basePrice + Math.max(0, numberOfDays - 1) * (Number(additionalDayRate) || 0);
   } else {
     baseRentalCost = basePrice * numberOfDays;
   }

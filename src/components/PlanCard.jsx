@@ -141,13 +141,18 @@ export const PlanCard = ({ plan, onSelect, isTemporarilyUnavailable }) => {
                     currentStyle.bg
                 )}>
                     
-                    {isTemporarilyUnavailable && (
-                        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600/90 backdrop-blur text-white px-6 py-1.5 rounded-full text-sm font-bold shadow-xl z-20 whitespace-nowrap border border-red-400/50">
-                            Temporarily Unavailable
-                        </div>
-                    )}
-
-                    <div className="flex-grow pt-8">
+                    <div className="flex-grow pt-6">
+                        {isTemporarilyUnavailable && (
+                            <div className="mx-auto mb-3 w-fit bg-red-600 text-white px-5 py-1.5 rounded-full text-sm font-bold shadow-lg whitespace-nowrap">
+                                Temporarily Unavailable
+                            </div>
+                        )}
+                        {plan?.promoLabel ? (
+                            <div className="mb-3 text-center">
+                                <p className="text-2xl font-extrabold uppercase tracking-wide text-red-500 animate-pulse">{plan.promoLabel}</p>
+                                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-red-400">Limited time</p>
+                            </div>
+                        ) : null}
                         <h3 className={cn("text-2xl xl:text-3xl font-bold mb-3 text-center leading-tight", currentStyle.title)} style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{planName}</h3>
                         <p className="text-white/80 mb-6 min-h-[5.5rem] text-sm xl:text-[15px] leading-relaxed text-center" >
                             {typeof displayDescription === 'string'

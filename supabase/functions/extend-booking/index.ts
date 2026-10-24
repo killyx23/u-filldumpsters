@@ -50,7 +50,10 @@ function eachDate(startIso: string, endIso: string) {
   return dates;
 }
 
-function dayRateFromBooking(booking: { plan?: { base_price?: number; price?: number }; drop_off_date?: string; pickup_date?: string }) {
+function dayRateFromBooking(booking: { plan?: { id?: number; base_price?: number; price?: number; additional_day_rate?: number }; drop_off_date?: string; pickup_date?: string }) {
+  const planId = Number(booking.plan?.id);
+  if (planId === 4) return round2(Number(booking.plan?.additional_day_rate) || 0);
+  if (planId === 1) return 50;
   const base = Number(booking.plan?.base_price);
   if (base > 0) return round2(base);
   const dropOff = dateKey(booking.drop_off_date);

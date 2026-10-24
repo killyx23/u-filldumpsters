@@ -9,7 +9,7 @@ export function rentalDaysForPlan(planId, dropOff, pickup) {
   const endRaw = pickup || dropOff;
   const end = startOfDay(endRaw instanceof Date ? endRaw : parseISO(String(endRaw)));
   if (!isValid(start) || !isValid(end)) return 1;
-  if (id === 3 || id === 4) {
+  if (id === 3) {
     const diff = differenceInDays(end, start);
     return diff === 0 ? 1 : Math.max(1, diff);
   }
@@ -23,7 +23,11 @@ export function catalogBaseRental(service, days) {
   if (id === 1) {
     return dayCount === 7 ? 500 : basePrice + Math.max(0, dayCount - 1) * 50;
   }
-  if (id === 2 || id === 4 || id === 5 || id === 8 || id === 3) {
+  if (id === 4) {
+    const dailyRate = Number(service?.additional_day_rate) || 0;
+    return basePrice + Math.max(0, dayCount - 1) * dailyRate;
+  }
+  if (id === 2 || id === 5 || id === 8 || id === 3) {
     return basePrice * dayCount;
   }
   return basePrice * dayCount;

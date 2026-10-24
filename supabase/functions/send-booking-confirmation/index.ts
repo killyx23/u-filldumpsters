@@ -251,6 +251,11 @@ const quoteEmailEquipment = (item, booking) => {
     note: additionalDayNote(rate, extraDays, extraDayCharge, qty),
   };
 };
+const promoLabelHtml = (booking) => {
+  const label = String(booking?.plan?.promo_label || "").trim();
+  if (!label) return "";
+  return `<p style="margin: 0 0 4px 0; color: #dc2626; font-size: 22px; font-weight: 800; text-transform: uppercase;">${escapeHtml(label)}</p><p style="margin: 0 0 8px 0; color: #b91c1c; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">Limited time</p>`;
+};
 const escapeHtml = (value) => String(value ?? "")
   .replace(/&/g, "&amp;")
   .replace(/</g, "&lt;")
@@ -932,6 +937,7 @@ const generateActionRequiredEmailHTML = (
       ${buildPriceSummaryHTML(booking, insuranceAmount)}
       <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">
         <p style="margin: 0; color: #6b7280; font-size: 16px;">Amount Paid</p>
+        ${promoLabelHtml(booking)}
         <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(grandTotal)}</p>
       </div>
       <div style="margin-top: 30px; padding: 25px 20px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
@@ -979,6 +985,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const rawPhone = String(phone).replace(/\D/g, '');
   console.log(` site url: ${siteUrl}`);
   const portalUrl = buildCustomerPortalUrl(siteUrl, {
+    tab: "dashboard",
     portalNumber: customerIdText,
     phone: rawPhone || phone,
     orderId: booking.id,
@@ -1175,6 +1182,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       <!-- Total -->
       <div style="margin-top: 30px; padding: 20px; background-color: #eff6ff; border-radius: 8px; text-align: center;">
         <p style="margin: 0; color: #6b7280; font-size: 16px;">Total Amount Paid</p>
+        ${promoLabelHtml(booking)}
         <p style="margin: 10px 0 0 0; color: #1e40af; font-size: 36px; font-weight: bold;">${formatCurrency(grandTotal)}</p>
       </div>
 
@@ -1634,6 +1642,12 @@ Deno.serve(async (req)=>{
     }
     console.log(`[${timestamp}] [send-booking-confirmation] Booking fetched successfully planId=${booking.plan?.id} serviceType=${booking.plan?.service_type}`);
     const portalLogin = portalCredentialsFromBooking(booking);
+    const dashboardUrl = buildCustomerPortalUrl(siteUrl, {
+      tab: "dashboard",
+      portalNumber: portalLogin.portalNumber,
+      phone: portalLogin.phone,
+      orderId: booking.id,
+    });
     const accessCodesUrl = buildCustomerPortalUrl(siteUrl, {
       tab: "access-codes",
       portalNumber: portalLogin.portalNumber,
@@ -1707,7 +1721,7 @@ Deno.serve(async (req)=>{
       <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
       <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+        <a href="${dashboardUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>

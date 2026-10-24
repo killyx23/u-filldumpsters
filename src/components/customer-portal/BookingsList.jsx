@@ -14,6 +14,8 @@ import {
   Star
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { canExtendBooking } from '@/utils/rentalExtension';
@@ -22,6 +24,7 @@ import { formatAddressDeadlineMessage } from '@/utils/verificationDeadline';
 
 export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, onCancelClick, onRescheduleClick, onExtendClick, onLeaveReview }) => {
   const [filterStatus, setFilterStatus] = useState('all');
+  const [unpaidNotice, setUnpaidNotice] = useState(null);
 
   const filteredBookings = useMemo(() => {
     let result = [...bookings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -188,7 +191,20 @@ export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, o
                       <Clock className="w-3 h-3 mr-1 mt-0.5 shrink-0"/> {PENDING_REVIEW_MESSAGE}
                    </button>
                 )}
-                <Button variant="outline" size="sm" onClick={() => onReceiptClick(booking)} className="border-white/20 hover:bg-white/10">Details</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (isUnfinishedUnpaidBooking(booking)) {
+                      setUnpaidNotice(booking);
+                      return;
+                    }
+                    onReceiptClick(booking);
+                  }}
+                  className="border-white/20 hover:bg-white/10"
+                >
+                  Details
+                </Button>
                 {canExtend && (
                   <Button size="sm" onClick={() => onExtendClick?.(booking)} className="bg-orange-500 hover:bg-orange-600 text-black font-bold">
                     Extend service
@@ -218,6 +234,17 @@ export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, o
            </div>
         )}
       </div>
+      <Dialog open={Boolean(unpaidNotice)} onOpenChange={(open) => !open && setUnpaidNotice(null)}>
+        <DialogContent className="bg-gray-900 border-white/20 text-white">
+          <DialogHeader>
+            <DialogTitle>Booking not finished</DialogTitle>
+            <DialogDescription>
+              This booking was not finished and no payment was taken, so there is no receipt
+              {unpaidNotice?.id ? ` for booking #${unpaidNotice.id}` : ''}.
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

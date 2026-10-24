@@ -91,6 +91,9 @@ export function mapServiceToPlanCard(service, displayOrderIndex = 0) {
       : service.homepage_description || service.description || '',
     displayFeatures,
     displayDeliveryFee: deliveryFee,
+    promoLabel: service.show_promo_label
+      ? String(service.promo_label || service.pricing_promo_labels?.label || '').trim()
+      : '',
     // Service 5 books as Mini Excavator, but the homepage category card stays Compact Equipment Rental.
     displayName: isDiyHomepage
       ? DIY_HOMEPAGE_DISPLAY_NAME
@@ -138,8 +141,21 @@ export function buildPlanSnapshot(service, overrides = {}) {
       overrides.delivery_fee !== undefined
         ? Number(overrides.delivery_fee)
         : Number(service.delivery_fee ?? 0),
+    additional_day_rate: Number(service.additional_day_rate ?? 0),
     booked_at: bookedAt,
+    promo_label: activePromoLabel(service) || null,
   };
+}
+
+/** Label text when the service checkmark is on and a label is chosen. */
+export function activePromoLabel(source) {
+  if (!source) return '';
+  const fromCard = String(source.promoLabel || '').trim();
+  if (fromCard) return fromCard;
+  const text = String(source.promo_label || source.pricing_promo_labels?.label || '').trim();
+  if (!text || source.show_promo_label === false) return '';
+  if (source.show_promo_label === true || source.promo_label) return text;
+  return '';
 }
 
 /**
@@ -198,6 +214,7 @@ export function resolveBookingService(booking, liveService = null) {
           base_price: auditPlan.base_price ?? service.base_price,
           mileage_rate: auditPlan.mileage_rate ?? service.mileage_rate,
           delivery_fee: auditPlan.delivery_fee ?? service.delivery_fee,
+          additional_day_rate: auditPlan.additional_day_rate ?? service.additional_day_rate,
         }
       : auditPlan,
   };
@@ -217,7 +234,7 @@ function isCustomerPickupFromAudit(auditPlan, addons) {
  */
 export async function fetchServiceById(supabase, serviceId) {
   if (!serviceId) return { data: null, error: null };
-  return supabase.from('services').select('*').eq('id', serviceId).maybeSingle();
+  return supabase.from('services').select('*, pricing_promo_labels(label)').eq('id', serviceId).maybeSingle();
 }
 
 /**

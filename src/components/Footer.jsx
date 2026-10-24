@@ -6,6 +6,7 @@ export const Footer = () => {
       <div className="container mx-auto grid grid-cols-1 md:grid-cols-5 gap-8 text-center md:text-left">
         <div>
           <p className="font-bold text-lg text-yellow-400 mb-4">U-Fill Dumpsters</p>
+          <p className="text-white">Serving Saratoga Springs and the surrounding areas.</p>
           <p className="text-blue-200">Phone: (801) 810-8832</p>
           <p className="text-blue-200">Email: support@u-filldumpsters.com</p>
         </div>
@@ -57,7 +58,7 @@ export const Footer = () => {
           <p className="font-bold text-lg text-yellow-400 mb-4">Office Hours</p>
           <p className="text-blue-200">Mon-Fri: 8 AM - 10 AM</p>
           <p className="text-blue-200">Closed: Saturday & Sunday</p>
-          <p className="text-blue-200 mt-2">24/7 Online Booking & Customer Portal. Complete control at your fingertips: Track deliveries in real-time, manage schedules, download receipts, write reviews, update your contact info, upload info needed, or use our messaging service.</p>
+          <p className="text-white mt-2">24/7 Online Booking & Customer Portal. Complete control at your fingertips: Track deliveries in real-time, manage schedules, download receipts, write reviews, update your contact info, upload info needed, or use our messaging service.</p>
         </div>
         <div>
           <p className="font-bold text-lg text-yellow-400 mb-4">Legal</p>

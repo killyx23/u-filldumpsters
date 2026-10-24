@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { format } from 'date-fns';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 
 import { PortalNavigation } from '@/components/customer-portal/PortalNavigation';
 import { PortalDashboard } from '@/components/customer-portal/PortalDashboard';
@@ -867,7 +868,10 @@ export const CustomerPortal = () => {
                     <BookingsList 
                         bookings={bookings}
                         customerReviews={customerReviews}
-                        onReceiptClick={(b) => handleTabChange('documents')} 
+                        onReceiptClick={(booking) => {
+                            if (isUnfinishedUnpaidBooking(booking)) return;
+                            handleTabChange('documents');
+                        }} 
                         onCancelClick={setSelectedBookingForCancel} 
                         onRescheduleClick={handleRescheduleClick}
                         onExtendClick={setSelectedBookingForExtend}

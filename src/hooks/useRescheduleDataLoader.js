@@ -27,7 +27,7 @@ export const useRescheduleDataLoader = (bookingId) => {
 
                 const { data: servicesRaw, error: servicesErr } = await supabase
                     .from('services')
-                    .select('*');
+                    .select('*, pricing_promo_labels(label)');
                 if (servicesErr) throw servicesErr;
                 const services = filterRentableServices(servicesRaw || []);
 

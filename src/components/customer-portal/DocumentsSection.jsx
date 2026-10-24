@@ -7,6 +7,7 @@ import { useReactToPrint } from 'react-to-print';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 
 export const DocumentsSection = ({ bookings, customerData }) => {
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -30,7 +31,8 @@ export const DocumentsSection = ({ bookings, customerData }) => {
     setIsViewerOpen(true);
   };
 
-  const completedOrConfirmedBookings = bookings.filter(b => 
+  const completedOrConfirmedBookings = bookings.filter(b =>
+    !isUnfinishedUnpaidBooking(b) &&
     ['Confirmed', 'Delivered', 'Completed', 'flagged'].includes(b.status)
   ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 

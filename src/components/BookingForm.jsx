@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogTrigger, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid, addDays, differenceInDays } from 'date-fns';
+import { format, startOfDay, isBefore, parse, formatISO, startOfMonth, endOfMonth, isValid, addDays } from 'date-fns';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -18,6 +18,8 @@ import { addressCanProceed, applySelectedAddress } from '@/utils/addressHelpers'
 import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { formatMoney } from '@/utils/chargesAndFeesConfig';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
@@ -40,6 +42,9 @@ import {
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
 import { useNavigate } from 'react-router-dom';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
+import { activePromoLabel } from '@/utils/servicePlan';
+import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 
 export const BookingForm = ({
   plan,
@@ -82,6 +87,7 @@ export const BookingForm = ({
   // Plan id 4 is the dump-trailer delivery variant stored on some past bookings.
   const isDelivery = (planId === 2 && Boolean(deliveryService)) || planId === 4;
   const { getFeeForService } = useDumpFees();
+  const { fee: adminFee, loading: adminFeesLoading } = useChargesAndFees();
 
   console.group('[BookingForm] Component Initialization');
   console.log('Plan ID:', plan?.id);
@@ -187,7 +193,7 @@ export const BookingForm = ({
     const fetchPlans = async () => {
       console.log('[BookingForm] Fetching service plans...');
       setLoadingPlans(true);
-      const { data, error } = await supabase.from('services').select('*');
+      const { data, error } = await supabase.from('services').select('*, pricing_promo_labels(label)');
       if (!error && data) {
         const rentablePlans = data.filter((service) => service.is_rentable !== false && Number(service.id) !== 7);
         console.log('[BookingForm] ✓ Loaded', rentablePlans.length, 'service plans');
@@ -765,22 +771,8 @@ export const BookingForm = ({
       const dropOff = startOfDay(new Date(bookingData.dropOffDate));
       const pickup = currentPlan.id === 3 ? dropOff : startOfDay(new Date(bookingData.pickupDate));
       if (isValid(dropOff) && isValid(pickup) && !isBefore(pickup, dropOff)) {
-        let dayDiff;
-        
-        if (currentPlan.id === 3 || currentPlan.id === 4) {
-          dayDiff = differenceInDays(pickup, dropOff);
-          if (dayDiff === 0) dayDiff = 1;
-        } else {
-          dayDiff = differenceInDays(pickup, dropOff) + 1;
-        }
-        
-        if (currentPlan.id === 1) {
-          basePriceCalculation = dayDiff === 7 ? 500 : parseFloat(currentPlan.base_price) + Math.max(0, dayDiff - 1) * 50;
-        } else if (currentPlan.id === 2 || currentPlan.id === 4 || currentPlan.id === 5 || currentPlan.id === 8) {
-          basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
-        } else if (currentPlan.id === 3) {
-          basePriceCalculation = parseFloat(currentPlan.base_price) * dayDiff;
-        }
+        const dayDiff = rentalDaysForPlan(currentPlan.id, dropOff, pickup);
+        basePriceCalculation = catalogBaseRental(currentPlan, dayDiff);
         
         console.log('[BookingForm] Base rental calculation:', {
           planId: currentPlan.id,
@@ -984,6 +976,9 @@ export const BookingForm = ({
       : null;
     const dynamicFee = adminDumpFee ?? '45.00';
     const dynamicMaxTons = dumpFeeData?.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
+    const landfillRateText = adminFeesLoading
+      ? '…'
+      : `${formatMoney(adminFee('dump_tonnage_rate'))} per ton`;
 
     if (currentPlan?.id === 4) {
       return (
@@ -1056,11 +1051,12 @@ export const BookingForm = ({
           <div className="bg-black/20 p-3 rounded border border-blue-500/20">
             <p className="font-bold text-white mb-1">Fee Structure:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>Rental: Base rate per day (calculated below)</li>
+              <li>Rental: Base rate once for the first day, then the daily rate for each additional day</li>
               <li>Base Delivery Fee{currentDeliveryFee > 0 ? <>: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></> : ''}</li>
               <li>The first 30 miles plus mileage to the landfill is included in the basic delivery fee.</li>
               <li>Additional mileage fee at ${Number(currentMileageRate).toFixed(2)}/mile.</li>
               <li>Weight Limit: <span className="text-orange-400">{dynamicMaxTons || 2.5}-ton maximum capacity</span></li>
+              <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
           </div>
         </div>
@@ -1079,6 +1075,7 @@ export const BookingForm = ({
               <li>Rental: Base rate covers up to 7 days</li>
               {currentDeliveryFee > 0 && <li>Base Delivery Fee: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></li>}
               <li>Dump Fees: <span className="text-green-400">${dynamicFee} per ton {dynamicMaxTons ? `(${dynamicMaxTons} tons max)` : ''}</span></li>
+              <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
           </div>
         </div>
@@ -1308,6 +1305,7 @@ export const BookingForm = ({
               <p className="text-white text-lg font-semibold">
                 {isHourlySelfPickupPlan(currentPlan, isDelivery) ? 'Projected Total (For Days Booked):' : 'Estimated Price (Rental + Base Delivery Fee):'}
               </p>
+              <PromoTotalLabel label={activePromoLabel(currentPlan) || activePromoLabel(plan)} />
               <div className="flex items-baseline mb-2">
                 <p className="text-4xl font-bold text-green-400">${totalPrice.toFixed(2)}</p>
                 <span className="text-sm text-blue-200 ml-2">(plus tax)</span>

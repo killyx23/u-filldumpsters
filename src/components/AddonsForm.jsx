@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, HardHat, ShoppingCart, Hammer, Package, PackagePlus, Trash2, Monitor, Info, ShowerHead as WashingMachine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { ProtectionSection } from './addons/ProtectionSection';
 import { EquipmentSection } from './addons/EquipmentSection';
 import { OrderSummary } from './addons/OrderSummary';
 import { DeclineWarningDialog } from './addons/DeclineWarningDialog';
+import { MattressDisposalAgreementDialog, ApplianceDisposalAgreementDialog } from './addons/MattressDisposalAgreementDialog';
 import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
@@ -40,6 +41,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [showInsuranceDeclineWarning, setShowInsuranceDeclineWarning] = useState(false);
   const [showDrivewayDeclineWarning, setShowDrivewayDeclineWarning] = useState(false);
   const [showDisposalInfo, setShowDisposalInfo] = useState(false);
+  const [showMattressAgreement, setShowMattressAgreement] = useState(false);
+  const [showApplianceAgreement, setShowApplianceAgreement] = useState(false);
+  const pendingMattressQuantity = useRef(0);
+  const pendingApplianceQuantity = useRef(0);
+  const ignoreDisposalClickUntil = useRef(0);
   const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [fetchedMileageRate, setFetchedMileageRate] = useState(plan?.mileage_rate !== undefined ? Number(plan.mileage_rate) : 0.85);
@@ -246,11 +252,42 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
     });
   };
 
-  const handleDisposalQuantityChange = (itemId, newQuantity) => {
+  const applyDisposalQuantity = (itemId, newQuantity) => {
     setAddonsData(prev => ({
       ...prev,
       [itemId]: newQuantity
     }));
+  };
+
+  const handleDisposalQuantityChange = (itemId, newQuantity) => {
+    if (
+      (itemId === 'mattressDisposal' || itemId === 'applianceDisposal')
+      && Date.now() < ignoreDisposalClickUntil.current
+    ) {
+      return;
+    }
+    const current = Number(addonsData?.[itemId] || 0);
+    if (itemId === 'mattressDisposal' && newQuantity > 0 && current <= 0) {
+      pendingMattressQuantity.current = newQuantity;
+      setShowMattressAgreement(true);
+      return;
+    }
+    if (itemId === 'applianceDisposal' && newQuantity > 0 && current <= 0) {
+      pendingApplianceQuantity.current = newQuantity;
+      setShowApplianceAgreement(true);
+      return;
+    }
+    applyDisposalQuantity(itemId, newQuantity);
+  };
+
+  const confirmMattressDisposal = () => {
+    ignoreDisposalClickUntil.current = Date.now() + 500;
+    applyDisposalQuantity('mattressDisposal', pendingMattressQuantity.current || 1);
+  };
+
+  const confirmApplianceDisposal = () => {
+    ignoreDisposalClickUntil.current = Date.now() + 500;
+    applyDisposalQuantity('applianceDisposal', pendingApplianceQuantity.current || 1);
   };
   
   const handleProceed = async (appliedDeliveryFeeFlat, calculatedMileageCharge) => {
@@ -634,6 +671,18 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         onConfirm={confirmDeclineDrivewayProtection}
         title="Confirm Your Choice"
         description="By declining driveway protection, you acknowledge that U-Fill Dumpsters LLC is not liable for any potential damage, including but not limited to cracks, scratches, or stains, to your driveway or the surrounding area."
+      />
+
+      <MattressDisposalAgreementDialog
+        open={showMattressAgreement}
+        onOpenChange={setShowMattressAgreement}
+        onAgree={confirmMattressDisposal}
+      />
+
+      <ApplianceDisposalAgreementDialog
+        open={showApplianceAgreement}
+        onOpenChange={setShowApplianceAgreement}
+        onAgree={confirmApplianceDisposal}
       />
 
       <Dialog open={showDisposalInfo} onOpenChange={setShowDisposalInfo}>

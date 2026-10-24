@@ -25,7 +25,8 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { hydratePlanFromPending } from '@/utils/bookingDataPersistence';
-import { buildPlanSnapshot } from '@/utils/servicePlan';
+import { activePromoLabel, buildPlanSnapshot } from '@/utils/servicePlan';
+import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 import { ensureBookingMileage } from '@/utils/bookingMileage';
 import {
   isBookingCapacityError,
@@ -519,6 +520,9 @@ const CheckoutForm = ({
             <BreakdownLine label={`Tax (${pricingBreakdown.taxRate.toFixed(2)}%)`} value={pricingBreakdown.tax} />
           </div>
           <div className="border-t border-white/20 pt-3 mt-1">
+            <div className="flex justify-end">
+              <PromoTotalLabel label={activePromoLabel(plan)} />
+            </div>
             <div className="flex justify-between items-center text-white">
               <span className="text-lg font-bold">Total Amount:</span>
               <span className="text-2xl font-bold text-green-400">{formatMoney(validatedTotal)}</span>
