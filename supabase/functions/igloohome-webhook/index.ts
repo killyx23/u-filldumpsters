@@ -85,6 +85,7 @@ function eventTypeOf(event: Record<string, unknown> | null): number | null {
 
 const JOB_TYPE_CREATE_PIN = 4;
 const JOB_TYPE_DELETE_PIN = 5;
+const JOB_TYPE_GET_LOGS = 15;
 
 /** Igloohome job statuses: 0 = completed, 2 = failed (matches _shared/lockPin.ts pollJob). */
 function isJobCompleted(jobStatus: unknown, completedFlag: unknown): boolean {
@@ -142,15 +143,36 @@ async function reconcilePinFromJob(
 async function handleJobComplete(
   supabase: SupabaseClient,
   event: Record<string, unknown>,
-): Promise<{ result: Record<string, unknown>; pinConfirmed: { orderId: number; booking: Record<string, unknown> } | null }> {
+): Promise<{
+  result: Record<string, unknown>;
+  pinConfirmed: { orderId: number; booking: Record<string, unknown> } | null;
+  ingestLogs: boolean;
+  ingestSince: string;
+}> {
   const data = asRecord(event.data) || event;
   const jobId = pickString(data, ["jobId", "job_id", "id"]);
-  if (!jobId) return { result: { handled: false, reason: "missing jobId" }, pinConfirmed: null };
+  if (!jobId) {
+    return {
+      result: { handled: false, reason: "missing jobId" },
+      pinConfirmed: null,
+      ingestLogs: false,
+      ingestSince: "",
+    };
+  }
 
   const jobStatusRaw = data.jobStatus ?? data.job_status ?? asRecord(data.jobResponse)?.jobStatus;
   const jobTypeRaw = data.jobType ?? data.job_type;
-  const jobType = typeof jobTypeRaw === "number" ? jobTypeRaw : null;
+  let jobType = typeof jobTypeRaw === "number" ? jobTypeRaw : null;
   const deviceId = pickString(data, ["deviceId", "device_id", "lockId"]) || defaultDeviceId();
+
+  if (jobType == null) {
+    const { data: existing } = await supabase
+      .from("lock_jobs")
+      .select("job_type")
+      .eq("job_id", jobId)
+      .maybeSingle();
+    if (typeof existing?.job_type === "number") jobType = existing.job_type;
+  }
 
   const { error } = await supabase.from("lock_jobs").upsert({
     job_id: jobId,
@@ -170,7 +192,17 @@ async function handleJobComplete(
     console.error("[igloohome-webhook] reconcilePinFromJob failed:", err);
   }
 
-  return { result: { handled: !error, jobId, jobStatus: jobStatusRaw ?? null }, pinConfirmed };
+  const ingestLogs = jobType === JOB_TYPE_GET_LOGS && isJobCompleted(jobStatusRaw, data.completed);
+  const ingestSince = pickString(event, ["date"]) ||
+    pickString(data, ["date"]) ||
+    new Date().toISOString();
+
+  return {
+    result: { handled: !error, jobId, jobStatus: jobStatusRaw ?? null },
+    pinConfirmed,
+    ingestLogs,
+    ingestSince,
+  };
 }
 
 /**
@@ -178,6 +210,26 @@ async function handleJobComplete(
  * PIN create/delete that got stuck while it was offline, instead of waiting
  * for the next overnight cron sweep. Customer PIN email waits until 5am Denver.
  */
+async function triggerActivityIngest(sinceIso: string): Promise<void> {
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceKey) return;
+    const res = await fetch(`${supabaseUrl}/functions/v1/sync-lock-activity`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ingest: true, since: sinceIso }),
+    });
+    console.log(`[igloohome-webhook] Activity ingest after GET_LOGS -> HTTP ${res.status}`);
+  } catch (err) {
+    console.error("[igloohome-webhook] Activity ingest after GET_LOGS failed:", err);
+  }
+}
+
 async function triggerReconciler(reason: string): Promise<void> {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -417,7 +469,10 @@ Deno.serve(async (req) => {
     }));
 
     if (type === EVENT_JOB_COMPLETE) {
-      const { result } = await handleJobComplete(supabase, event!);
+      const { result, ingestLogs, ingestSince } = await handleJobComplete(supabase, event!);
+      if (ingestLogs) {
+        runDeferred(triggerActivityIngest(ingestSince));
+      }
       return jsonResponse({ success: true, eventType: type, ...result });
     }
 

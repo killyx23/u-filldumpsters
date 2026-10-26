@@ -24,8 +24,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
   fetchDeviceActivityRows,
+  fetchDeviceActivityUntilFresh,
   mergeActivityEvents,
-  parseActivityLogsFromPayload,
   isEmptyActivityLogPayload,
 } from "../_shared/iglooActivity.ts";
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "../_shared/pinTiming.ts";
@@ -45,6 +45,7 @@ import {
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 const ACTIVITY_PULL_MIN_MS = 60 * 60 * 1000;
+const JOB_TYPE_GET_LOGS = 15;
 
 type BridgeWake = { reason: string; pollMinMs: number };
 
@@ -204,6 +205,8 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     let probe = url.searchParams.get("probe") === "1";
     let force = url.searchParams.get("force") === "1";
+    let ingest = url.searchParams.get("ingest") === "1";
+    let ingestSince = "";
     if (req.method === "POST") {
       try {
         const body = await req.json();
@@ -212,6 +215,12 @@ Deno.serve(async (req) => {
         }
         if (body?.force === true || body?.force === 1 || body?.force === "1") {
           force = true;
+        }
+        if (body?.ingest === true || body?.ingest === 1 || body?.ingest === "1") {
+          ingest = true;
+        }
+        if (typeof body?.since === "string" && body.since.trim()) {
+          ingestSince = body.since.trim();
         }
       } catch {
         // empty body is fine (cron)
@@ -236,8 +245,9 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, serviceKey);
+    let pollMinMs = ACTIVITY_PULL_MIN_MS;
 
-    if (!probe && !force) {
+    if (!probe && !force && !ingest) {
       const sweptEarly = await sweepGraceHourReturns(supabase);
       const wake = await bridgeWakeReason(supabase);
       if (!wake) {
@@ -249,6 +259,7 @@ Deno.serve(async (req) => {
           graceHourClosed: sweptEarly,
         });
       }
+      pollMinMs = wake.pollMinMs;
       console.log(`[sync-lock-activity] Waking bridge for ${wake.reason} (poll every ${wake.pollMinMs / 60000} min)`);
 
       const { data: pullRow } = await supabase
@@ -273,78 +284,111 @@ Deno.serve(async (req) => {
       }
     }
 
-    const oauth = await getActivitySyncToken(clientId, clientSecret);
-    if (!oauth.token) {
-      return jsonResponse({
-        success: false,
-        error: oauth.reason || "OAuth failed",
-        hint: ACTIVITY_SYNC_SCOPE_HINT,
-      }, 502);
-    }
-    const accessToken = oauth.token;
+    let jobId: string | null = null;
+    let jobResultRaw: unknown = null;
+    let sinceIso = ingestSince || new Date().toISOString();
 
-    const jobCreate = await createActivityLogJob(accessToken, lockId, bridgeId);
-    if (jobCreate.success) {
-      const pulledAt = new Date().toISOString();
-      const { error: stampError } = await supabase
-        .from("lock_devices")
-        .update({ activity_pulled_at: pulledAt })
-        .eq("device_id", lockId);
-      if (stampError) {
-        console.error("[sync-lock-activity] activity_pulled_at stamp failed:", stampError.message);
+    if (!ingest) {
+      const oauth = await getActivitySyncToken(clientId, clientSecret);
+      if (!oauth.token) {
+        return jsonResponse({
+          success: false,
+          error: oauth.reason || "OAuth failed",
+          hint: ACTIVITY_SYNC_SCOPE_HINT,
+        }, 502);
       }
-    }
-    if (!jobCreate.success) {
-      const forbidden = /403|401|Forbidden/i.test(String(jobCreate.error || ""));
-      return jsonResponse({
-        success: false,
-        error: forbidden
-          ? `Activity log job failed: ${jobCreate.error}. ${ACTIVITY_SYNC_SCOPE_HINT}`
-          : `Activity log job failed: ${jobCreate.error}`,
-        hint: forbidden ? ACTIVITY_SYNC_SCOPE_HINT : undefined,
-        raw: jobCreate.raw,
-        probe,
-      }, 502);
-    }
+      const accessToken = oauth.token;
 
-    const jobResult = await pollJobStatus(accessToken, jobCreate.jobId);
-    if (!jobResult.completed && !probe) {
-      return jsonResponse({
-        success: false,
-        error: jobResult.expired ? "Job expired" : "Job timed out",
-        jobId: jobCreate.jobId,
-        raw: jobResult.raw,
-      }, 504);
+      const jobCreate = await createActivityLogJob(accessToken, lockId, bridgeId);
+      if (!jobCreate.success) {
+        const forbidden = /403|401|Forbidden/i.test(String(jobCreate.error || ""));
+        return jsonResponse({
+          success: false,
+          error: forbidden
+            ? `Activity log job failed: ${jobCreate.error}. ${ACTIVITY_SYNC_SCOPE_HINT}`
+            : `Activity log job failed: ${jobCreate.error}`,
+          hint: forbidden ? ACTIVITY_SYNC_SCOPE_HINT : undefined,
+          raw: jobCreate.raw,
+          probe,
+        }, 502);
+      }
+      jobId = jobCreate.jobId;
+      await supabase.from("lock_jobs").upsert({
+        job_id: jobCreate.jobId,
+        device_id: lockId,
+        job_type: JOB_TYPE_GET_LOGS,
+        job_status: null,
+        raw: jobCreate.raw,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "job_id" });
+
+      const jobResult = await pollJobStatus(accessToken, jobCreate.jobId);
+      jobResultRaw = jobResult.raw;
+      if (!jobResult.completed && !probe) {
+        return jsonResponse({
+          success: false,
+          error: jobResult.expired ? "Job expired" : "Job timed out",
+          jobId: jobCreate.jobId,
+          raw: jobResult.raw,
+        }, 504);
+      }
+      sinceIso = new Date().toISOString();
     }
 
     // Bridge job body usually has no log array (opResult.result=0 = success).
     // Real history is on GET /devices/{id}/activity with a solo-scope token.
+    // Igloo can keep serving the previous snapshot; retry until createdAt moves.
     const activityOauth = await getDeviceActivityToken(clientId, clientSecret);
     let activityRows: unknown[] = [];
     let activityError: string | undefined;
+    let activityFresh = false;
+    let activityAttempts = 0;
+    let newestCreatedAt: string | null = null;
     if (!activityOauth.token) {
       activityError = activityOauth.reason || DEVICE_ACTIVITY_SCOPE_HINT;
-    } else {
+    } else if (probe && !ingest) {
       const fetched = await fetchDeviceActivityRows(activityOauth.token, lockId, {
         maxPages: 5,
         pageSize: 50,
       });
       activityRows = fetched.rows;
       if (fetched.error) activityError = fetched.error;
+      activityFresh = true;
+      activityAttempts = 1;
+    } else {
+      const fetched = await fetchDeviceActivityUntilFresh(
+        activityOauth.token,
+        lockId,
+        sinceIso,
+        { maxPages: 5, pageSize: 50 },
+      );
+      activityRows = fetched.rows;
+      if (fetched.error) activityError = fetched.error;
+      activityFresh = fetched.fresh;
+      activityAttempts = fetched.attempts;
+      newestCreatedAt = fetched.newestCreatedAt;
+      if (!activityFresh) {
+        console.warn(
+          `[sync-lock-activity] Activity list still stale after ${activityAttempts} reads ` +
+            `(newestCreatedAt=${newestCreatedAt || "none"}); will retry on the next cron`,
+        );
+      }
     }
 
-    const events = mergeActivityEvents(jobResult.raw, activityRows);
-    const emptyBridgePayload = isEmptyActivityLogPayload(jobResult.raw);
+    const events = mergeActivityEvents(jobResultRaw, activityRows);
+    const emptyBridgePayload = isEmptyActivityLogPayload(jobResultRaw);
 
     if (probe) {
       return jsonResponse({
         success: true,
         probe: true,
-        jobId: jobCreate.jobId,
-        jobCreate: jobCreate.raw,
-        jobResult: jobResult.raw,
+        jobId,
+        jobResult: jobResultRaw,
         emptyBridgePayload,
         activityRowsFetched: activityRows.length,
+        activityFresh,
+        activityAttempts,
+        newestCreatedAt,
         activityError,
         activitySample: activityRows.slice(0, 3),
         parsedEvents: events,
@@ -358,14 +402,26 @@ Deno.serve(async (req) => {
         success: false,
         error: activityError,
         hint: DEVICE_ACTIVITY_SCOPE_HINT,
-        jobId: jobCreate.jobId,
+        jobId,
         emptyBridgePayload,
       }, 502);
     }
 
     console.log(
-      `[sync-lock-activity] Parsed ${events.length} events (activityRows=${activityRows.length}) from job ${jobCreate.jobId}`,
+      `[sync-lock-activity] Parsed ${events.length} events (activityRows=${activityRows.length}) ` +
+        `from job ${jobId || "ingest"} fresh=${activityFresh} attempts=${activityAttempts}`,
     );
+
+    const pulledAtMs = activityFresh
+      ? Date.now()
+      : Date.now() - pollMinMs + 5 * 60 * 1000;
+    const { error: stampError } = await supabase
+      .from("lock_devices")
+      .update({ activity_pulled_at: new Date(pulledAtMs).toISOString() })
+      .eq("device_id", lockId);
+    if (stampError) {
+      console.error("[sync-lock-activity] activity_pulled_at stamp failed:", stampError.message);
+    }
 
     // Keep device-level presence current even when the webhook missed a
     // delivery. Duplicates are dropped by the unique index. Newly stored
@@ -387,7 +443,7 @@ Deno.serve(async (req) => {
         orderId,
         eventType: event.eventType,
         eventTimestamp: event.eventTimestamp,
-        notes: `${event.eventType} via sync-lock-activity job ${jobCreate.jobId}`,
+        notes: `${event.eventType} via sync-lock-activity job ${jobId || "ingest"}`,
       });
       actions.push({ pin: event.pinCode, orderId, action });
     }
@@ -396,9 +452,12 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       success: true,
-      jobId: jobCreate.jobId,
+      jobId,
       eventsParsed: events.length,
       activityRowsFetched: activityRows.length,
+      activityFresh,
+      activityAttempts,
+      newestCreatedAt,
       emptyBridgePayload,
       bridgeHint: syncEmptyHint(activityRows.length, events.length),
       actions,

@@ -442,6 +442,97 @@ async function readResponse(res: Response) {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** When Igloo wrote the activity document, not when the lock fired. */
+export function activityRowCreatedAtMs(row: unknown): number | null {
+  const rec = asRecord(row);
+  if (!rec) return null;
+  const raw = pickString(rec, ["createdAt", "created_at", "updatedAt", "updated_at"]);
+  if (!raw) return null;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function newestActivityCreatedAtMs(rows: unknown[]): number | null {
+  let newest: number | null = null;
+  for (const row of rows) {
+    const ms = activityRowCreatedAtMs(row);
+    if (ms == null) continue;
+    if (newest == null || ms > newest) newest = ms;
+  }
+  return newest;
+}
+
+export function activityUnlockLockFingerprint(rows: unknown[]): string {
+  return eventsFromSource(rows)
+    .map((event) => `${event.eventType}|${event.eventTimestamp}`)
+    .sort()
+    .join(";");
+}
+
+const ACTIVITY_FRESHNESS_SKEW_MS = 30 * 1000;
+const ACTIVITY_RETRY_DELAYS_MS = [0, 4000, 8000, 12000, 16000];
+
+/**
+ * GET /devices/{id}/activity can keep serving the previous snapshot after
+ * GET_LOGS has already uploaded. Retry until a row's createdAt is at/after
+ * `sinceIso` (the job finish), or until the unlock/lock set changes.
+ */
+export async function fetchDeviceActivityUntilFresh(
+  accessToken: string,
+  deviceId: string,
+  sinceIso: string,
+  opts: { maxPages?: number; pageSize?: number } = {},
+): Promise<{
+  rows: unknown[];
+  error?: string;
+  status?: number;
+  fresh: boolean;
+  attempts: number;
+  newestCreatedAt: string | null;
+}> {
+  const sinceMs = new Date(sinceIso).getTime();
+  let firstFingerprint: string | null = null;
+  let last: { rows: unknown[]; error?: string; status?: number } = { rows: [] };
+
+  for (let i = 0; i < ACTIVITY_RETRY_DELAYS_MS.length; i++) {
+    const delay = ACTIVITY_RETRY_DELAYS_MS[i];
+    if (delay) await sleep(delay);
+    last = await fetchDeviceActivityRows(accessToken, deviceId, opts);
+    const newestMs = newestActivityCreatedAtMs(last.rows);
+    const fingerprint = activityUnlockLockFingerprint(last.rows);
+    if (i === 0) firstFingerprint = fingerprint;
+    const freshByCreated = newestMs != null && Number.isFinite(sinceMs) &&
+      newestMs >= sinceMs - ACTIVITY_FRESHNESS_SKEW_MS;
+    const freshByChange = i > 0 && fingerprint !== firstFingerprint;
+    if (freshByCreated || freshByChange) {
+      return {
+        ...last,
+        fresh: true,
+        attempts: i + 1,
+        newestCreatedAt: newestMs != null ? new Date(newestMs).toISOString() : null,
+      };
+    }
+    console.log(
+      `[iglooActivity] Stale activity list attempt ${i + 1}/${ACTIVITY_RETRY_DELAYS_MS.length} ` +
+        `newestCreatedAt=${newestMs != null ? new Date(newestMs).toISOString() : "none"} ` +
+        `since=${sinceIso}`,
+    );
+    if (last.error) break;
+  }
+
+  const newestMs = newestActivityCreatedAtMs(last.rows);
+  return {
+    ...last,
+    fresh: false,
+    attempts: ACTIVITY_RETRY_DELAYS_MS.length,
+    newestCreatedAt: newestMs != null ? new Date(newestMs).toISOString() : null,
+  };
+}
+
 /**
  * Read stored device activity from Igloohome cloud.
  * Requires an access token issued with ONLY igloohomeapi/get-device-activity.
