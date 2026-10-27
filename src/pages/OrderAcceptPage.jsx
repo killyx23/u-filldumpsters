@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { format } from 'date-fns';
+import { format, isValid, parseISO } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ import { SmsOptInFields } from '@/components/SmsOptInFields';
 import { HPP_TERMS_PATH } from '@/components/terms/HardwareProtectionPlanTerms';
 import { saveCheckoutVerificationDocuments } from '@/utils/verificationImageHelper';
 import { DEFAULT_FEES, mapFeeRowsToConfig } from '@/utils/chargesAndFeesConfig';
-import { money } from '@/utils/phoneOrderQuote';
+import { priceReviewForSummary } from '@/utils/customerPriceReview';
+import { OrderAcceptPriceBreakdown } from '@/components/phone-order/OrderAcceptPriceBreakdown';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 import {
@@ -23,6 +24,13 @@ import {
   readOrderAcceptDraft,
   writeOrderAcceptDraft,
 } from '@/utils/smsFormReturn';
+
+function prettyDate(value) {
+  if (!value) return '';
+  const date = parseISO(String(value));
+  if (!isValid(date)) return String(value);
+  return format(date, 'EEEE, MMMM d, yyyy');
+}
 
 function continueAfterAccept(redirect, email, pendingId) {
   if (redirect && String(redirect).startsWith('/payment')) {
@@ -234,6 +242,9 @@ export function OrderAcceptPage() {
   }
 
   const nameMatches = signatureName.trim().toLowerCase() === expectedName.toLowerCase();
+  const priceReview = priceReviewForSummary(summary);
+  const dropWhen = [prettyDate(summary.dropOff), summary.dropOffTime].filter(Boolean).join(' · ');
+  const pickWhen = [prettyDate(summary.pickup), summary.pickupTime].filter(Boolean).join(' · ');
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 text-white">
@@ -243,15 +254,10 @@ export function OrderAcceptPage() {
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
         <h2 className="text-lg">{summary.serviceName}</h2>
-        <p className="mt-2 text-sm text-gray-300">{summary.dropOff} to {summary.pickup}</p>
+        <p className="mt-2 text-sm text-gray-300">Drop-off: {dropWhen || 'Scheduled date'}</p>
+        <p className="text-sm text-gray-300">Pickup: {pickWhen || 'Scheduled date'}</p>
         <p className="text-sm text-gray-300">{[summary.street, summary.city, summary.state, summary.zip].filter(Boolean).join(', ')}</p>
-        <p className="mt-3 text-2xl text-yellow-300">{money(summary.total)}</p>
-        {(summary.lineItems || []).map((line) => (
-          <div key={line.key} className="mt-1 flex justify-between text-sm text-gray-300">
-            <span>{line.label}</span>
-            <span>{money(line.amountAfterDiscount ?? line.amount)}</span>
-          </div>
-        ))}
+        <OrderAcceptPriceBreakdown review={priceReview} />
       </section>
 
       <ScrollArea

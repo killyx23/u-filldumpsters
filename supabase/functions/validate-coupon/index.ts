@@ -8,10 +8,11 @@ Deno.serve(async (req)=>{
     });
   }
   try {
-    const { couponCode, serviceId } = await req.json();
+    const { couponCode, serviceId, rentalDays } = await req.json();
     if (!couponCode || !serviceId) {
       throw new Error("Coupon code and service ID are required.");
     }
+    const parsedRentalDays = Number(rentalDays);
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       throw new Error("Missing authorization header");
@@ -25,7 +26,8 @@ Deno.serve(async (req)=>{
     });
     const { data, error } = await supabase.rpc('validate_coupon', {
       coupon_code: couponCode,
-      service_id_arg: serviceId
+      service_id_arg: serviceId,
+      rental_days_arg: Number.isFinite(parsedRentalDays) && parsedRentalDays > 0 ? parsedRentalDays : null
     });
     if (error) {
       throw error;

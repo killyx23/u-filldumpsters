@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { getTaxRate, invalidateTaxRateCache } from '@/utils/getTaxRate';
 import { clearProtectionPlansCache } from '@/utils/protectionPlans';
@@ -825,6 +827,21 @@ const TaxConfigurationCard = () => {
     );
 };
 
+const BENEFIT_TYPES = [
+    { value: 'percentage_off', label: 'Percentage off' },
+    { value: 'fixed_off', label: 'Fixed amount off ($)' },
+    { value: 'free_days', label: 'Free day(s)' },
+    { value: 'issue_coupon', label: 'Issue reward coupon' },
+];
+
+const makeEmptyRule = () => ({
+    condition: { minDays: 1, maxDays: null },
+    benefit: { type: 'percentage_off', value: 0, appliesTo: 'base_rental' },
+    advertise: false,
+    headline: '',
+    description: '',
+});
+
 const CouponForm = ({ services, onSave, onCancel, coupon }) => {
     const [code, setCode] = useState(coupon?.code || '');
     const [discountType, setDiscountType] = useState(coupon?.discount_type || 'fixed');
@@ -833,16 +850,39 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
     const [usageLimit, setUsageLimit] = useState(coupon?.usage_limit || '');
     const [selectedServices, setSelectedServices] = useState(coupon?.service_ids || []);
     const [applyToAll, setApplyToAll] = useState(!coupon?.service_ids || coupon.service_ids.length === 0);
+    const [rules, setRules] = useState(Array.isArray(coupon?.rules) ? coupon.rules : []);
 
     const handleServiceToggle = (serviceId) => {
         setSelectedServices(prev => prev.includes(serviceId) ? prev.filter(id => id !== serviceId) : [...prev, serviceId]);
     };
 
+    const addRule = () => setRules(prev => [...prev, makeEmptyRule()]);
+    const removeRule = (idx) => setRules(prev => prev.filter((_, i) => i !== idx));
+    const patchRule = (idx, patch) => setRules(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+    const patchCondition = (idx, patch) => setRules(prev => prev.map((r, i) => (i === idx ? { ...r, condition: { ...r.condition, ...patch } } : r)));
+    const patchBenefit = (idx, patch) => setRules(prev => prev.map((r, i) => (i === idx ? { ...r, benefit: { ...r.benefit, ...patch } } : r)));
+
     const handleSubmit = () => {
+        const cleanedRules = rules.map(r => ({
+            condition: {
+                minDays: Number(r.condition?.minDays) || 1,
+                maxDays: r.condition?.maxDays === '' || r.condition?.maxDays == null ? null : Number(r.condition.maxDays),
+            },
+            benefit: {
+                type: r.benefit?.type || 'percentage_off',
+                value: Number(r.benefit?.value) || 0,
+                appliesTo: r.benefit?.appliesTo || 'base_rental',
+            },
+            advertise: Boolean(r.advertise),
+            headline: (r.headline || '').trim(),
+            description: (r.description || '').trim(),
+        }));
         const couponData = {
             code: code.toUpperCase(),
+            coupon_kind: cleanedRules.length > 0 ? 'rules' : 'flat',
+            rules: cleanedRules,
             discount_type: discountType,
-            discount_value: parseFloat(discountValue),
+            discount_value: parseFloat(discountValue) || 0,
             expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
             usage_limit: usageLimit ? parseInt(usageLimit) : null,
             service_ids: applyToAll ? null : selectedServices,
@@ -853,7 +893,7 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
     };
 
     return (
-        <DialogContent className="bg-gray-900 border-yellow-400 text-white">
+        <DialogContent className="bg-gray-900 border-yellow-400 text-white max-h-[90vh] overflow-y-auto">
             <DialogHeader>
                 <DialogTitle>{coupon ? 'Edit Coupon' : 'Create New Coupon'}</DialogTitle>
                 <DialogDescription>Fill out the form to create or edit a promotional coupon.</DialogDescription>
@@ -906,6 +946,96 @@ const CouponForm = ({ services, onSave, onCancel, coupon }) => {
                                 ))}
                             </div>
                         )}
+                    </div>
+                </div>
+
+                <div className="pt-2 border-t border-white/10">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <Label className="text-white">Deal Rules (optional)</Label>
+                            <p className="text-xs text-gray-400">Day-based tiers. The flat discount above is used when no rules match.</p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={addRule} className="border-green-400 text-green-400 hover:bg-green-500 hover:text-white">
+                            <Plus className="mr-1 h-4 w-4" /> Add Rule
+                        </Button>
+                    </div>
+
+                    <div className="space-y-3 mt-3">
+                        {rules.map((rule, idx) => (
+                            <div key={idx} className="p-3 bg-black/20 rounded-md border border-white/10 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-semibold text-yellow-300">Rule {idx + 1}</span>
+                                    <button type="button" onClick={() => removeRule(idx)} className="text-red-400 hover:text-red-300">
+                                        <Trash2 className="h-4 w-4" />
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <Label className="text-white text-xs">Min rental days</Label>
+                                        <Input type="number" min="1" value={rule.condition?.minDays ?? ''} onChange={e => patchCondition(idx, { minDays: e.target.value })} className="bg-white/10 text-white border-white/20" />
+                                    </div>
+                                    <div>
+                                        <Label className="text-white text-xs">Max rental days (optional)</Label>
+                                        <Input type="number" min="1" value={rule.condition?.maxDays ?? ''} onChange={e => patchCondition(idx, { maxDays: e.target.value })} className="bg-white/10 text-white border-white/20" />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <Label className="text-white text-xs">Benefit</Label>
+                                        <Select value={rule.benefit?.type} onValueChange={v => patchBenefit(idx, { type: v })}>
+                                            <SelectTrigger className="bg-white/10 text-white border-white/20"><SelectValue /></SelectTrigger>
+                                            <SelectContent className="bg-gray-800 text-white border-gray-700">
+                                                {BENEFIT_TYPES.map(b => <SelectItem key={b.value} value={b.value}>{b.label}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label className="text-white text-xs">
+                                            {rule.benefit?.type === 'free_days' ? 'Number of free days'
+                                                : rule.benefit?.type === 'fixed_off' ? 'Amount off ($)'
+                                                : rule.benefit?.type === 'issue_coupon' ? 'Reward value ($)'
+                                                : 'Percent off (%)'}
+                                        </Label>
+                                        <Input type="number" value={rule.benefit?.value ?? ''} onChange={e => patchBenefit(idx, { value: e.target.value })} className="bg-white/10 text-white border-white/20" />
+                                    </div>
+                                </div>
+
+                                {(rule.benefit?.type === 'percentage_off' || rule.benefit?.type === 'fixed_off') && (
+                                    <div>
+                                        <Label className="text-white text-xs">Applies to</Label>
+                                        <Select value={rule.benefit?.appliesTo} onValueChange={v => patchBenefit(idx, { appliesTo: v })}>
+                                            <SelectTrigger className="bg-white/10 text-white border-white/20"><SelectValue /></SelectTrigger>
+                                            <SelectContent className="bg-gray-800 text-white border-gray-700">
+                                                <SelectItem value="base_rental">Base rental</SelectItem>
+                                                <SelectItem value="order">Whole order</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                )}
+
+                                <div className="pt-2 border-t border-white/10 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-white text-sm cursor-pointer">Advertise this deal</Label>
+                                        <Switch checked={Boolean(rule.advertise)} onCheckedChange={v => patchRule(idx, { advertise: v })} />
+                                    </div>
+                                    {rule.advertise && (
+                                        <div className="space-y-2">
+                                            <div>
+                                                <Label className="text-white text-xs">Headline</Label>
+                                                <Input value={rule.headline || ''} onChange={e => patchRule(idx, { headline: e.target.value })} placeholder="Rent 5 days, get a free equipment rental" className="bg-white/10 text-white border-white/20" />
+                                            </div>
+                                            <div>
+                                                <Label className="text-white text-xs">Description</Label>
+                                                <Textarea value={rule.description || ''} onChange={e => patchRule(idx, { description: e.target.value })} placeholder="Short marketing copy shown on the booking page, emails, and site." className="bg-white/10 text-white border-white/20" />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                        {rules.length === 0 && <p className="text-gray-500 text-xs">No rules yet — this coupon uses the flat discount above.</p>}
                     </div>
                 </div>
             </div>
@@ -1229,6 +1359,25 @@ export const PricingManager = () => {
         }
     };
 
+    const handleDeleteCoupon = async (coupon) => {
+        const confirmed = window.confirm(
+            `Delete coupon ${coupon.code}? This removes it permanently. Bookings that already used it keep their recorded discount.`
+        );
+        if (!confirmed) return;
+        try {
+            const { error } = await supabase.from('coupons').delete().eq('id', coupon.id);
+            if (error) throw error;
+            toast({ title: `Coupon ${coupon.code} deleted.` });
+            if (editingCoupon?.id === coupon.id) {
+                setEditingCoupon(null);
+                setIsCouponFormOpen(false);
+            }
+            fetchData();
+        } catch (error) {
+            toast({ title: 'Failed to delete coupon', variant: 'destructive', description: error.message });
+        }
+    };
+
     if (loading) {
         return <div className="flex justify-center items-center h-64"><Loader2 className="h-16 w-16 animate-spin text-yellow-400" /></div>;
     }
@@ -1356,7 +1505,9 @@ export const PricingManager = () => {
                             <div>
                                 <p className="font-bold text-xl text-yellow-400">{coupon.code}</p>
                                 <p className="text-sm text-blue-200">
-                                    {coupon.discount_type === 'fixed' ? `$${coupon.discount_value}` : `${coupon.discount_value}%`} off
+                                    {coupon.coupon_kind === 'rules' && Array.isArray(coupon.rules) && coupon.rules.length > 0
+                                        ? `${coupon.rules.length} deal rule${coupon.rules.length > 1 ? 's' : ''}`
+                                        : `${coupon.discount_type === 'fixed' ? `$${coupon.discount_value}` : `${coupon.discount_value}%`} off`}
                                 </p>
                             </div>
                             <div className="text-sm text-gray-300">
@@ -1369,6 +1520,9 @@ export const PricingManager = () => {
                                 </Button>
                                 <Button variant="outline" size="sm" onClick={() => { setEditingCoupon(coupon); setIsCouponFormOpen(true); }} className="border-blue-400 text-blue-400 hover:bg-blue-500 hover:text-white">
                                     <Edit className="mr-2 h-4 w-4" /> Edit
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => handleDeleteCoupon(coupon)} className="border-red-400 text-red-400 hover:bg-red-500 hover:text-white">
+                                    <Trash2 className="mr-2 h-4 w-4" /> Delete
                                 </Button>
                             </div>
                         </div>

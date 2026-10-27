@@ -1,5 +1,6 @@
 import { getCorsHeaders } from './cors.ts';
 import { jsonError, jsonOk, serviceRoleClient, sha256Hex } from '../_shared/phoneOrderAuth.ts';
+import { priceReviewFromBooking } from '../_shared/customerPriceReview.ts';
 import Stripe from 'https://esm.sh/stripe@14.14.0?target=deno';
 
 function stripeClient() {
@@ -32,6 +33,8 @@ function appointmentInsideLead(booking: Record<string, unknown> | null) {
 function summaryFrom(order: Record<string, unknown>, booking: Record<string, unknown> | null) {
   const addons = (booking?.addons as Record<string, unknown>) || {};
   const plan = (booking?.plan as Record<string, unknown>) || {};
+  const serviceName = String(order.service_name || plan.name || 'Rental');
+  const priceReview = priceReviewFromBooking(booking, serviceName) as Record<string, unknown>;
   return {
     phoneOrderId: order.id,
     status: order.status,
@@ -42,10 +45,14 @@ function summaryFrom(order: Record<string, unknown>, booking: Record<string, unk
     lastName: booking?.last_name || '',
     email: order.customer_email,
     phone: order.customer_phone,
-    serviceName: order.service_name || plan.name || 'Rental',
+    serviceName,
     total: booking?.total_price ?? order.total_price,
     subtotal: booking?.subtotal_before_tax ?? null,
     tax: booking?.tax_amount ?? null,
+    taxRate: priceReview.taxRate ?? booking?.tax_rate_used ?? null,
+    rentalDays: priceReview.days ?? null,
+    promoLabel: priceReview.promoLabel || plan.promo_label || '',
+    priceReview,
     dropOff: booking?.drop_off_date || null,
     pickup: booking?.pickup_date || null,
     dropOffTime: booking?.drop_off_time_slot || null,

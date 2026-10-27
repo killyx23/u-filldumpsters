@@ -41,6 +41,7 @@ import { CustomerPortalResourceDetailPage } from '@/components/customer-portal/C
 import { ScrollToTop } from '@/components/ScrollToTop';
 import { BrevoChat } from '@/components/BrevoChat';
 import { HostSplitGate } from '@/components/HostSplitGate';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 const mergeRouteQuery = (to, incomingSearch) => {
   const [path, toQuery = ''] = to.split('?');
@@ -154,7 +155,7 @@ function App() {
               <Route path="/verify" element={<VerifyRedirect />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/payment" element={<PaymentPage />} />
-              <Route path="/order-accept/:token" element={<OrderAcceptPage />} />
+              <Route path="/order-accept/:token" element={<ErrorBoundary><OrderAcceptPage /></ErrorBoundary>} />
               <Route path="/confirmation" element={<BookingConfirmation />} />
               
               <Route path="/resources" element={<ResourceLibraryPage />} />

@@ -208,6 +208,38 @@ const rentalDayCount = (dropOff: unknown, pickup: unknown) => {
   return Math.max(1, Math.round((endUtc - startUtc) / 86400000) + 1);
 };
 
+/** Same rule selection as src/utils/couponRules.js. */
+const emailCouponDiscount = (coupon, { gross, baseRental, dropOff, pickup }) => {
+  const rules = Array.isArray(coupon?.rules) ? coupon.rules : [];
+  const kind = coupon?.coupon_kind || coupon?.couponKind || (rules.length ? "rules" : "flat");
+  const discountType = coupon?.discountType || coupon?.discount_type;
+  const discountValue = Number(coupon?.discountValue ?? coupon?.discount_value ?? 0);
+  if (kind !== "rules" || rules.length === 0) {
+    if (discountType === "fixed") return Math.min(gross, Math.max(0, discountValue));
+    if (discountType === "percentage") return Math.min(gross, Math.max(0, (gross * discountValue) / 100));
+    return 0;
+  }
+  const days = rentalDayCount(dropOff, pickup);
+  let best = 0;
+  for (const rule of rules) {
+    const min = rule?.condition?.minDays == null ? 0 : Number(rule.condition.minDays);
+    const max = rule?.condition?.maxDays == null ? Infinity : Number(rule.condition.maxDays);
+    if (days < min || days > max) continue;
+    const benefit = rule?.benefit || {};
+    const value = Number(benefit.value) || 0;
+    let amount = 0;
+    if (benefit.type === "fixed_off") amount = value;
+    else if (benefit.type === "percentage_off") {
+      const base = benefit.appliesTo === "order" ? gross : baseRental;
+      amount = (base * value) / 100;
+    } else if (benefit.type === "free_days") {
+      amount = (days > 0 ? baseRental / days : 0) * value;
+    }
+    if (amount > best) best = amount;
+  }
+  return Math.min(gross, Math.max(0, best));
+};
+
 const additionalDayNote = (rate: number, extraDays: number, extraDayCharge: number, qty: number) => {
   if (!(extraDays > 0) || !(rate > 0)) return "";
   const qtySuffix = qty > 1 ? ` × ${qty}` : "";
@@ -316,17 +348,26 @@ const resolveReceiptPricing = (booking, insuranceAmount) => {
     }
   }
 
+  const snapshotCharges = snapshot
+    .filter((line) => Number(line?.amount) > 0)
+    .map((line) => ({ label: String(line.label || "Charge"), amount: roundMoney(line.amount) }));
+  if (snapshotCharges.length > 0) {
+    charges.splice(0, charges.length, ...snapshotCharges);
+  }
+
   const gross = roundMoney(charges.reduce((sum, line) => sum + line.amount, 0));
+  const coupon = addons?.coupon;
   let couponDiscountAmount = Number(
     addons?.coupon?.discountAmount ?? addons?.couponDiscountAmount ?? 0,
   );
-  const coupon = addons?.coupon;
   if (!(couponDiscountAmount > 0) && coupon) {
-    if (coupon.discountType === "fixed") {
-      couponDiscountAmount = Number(coupon.discountValue || 0);
-    } else if (coupon.discountType === "percentage") {
-      couponDiscountAmount = (gross * Number(coupon.discountValue || 0)) / 100;
-    }
+    const baseRental = charges.find((line) => line.label === "Base Rental")?.amount ?? Number(plan.price ?? plan.base_price ?? 0);
+    couponDiscountAmount = emailCouponDiscount(coupon, {
+      gross,
+      baseRental,
+      dropOff: booking.drop_off_date,
+      pickup: booking.pickup_date,
+    });
   }
   const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount ?? 0);
   const referralDiscountAmount = Number(addons?.referralDiscountAmount ?? 0);
@@ -337,10 +378,14 @@ const resolveReceiptPricing = (booking, insuranceAmount) => {
   const appliedCoupon = Math.min(discount, Math.max(0, couponDiscountAmount));
   const appliedLoyalty = Math.min(roundMoney(discount - appliedCoupon), Math.max(0, loyaltyDiscountAmount));
   const appliedReferral = roundMoney(Math.max(0, discount - appliedCoupon - appliedLoyalty));
-  const subtotal = roundMoney(Math.max(0, gross - appliedCoupon - appliedLoyalty - appliedReferral));
+  const computedSubtotal = roundMoney(Math.max(0, gross - appliedCoupon - appliedLoyalty - appliedReferral));
   const taxRate = Number(booking.tax_rate_used ?? 7.45);
-  const tax = roundMoney(subtotal * (taxRate / 100));
-  const total = roundMoney(subtotal + tax);
+  const storedSubtotal = Number(booking.subtotal_before_tax);
+  const storedTax = Number(booking.tax_amount);
+  const storedTotal = Number(booking.total_price);
+  const subtotal = storedSubtotal > 0 ? roundMoney(storedSubtotal) : computedSubtotal;
+  const tax = storedTax > 0 ? roundMoney(storedTax) : roundMoney(subtotal * (taxRate / 100));
+  const total = storedTotal > 0 ? roundMoney(storedTotal) : roundMoney(subtotal + tax);
 
   return {
     charges,
@@ -1063,6 +1108,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
   const returnByTimePlain = formatPlainBookingTime(booking.pickup_time_slot);
   const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);
   const referralPendingDollars = Number(addons?.referralDollarsPending || 0);
+  const issuedRewardCoupons = Array.isArray(addons?.issuedRewardCoupons) ? addons.issuedRewardCoupons : [];
 
   let nextStepsHTML = "";
   if (selfService) {
@@ -1176,6 +1222,21 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
           ${referralPendingDollars > 0 ? ` Because you were referred, you just helped a friend or family member earn a referral reward!` : ''}
           Visit your Customer Portal anytime to track your balances, where you can also invite friends and family to try our services and start earning rewards yourself.
         </p>
+      </div>
+      ` : ""}
+
+      ${issuedRewardCoupons.length > 0 ? `
+      <div style="margin-top: 20px; padding: 14px 16px; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px;">
+        <p style="margin: 0 0 8px 0; color: #92400e; font-size: 14px; line-height: 1.5;">
+          <strong>🎁 You've unlocked a reward!</strong>
+        </p>
+        ${issuedRewardCoupons.map((reward) => `
+          <p style="margin: 0 0 6px 0; color: #92400e; font-size: 14px; line-height: 1.5;">
+            ${reward.headline ? `${reward.headline} — ` : ""}Use code
+            <strong style="font-size: 16px; letter-spacing: 1px;">${reward.code}</strong>
+            on your next booking.${reward.description ? ` ${reward.description}` : ""}
+          </p>
+        `).join("")}
       </div>
       ` : ""}
 

@@ -1,5 +1,5 @@
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
-import { quoteEquipmentExtension } from '@/utils/rentalEquipmentPricing';
+import { quoteEquipmentExtension } from './rentalEquipmentPricing.js';
 
 const CLOSED_STATUSES = new Set([
   'Completed',
@@ -57,6 +57,9 @@ function denverNow(now = new Date()) {
   };
 }
 
+const LATE_RETURN_WINDOW_MS = 2 * 60 * 60 * 1000;
+const UNNOTIFIED_LATE_WINDOW_MINUTES = 3 * 60;
+
 export function rentalReturnDeadlinePassed(booking, now = new Date()) {
   const returnDate = dateKey(booking?.pickup_date);
   if (!returnDate) return true;
@@ -66,11 +69,45 @@ export function rentalReturnDeadlinePassed(booking, now = new Date()) {
   return current.minutes >= parseClockMinutes(booking?.pickup_time_slot);
 }
 
+function calendarDayDelta(laterDate, earlierDate) {
+  const [laterYear, laterMonth, laterDay] = laterDate.split('-').map(Number);
+  const [earlierYear, earlierMonth, earlierDay] = earlierDate.split('-').map(Number);
+  return Math.round(
+    (Date.UTC(laterYear, laterMonth - 1, laterDay) - Date.UTC(earlierYear, earlierMonth - 1, earlierDay)) / 86400000,
+  );
+}
+
+function minutesAfterScheduledReturn(booking, now = new Date()) {
+  const returnDate = dateKey(booking?.pickup_date);
+  if (!returnDate) return Number.POSITIVE_INFINITY;
+  const current = denverNow(now);
+  return calendarDayDelta(current.date, returnDate) * 1440
+    + current.minutes
+    - parseClockMinutes(booking?.pickup_time_slot);
+}
+
+/**
+ * After the scheduled return, the customer can still extend until the late-return
+ * code expires. That is two hours after the late notice, or three hours after the
+ * return time when the notice has not been stamped yet.
+ */
+export function lateExtensionWindowOpen(booking, now = new Date()) {
+  if (!booking || booking.failure_to_return_notice_at || booking.status === 'failure_to_return') return false;
+  if (booking.late_return_notice_at) {
+    const start = new Date(booking.late_return_notice_at).getTime();
+    if (!Number.isFinite(start)) return false;
+    return now.getTime() < start + LATE_RETURN_WINDOW_MS;
+  }
+  const elapsed = minutesAfterScheduledReturn(booking, now);
+  return elapsed >= 0 && elapsed < UNNOTIFIED_LATE_WINDOW_MINUTES;
+}
+
 export function canExtendBooking(booking, now = new Date()) {
   if (!booking?.id || !dateKey(booking.drop_off_date) || !dateKey(booking.pickup_date)) return false;
   if (booking.pending_address_verification || booking.returned_at) return false;
-  if (CLOSED_STATUSES.has(booking.status)) return false;
-  return !rentalReturnDeadlinePassed(booking, now);
+  if (CLOSED_STATUSES.has(booking.status) || booking.status === 'failure_to_return' || booking.failure_to_return_notice_at) return false;
+  if (!rentalReturnDeadlinePassed(booking, now)) return true;
+  return lateExtensionWindowOpen(booking, now);
 }
 
 export function dayRateFromBooking(booking) {

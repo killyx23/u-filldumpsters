@@ -10,6 +10,7 @@ import { logBookingChargeHistory } from '@/utils/bookingChargeHistory';
 import { AlertTriangle, Clock, DollarSign, Save } from 'lucide-react';
 import { format, differenceInMinutes } from 'date-fns';
 import { getPickupWindowTimes } from '@/utils/bookingPickupWindow';
+import { withoutAutoLocks } from '@/utils/lockAutoLock';
 
 export const OverdueFeeManagement = ({ booking, onUpdate }) => {
   const [overdueFee, setOverdueFee] = useState('');
@@ -23,18 +24,20 @@ export const OverdueFeeManagement = ({ booking, onUpdate }) => {
   const checkReturnStatus = async () => {
     try {
       // Check for lock event in tracking logs
-      const { data: lockEvent, error } = await supabase
+      const { data: rows, error } = await supabase
         .from('rental_tracking_logs')
-        .select('event_timestamp')
+        .select('event_type, event_timestamp, notes')
         .eq('order_id', booking.id)
-        .eq('event_type', 'lock')
-        .order('event_timestamp', { ascending: false })
-        .limit(1)
-        .single();
+        .in('event_type', ['unlock', 'lock'])
+        .order('event_timestamp', { ascending: true });
 
       if (error && error.code !== 'PGRST116') {
         console.error('[OverdueFeeManagement] Error checking return status:', error);
       }
+
+      const lockEvent = [...withoutAutoLocks(rows || [])]
+        .reverse()
+        .find((row) => row.event_type === 'lock') || null;
 
       const scheduledReturnTime = getPickupWindowTimes(booking).returnBy || new Date(booking.pickup_date);
       const lockClose = booking.return_lock_at || null;

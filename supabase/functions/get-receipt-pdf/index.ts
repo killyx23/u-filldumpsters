@@ -185,16 +185,20 @@ async function generatePDFReceipt(booking: any) {
 
   const coupon = booking.addons?.coupon;
   if (coupon?.isValid) {
-    let discountAmount = 0;
-    if (coupon.discountType === 'fixed') {
-      discountAmount = coupon.discountValue;
-    } else if (coupon.discountType === 'percentage') {
-      discountAmount = (booking.plan?.price || 0) * (coupon.discountValue / 100);
+    let discountAmount = Number(coupon.discountAmount ?? booking.addons?.couponDiscountAmount ?? 0);
+    if (!(discountAmount > 0)) {
+      if (coupon.discountType === 'fixed') {
+        discountAmount = coupon.discountValue;
+      } else if (coupon.discountType === 'percentage') {
+        discountAmount = (booking.plan?.price || 0) * (coupon.discountValue / 100);
+      }
     }
-    y -= 20;
-    drawDivider(page, y + 8, margin, width, lightGray);
-    drawText(`Coupon (${coupon.code})`, margin, y, { size: 10, color: green });
-    drawText(`-${formatCurrency(discountAmount)}`, width - margin, y, { size: 10, color: green, align: 'right' });
+    if (discountAmount > 0) {
+      y -= 20;
+      drawDivider(page, y + 8, margin, width, lightGray);
+      drawText(`Coupon (${coupon.code})`, margin, y, { size: 10, color: green });
+      drawText(`-${formatCurrency(discountAmount)}`, width - margin, y, { size: 10, color: green, align: 'right' });
+    }
   }
 
   // ── Totals ────────────────────────────────────────────────────────────

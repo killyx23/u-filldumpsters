@@ -40,7 +40,6 @@ export default function LockOpenCloseTimes({
   lastClosedAt,
   currentState = null,
   align = 'left',
-  watching = false,
 }) {
   const position = lockPosition({
     current_state: currentState,
@@ -56,9 +55,6 @@ export default function LockOpenCloseTimes({
       <div className="leading-snug">
         <span className="text-slate-500">Position</span>{' '}
         <span className={`font-semibold ${badge.className}`}>{badge.text}</span>
-        {watching && position === 'open' && (
-          <span className="text-slate-500"> — waiting for auto-lock</span>
-        )}
       </div>
       <TimeRow label="Last opened" value={lastOpenedAt} />
       <TimeRow label="Last closed" value={lastClosedAt} />

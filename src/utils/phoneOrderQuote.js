@@ -1,5 +1,6 @@
 import { differenceInDays, isValid, parseISO, startOfDay } from 'date-fns';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { evaluateCoupon } from '@/utils/couponRules';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -33,16 +34,17 @@ export function catalogBaseRental(service, days) {
   return basePrice * dayCount;
 }
 
-function couponDollars(addons, gross) {
+function couponDollars(addons, gross, { rentalDays = 1, baseRental = 0 } = {}) {
   if (!addons?.coupon?.isValid) return 0;
-  if (addons.coupon.discountType === 'fixed') return Number(addons.coupon.discountValue || 0);
-  if (addons.coupon.discountType === 'percentage') {
-    return (Number(gross) * Number(addons.coupon.discountValue || 0)) / 100;
-  }
-  return 0;
+  return evaluateCoupon({
+    coupon: addons.coupon,
+    rentalDays,
+    baseRental,
+    grossBeforeDiscount: gross,
+  }).discount;
 }
 
-function withCouponExtra(addons, extra, gross) {
+function withCouponExtra(addons, extra, gross, couponContext) {
   const amount = round2(extra);
   if (amount <= 0) return addons;
   const existing = addons?.coupon?.isValid ? addons.coupon : null;
@@ -52,7 +54,7 @@ function withCouponExtra(addons, extra, gross) {
     coupon: {
       isValid: true,
       discountType: 'fixed',
-      discountValue: round2(couponDollars(addons, gross) + amount),
+      discountValue: round2(couponDollars(addons, gross, couponContext) + amount),
       code: existing?.code ? `${existing.code}+PHONE` : 'PHONE',
       phoneAdjustment: true,
     },
@@ -93,16 +95,20 @@ export function solvePersistedPricing(catalogInputs, targetTotal) {
 
   if (target < baseline.total) {
     const gross = baseline.lineItems?.reduce((sum, line) => sum + Number(line.amount || 0), 0) || baseline.subtotal;
+    const couponContext = {
+      rentalDays: catalogInputs.taxOptions?.rentalDays,
+      baseRental: Number(catalogInputs.plan?.price) || 0,
+    };
     let lo = 0;
     let hi = Math.max(baseline.subtotal, baseline.total, gross) + 1;
     for (let i = 0; i < 42; i += 1) {
       const mid = (lo + hi) / 2;
-      const addons = withCouponExtra(catalogInputs.addons, mid, gross);
+      const addons = withCouponExtra(catalogInputs.addons, mid, gross, couponContext);
       const next = quoteTotal({ ...catalogInputs, addons });
       if (next.total > target) lo = mid;
       else hi = mid;
     }
-    const addons = withCouponExtra(catalogInputs.addons, hi, gross);
+    const addons = withCouponExtra(catalogInputs.addons, hi, gross, couponContext);
     const quote = quoteTotal({ ...catalogInputs, addons });
     if (Math.abs(quote.total - target) > 0.05) {
       return { ok: false, error: 'Could not match the approved total to checkout pricing.' };

@@ -803,6 +803,7 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             onBack={goBackOneStep}
             deliveryService={deliveryService}
             setDeliveryService={setDeliveryService}
+            setSelectedPlan={setSelectedPlan}
             onReorderSelect={handleReorderService}
             onCustomerVerified={handleReturningCustomerVerified}
           />
@@ -871,6 +872,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
             onBack={goBackOneStep}
             onVerified={handleEmailVerificationComplete}
             isReturningCustomer={isTrueReturningCustomer}
+            plan={selectedPlan}
+            addonsData={addonsData}
+            bookingData={bookingData}
+            deliveryService={deliveryService}
           />
         );
       case 8:

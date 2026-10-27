@@ -20,11 +20,13 @@ import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
+import { evaluateCoupon } from '@/utils/couponRules';
 import { calculateTaxFromLineItems } from '@/utils/bookingTaxCalculator';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
 import { storePendingBooking } from '@/utils/bookingDataPersistence';
-import { buildPlanSnapshot } from '@/utils/servicePlan';
+import { activePromoLabel, buildPlanSnapshot } from '@/utils/servicePlan';
+import { buildCustomerPriceReview } from '@/utils/customerPriceReview';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { addressCanProceed, addressReviewAddonFields, applySelectedAddress } from '@/utils/addressHelpers';
 import { getServiceSpecificDateLabel } from '@/utils/serviceSpecificLabels';
@@ -325,6 +327,8 @@ export function PhoneOrderDesk() {
   const ignoreQtyUntil = useRef(0);
   const [stockNote, setStockNote] = useState({});
   const [equipmentPrices, setEquipmentPrices] = useState({});
+  const [additionalDayPrices, setAdditionalDayPrices] = useState({});
+  const [equipmentTypes, setEquipmentTypes] = useState({});
   const [coupon, setCoupon] = useState(null);
   const [mileage, setMileage] = useState(0);
   const [distanceMiles, setDistanceMiles] = useState(0);
@@ -364,8 +368,23 @@ export function PhoneOrderDesk() {
 
   useEffect(() => {
     supabase.from('services').select('*').order('id').then(({ data }) => setServices(data || []));
-    Promise.all([1, 2, 3, 4, 5, 6].map(async (id) => [id, await getPriceForEquipment(id)]))
-      .then((pairs) => setEquipmentPrices(Object.fromEntries(pairs)));
+    Promise.all([
+      supabase.from('equipment').select('id, price, additional_day_price, type'),
+      Promise.all([1, 2, 3, 4, 5, 6].map(async (id) => [id, await getPriceForEquipment(id)])),
+    ]).then(([{ data: equipmentRows }, fallbackPairs]) => {
+      const prices = Object.fromEntries(fallbackPairs);
+      const extraRates = {};
+      const types = {};
+      (equipmentRows || []).forEach((row) => {
+        const id = Number(row.id);
+        if (row.type === 'rental') prices[id] = Number(row.price || 0);
+        extraRates[id] = Number(row.additional_day_price || 0);
+        types[id] = row.type || 'rental';
+      });
+      setEquipmentPrices(prices);
+      setAdditionalDayPrices(extraRates);
+      setEquipmentTypes(types);
+    });
   }, []);
 
   useEffect(() => {
@@ -521,7 +540,7 @@ export function PhoneOrderDesk() {
   const showDisposal = Number(effective?.id) !== 2;
   const addonChoices = ADDONS.filter((item) => showDisposal || item.kind !== 'disposal');
   const selectedEquipment = addonChoices
-    .filter((item) => Number(qty[item.id] || 0) > 0)
+    .filter((item) => Number(qty[item.id] || 0) > 0 && item.kind !== 'disposal')
     .map((item) => ({
       id: item.id,
       dbId: item.id,
@@ -529,6 +548,7 @@ export function PhoneOrderDesk() {
       name: item.label,
       quantity: Number(qty[item.id]),
       type: item.kind === 'purchase' ? 'purchase' : 'rental',
+      additionalDayPrice: Number(additionalDayPrices[item.id] || 0),
     }));
 
   const pointsToDollar = Number(rewards?.conversionRates?.pointsToDollar || 100);
@@ -546,6 +566,9 @@ export function PhoneOrderDesk() {
     mileageCharge: isDelivery ? mileage : 0,
     oneWayDistanceMiles: distanceMiles,
     coupon,
+    mattressDisposal: showDisposal ? Number(qty[4] || 0) : 0,
+    tvDisposal: showDisposal ? Number(qty[5] || 0) : 0,
+    applianceDisposal: showDisposal ? Number(qty[6] || 0) : 0,
     loyaltyDiscountAmount: loyaltyDiscount,
     loyaltyPointsToRedeem: Number(form.loyaltyPoints || 0),
     referralDiscountAmount: referralDiscount,
@@ -554,8 +577,16 @@ export function PhoneOrderDesk() {
   };
 
   const catalogPlan = effective ? { ...effective, price: baseRental } : null;
+  const quoteOptions = {
+    ...taxOptions,
+    rentalDays: days,
+    dropOff: form.dropOff || null,
+    pickup: form.pickup || form.dropOff || null,
+    additionalDayPrices,
+    equipmentTypes,
+  };
   const catalogQuote = catalogPlan
-    ? calculateBookingTotal(catalogPlan, catalogAddons, equipmentPrices, taxRate, isDelivery, insurancePrice, taxOptions)
+    ? calculateBookingTotal(catalogPlan, catalogAddons, equipmentPrices, taxRate, isDelivery, insurancePrice, quoteOptions)
     : null;
 
   const displayLines = (catalogQuote?.lineItems || []).map((line) => ({
@@ -739,20 +770,55 @@ export function PhoneOrderDesk() {
   };
 
   const applyCoupon = async () => {
-    if (!effective || !form.couponCode.trim()) return;
-    const { data, error } = await supabase.functions.invoke('validate-coupon', {
-      body: { couponCode: form.couponCode.trim(), serviceId: effective.id },
-    });
-    if (error || !data?.isValid) {
-      toast({ title: 'Coupon', description: 'That coupon is not valid for this service.', variant: 'destructive' });
+    const code = form.couponCode.trim();
+    if (!selected || !effective) {
+      toast({ title: 'Coupon', description: 'Choose a service before applying a coupon.', variant: 'destructive' });
+      return;
+    }
+    if (!code) {
+      toast({ title: 'Coupon', description: 'Enter a coupon code.', variant: 'destructive' });
+      return;
+    }
+    const serviceIds = [...new Set([Number(selected.id), Number(effective.id)].filter((id) => id > 0))];
+    let data = null;
+    let failure = 'That coupon is not valid for this service.';
+    for (const serviceId of serviceIds) {
+      const result = await supabase.functions.invoke('validate-coupon', {
+        body: { couponCode: code, serviceId, rentalDays: days },
+      });
+      if (!result.error && result.data?.isValid) {
+        data = result.data;
+        break;
+      }
+      failure = result.data?.error || result.error?.message || failure;
+    }
+    if (!data?.isValid) {
+      toast({ title: 'Coupon', description: failure, variant: 'destructive' });
       setCoupon(null);
       return;
     }
-    setCoupon({
+    const applied = {
       isValid: true,
+      id: data.id,
       code: data.code,
       discountType: data.discountType,
       discountValue: Number(data.discountValue),
+      coupon_kind: data.couponKind || (Array.isArray(data.rules) && data.rules.length ? 'rules' : 'flat'),
+      rules: Array.isArray(data.rules) ? data.rules : [],
+    };
+    setCoupon(applied);
+    const preview = evaluateCoupon({
+      coupon: applied,
+      rentalDays: days,
+      baseRental,
+      grossBeforeDiscount: baseRental,
+    });
+    const headline = (applied.rules || []).find((rule) => rule.advertise && rule.headline)?.headline;
+    toast({
+      title: 'Coupon applied',
+      description: preview.discount > 0
+        ? `${applied.code} takes ${money(preview.discount)} off this ${days}-day rental.`
+        : (headline || `${applied.code} is on the order. This rental length does not qualify for a price reduction.`),
     });
   };
 
@@ -870,7 +936,7 @@ export function PhoneOrderDesk() {
       taxRate,
       deliveryService: isDelivery,
       insurancePrice,
-      taxOptions,
+      taxOptions: quoteOptions,
     }, chargeTotal);
     if (!solved.ok) {
       toast({ title: 'Price', description: solved.error, variant: 'destructive' });
@@ -923,6 +989,19 @@ export function PhoneOrderDesk() {
           is_taxable: line.is_taxable,
           amountAfterDiscount: line.amountAfterDiscount,
         })),
+        customerPriceReview: buildCustomerPriceReview({
+          lines: solved.quote.lineItems || [],
+          serviceName: effective?.name,
+          days,
+          quantities: qty,
+          quote: solved.quote,
+          coupon: solved.addons.originalCoupon?.code
+            ? { ...solved.addons.coupon, displayCode: solved.addons.originalCoupon.code }
+            : solved.addons.coupon,
+          loyaltyPoints: Number(solved.addons.loyaltyPointsToRedeem || 0),
+          referralDollars: Number(solved.addons.referralDollarsToRedeem || 0),
+          promoLabel: activePromoLabel(effective),
+        }),
       };
       const bookingData = {
         firstName: form.firstName.trim(),
@@ -1420,9 +1499,24 @@ export function PhoneOrderDesk() {
               )}
 
               <div className="flex gap-2">
-                <Input placeholder="Coupon" value={form.couponCode} onChange={set('couponCode')} className="bg-white/10 border-white/30" />
+                <Input
+                  placeholder="Coupon"
+                  value={form.couponCode}
+                  onChange={(event) => {
+                    set('couponCode')(event);
+                    const next = event.target.value.trim();
+                    if (coupon?.code && next.toLowerCase() !== String(coupon.code).toLowerCase()) setCoupon(null);
+                  }}
+                  className="bg-white/10 border-white/30"
+                />
                 <Button type="button" variant="outline" className="border-white/20" onClick={applyCoupon}>Apply</Button>
               </div>
+              {coupon?.isValid && (
+                <p className="text-sm text-green-300">
+                  {coupon.code} is applied
+                  {catalogQuote?.couponDiscount > 0 ? ` · ${money(catalogQuote.couponDiscount)} off` : ' · no price change for these dates'}
+                </p>
+              )}
               <Textarea placeholder="Notes for the crew" value={form.notes} onChange={set('notes')} className="bg-white/10 border-white/30" />
               <Textarea placeholder="Call notes, not shown to the customer" value={form.callNotes} onChange={set('callNotes')} className="bg-white/10 border-white/30" />
             </section>

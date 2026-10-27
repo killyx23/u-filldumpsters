@@ -1,4 +1,13 @@
 import { supabase } from '@/lib/customSupabaseClient';
+import {
+  eventTimeMs,
+  isLockKind,
+  isUnlockKind,
+  lockDisplayFromCommand,
+  withoutAutoLocks,
+} from '@/utils/lockAutoLock';
+
+export { lockDisplayFromCommand };
 
 export function bridgeOnlineFromDevices(devices) {
   if (!devices?.length) return null;
@@ -7,13 +16,12 @@ export function bridgeOnlineFromDevices(devices) {
   return null;
 }
 
-/** How long the admin bar waits for the padlock to auto-lock after a manual unlock. */
+/** How long the admin bar waits for a manual unlock or lock to show up. */
 export const MANUAL_LOCK_WATCH_MS = 2 * 60 * 1000;
 
 /**
  * Physical position for the admin manual lock bar.
- * `current_state` wins, including when a hardware close is a few seconds behind
- * the server clock and the open timestamp is still slightly newer.
+ * `current_state` is the display state after automatic relocks are removed.
  */
 export function lockPosition(device) {
   if (!device) return 'unknown';
@@ -37,12 +45,12 @@ function timesClose(a, b, slackMs) {
 /**
  * Poll presence after a manual unlock or lock. Stops when this command's
  * position is visible, or after two minutes. Does not touch booking state.
+ * An unlock is visible while it stays open. The automatic relock is not a close.
  */
 export function watchManualLockAfterCommand({
   action,
   lastOpenedAt,
   lastClosedAt,
-  currentState,
   onDevices,
   intervalMs = 2000,
   timeoutMs = MANUAL_LOCK_WATCH_MS,
@@ -50,8 +58,7 @@ export function watchManualLockAfterCommand({
   let stopped = false;
   let timer = null;
   const started = Date.now();
-  let lastPull = started;
-  const waitingForAutolock = action === 'remote_unlock' && currentState !== 'locked';
+  const waitingForOpen = action === 'remote_unlock';
 
   const finish = (devices) => {
     stopped = true;
@@ -61,17 +68,11 @@ export function watchManualLockAfterCommand({
 
   const tick = async () => {
     if (stopped) return;
-    if (waitingForAutolock && Date.now() - lastPull >= 35000) {
-      lastPull = Date.now();
-      supabase.functions.invoke('test-lock-lifecycle', {
-        body: { action: 'pull_manual_autolock' },
-      }).catch(() => {});
-    }
     const { devices } = await loadLockPresenceDevices();
     if (stopped) return;
     const device = devices?.[0];
-    const landed = waitingForAutolock
-      ? device?.current_state === 'locked' && timesClose(device?.last_opened_at, lastOpenedAt, 5000)
+    const landed = waitingForOpen
+      ? device?.current_state === 'unlocked' && timesClose(device?.last_opened_at, lastOpenedAt, 5000)
       : device?.current_state === 'locked' &&
         (!lastClosedAt || timesClose(device?.last_closed_at, lastClosedAt, 5000) ||
           new Date(device.last_closed_at).getTime() >= new Date(lastClosedAt).getTime() - 2000);
@@ -90,24 +91,48 @@ export function watchManualLockAfterCommand({
   };
 }
 
-function latestEventMap(events, kind) {
-  const map = {};
-  for (const ev of events || []) {
-    if (ev.event_kind !== kind || !ev.device_id || !ev.occurred_at) continue;
-    if (!map[ev.device_id] || ev.occurred_at > map[ev.device_id]) {
-      map[ev.device_id] = ev.occurred_at;
-    }
-  }
-  return map;
+function presenceFor(currentState, bridgeOnline) {
+  if (currentState === 'unlocked' && bridgeOnline === false) return 'alert_open_and_offline';
+  if (currentState === 'unlocked') return 'off_premises';
+  if (currentState === 'locked') return 'on_premises';
+  return 'unknown';
 }
 
-async function enrichOpenCloseTimes(devices) {
+function isoFromMs(ms) {
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/** Status and last-closed time ignore automatic relocks. */
+export function displayDeviceFromEvents(device, events) {
+  const real = withoutAutoLocks(events);
+  let lastOpenMs = NaN;
+  let lastCloseMs = NaN;
+  for (const event of real) {
+    const ms = eventTimeMs(event);
+    if (!Number.isFinite(ms)) continue;
+    if (isUnlockKind(event)) lastOpenMs = ms;
+    if (isLockKind(event)) lastCloseMs = ms;
+  }
+  const latest = [...real].reverse().find((event) => isUnlockKind(event) || isLockKind(event));
+  let currentState = device.current_state;
+  if (latest && isUnlockKind(latest)) currentState = 'unlocked';
+  else if (latest && isLockKind(latest)) currentState = 'locked';
+  return {
+    ...device,
+    current_state: currentState,
+    presence: presenceFor(currentState, device.bridge_online),
+    last_opened_at: isoFromMs(lastOpenMs) ?? device.last_opened_at ?? null,
+    last_closed_at: isoFromMs(lastCloseMs),
+  };
+}
+
+async function applyAutoLockDisplay(devices) {
   const ids = devices.map((d) => d.device_id).filter(Boolean);
   if (!ids.length) return devices;
 
   const { data: events, error } = await supabase
     .from('lock_device_events')
-    .select('device_id, event_kind, occurred_at')
+    .select('device_id, event_kind, occurred_at, log_type')
     .in('device_id', ids)
     .in('event_kind', ['lock', 'unlock']);
 
@@ -116,13 +141,19 @@ async function enrichOpenCloseTimes(devices) {
     return devices;
   }
 
-  const opened = latestEventMap(events, 'unlock');
-  const closed = latestEventMap(events, 'lock');
-  return devices.map((d) => ({
-    ...d,
-    last_opened_at: d.last_opened_at ?? opened[d.device_id] ?? null,
-    last_closed_at: d.last_closed_at ?? closed[d.device_id] ?? null,
-  }));
+  const byDevice = new Map();
+  for (const event of events || []) {
+    if (!event.device_id) continue;
+    const list = byDevice.get(event.device_id) || [];
+    list.push(event);
+    byDevice.set(event.device_id, list);
+  }
+
+  return devices.map((device) => {
+    const mine = byDevice.get(device.device_id);
+    if (!mine?.length) return device;
+    return displayDeviceFromEvents(device, mine);
+  });
 }
 
 export async function loadLockPresenceDevices() {
@@ -135,13 +166,7 @@ export async function loadLockPresenceDevices() {
     return { devices: [], error: error.message };
   }
 
-  let devices = data || [];
-  const missingTimes = devices.some(
-    (d) => !('last_opened_at' in d) || !('last_closed_at' in d),
-  );
-  if (devices.length && missingTimes) {
-    devices = await enrichOpenCloseTimes(devices);
-  }
-
-  return { devices, error: null };
+  const devices = data || [];
+  if (!devices.length) return { devices, error: null };
+  return { devices: await applyAutoLockDisplay(devices), error: null };
 }

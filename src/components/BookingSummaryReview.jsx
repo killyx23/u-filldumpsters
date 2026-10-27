@@ -169,24 +169,18 @@ export const BookingSummaryReview = ({
             insurancePrice,
             drivewayPrice,
             ...taxOptions,
+            dropOff: bookingData?.dropOffDate,
+            pickup: bookingData?.pickupDate || bookingData?.dropOffDate,
         });
 
-        let couponDiscount = 0;
-        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
-        if (addonsData?.coupon?.isValid) {
-            if (addonsData.coupon.discountType === 'fixed') {
-                couponDiscount = Number(addonsData.coupon.discountValue || 0);
-            } else if (addonsData.coupon.discountType === 'percentage') {
-                couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
-            }
-        }
-
-        const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-        const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
-        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
+        const pricedBaseRental = (taxBreakdown.lineItems || []).find((line) => line.key === 'base_rental')?.amount ?? basePriceAmount;
+        const couponDiscount = Number(taxBreakdown.couponDiscount || 0);
+        const loyaltyDiscount = Number(taxBreakdown.loyaltyDiscount || addonsData?.loyaltyDiscountAmount || 0);
+        const referralDiscount = Number(taxBreakdown.referralDiscount || addonsData?.referralDiscountAmount || 0);
+        const discount = Number(taxBreakdown.discount ?? couponDiscount + loyaltyDiscount + referralDiscount);
 
         return {
-            basePriceAmount,
+            basePriceAmount: pricedBaseRental,
             deliveryFeeFlat,
             tripMileageCost,
             insuranceCost,
@@ -205,7 +199,7 @@ export const BookingSummaryReview = ({
             taxRate: taxBreakdown.taxRate,
             total: taxBreakdown.total,
         };
-    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, deliveryService, taxOptions]);
+    }, [basePrice, plan, addonsData, equipmentPrices, isDelivery, taxRate, insurancePrice, drivewayPrice, deliveryService, taxOptions, bookingData?.dropOffDate, bookingData?.pickupDate]);
 
     const planName = formatCustomerFacingPlanName(plan?.name) || 'Selected Plan';
     const displayPlanName = isDelivery ? `${planName} (with Delivery)` : planName;

@@ -41,7 +41,6 @@ export default function RemoteBridgeControls({
   lastOpenedAt = null,
   lastClosedAt = null,
   currentState = null,
-  watching = false,
 }) {
   const [busy, setBusy] = useState(null);
   const [pendingAction, setPendingAction] = useState(null);
@@ -117,7 +116,6 @@ export default function RemoteBridgeControls({
               lastOpenedAt={lastOpenedAt}
               lastClosedAt={lastClosedAt}
               currentState={currentState}
-              watching={watching}
               align="right"
             />
           </div>
@@ -127,7 +125,6 @@ export default function RemoteBridgeControls({
             lastOpenedAt={lastOpenedAt}
             lastClosedAt={lastClosedAt}
             currentState={currentState}
-            watching={watching}
             align="right"
           />
         )}

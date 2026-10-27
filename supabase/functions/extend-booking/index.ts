@@ -131,12 +131,35 @@ function applyEquipmentExtension(
   });
 }
 
-function returnDeadlinePassed(booking: { pickup_date?: string; pickup_time_slot?: string }) {
+const LATE_RETURN_WINDOW_MS = 2 * 60 * 60 * 1000;
+const UNNOTIFIED_LATE_WINDOW_MS = 3 * 60 * 60 * 1000;
+
+function returnDeadline(booking: { pickup_date?: string; pickup_time_slot?: string }) {
   const returnDate = dateKey(booking.pickup_date);
   const clock = parseClockTime(booking.pickup_time_slot || "23:00:00") || { hour: 23, minute: 0, second: 0 };
-  const deadline = businessWallTimeToUtc(returnDate, clock);
+  return businessWallTimeToUtc(returnDate, clock);
+}
+
+function returnDeadlinePassed(booking: { pickup_date?: string; pickup_time_slot?: string }, now = Date.now()) {
+  const deadline = returnDeadline(booking);
   if (!deadline) return true;
-  return Date.now() >= deadline.getTime();
+  return now >= deadline.getTime();
+}
+
+function lateExtensionWindowOpen(
+  booking: { pickup_date?: string; pickup_time_slot?: string; status?: string; late_return_notice_at?: string; failure_to_return_notice_at?: string },
+  now = Date.now(),
+) {
+  if (booking.failure_to_return_notice_at || booking.status === "failure_to_return") return false;
+  if (booking.late_return_notice_at) {
+    const start = new Date(booking.late_return_notice_at).getTime();
+    if (!Number.isFinite(start)) return false;
+    return now < start + LATE_RETURN_WINDOW_MS;
+  }
+  const deadline = returnDeadline(booking);
+  if (!deadline) return false;
+  const elapsed = now - deadline.getTime();
+  return elapsed >= 0 && elapsed < UNNOTIFIED_LATE_WINDOW_MS;
 }
 
 function dayIsBlocked(availability: Record<string, { available?: boolean; inventoryAvailable?: boolean }>, date: string, returnDay: boolean) {
@@ -247,8 +270,13 @@ Deno.serve(async (req) => {
     if (!portalCallerOwnsBooking(user, booking)) {
       return fail(403, "This booking belongs to another customer.");
     }
-    if (booking.returned_at || CLOSED_STATUSES.has(booking.status) || returnDeadlinePassed(booking)) {
-      return fail(400, "This rental can only be extended before the return time.");
+    const extensionClosed = booking.returned_at
+      || CLOSED_STATUSES.has(booking.status)
+      || booking.status === "failure_to_return"
+      || booking.failure_to_return_notice_at
+      || (returnDeadlinePassed(booking) && !lateExtensionWindowOpen(booking));
+    if (extensionClosed) {
+      return fail(400, "This rental can only be extended before the return time or during the late-return window.");
     }
 
     const currentPickup = dateKey(booking.pickup_date);

@@ -1,0 +1,5 @@
+-- Already applied on the linked remote database under this version.
+-- Supabase recorded it when the same change was applied from the dashboard,
+-- which used a different timestamp than 20261006103834_hold_loyalty_points_until_rental_finalized.sql.
+-- This file only aligns local history with that remote version.
+-- It intentionally contains no SQL, so it cannot run the change again.
