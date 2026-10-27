@@ -909,6 +909,13 @@ export const PaymentPage = ({ onBack }) => {
           ) || 0,
           addons: {
             ...pendingData.addons_data,
+            ...(pendingData.addons_data?.coupon?.isValid ? {
+              coupon: {
+                ...pendingData.addons_data.coupon,
+                discountAmount: Number(calcResult.couponDiscount || 0),
+              },
+              couponDiscountAmount: Number(calcResult.couponDiscount || 0),
+            } : {}),
             smsTransactionalOptIn: pendingData.booking_data?.smsTransactionalOptIn === true,
             smsMarketingOptIn: pendingData.booking_data?.smsMarketingOptIn === true,
             verificationSkipped: driverVerificationSkipped,
@@ -1064,7 +1071,11 @@ export const PaymentPage = ({ onBack }) => {
           taxRate,
           deliveryService,
           insurancePrice,
-          taxOptions
+          {
+            ...taxOptions,
+            dropOff: bookingData?.dropOffDate || pendingCustomerData?.drop_off_date,
+            pickup: bookingData?.pickupDate || pendingCustomerData?.pickup_date,
+          }
         );
 
         const finalTotal = calcResult.total;
@@ -1284,9 +1295,13 @@ export const PaymentPage = ({ onBack }) => {
       taxRate,
       deliveryService,
       insurancePrice,
-      taxOptions
+      {
+        ...taxOptions,
+        dropOff: bookingData?.dropOffDate || pendingCustomerData?.drop_off_date,
+        pickup: bookingData?.pickupDate || pendingCustomerData?.pickup_date,
+      }
     );
-  }, [plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingCreated]);
+  }, [plan, addonsData, equipmentPrices, taxRate, deliveryService, insurancePrice, taxOptions, bookingCreated, bookingData?.dropOffDate, bookingData?.pickupDate, pendingCustomerData?.drop_off_date, pendingCustomerData?.pickup_date]);
 
   const elementsOptions = useMemo(() => {
     if (!clientSecret) return null;

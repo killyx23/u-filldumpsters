@@ -12,7 +12,7 @@ import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide
 import { format } from 'date-fns';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
 import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
-import { bridgeOnlineFromDevices, loadLockPresenceDevices, watchManualLockAfterCommand } from '@/utils/lockPresence';
+import { bridgeOnlineFromDevices, loadLockPresenceDevices, lockDisplayFromCommand, watchManualLockAfterCommand } from '@/utils/lockPresence';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 
@@ -61,7 +61,6 @@ export default function LockPresencePanel() {
   const [error, setError] = useState(null);
   const [linkingDeviceId, setLinkingDeviceId] = useState(null);
   const [optimisticTimes, setOptimisticTimes] = useState(null);
-  const [watching, setWatching] = useState(false);
   const stopWatch = useRef(null);
 
   const load = useCallback(async () => {
@@ -163,34 +162,22 @@ export default function LockPresencePanel() {
           lastOpenedAt={lastOpenedAt}
           lastClosedAt={lastClosedAt}
           currentState={currentState}
-          watching={watching}
           onSuccess={(data) => {
-            const nextState = data?.currentState
-              || (data?.action === 'remote_unlock' ? 'unlocked' : data?.action === 'remote_lock' ? 'locked' : null);
-            setOptimisticTimes({
-              lastOpenedAt: data?.lastOpenedAt ?? primary?.last_opened_at ?? null,
-              lastClosedAt: data?.lastClosedAt ?? primary?.last_closed_at ?? null,
-              currentState: nextState,
+            const display = lockDisplayFromCommand(data, {
+              lastOpenedAt,
+              lastClosedAt,
+              currentState,
             });
+            if (display) setOptimisticTimes(display);
             stopWatch.current?.();
-            if (data?.action === 'remote_unlock' && data?.currentState === 'locked') {
-              setWatching(false);
-              setOptimisticTimes(null);
-              load();
-              return;
-            }
-            setWatching(data?.action === 'remote_unlock');
+            if (data?.action !== 'remote_unlock' && data?.action !== 'remote_lock') return;
             stopWatch.current = watchManualLockAfterCommand({
-              action: data?.action,
-              lastOpenedAt: data?.lastOpenedAt,
-              lastClosedAt: data?.lastClosedAt,
-              currentState: data?.currentState,
+              action: data.action,
+              lastOpenedAt: display?.lastOpenedAt ?? data?.lastOpenedAt,
+              lastClosedAt: display?.lastClosedAt ?? data?.lastClosedAt,
               onDevices: (next, { done }) => {
                 setDevices(next || []);
-                if (done) {
-                  setOptimisticTimes(null);
-                  setWatching(false);
-                }
+                if (done) setOptimisticTimes(null);
               },
             });
           }}

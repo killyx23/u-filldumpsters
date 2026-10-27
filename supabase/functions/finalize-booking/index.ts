@@ -52,6 +52,42 @@ const toPositiveInt = (value: unknown): number => {
   return Math.floor(n);
 };
 
+// Inclusive rental-day count between two date strings (YYYY-MM-DD).
+const rentalDaysInclusive = (dropOff: unknown, pickup: unknown): number => {
+  const start = dropOff ? new Date(String(dropOff)) : null;
+  const end = pickup ? new Date(String(pickup)) : start;
+  if (!start || Number.isNaN(start.getTime())) return 1;
+  const e = end && !Number.isNaN(end.getTime()) ? end : start;
+  const MS = 86400000;
+  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  const endDay = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
+  return Math.max(1, Math.round((endDay - startDay) / MS) + 1);
+};
+
+// Which issue_coupon rules match the rental length (mirrors src/utils/couponRules.js).
+const matchingIssueCouponRewards = (rules: any[], days: number) => {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .filter((r) => {
+      const c = r?.condition || {};
+      const min = c.minDays == null ? 0 : Number(c.minDays);
+      const max = c.maxDays == null ? Infinity : Number(c.maxDays);
+      return r?.benefit?.type === "issue_coupon" && days >= min && days <= max;
+    })
+    .map((r) => ({
+      rewardValue: Number(r?.benefit?.value) || 0,
+      headline: String(r?.headline || ""),
+      description: String(r?.description || ""),
+    }));
+};
+
+const generateRewardCode = (): string => {
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let suffix = "";
+  for (let i = 0; i < 8; i++) suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return `REWARD-${suffix}`;
+};
+
 async function upsertTaxLedgerForBooking(booking: Record<string, unknown>) {
   const bookingId = Number(booking?.id);
   if (!Number.isFinite(bookingId) || bookingId <= 0) return;
@@ -494,14 +530,53 @@ Deno.serve(async (req)=>{
         }
       }
     }
+    const issuedRewardCoupons: Array<{ code: string; headline: string; description: string; value: number }> = [];
     if (couponId > 0) {
-      const { data: couponRow } = await supabase.from("coupons").select("id, usage_count").eq("id", couponId).maybeSingle();
+      const { data: couponRow } = await supabase
+        .from("coupons")
+        .select("id, usage_count, coupon_kind, rules")
+        .eq("id", couponId)
+        .maybeSingle();
       const nextUsage = Number(couponRow?.usage_count || 0) + 1;
       const { error: couponError } = await supabase.from("coupons").update({
         usage_count: nextUsage
       }).eq("id", couponId);
       if (couponError) {
         console.error("[finalize-booking] coupon usage increment failed:", couponError);
+      }
+
+      // Auto-issue reward coupons for matching issue_coupon rules
+      // (e.g. "rent 5 days, get a free equipment rental").
+      if (couponRow?.coupon_kind === "rules") {
+        const days = rentalDaysInclusive(updatedBooking.drop_off_date, updatedBooking.pickup_date);
+        const rewards = matchingIssueCouponRewards(couponRow.rules as any[], days);
+        for (const reward of rewards) {
+          const code = generateRewardCode();
+          const expiresAt = new Date();
+          expiresAt.setDate(expiresAt.getDate() + 60);
+          const { error: rewardInsertError } = await supabase.from("coupons").insert({
+            code,
+            coupon_kind: "flat",
+            rules: [],
+            discount_type: "fixed",
+            discount_value: reward.rewardValue,
+            usage_limit: 1,
+            usage_count: 0,
+            is_active: true,
+            expires_at: expiresAt.toISOString(),
+          });
+          if (rewardInsertError) {
+            console.error("[finalize-booking] reward coupon insert failed:", rewardInsertError);
+          } else {
+            issuedRewardCoupons.push({
+              code,
+              headline: reward.headline,
+              description: reward.description,
+              value: reward.rewardValue,
+            });
+            log("Reward coupon issued", code);
+          }
+        }
       }
     }
     const rewardsAddonsPatch = {
@@ -510,6 +585,7 @@ Deno.serve(async (req)=>{
       loyaltyPointsRedeemed: Number(loyaltyOutcome.pointsRedeemed || 0),
       referralDollarsRedeemed: Number(loyaltyOutcome.referralDollarsRedeemed || 0),
       referralDollarsPending: loyaltyOutcome.referralPendingRecorded ? Number(referralBonusDollars.toFixed(2)) : Number(updatedBooking.addons?.referralDollarsPending || 0),
+      issuedRewardCoupons: issuedRewardCoupons.length > 0 ? issuedRewardCoupons : (updatedBooking.addons?.issuedRewardCoupons || []),
       rewardsSummaryUpdatedAt: new Date().toISOString(),
       ...(referralRegistrationError
         ? { referralRegistrationError, referralRegistrationFailedAt: new Date().toISOString() }

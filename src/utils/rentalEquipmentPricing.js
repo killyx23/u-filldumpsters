@@ -13,6 +13,18 @@ export function rentalDayCount(dropOff, pickup) {
   return Math.max(1, differenceInDays(end, start) + 1);
 }
 
+const EQUIPMENT_SLUGS = {
+  wheelbarrow: 1,
+  handtruck: 2,
+  gloves: 3,
+  mattress: 4,
+  mattressdisposal: 4,
+  tv: 5,
+  tvdisposal: 5,
+  appliance: 6,
+  appliancedisposal: 6,
+};
+
 export function isChargeableEquipmentId(id) {
   const numericId = Number(id);
   return Number.isInteger(numericId) && numericId > 0 && numericId !== 7;
@@ -20,8 +32,24 @@ export function isChargeableEquipmentId(id) {
 
 export function equipmentNumericId(item) {
   const raw = item?.equipment_id ?? item?.dbId ?? item?.id;
+  if (typeof raw === 'string') {
+    const slug = raw.toLowerCase().replace(/[\s_-]/g, '');
+    if (EQUIPMENT_SLUGS[slug]) return EQUIPMENT_SLUGS[slug];
+  }
   const numericId = Number(raw);
   return isChargeableEquipmentId(numericId) ? numericId : null;
+}
+
+export function lookupEquipmentPrice(prices, item, equipmentId) {
+  if (!prices) return Number(item?.price ?? item?.basePrice ?? 0);
+  const slug = typeof item?.id === 'string' ? item.id : null;
+  const raw = prices[equipmentId]
+    ?? prices[String(equipmentId)]
+    ?? (slug != null ? prices[slug] : undefined)
+    ?? item?.price
+    ?? item?.basePrice
+    ?? 0;
+  return Number(raw) || 0;
 }
 
 export function isRentalEquipmentItem(item, typeHint = null) {
@@ -153,7 +181,7 @@ export function equipmentLineAmount(item, equipmentPrices = {}, {
   const qty = Number(item?.quantity || 1);
   const type = item?.type || equipmentTypes[key] || equipmentTypes[equipmentId];
   const rental = isRentalEquipmentItem(item, type);
-  const base = Number(equipmentPrices[key] ?? equipmentPrices[equipmentId] ?? item?.price ?? item?.basePrice ?? 0);
+  const base = lookupEquipmentPrice(equipmentPrices, item, equipmentId ?? key);
   const rate = Number(
     item?.additionalDayPrice ??
     item?.additional_day_price ??
@@ -181,13 +209,7 @@ export function quoteEquipmentLineForItem(item, equipmentPrices = {}, options = 
   const key = equipmentId ?? (item?.equipment_id || item?.dbId || item?.id);
   const type = item?.type || options.equipmentTypes?.[key];
   const rental = isRentalEquipmentItem(item, type);
-  const base = Number(
-    equipmentPrices[key] ??
-    equipmentPrices[equipmentId] ??
-    item?.price ??
-    item?.basePrice ??
-    0
-  );
+  const base = lookupEquipmentPrice(equipmentPrices, item, equipmentId ?? key);
   const rate = Number(
     item?.additionalDayPrice ??
     options.additionalDayPrices?.[key] ??

@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
-import { bridgeOnlineFromDevices, loadLockPresenceDevices, watchManualLockAfterCommand } from '@/utils/lockPresence';
+import { bridgeOnlineFromDevices, loadLockPresenceDevices, lockDisplayFromCommand, watchManualLockAfterCommand } from '@/utils/lockPresence';
 
 export default function AdminRemoteLockBar() {
   const [devices, setDevices] = useState([]);
   const [optimisticTimes, setOptimisticTimes] = useState(null);
-  const [watching, setWatching] = useState(false);
   const stopWatch = useRef(null);
 
   const load = useCallback(async () => {
@@ -31,36 +30,22 @@ export default function AdminRemoteLockBar() {
       lastOpenedAt={lastOpenedAt}
       lastClosedAt={lastClosedAt}
       currentState={currentState}
-      watching={watching}
       onSuccess={(data) => {
-        const nextState = data?.currentState
-          || (data?.action === 'remote_unlock' ? 'unlocked' : data?.action === 'remote_lock' ? 'locked' : null);
-        if (data?.lastOpenedAt || data?.lastClosedAt || nextState) {
-          setOptimisticTimes({
-            lastOpenedAt: data?.lastOpenedAt ?? null,
-            lastClosedAt: data?.lastClosedAt ?? null,
-            currentState: nextState,
-          });
-        }
+        const display = lockDisplayFromCommand(data, {
+          lastOpenedAt,
+          lastClosedAt,
+          currentState,
+        });
+        if (display) setOptimisticTimes(display);
         stopWatch.current?.();
-        const alreadyClosed = data?.action === 'remote_unlock' && data?.currentState === 'locked';
-        if (alreadyClosed) {
-          setWatching(false);
-          load();
-          return;
-        }
-        setWatching(data?.action === 'remote_unlock');
+        if (data?.action !== 'remote_unlock' && data?.action !== 'remote_lock') return;
         stopWatch.current = watchManualLockAfterCommand({
-          action: data?.action,
-          lastOpenedAt: data?.lastOpenedAt,
-          lastClosedAt: data?.lastClosedAt,
-          currentState: data?.currentState,
+          action: data.action,
+          lastOpenedAt: display?.lastOpenedAt ?? data?.lastOpenedAt,
+          lastClosedAt: display?.lastClosedAt ?? data?.lastClosedAt,
           onDevices: (next, { done }) => {
             setDevices(next || []);
-            if (done) {
-              setOptimisticTimes(null);
-              setWatching(false);
-            }
+            if (done) setOptimisticTimes(null);
           },
         });
       }}

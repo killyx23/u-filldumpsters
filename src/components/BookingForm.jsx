@@ -54,6 +54,7 @@ export const BookingForm = ({
   onBack,
   deliveryService,
   setDeliveryService,
+  setSelectedPlan,
   onReorderSelect,
   onCustomerVerified
 }) => {
@@ -86,6 +87,10 @@ export const BookingForm = ({
   const planId = Number(plan?.id);
   // Plan id 4 is the dump-trailer delivery variant stored on some past bookings.
   const isDelivery = (planId === 2 && Boolean(deliveryService)) || planId === 4;
+  const isTrailerDeliveryVariant = planId === 4 || allPlans.some(
+    (service) => Number(service.delivery_variant_service_id) === planId && Number(service.id) !== planId
+  );
+  const canToggleTrailerDelivery = Boolean(plan?.delivery_variant_service_id) || planId === 2 || isTrailerDeliveryVariant;
   const { getFeeForService } = useDumpFees();
   const { fee: adminFee, loading: adminFeesLoading } = useChargesAndFees();
 
@@ -236,6 +241,18 @@ export const BookingForm = ({
   const handleDeliveryServiceChange = useCallback(async (checked) => {
     if (!checked) {
       setDeliveryService(false);
+      const selectedIsVariant = !plan?.delivery_variant_service_id && (
+        planId === 4 || allPlans.some(
+          (service) => Number(service.delivery_variant_service_id) === planId && Number(service.id) !== planId
+        )
+      );
+      if (selectedIsVariant && setSelectedPlan) {
+        const basePlan = allPlans.find((service) => Number(service.delivery_variant_service_id) === planId)
+          || allPlans.find((service) => Number(service.id) === 2);
+        if (basePlan && Number(basePlan.id) !== planId) {
+          setSelectedPlan(basePlan);
+        }
+      }
       return;
     }
 
@@ -261,7 +278,15 @@ export const BookingForm = ({
     } finally {
       setCheckingDeliveryAvailability(false);
     }
-  }, [plan?.delivery_variant_service_id, bookingData.dropOffDate, bookingData.pickupDate, setDeliveryService]);
+  }, [
+    plan?.delivery_variant_service_id,
+    planId,
+    allPlans,
+    bookingData.dropOffDate,
+    bookingData.pickupDate,
+    setDeliveryService,
+    setSelectedPlan,
+  ]);
 
   useEffect(() => {
     if (!isHourlySelfPickupPlan(currentPlan, isDelivery) || !bookingData.dropOffDate) {
@@ -1330,10 +1355,10 @@ export const BookingForm = ({
               opacity: 1,
               x: 0
             }} className="space-y-4">
-              {plan?.id === 2 && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
+              {canToggleTrailerDelivery && <div className="flex items-center space-x-3 mb-6 bg-white/10 p-4 rounded-lg border border-yellow-500/30">
                     <Checkbox
                       id="deliveryService"
-                      checked={deliveryService}
+                      checked={isDelivery}
                       disabled={checkingDeliveryAvailability}
                       onCheckedChange={handleDeliveryServiceChange}
                       className="border-yellow-400 data-[state=checked]:bg-yellow-400"

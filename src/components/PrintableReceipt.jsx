@@ -18,7 +18,9 @@ import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
 import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
-import { catalogBaseRental, phoneOrderLabel } from '@/utils/phoneOrderQuote';
+import { phoneOrderLabel, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
+import { evaluateCoupon } from '@/utils/couponRules';
+import { resolveBaseRentalAmount } from '@/utils/bookingTaxCalculator';
 import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equipmentReturnDisplay';
 import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 
@@ -216,20 +218,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
 
     // Prefer audit quote (plan.price) when present; otherwise recompute from daily rate × days
-    const quotedBasePrice = Number(currentPlan.price);
-    let baseServicePrice = Number.isFinite(quotedBasePrice) && quotedBasePrice > 0
-        ? quotedBasePrice
-        : (currentPlan.base_price || 0);
-    if (!(Number.isFinite(quotedBasePrice) && quotedBasePrice > 0)) {
-        const countedDays = currentPlan.id === 3
-            ? Math.max(1, duration <= 1 ? 1 : duration - 1)
-            : duration;
-        if (currentPlan.id === 4 && currentPlan.additional_day_rate == null) {
-            baseServicePrice = (currentPlan.base_price || 0) * duration;
-        } else {
-            baseServicePrice = catalogBaseRental({ ...currentPlan, id: currentPlan.id }, countedDays);
-        }
-    }
+    const countedDays = rentalDaysForPlan(currentPlan.id, dropOff, pickup);
+    const baseServicePrice = resolveBaseRentalAmount(currentPlan, {
+        rentalDays: countedDays,
+        dropOff,
+        pickup,
+    });
 
     const deliveryChargeFlat = isDelivery ? (addons.deliveryFee || 0) : 0;
     const tripMileageCost = isDelivery ? (addons.distanceInfo?.mileageFee || addons.mileageCharge || 0) : 0;
@@ -300,14 +294,14 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                     rentEquipmentCost + purchaseItemsCost + disposalCost;
 
     // Discount
-    let couponDiscountAmount = 0;
-    if (coupon && coupon.isValid) {
-        if (coupon.discountType === 'fixed') {
-            couponDiscountAmount = Number(coupon.discountValue || 0);
-        } else if (coupon.discountType === 'percentage') {
-            couponDiscountAmount = (subtotalBeforeDiscount * Number(coupon.discountValue || 0)) / 100;
-        }
-    }
+    const couponDiscountAmount = coupon?.isValid
+        ? evaluateCoupon({
+            coupon,
+            rentalDays: countedDays,
+            baseRental: baseServicePrice,
+            grossBeforeDiscount: subtotalBeforeDiscount,
+          }).discount
+        : 0;
     const loyaltyDiscountAmount = Number(addons?.loyaltyDiscountAmount || 0);
     const referralDiscountAmount = Number(addons?.referralDiscountAmount || 0);
     const pointsEarned = Number(addons?.loyaltyPointsEarned || 0);

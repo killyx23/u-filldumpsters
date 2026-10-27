@@ -1,4 +1,5 @@
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { equipmentNumericId } from '@/utils/rentalEquipmentPricing';
 
 /**
  * Full booking total with per-line taxability (exemptions via is_taxable flags).
@@ -52,9 +53,9 @@ export function calculateBookingTotal(
   let rentEquipmentCost = 0;
   let purchaseItemsCost = 0;
   (addonsData?.equipment || []).forEach((item) => {
-    const equipmentId = item.equipment_id || item.dbId || item.id;
-    const key = `equipment_${equipmentId}`;
-    const amt = lineByKey[key]?.amount ?? 0;
+    const equipmentId = equipmentNumericId(item);
+    if (!equipmentId) return;
+    const amt = lineByKey[`equipment_${equipmentId}`]?.amount ?? 0;
     if (equipmentId === 3) purchaseItemsCost += amt;
     else rentEquipmentCost += amt;
   });
@@ -64,19 +65,10 @@ export function calculateBookingTotal(
     (lineByKey.tvDisposal?.amount ?? 0) +
     (lineByKey.applianceDisposal?.amount ?? 0);
 
-  let couponDiscount = 0;
-  const grossBeforeDiscount = breakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
-  if (addonsData?.coupon?.isValid) {
-    if (addonsData.coupon.discountType === 'fixed') {
-      couponDiscount = Number(addonsData.coupon.discountValue || 0);
-    } else if (addonsData.coupon.discountType === 'percentage') {
-      couponDiscount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
-    }
-  }
-
-  const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
-  const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
-  const discount = couponDiscount + loyaltyDiscount + referralDiscount;
+  const couponDiscount = Number(breakdown.couponDiscount || 0);
+  const loyaltyDiscount = Number(breakdown.loyaltyDiscount || 0);
+  const referralDiscount = Number(breakdown.referralDiscount || 0);
+  const discount = Number(breakdown.discount ?? couponDiscount + loyaltyDiscount + referralDiscount);
 
   return {
     basePriceAmount: lineByKey.base_rental?.amount ?? Number(plan?.price || plan?.base_price || 0),
@@ -89,6 +81,8 @@ export function calculateBookingTotal(
     disposalCost,
     discount,
     couponDiscount,
+    couponRewards: breakdown.couponRewards || [],
+    couponAppliedRule: breakdown.couponAppliedRule || null,
     loyaltyDiscount,
     referralDiscount,
     subtotal: breakdown.subtotalBeforeTax,

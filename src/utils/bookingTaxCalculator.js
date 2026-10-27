@@ -1,5 +1,9 @@
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { equipmentLineAmount, equipmentNumericId } from '@/utils/rentalEquipmentPricing';
+import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
+import { evaluateCoupon, resolveRentalDays } from '@/utils/couponRules';
+
+const DISPOSAL_FALLBACK = { 4: 25, 5: 15, 6: 35 };
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 
@@ -39,7 +43,7 @@ export function buildBookingLineItems({
   equipmentTypes = {},
 }) {
   const lines = [];
-  const basePriceAmount = Number(plan?.price ?? plan?.base_price ?? 0);
+  const basePriceAmount = resolveBaseRentalAmount(plan, { rentalDays, dropOff, pickup });
   const deliveryFeeFlat = Number(addonsData?.deliveryFee ?? 0);
   const tripMileageCost = Number(
     addonsData?.mileageCharge ?? addonsData?.distanceInfo?.mileageFee ?? 0
@@ -123,7 +127,7 @@ export function buildBookingLineItems({
   const addDisposal = (key, label, defaultId) => {
     const qty = Number(addonsData?.[key] || 0);
     if (qty <= 0) return;
-    const unitPrice = Number(equipmentPrices[defaultId] || 0);
+    const unitPrice = Number(equipmentPrices[defaultId] || DISPOSAL_FALLBACK[defaultId] || 0);
     const amount = unitPrice * qty;
     if (amount <= 0) return;
     lines.push({
@@ -209,22 +213,57 @@ export function calculateTaxFromLineItems(lineItems, taxRate, discount = 0) {
 /**
  * Full booking tax breakdown from plan/addons inputs.
  */
+/**
+ * Day-adjusted base rental. A plan.price that already differs from the catalog
+ * daily rate is a quoted total (checkout or a phone order) and is kept as-is.
+ * Otherwise the catalog rate is priced for the rental length.
+ */
+export function resolveBaseRentalAmount(plan, { rentalDays = null, dropOff = null, pickup = null } = {}) {
+  const daily = Number(plan?.base_price) || 0;
+  const quoted = Number(plan?.price);
+  const hasQuote = Number.isFinite(quoted) && quoted > 0 && quoted !== daily;
+  if (hasQuote) return quoted;
+
+  const days = rentalDays != null
+    ? Math.max(1, Number(rentalDays) || 1)
+    : (dropOff ? rentalDaysForPlan(plan?.id, dropOff, pickup || dropOff) : null);
+  if (days != null && daily > 0) return catalogBaseRental(plan, days);
+  return quoted > 0 ? quoted : daily;
+}
+
 export function calculateBookingTaxBreakdown(options) {
   const { addonsData = {} } = options;
-  let discount = 0;
   const lineItems = buildBookingLineItems(options);
   const grossBeforeDiscount = lineItems.reduce((s, l) => s + l.amount, 0);
+  const baseRental = lineItems.find((line) => line.key === 'base_rental')?.amount
+    ?? resolveBaseRentalAmount(options.plan, options);
+  const rentalDays = options.rentalDays
+    ?? (options.dropOff
+      ? rentalDaysForPlan(options.plan?.id, options.dropOff, options.pickup || options.dropOff)
+      : resolveRentalDays(
+        addonsData?.dropOffDate || addonsData?.drop_off_date,
+        addonsData?.pickupDate || addonsData?.pickup_date,
+      ));
 
-  if (addonsData?.coupon?.isValid) {
-    if (addonsData.coupon.discountType === 'fixed') {
-      discount = Number(addonsData.coupon.discountValue || 0);
-    } else if (addonsData.coupon.discountType === 'percentage') {
-      discount = (grossBeforeDiscount * Number(addonsData.coupon.discountValue || 0)) / 100;
-    }
-  }
+  const couponEvaluation = evaluateCoupon({
+    coupon: addonsData?.coupon,
+    rentalDays,
+    baseRental,
+    grossBeforeDiscount,
+  });
+  const loyaltyDiscount = Number(addonsData?.loyaltyDiscountAmount || 0);
+  const referralDiscount = Number(addonsData?.referralDiscountAmount || 0);
+  const discount = couponEvaluation.discount + loyaltyDiscount + referralDiscount;
+  const priced = calculateTaxFromLineItems(lineItems, options.taxRate, discount);
 
-  discount += Number(addonsData?.loyaltyDiscountAmount || 0);
-  discount += Number(addonsData?.referralDiscountAmount || 0);
-
-  return calculateTaxFromLineItems(lineItems, options.taxRate, discount);
+  return {
+    ...priced,
+    discount,
+    couponDiscount: couponEvaluation.discount,
+    couponRewards: couponEvaluation.rewards,
+    couponAppliedRule: couponEvaluation.appliedRule,
+    loyaltyDiscount,
+    referralDiscount,
+    rentalDays,
+  };
 }

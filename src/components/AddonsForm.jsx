@@ -430,6 +430,13 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
         equipmentTypes,
       }
     );
+    if (updatedAddons.coupon?.isValid) {
+      updatedAddons.coupon = {
+        ...updatedAddons.coupon,
+        discountAmount: calcResult.couponDiscount,
+      };
+    }
+    updatedAddons.couponDiscountAmount = calcResult.couponDiscount;
     const finalTotal = calcResult.total;
 
     console.log('[AddonsForm] Final total calculated (tax-inclusive):', finalTotal);

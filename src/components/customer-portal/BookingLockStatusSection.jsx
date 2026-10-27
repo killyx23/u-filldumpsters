@@ -3,6 +3,7 @@ import { format, formatDistanceStrict, parseISO } from 'date-fns';
 import { Loader2, Lock, RefreshCw, Unlock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
+import { withoutAutoLocks } from '@/utils/lockAutoLock';
 
 function formatEventTime(value) {
   if (!value) return '—';
@@ -138,18 +139,20 @@ export const BookingLockStatusSection = ({ bookingId }) => {
     };
   }, [bookingId, fetchEvents]);
 
+  const accessEvents = useMemo(
+    () => withoutAutoLocks(
+      events.filter((e) => e.event_type === 'unlock' || e.event_type === 'lock'),
+    ),
+    [events],
+  );
+
   // Keep "currently open" duration fresh while unlocked.
   useEffect(() => {
-    const last = events.length ? events[events.length - 1] : null;
+    const last = accessEvents.length ? accessEvents[accessEvents.length - 1] : null;
     if (last?.event_type !== 'unlock') return undefined;
     const id = setInterval(() => setNowTick(Date.now()), 30_000);
     return () => clearInterval(id);
-  }, [events]);
-
-  const accessEvents = useMemo(
-    () => events.filter((e) => e.event_type === 'unlock' || e.event_type === 'lock'),
-    [events],
-  );
+  }, [accessEvents]);
 
   const unlockCount = useMemo(
     () => accessEvents.filter((e) => e.event_type === 'unlock').length,

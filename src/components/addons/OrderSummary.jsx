@@ -12,6 +12,7 @@ import { additionalDayIncludesPrint, equipmentNumericId, quoteEquipmentLineForIt
 import { PriceBreakdownCategory } from '@/components/pricing/PriceBreakdownCategory';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
+import { resolveRentalDays } from '@/utils/couponRules';
 import { useBookingTaxOptions } from '@/hooks/useBookingTaxOptions';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
@@ -132,7 +133,7 @@ export const OrderSummary = ({
 
         try {
             const { data, error } = await supabase.functions.invoke('validate-coupon', {
-                body: { couponCode: couponCode.trim(), serviceId: plan.id }
+                body: { couponCode: couponCode.trim(), serviceId: plan.id, rentalDays: resolveRentalDays(rentalStart, rentalEnd) }
             });
 
             if (error) throw error;
@@ -143,13 +144,18 @@ export const OrderSummary = ({
                     id: data.id,
                     code: data.code,
                     discountType: data.discountType,
-                    discountValue: parseFloat(data.discountValue)
+                    discountValue: parseFloat(data.discountValue),
+                    coupon_kind: data.couponKind || (Array.isArray(data.rules) && data.rules.length ? 'rules' : 'flat'),
+                    rules: Array.isArray(data.rules) ? data.rules : [],
                 };
                 setAppliedCoupon(couponData);
                 if (onCouponApply) onCouponApply(couponData);
+                const advertisedHeadline = (couponData.rules || []).find(r => r.advertise && r.headline)?.headline;
                 toast({
                     title: "Coupon Applied!",
-                    description: `You saved ${data.discountType === 'percentage' ? data.discountValue + '%' : '$' + data.discountValue}!`,
+                    description: couponData.coupon_kind === 'rules'
+                        ? (advertisedHeadline || "Deal applied based on your rental length.")
+                        : `You saved ${data.discountType === 'percentage' ? data.discountValue + '%' : '$' + data.discountValue}!`,
                 });
             } else {
                 toast({
@@ -333,18 +339,7 @@ export const OrderSummary = ({
 
         // Disposal costs (IDs 4-6)
         if (plan?.id !== 2) {
-            if (addons?.mattressDisposal && addons.mattressDisposal > 0) {
-                const price = Number(equipmentPrices[4] || 25);
-                disposalCost += price * addons.mattressDisposal;
-            }
-            if (addons?.tvDisposal && addons.tvDisposal > 0) {
-                const price = Number(equipmentPrices[5] || 15);
-                disposalCost += price * addons.tvDisposal;
-            }
-            if (addons?.applianceDisposal && addons.applianceDisposal > 0) {
-                const price = Number(equipmentPrices[6] || 35);
-                disposalCost += price * addons.applianceDisposal;
-            }
+            disposalCost = 0;
         }
 
         const addonsWithDelivery = {
@@ -370,22 +365,16 @@ export const OrderSummary = ({
             equipmentTypes,
         });
 
-        let couponDiscount = 0;
-        const grossBeforeDiscount = taxBreakdown.lineItems?.reduce((s, l) => s + l.amount, 0) ?? 0;
-        if (appliedCoupon?.isValid) {
-            if (appliedCoupon.discountType === 'fixed') {
-                couponDiscount = Number(appliedCoupon.discountValue);
-            } else if (appliedCoupon.discountType === 'percentage') {
-                couponDiscount = (grossBeforeDiscount * Number(appliedCoupon.discountValue)) / 100;
-            }
-        }
-
-        const loyaltyDiscount = Number(addons?.loyaltyDiscountAmount || 0);
-        const referralDiscount = Number(addons?.referralDiscountAmount || 0);
-        const discount = couponDiscount + loyaltyDiscount + referralDiscount;
+        const pricedBaseRental = (taxBreakdown.lineItems || []).find(l => l.key === 'base_rental')?.amount ?? baseRental;
+        const couponDiscount = Number(taxBreakdown.couponDiscount || 0);
+        const loyaltyDiscount = Number(taxBreakdown.loyaltyDiscount || addons?.loyaltyDiscountAmount || 0);
+        const referralDiscount = Number(taxBreakdown.referralDiscount || addons?.referralDiscountAmount || 0);
+        const discount = Number(taxBreakdown.discount ?? couponDiscount + loyaltyDiscount + referralDiscount);
+        const lineAmount = (key) => (taxBreakdown.lineItems || []).find(l => l.key === key)?.amount ?? 0;
 
         return {
-            baseRental,
+            baseRental: pricedBaseRental,
+            lineAmount,
             deliveryFee: deliveryFeeAmount,
             mileageCharge,
             insuranceCost,
@@ -479,7 +468,7 @@ export const OrderSummary = ({
 
             rentEquipmentItems.push({
                 label: `${itemName} (x${quote.quantity})`,
-                amount: quote.lineTotal,
+                amount: calculatedTotals.lineAmount(`equipment_${equipmentId}`),
                 sublabel: note || undefined,
             });
         });
@@ -487,17 +476,13 @@ export const OrderSummary = ({
 
     const purchaseItems = [];
     if (addons?.equipment && Array.isArray(addons.equipment)) {
-        const glovesItem = addons.equipment.find(item => {
-            const id = item.equipment_id || item.dbId || item.id;
-            return id === 3;
-        });
-        
+        const glovesItem = addons.equipment.find(item => equipmentNumericId(item) === 3);
+
         if (glovesItem) {
-            const price = Number(equipmentPrices[3] || 0);
             const quantity = Number(glovesItem.quantity || 1);
-            purchaseItems.push({ 
-                label: `Working Gloves (Pair) (x${quantity})`, 
-                amount: price * quantity 
+            purchaseItems.push({
+                label: `Working Gloves (Pair) (x${quantity})`,
+                amount: calculatedTotals.lineAmount('equipment_3'),
             });
         }
     }
@@ -505,24 +490,21 @@ export const OrderSummary = ({
     const disposalItems = [];
     if (plan?.id !== 2) {
         if (addons?.mattressDisposal && addons.mattressDisposal > 0) {
-            const price = Number(equipmentPrices[4] || 25);
-            disposalItems.push({ 
-                label: `Mattress Disposal (x${addons.mattressDisposal})`, 
-                amount: price * addons.mattressDisposal 
+            disposalItems.push({
+                label: `Mattress Disposal (x${addons.mattressDisposal})`,
+                amount: calculatedTotals.lineAmount('mattressDisposal'),
             });
         }
         if (addons?.tvDisposal && addons.tvDisposal > 0) {
-            const price = Number(equipmentPrices[5] || 15);
-            disposalItems.push({ 
-                label: `TV Disposal (x${addons.tvDisposal})`, 
-                amount: price * addons.tvDisposal 
+            disposalItems.push({
+                label: `TV Disposal (x${addons.tvDisposal})`,
+                amount: calculatedTotals.lineAmount('tvDisposal'),
             });
         }
         if (addons?.applianceDisposal && addons.applianceDisposal > 0) {
-            const price = Number(equipmentPrices[6] || 35);
-            disposalItems.push({ 
-                label: `Appliance Disposal (x${addons.applianceDisposal})`, 
-                amount: price * addons.applianceDisposal 
+            disposalItems.push({
+                label: `Appliance Disposal (x${addons.applianceDisposal})`,
+                amount: calculatedTotals.lineAmount('applianceDisposal'),
             });
         }
     }
