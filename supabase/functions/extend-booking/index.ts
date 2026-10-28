@@ -401,8 +401,11 @@ Deno.serve(async (req) => {
     }
 
     const returnPin = await issueExtensionReturnPin(supabaseAdmin, updated, newPickupDate);
+    const issuedAlgoPin = Boolean(
+      returnPin.ok && !returnPin.skipped && !returnPin.replacedCustom && returnPin.pin,
+    );
     let bookingForResponse = updated;
-    if (returnPin.ok && !returnPin.skipped && returnPin.pin) {
+    if (issuedAlgoPin) {
       const pinFields = {
         original_pin: returnPin.originalPin,
         original_pin_end: returnPin.originalEnd,
@@ -424,10 +427,13 @@ Deno.serve(async (req) => {
         .single();
       if (pinned) bookingForResponse = pinned;
     } else if (!returnPin.ok) {
-      const failMsg =
-        `URGENT: Order #${bookingId} was extended to ${newPickupDate} and charged, ` +
-        `but the return AlgoPIN was not created. ${returnPin.error || ""} ` +
-        `The customer can use the backup return code in the portal.`;
+      const failMsg = returnPin.replacedCustom
+        ? `URGENT: Order #${bookingId} was extended to ${newPickupDate} and charged, ` +
+          `but the custom lock PIN was not replaced for the new return. ${returnPin.error || ""} ` +
+          `The replacement code is saved for admin. The lock still needs that code.`
+        : `URGENT: Order #${bookingId} was extended to ${newPickupDate} and charged, ` +
+          `but the return AlgoPIN was not created. ${returnPin.error || ""} ` +
+          `The customer can use the backup return code in the portal.`;
       if (booking.customer_id) {
         await supabaseAdmin.from("chat_messages").insert({
           conversation_id: `cust_${booking.customer_id}`,
@@ -448,27 +454,36 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: emailData, error: emailError } = await supabaseAdmin.functions.invoke("send-booking-confirmation", {
-      body: returnPin.ok && !returnPin.skipped && returnPin.pin
+    const alreadySentPin = Boolean(updated.pin_notification_sent_at || booking.pin_notification_sent_at);
+    const emailBody = issuedAlgoPin
+      ? {
+        bookingId,
+        email_type: "extension_pin",
+        email: booking.email || booking.customers?.email,
+        extensionPin: returnPin.pin,
+        originalPin: returnPin.originalPin,
+        originalEnd: returnPin.originalEnd,
+        extensionStart: returnPin.start,
+        extensionEnd: returnPin.end,
+        activationRequired: returnPin.activationRequired,
+        amount: total,
+        oldReturn: currentPickup,
+        newReturn: newPickupDate,
+      }
+      : returnPin.replacedCustom && returnPin.ok && alreadySentPin && returnPin.pin
         ? {
           bookingId,
-          email_type: "extension_pin",
+          email_type: "pin_update",
           email: booking.email || booking.customers?.email,
-          extensionPin: returnPin.pin,
-          originalPin: returnPin.originalPin,
-          originalEnd: returnPin.originalEnd,
-          extensionStart: returnPin.start,
-          extensionEnd: returnPin.end,
-          activationRequired: returnPin.activationRequired,
-          amount: total,
-          oldReturn: currentPickup,
-          newReturn: newPickupDate,
+          pin: returnPin.pin,
         }
         : {
           bookingId,
           force: true,
           email: booking.email || booking.customers?.email,
-        },
+        };
+    const { data: emailData, error: emailError } = await supabaseAdmin.functions.invoke("send-booking-confirmation", {
+      body: emailBody,
     });
     if (emailError || emailData?.error) {
       console.error("[extend-booking] confirmation email failed", emailError || emailData?.error);
@@ -479,7 +494,12 @@ Deno.serve(async (req) => {
       booking: bookingForResponse,
       extension: entry,
       returnPin: returnPin.skipped ? null : returnPin,
-      pinWarning: returnPin.ok ? null : (returnPin.error || "Return code was not created. Use the backup code in the portal."),
+      returnCodeEmailed: issuedAlgoPin,
+      pinWarning: returnPin.ok
+        ? null
+        : returnPin.replacedCustom
+          ? (returnPin.error || "The lock code could not be updated for the new return. Staff have been notified.")
+          : (returnPin.error || "Return code was not created. Use the backup code in the portal."),
       emailSent: !emailError && !emailData?.error,
     }), { status: 200, headers });
   } catch (error) {

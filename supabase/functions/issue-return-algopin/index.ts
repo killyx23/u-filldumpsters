@@ -68,21 +68,34 @@ Deno.serve(async (req) => {
       return fail(409, pin.error || "Could not create a backup return code.");
     }
 
-    await supabaseAdmin.functions.invoke("send-booking-confirmation", {
-      body: {
-        bookingId,
-        email_type: "extension_pin",
-        backup: true,
-        email: booking.email || booking.customers?.email,
-        extensionPin: pin.pin,
-        originalPin: pin.originalPin,
-        originalEnd: pin.originalEnd,
-        extensionStart: pin.start,
-        extensionEnd: pin.end,
-        activationRequired: pin.activationRequired,
-        newReturn: pickupDate,
-      },
-    });
+    if (pin.replacedCustom) {
+      if (booking.pin_notification_sent_at) {
+        await supabaseAdmin.functions.invoke("send-booking-confirmation", {
+          body: {
+            bookingId,
+            email_type: "pin_update",
+            email: booking.email || booking.customers?.email,
+            pin: pin.pin,
+          },
+        });
+      }
+    } else {
+      await supabaseAdmin.functions.invoke("send-booking-confirmation", {
+        body: {
+          bookingId,
+          email_type: "extension_pin",
+          backup: true,
+          email: booking.email || booking.customers?.email,
+          extensionPin: pin.pin,
+          originalPin: pin.originalPin,
+          originalEnd: pin.originalEnd,
+          extensionStart: pin.start,
+          extensionEnd: pin.end,
+          activationRequired: pin.activationRequired,
+          newReturn: pickupDate,
+        },
+      });
+    }
 
     return new Response(JSON.stringify({ success: true, pin: pin.pin, start: pin.start, end: pin.end, activationRequired: pin.activationRequired }), {
       status: 200,
