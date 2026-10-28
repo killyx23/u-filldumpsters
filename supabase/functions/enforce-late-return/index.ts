@@ -32,6 +32,12 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const RETURNED_NOTICE =
+  "If you have already returned the trailer, please disregard this notice. Our system confirms returns when it checks GPS each morning, and your order will be updated at that time. We apologize for the inconvenience.";
+const RETURNED_NOTICE_SMS =
+  "If you already returned the trailer, please disregard this message. GPS is checked each morning and the order will update then. We apologize for the inconvenience.";
+const RETURNED_NOTICE_HTML =
+  `<p style="margin-top:28px;font-size:12px;line-height:1.45;color:#6b7280;">* ${RETURNED_NOTICE}</p>`;
 const STOP_STATUSES = new Set([
   "pending_checklist",
   "Returned",
@@ -283,15 +289,16 @@ Deno.serve(async (req) => {
            <p>A late fee of <strong>${money(lateFee)}</strong> will be charged to the card on file. If you return the trailer during this return window, or extend the rental in the customer portal while the next day is still open, this late fee is the only additional charge.</p>
            ${pinBlock}
            <p>If the trailer and every rental item are not back, or the rental is not extended, by ${until}, failure-to-return charges apply.</p>
-           <p style="text-align:center;margin:24px 0;"><a href="${portalUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">Extend in the customer portal</a></p>`,
+           <p style="text-align:center;margin:24px 0;"><a href="${portalUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">Extend in the customer portal</a></p>
+           ${RETURNED_NOTICE_HTML}`,
         );
         const sms = issued.pin
-          ? `U-Fill Dumpsters: Order #${orderId} missed its return time. Late fee ${money(lateFee)}. Return code ${issued.pin} works only until ${until}. Return or extend by then, or failure-to-return charges apply. ${portalUrl}`
-          : `U-Fill Dumpsters: Order #${orderId} missed its return time. Late fee ${money(lateFee)}. Have it back by ${until} or extend in the portal. ${portalUrl}`;
+          ? `U-Fill Dumpsters: Order #${orderId} missed its return time. Late fee ${money(lateFee)}. Return code ${issued.pin} works only until ${until}. Return or extend by then, or failure-to-return charges apply. ${portalUrl} ${RETURNED_NOTICE_SMS}`
+          : `U-Fill Dumpsters: Order #${orderId} missed its return time. Late fee ${money(lateFee)}. Have it back by ${until} or extend in the portal. ${portalUrl} ${RETURNED_NOTICE_SMS}`;
         await notify(booking, `Return time has passed — Order #${orderId} — U-Fill Dumpsters`, html, sms);
         await portalMessage(
           booking,
-          `Order #${orderId}: the scheduled return of ${returnLabel} has passed and the original lock code has expired. A late fee of ${money(lateFee)} will be charged. Your return code${issued.pin ? ` is ${issued.pin}` : ""} works only until ${until}. Return the trailer by then, or extend in the customer portal if the next day is open, and the late fee is the only additional charge. If it is not back or extended by ${until}, failure-to-return charges apply.`,
+          `Order #${orderId}: the scheduled return of ${returnLabel} has passed and the original lock code has expired. A late fee of ${money(lateFee)} will be charged. Your return code${issued.pin ? ` is ${issued.pin}` : ""} works only until ${until}. Return the trailer by then, or extend in the customer portal if the next day is open, and the late fee is the only additional charge. If it is not back or extended by ${until}, failure-to-return charges apply. ${RETURNED_NOTICE}`,
           "late_return",
         );
         results.push({ orderId, action: issued.pin ? "late_return_with_code" : "late_return_without_code" });
@@ -369,17 +376,18 @@ Deno.serve(async (req) => {
          <ul>${lineHtml}</ul>
          ${pinBlock}
          <p>The trailer and every rental item must be locked on our premises no later than <strong>${deadlineLabel}</strong>. If they are not, the unreturned equipment will be treated as stolen rental property.</p>
-         <p>Holding this equipment also kept the next customer from the booking they reserved. That breaks the rental agreement, and you are responsible for that lost business. The account may be closed, and you may be banned from using U-Fill Dumpsters again.</p>`,
+         <p>Holding this equipment also kept the next customer from the booking they reserved. That breaks the rental agreement, and you are responsible for that lost business. The account may be closed, and you may be banned from using U-Fill Dumpsters again.</p>
+         ${RETURNED_NOTICE_HTML}`,
       );
       await notify(
         booking,
         `Failure to return equipment — Order #${orderId} — U-Fill Dumpsters`,
         html,
-        `U-Fill Dumpsters: Order #${orderId} was not returned in time. Failure-to-return charges of ${money(total)} apply now. ${issued.pin ? `Return code ${issued.pin}. ` : ""}Have it locked on our premises by ${deadlineLabel} or it will be treated as stolen. You may be banned from future rentals.`,
+        `U-Fill Dumpsters: Order #${orderId} was not returned in time. Failure-to-return charges of ${money(total)} apply now. ${issued.pin ? `Return code ${issued.pin}. ` : ""}Have it locked on our premises by ${deadlineLabel} or it will be treated as stolen. You may be banned from future rentals. ${RETURNED_NOTICE_SMS}`,
       );
       await portalMessage(
         booking,
-        `Order #${orderId}: the trailer was not back within two hours. Failure-to-return charges of ${money(total)} have accrued and will be charged whether or not the equipment comes back. ${issued.pin ? `Return code ${issued.pin} works until ${until}. ` : ""}Lock it on our premises no later than ${deadlineLabel}. After that it will be treated as stolen rental property. You may be banned from using U-Fill Dumpsters again.`,
+        `Order #${orderId}: the trailer was not back within two hours. Failure-to-return charges of ${money(total)} have accrued and will be charged whether or not the equipment comes back. ${issued.pin ? `Return code ${issued.pin} works until ${until}. ` : ""}Lock it on our premises no later than ${deadlineLabel}. After that it will be treated as stolen rental property. You may be banned from using U-Fill Dumpsters again. ${RETURNED_NOTICE}`,
         "failure_to_return",
       );
       results.push({ orderId, action: "failure_to_return", total });

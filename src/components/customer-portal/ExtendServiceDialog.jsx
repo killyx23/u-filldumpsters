@@ -189,7 +189,9 @@ export const ExtendServiceDialog = ({
         title: 'Rental extended',
         description: data?.pinWarning
           ? `Charged ${money(quote.total)}. ${data.pinWarning}`
-          : `Charged ${money(quote.total)}. Your return code was emailed.`,
+          : data?.returnCodeEmailed
+            ? `Charged ${money(quote.total)}. Your return code was emailed.`
+            : `Charged ${money(quote.total)}. Your return date is updated.`,
       });
     } catch (err) {
       toast({

@@ -19,6 +19,7 @@ import { formatTimeWindow, shouldShowTimeWindow } from '@/utils/timeWindowFormat
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getServiceSpecificDateLabel, isSelfServiceTrailer } from '@/utils/serviceSpecificLabels';
+import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { getFormattedServiceTimes } from '@/utils/serviceAvailabilityHelper';
 import { useTaxRate } from '@/utils/getTaxRate';
 import { calculateBookingTaxBreakdown } from '@/utils/bookingTaxCalculator';
@@ -815,6 +816,7 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
 
     const dropoffLabel = getServiceSpecificDateLabel(plan, isDelivery, 'dropoff');
     const pickupLabel = getServiceSpecificDateLabel(plan, isDelivery, 'pickup');
+    const isCustomerPickup = isCustomerPickupService(plan, addonsData);
 
     const getDisplayTime = (timeSlot, isDropOff) => {
         if (plan?.id === 2 && !isDelivery) {
@@ -973,12 +975,25 @@ export const VerifyEmailBeforeBooking = ({ onBack }) => {
                         <div className="flex items-start text-gray-200">
                             <MapPin className="h-5 w-5 mr-3 text-red-400 mt-0.5 flex-shrink-0" />
                             <div>
-                                <p>{bookingData?.contactAddress?.street || addonsData?.deliveryAddress?.street}</p>
-                                <p>
-                                    {bookingData?.contactAddress?.city || addonsData?.deliveryAddress?.city},{' '}
-                                    {bookingData?.contactAddress?.state || addonsData?.deliveryAddress?.state}{' '}
-                                    {bookingData?.contactAddress?.zip || addonsData?.deliveryAddress?.zip}
-                                </p>
+                                {isCustomerPickup ? (
+                                    <>
+                                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                                            Pickup location
+                                        </p>
+                                        <p className="text-white">
+                                            Pickup is on the south side of Saratoga Springs.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p>{bookingData?.contactAddress?.street || addonsData?.deliveryAddress?.street}</p>
+                                        <p>
+                                            {bookingData?.contactAddress?.city || addonsData?.deliveryAddress?.city},{' '}
+                                            {bookingData?.contactAddress?.state || addonsData?.deliveryAddress?.state}{' '}
+                                            {bookingData?.contactAddress?.zip || addonsData?.deliveryAddress?.zip}
+                                        </p>
+                                    </>
+                                )}
                             </div>
                         </div>
 
