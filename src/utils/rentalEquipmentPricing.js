@@ -120,7 +120,8 @@ export function additionalDayIncludesPrint(quote) {
   const parts = extraDayParts(quote);
   if (!parts) return '';
   const dayLabel = parts.days === 1 ? 'additional day' : 'additional days';
-  return `Includes $${parts.rate} × ${parts.days} ${dayLabel}${quantitySuffix(quote)}`;
+  const base = Number(quote.basePrice || 0).toFixed(2);
+  return `Includes $${base} + $${parts.rate} × ${parts.days} ${dayLabel}${quantitySuffix(quote)}`;
 }
 
 export function hasEquipmentPriceSnapshot(item) {

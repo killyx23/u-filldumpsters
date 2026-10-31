@@ -1532,12 +1532,15 @@ export const PricingManager = () => {
             </div>
 
             <Dialog open={isCouponFormOpen} onOpenChange={setIsCouponFormOpen}>
-                <CouponForm 
-                    services={services} 
-                    onSave={handleSaveCoupon} 
-                    onCancel={() => setIsCouponFormOpen(false)}
-                    coupon={editingCoupon}
-                />
+                {isCouponFormOpen && (
+                    <CouponForm
+                        key={editingCoupon?.id ?? 'new'}
+                        services={services}
+                        onSave={handleSaveCoupon}
+                        onCancel={() => setIsCouponFormOpen(false)}
+                        coupon={editingCoupon}
+                    />
+                )}
             </Dialog>
         </div>
     );

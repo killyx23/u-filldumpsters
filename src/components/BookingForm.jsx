@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, MapPin, Calendar as CalendarIcon, Loader2, Clock, AlertCircle, Truck, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -45,6 +45,7 @@ import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
 import { activePromoLabel } from '@/utils/servicePlan';
 import { PromoTotalLabel } from '@/components/PromoTotalLabel';
+import { advertisedDealsForService } from '@/utils/advertisedDeals';
 
 export const BookingForm = ({
   plan,
@@ -75,6 +76,14 @@ export const BookingForm = ({
   const [showDeliveryUnavailableDialog, setShowDeliveryUnavailableDialog] = useState(false);
   const [addressReviewOpen, setAddressReviewOpen] = useState(false);
   const [checkingDeliveryAvailability, setCheckingDeliveryAvailability] = useState(false);
+  const [advertisedDeals, setAdvertisedDeals] = useState([]);
+  const [dealPromptOpen, setDealPromptOpen] = useState(false);
+  const seenDealServices = useRef(new Set());
+  const dealPromptRef = useRef(null);
+  const pendingDateOpen = useRef(null);
+  const advertisedDealsRef = useRef({ status: 'idle', deals: [] });
+  const planIdRef = useRef(plan?.id);
+  planIdRef.current = plan?.id;
   const navigate = useNavigate();
   
   // Disposal fees state
@@ -99,6 +108,72 @@ export const BookingForm = ({
   console.log('Delivery Service:', deliveryService);
   console.log('Is Delivery:', isDelivery);
   console.groupEnd();
+
+  const offerAdvertisedDeal = useCallback((deals, resume) => {
+    const serviceId = Number(planIdRef.current);
+    if (!deals.length || !serviceId || seenDealServices.current.has(serviceId)) return false;
+    seenDealServices.current.add(serviceId);
+    dealPromptRef.current = { resume };
+    setDealPromptOpen(true);
+    return true;
+  }, []);
+
+  const handleBeforeDateOpen = useCallback((resume) => {
+    const snapshot = advertisedDealsRef.current;
+    if (snapshot.status !== 'ready') {
+      pendingDateOpen.current = resume;
+      return true;
+    }
+    return offerAdvertisedDeal(snapshot.deals, resume);
+  }, [offerAdvertisedDeal]);
+
+  const closeDealPrompt = useCallback(() => {
+    const resume = dealPromptRef.current?.resume;
+    dealPromptRef.current = null;
+    setDealPromptOpen(false);
+    if (resume) window.setTimeout(resume, 0);
+  }, []);
+
+  useEffect(() => {
+    const releaseWaitingDate = (deals) => {
+      const waiting = pendingDateOpen.current;
+      if (!waiting) return;
+      pendingDateOpen.current = null;
+      if (!offerAdvertisedDeal(deals, waiting)) waiting();
+    };
+
+    const serviceId = plan?.id;
+    if (!serviceId) {
+      advertisedDealsRef.current = { status: 'ready', deals: [] };
+      setAdvertisedDeals([]);
+      releaseWaitingDate([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    advertisedDealsRef.current = { status: 'loading', deals: [] };
+    supabase
+      .from('coupons')
+      .select('code, rules, service_ids, expires_at, usage_limit, usage_count, is_active')
+      .eq('is_active', true)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        const deals = error ? [] : advertisedDealsForService(data, serviceId);
+        advertisedDealsRef.current = { status: 'ready', deals };
+        setAdvertisedDeals(deals);
+        releaseWaitingDate(deals);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        advertisedDealsRef.current = { status: 'ready', deals: [] };
+        setAdvertisedDeals([]);
+        releaseWaitingDate([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [plan?.id, offerAdvertisedDeal]);
 
   const currentPlan = useMemo(() => {
     if (loadingPlans) return null;
@@ -1441,7 +1516,7 @@ export const BookingForm = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 border-t border-white/10 pt-4">
-                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={dropOffDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                  <DatePickerField label={labels.date1} date={bookingData.dropOffDate} setDate={d => handleDateSelect('dropOffDate', d)} disabledDates={dropOffDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} onBeforeOpen={handleBeforeDateOpen} />
                   {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                       <ReadOnlyTimeField label={labels.time1} value={bookingData.dropOffTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.dropOffDate)} />
                   ) : (
@@ -1452,7 +1527,7 @@ export const BookingForm = ({
                   )}
                   
                   {currentPlan?.id !== 3 && <>
-                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={pickupDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} />
+                          <DatePickerField label={labels.date2} date={bookingData.pickupDate} setDate={d => handleDateSelect('pickupDate', d)} disabledDates={pickupDisabledDates} onMonthChange={setCurrentMonth} showNextMonthHint={showNextMonthHint} onBeforeOpen={handleBeforeDateOpen} />
                           {isHourlySelfPickupPlan(currentPlan, isDelivery) ? (
                               <ReadOnlyTimeField label={labels.time2} value={bookingData.pickupTimeSlot} loading={fetchingExactTimes} hasDate={Boolean(bookingData.pickupDate)} />
                           ) : (
@@ -1485,6 +1560,34 @@ export const BookingForm = ({
     />
 
     <UnavailableServiceModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} serviceName={planName} />
+
+    <Dialog open={dealPromptOpen} onOpenChange={(open) => { if (!open) closeDealPrompt(); }}>
+      <DialogContent className="bg-gray-900 border-yellow-500 text-white max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-2xl text-yellow-400">A better deal is available</DialogTitle>
+          <DialogDescription className="text-blue-200">
+            Use the coupon code when you continue. The discount applies to the rental dates that match.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="my-2 space-y-4">
+          {advertisedDeals.map((deal) => (
+            <div key={`${deal.code}-${deal.headline}-${deal.offer}`} className="rounded-lg border border-white/15 bg-black/20 p-3 space-y-2">
+              {deal.headline && <p className="font-semibold text-white">{deal.headline}</p>}
+              {deal.description && <p className="text-sm text-blue-100">{deal.description}</p>}
+              <p className="text-sm text-blue-100">{deal.offer}.</p>
+              <p className="text-sm text-white">
+                Use coupon code <span className="font-semibold text-yellow-300">{deal.code}</span> to receive this discount.
+              </p>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button onClick={closeDealPrompt} className="bg-yellow-500 hover:bg-yellow-600 text-black">
+            Choose dates
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={showDeliveryUnavailableDialog} onOpenChange={setShowDeliveryUnavailableDialog}>
       <DialogContent className="bg-gray-900 border-yellow-500 text-white max-w-md">
@@ -1552,7 +1655,8 @@ const DatePickerField = ({
   setDate,
   disabledDates,
   onMonthChange,
-  showNextMonthHint = false
+  showNextMonthHint = false,
+  onBeforeOpen,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -1565,10 +1669,15 @@ const DatePickerField = ({
     setOpen(false);
   };
 
+  const handleOpenChange = (nextOpen) => {
+    if (nextOpen && onBeforeOpen?.(() => setOpen(true))) return;
+    setOpen(nextOpen);
+  };
+
   return (
     <div className="md:col-span-1">
       <label className="text-sm font-medium text-white mb-2 block">{label}</label>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button variant="outline" className="w-full justify-start text-left font-normal bg-white/10 border-white/30 hover:bg-white/20 text-white">
             <CalendarIcon className="mr-2 h-4 w-4" />
