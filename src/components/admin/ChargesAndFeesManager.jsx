@@ -12,6 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { DUMP_RATE_TONS_KEY, INCLUDED_DELIVERY_MILES_KEY } from '@/utils/chargesAndFeesConfig';
+
+function feeValueUnit(row) {
+  if (row.fee_key === DUMP_RATE_TONS_KEY) return { symbol: 'tons', title: 'Tons', aria: 'tons' };
+  if (row.fee_key === INCLUDED_DELIVERY_MILES_KEY) return { symbol: 'miles', title: 'Miles', aria: 'miles' };
+  if (row.is_percentage) return { symbol: '%', title: 'Percentage', aria: 'percentage' };
+  return { symbol: '$', title: 'Dollar amount', aria: 'dollar amount' };
+}
 
 const REQUIRED_FEES = [
   {
@@ -247,8 +255,8 @@ export const ChargesAndFeesManager = () => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-white">Charges and Fees</h2>
-          <p className="text-sm text-blue-200">
-            Each fee has a name, a description, and a value. Percentage fees use %. Dollar fees use $.
+            <p className="text-sm text-blue-200">
+            Each fee has a name, a description, and a value. Percentage fees use %. Dollar fees use $. Landfill Rate Tonnage uses tons. Included Delivery Miles uses miles.
           </p>
         </div>
         <Button
@@ -309,14 +317,17 @@ export const ChargesAndFeesManager = () => {
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-300 min-w-4" title={row.is_percentage ? 'Percentage' : 'Dollar amount'}>
-                    {row.is_percentage ? '%' : '$'}
+                  <span
+                    className="text-sm text-gray-300 min-w-4"
+                    title={feeValueUnit(row).title}
+                  >
+                    {feeValueUnit(row).symbol}
                   </span>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
-                    aria-label={row.is_percentage ? `${row.fee_name} percentage` : `${row.fee_name} dollar amount`}
+                    aria-label={`${row.fee_name} ${feeValueUnit(row).aria}`}
                     value={row.fee_value}
                     onChange={(e) => updateCell(row.id, 'fee_value', e.target.value)}
                     className="bg-white/10 text-white border-white/20"

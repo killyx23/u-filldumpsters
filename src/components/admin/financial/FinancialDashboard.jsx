@@ -5,17 +5,25 @@ import { useRevenueCalculations } from '@/hooks/useRevenueCalculations';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { TrendingUp, TrendingDown, DollarSign, Truck, Percent, Loader2 } from 'lucide-react';
 import { useTaxCalculations } from '@/hooks/useTaxCalculations';
+import { useTruckOperatingCosts } from '@/hooks/useTruckOperatingCosts';
+import { useCreditCardFeeOverride } from '@/hooks/useCreditCardFeeOverride';
+import { effectiveCreditCardFees, sumCreditCardFees } from '@/utils/creditCardFees';
+import { CreditCardFeeField } from './CreditCardFeeField';
 import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export const FinancialDashboard = () => {
   const { data, loading } = useFinancialData({ autoRefresh: true });
+  const { totals: truckCosts, loading: costsLoading, error: costsError } = useTruckOperatingCosts();
   const { totalRevenue, grandTotal, avgRevenuePerBooking, revenueByMonth } = useRevenueCalculations();
   const { totalTaxCollected, netRevenueExTax, taxedBookingCount } = useTaxCalculations();
+  const cardFeeSummary = useMemo(() => sumCreditCardFees(data.bookings), [data.bookings]);
+  const { override: cardFeeOverride, loading: cardFeeLoading } = useCreditCardFeeOverride();
+  const creditCardFees = effectiveCreditCardFees(cardFeeSummary.total, cardFeeOverride);
 
   const metrics = useMemo(() => {
-    const totalExpenses = data.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const netProfit = grandTotal - totalExpenses;
+    const totalExpenses = truckCosts.total;
+    const netProfit = grandTotal - totalTaxCollected - totalExpenses - creditCardFees;
     const activeEquipment = data.equipment.filter(e => e.status === 'active').length;
 
     return {
@@ -30,20 +38,13 @@ export const FinancialDashboard = () => {
       avgRevenuePerBooking,
       taxedBookingCount,
     };
-  }, [data, grandTotal, avgRevenuePerBooking, totalTaxCollected, netRevenueExTax, taxedBookingCount]);
+  }, [data, grandTotal, avgRevenuePerBooking, totalTaxCollected, netRevenueExTax, taxedBookingCount, truckCosts.total, creditCardFees]);
 
-  const expenseBreakdown = useMemo(() => {
-    const breakdown = data.expenses.reduce((acc, exp) => {
-      const category = exp.financial_categories?.name || 'Uncategorized';
-      acc[category] = (acc[category] || 0) + (exp.amount || 0);
-      return acc;
-    }, {});
-
-    return Object.entries(breakdown).map(([name, value]) => ({
-      name,
-      value,
-    }));
-  }, [data.expenses]);
+  const expenseBreakdown = useMemo(() => ([
+    { name: 'Truck operational costs', value: truckCosts.truckOperationalCost },
+    { name: 'Trailer operational costs', value: truckCosts.trailerOperationalCost },
+    { name: 'Credit card fees', value: creditCardFees },
+  ].filter((item) => item.value > 0)), [truckCosts.truckOperationalCost, truckCosts.trailerOperationalCost, creditCardFees]);
 
   const recentTransactions = useMemo(() => {
     const allTransactions = [
@@ -66,7 +67,11 @@ export const FinancialDashboard = () => {
       .slice(0, 10);
   }, [data]);
 
-  if (loading) {
+  const waitingForFirstPaint = cardFeeLoading
+    || (loading && data.bookings.length === 0 && data.expenses.length === 0)
+    || (costsLoading && truckCosts.tripCount === 0 && !costsError);
+
+  if (waitingForFirstPaint) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-12 w-12 animate-spin text-yellow-400" />
@@ -125,7 +130,7 @@ export const FinancialDashboard = () => {
           <CardContent>
             <div className="text-2xl font-bold text-red-300">{formatCurrency(metrics.totalExpenses)}</div>
             <p className="text-xs text-red-200 mt-1">
-              {data.expenses.length} expense entries
+              {costsError || `${truckCosts.tripCount} trip log${truckCosts.tripCount === 1 ? '' : 's'}`}
             </p>
           </CardContent>
         </Card>
@@ -140,9 +145,7 @@ export const FinancialDashboard = () => {
               {formatCurrency(metrics.netProfit)}
             </div>
             <p className="text-xs text-blue-200 mt-1">
-              {metrics.totalRevenue > 0
-                ? `${((metrics.netProfit / metrics.totalRevenue) * 100).toFixed(1)}% profit margin`
-                : 'No revenue yet'}
+              After taxes, operating costs, and credit card fees
             </p>
           </CardContent>
         </Card>
@@ -160,6 +163,18 @@ export const FinancialDashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="bg-gray-800/50 border-gray-700">
+        <CardHeader>
+          <CardTitle className="text-white">Credit card fees</CardTitle>
+          <CardDescription className="text-gray-400">
+            Calculated from each order, then subtracted in net profit. The amount can be edited.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <CreditCardFeeField bookings={data.bookings} />
+        </CardContent>
+      </Card>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -190,9 +205,12 @@ export const FinancialDashboard = () => {
         <Card className="bg-gray-800/50 border-gray-700">
           <CardHeader>
             <CardTitle className="text-white">Expense Breakdown</CardTitle>
-            <CardDescription className="text-gray-400">By category</CardDescription>
+            <CardDescription className="text-gray-400">Truck operating costs</CardDescription>
           </CardHeader>
           <CardContent>
+            {expenseBreakdown.length === 0 ? (
+              <p className="text-gray-400 text-sm py-16 text-center">No truck operating costs on trip logs yet.</p>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
                 <Pie
@@ -215,6 +233,7 @@ export const FinancialDashboard = () => {
                 />
               </PieChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>

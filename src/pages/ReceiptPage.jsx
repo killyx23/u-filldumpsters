@@ -7,13 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Helmet } from 'react-helmet';
 import { getDumpFeeForService } from '@/utils/getDumpFeeForService';
 import { calculateDeliveryRoute, calculateRoundTripDistance } from '@/utils/distanceCalculationHelper';
-import { TRAILER_DELIVERY_MILEAGE_EXPLANATION, formatTrailerDeliveryMileage, trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
+import { formatTrailerDeliveryMileage, trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { activePromoLabel } from '@/utils/servicePlan';
 import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
+import { includedDeliveryMileageExplanation, resolveIncludedDeliveryMiles, landfillTonClause } from '@/utils/chargesAndFeesConfig';
+import { chargeMileageBands } from '@/utils/mileageBands';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 
 export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
@@ -24,6 +27,8 @@ export const ReceiptPage = () => {
     const [dumpFeeInfo, setDumpFeeInfo] = useState(null);
     const [receiptDetails, setReceiptDetails] = useState(null);
     const [calculatingMileage, setCalculatingMileage] = useState(true);
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
 
     useEffect(() => {
         const bookingId = searchParams.get('bookingId') || bookingIdFromPath;
@@ -227,19 +232,21 @@ export const ReceiptPage = () => {
 
                     if (resolvedServiceId === 4) {
                         const route = await calculateDeliveryRoute(customerAddress);
-                        const priced = trailerDeliveryChargeableMiles(route);
+                        const priced = trailerDeliveryChargeableMiles(route, includedMiles);
                         totalMiles = priced.businessToCustomer;
-                        mileageCharge = priced.chargeableDistance * mileageRate;
+                        mileageCharge = chargeMileageBands(priced.businessToCustomer, includedMiles, booking.plan);
                         mileageDisplay = formatTrailerDeliveryMileage({
                             deliveryMiles: priced.businessToCustomer,
                             chargeableDistance: priced.chargeableDistance,
                             mileageCharge,
                         });
-                        mileageExplanation = TRAILER_DELIVERY_MILEAGE_EXPLANATION;
+                        mileageExplanation = includedDeliveryMileageExplanation(includedMiles);
                     } else {
                         totalMiles = await calculateRoundTripDistance(customerAddress);
-                        mileageCharge = totalMiles * mileageRate;
-                        mileageExplanation = 'Mileage covers delivery and the drive to the landfill.';
+                        mileageCharge = chargeMileageBands(totalMiles, resolvedServiceId === 1 ? includedMiles : 0, booking.plan);
+                        mileageExplanation = resolvedServiceId === 1
+                            ? includedDeliveryMileageExplanation(includedMiles)
+                            : 'Mileage covers delivery and the drive to the landfill.';
                     }
 
                     console.log(`[Receipt] 3-Point Route Calculation: ${totalMiles} miles × $${mileageRate}/mile = $${mileageCharge.toFixed(2)}`);
@@ -248,7 +255,7 @@ export const ReceiptPage = () => {
                     // Fallback to stored distance if available
                     if (booking.customers?.distance_miles) {
                         totalMiles = parseFloat(booking.customers.distance_miles);
-                        mileageCharge = totalMiles * mileageRate;
+                        mileageCharge = chargeMileageBands(totalMiles, 0, booking.plan);
                         mileageExplanation = 'Based on stored distance (route calculation unavailable)';
                     }
                 }
@@ -355,7 +362,7 @@ export const ReceiptPage = () => {
         };
 
         fetchDetailsAndCalculate();
-    }, [searchParams, bookingIdFromPath]);
+    }, [searchParams, bookingIdFromPath, includedMiles]);
 
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('en-US', {
@@ -385,7 +392,7 @@ export const ReceiptPage = () => {
                             </p>
                             <div className="mt-4 inline-block bg-black/40 border border-amber-500/30 px-4 py-2 rounded-lg">
                               <span className="text-amber-200">Current Rate: </span>
-                              <span className="text-amber-400 font-bold text-lg">${parseFloat(dumpFeeInfo.fee_per_ton).toFixed(2)} per ton</span>
+                              <span className="text-amber-400 font-bold text-lg">${parseFloat(dumpFeeInfo.fee_per_ton).toFixed(2)} {landfillTonClause(adminFee('dump_rate_tons'))}</span>
                             </div>
                           </div>
                         </div>

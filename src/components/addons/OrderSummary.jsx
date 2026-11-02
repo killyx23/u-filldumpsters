@@ -18,7 +18,7 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { formatMoney } from '@/utils/chargesAndFeesConfig';
+import { formatMoney, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
 export const OrderSummary = ({
     plan,
@@ -301,7 +301,7 @@ export const OrderSummary = ({
         // Distance-based mileage charge
         const deliveryDistance = Number(addons?.deliveryDistance || 0);
         if (isDeliveryRequired && deliveryDistance > 0) {
-            const feeResult = calculateDistanceAndFee(deliveryDistance, plan?.id, fetchedMileageRate, addons?.deliveryRoute);
+            const feeResult = calculateDistanceAndFee(deliveryDistance, plan?.id, fetchedMileageRate, addons?.deliveryRoute, resolveIncludedDeliveryMiles(fee('included_delivery_miles')), { ...plan, mileage_rate: fetchedMileageRate });
             mileageCharge = Number(feeResult.trip_mileage_cost || 0);
         }
 
@@ -393,7 +393,7 @@ export const OrderSummary = ({
             taxRate: taxBreakdown.taxRate,
             total: taxBreakdown.total,
         };
-    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, additionalDayPrices, equipmentTypes, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions, rentalStart, rentalEnd]);
+    }, [plan, addons, appliedCoupon, isDeliveryRequired, showDrivewayProtection, fetchedMileageRate, fetchedDeliveryFeeFlat, equipmentPrices, additionalDayPrices, equipmentTypes, insurancePrice, drivewayPrice, taxRate, deliveryService, taxOptions, rentalStart, rentalEnd, fee]);
 
     const handleProceedClick = () => {
         if (!isDeliveryRequired) {

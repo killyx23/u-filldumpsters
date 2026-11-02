@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { format, parseISO, isValid, differenceInDays } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { Key, Repeat, FileSignature, ShieldCheck, QrCode, AlertTriangle } from 'lucide-react';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 import { isValidEquipmentId } from '@/utils/equipmentIdValidator';
@@ -15,7 +15,7 @@ import { bookingHadInsurance } from '@/utils/rescheduleCalculations';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { listRentalExtensions } from '@/utils/rentalExtension';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
-import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
+import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery, lockedExtraGpsMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName, mentionsDumpTrailer } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
 import { phoneOrderLabel, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
@@ -23,6 +23,8 @@ import { evaluateCoupon } from '@/utils/couponRules';
 import { resolveBaseRentalAmount } from '@/utils/bookingTaxCalculator';
 import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equipmentReturnDisplay';
 import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { includedDeliveryMileageExplanation, includedMilesPhrase, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -78,6 +80,8 @@ const AgreementText = ({ booking, hasInsurance }) => {
 };
 
 export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     const [equipmentPrices, setEquipmentPrices] = useState({});
     const [loading, setLoading] = useState(true);
     const [magicLinkToken, setMagicLinkToken] = useState(null);
@@ -215,10 +219,12 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     
     const dropOff = parseISO(drop_off_date);
     const pickup = parseISO(pickup_date);
-    const duration = isValid(dropOff) && isValid(pickup) ? differenceInDays(pickup, dropOff) + 1 : 1;
 
     // Prefer audit quote (plan.price) when present; otherwise recompute from daily rate × days
-    const countedDays = rentalDaysForPlan(currentPlan.id, dropOff, pickup);
+    const countedDays = isValid(dropOff) && isValid(pickup)
+        ? rentalDaysForPlan(currentPlan.id, dropOff, pickup)
+        : 1;
+    const duration = countedDays;
     const baseServicePrice = resolveBaseRentalAmount(currentPlan, {
         rentalDays: countedDays,
         dropOff,
@@ -317,7 +323,7 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
     const calculatedTotal = resolveBookingGrandTotal(booking) || subtotal + taxAmount;
 
     const hasReturnIssues = return_issues && Object.keys(return_issues).length > 0;
-    const freeMiles = currentPlan.id === 1 || currentPlan.id === 4 ? 30 : 0;
+    const freeMiles = currentPlan.id === 1 || currentPlan.id === 4 ? includedMiles : 0;
     const trailerDeliveryIncludedMiles = currentPlan.id === 4;
     const totalMiles = addons.distanceInfo?.miles || addons.distanceInfo?.roundTripMiles || addons.deliveryDistance || 0;
     const isDeliveryServiceForFees = currentPlan.id === 1 || currentPlan.id === 4 || (currentPlan.id === 2 && isDelivery);
@@ -531,6 +537,11 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 Distance (one-way): {formatMilesLabel(resolveOneWayMiles(booking, booking.customers))}
                             </p>
                         )}
+                        {lockedExtraGpsMilesLabel(booking) && (
+                            <p className="text-sm text-gray-600 mt-1">
+                                Extra GPS mileage: {lockedExtraGpsMilesLabel(booking)}
+                            </p>
+                        )}
                         {reschedule_history && reschedule_history.length > 0 && (
                             <div className="text-xs text-gray-500 mt-1 p-2 bg-gray-100 rounded">
                                 <p className="font-bold">Original Dates:</p>
@@ -568,8 +579,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                             {tripMileageCost > 0 && (
                                 <tr className="border-b">
                                     <td className="py-1 px-6">{trailerDeliveryIncludedMiles
-                                        ? "Mileage Charge (the first 30 miles plus the mileage to the landfill are included in the basic delivery fee; every additional mile beyond that is charged at the mileage rate)"
-                                        : `Mileage Charge (${totalMiles.toFixed(2)} miles${freeMiles > 0 ? `, ${freeMiles} free` : ''})`}</td>
+                                        ? `Mileage Charge (${includedDeliveryMileageExplanation(includedMiles)})`
+                                        : `Mileage Charge (${totalMiles.toFixed(2)} miles${freeMiles > 0 ? `, ${includedMilesPhrase(freeMiles)} free` : ''})`}</td>
                                     <td className="text-right py-1 pr-3">${tripMileageCost.toFixed(2)}</td>
                                 </tr>
                             )}

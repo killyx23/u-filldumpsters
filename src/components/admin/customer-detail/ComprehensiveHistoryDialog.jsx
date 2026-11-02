@@ -3,7 +3,7 @@ import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet, MessageSquare } from 'lucide-react';
+import { DollarSign, Hash, ShieldCheck, AlertTriangle, Package, Car, Image as ImageIcon, User, Clock, FileText, CheckCircle, Repeat, Truck, Home, Mail, Phone, ExternalLink, Gift, Wallet, MessageSquare, MapPin } from 'lucide-react';
 import { formatReferralWalletTxType } from '@/utils/referralWalletLabels';
 import { formatLoyaltyTxLabel, formatLoyaltyTxAmount } from '@/utils/loyaltyTransactionLabels';
 import { ChangeRequestNoteContent } from '@/components/admin/customer-detail/ChangeRequestNoteContent';
@@ -18,6 +18,7 @@ import {
     isRentalEquipmentId,
 } from '@/utils/equipmentReturnDisplay';
 import { feeChargeEntries } from '@/utils/feeCharges';
+import { lockedExtraGpsMilesLabel } from '@/utils/bookingMileage';
 import { AddressHistorySection } from '@/components/admin/customer-detail/AddressHistorySection';
 
 const Section = ({ title, icon, children, className = '' }) => (
@@ -274,6 +275,9 @@ export const ComprehensiveHistoryDialog = ({
                                                         label="Final lock close (fee time)"
                                                         value={booking.return_lock_at ? format(parseISO(booking.return_lock_at), 'Pp') : 'Not recorded'}
                                                       />
+                                                    )}
+                                                    {lockedExtraGpsMilesLabel(booking) && (
+                                                      <DetailItem icon={<MapPin />} label="Extra GPS mileage" value={lockedExtraGpsMilesLabel(booking)} />
                                                     )}
                                                 </>
                                             );

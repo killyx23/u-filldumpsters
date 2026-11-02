@@ -7,9 +7,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Checkbox } from '@/components/ui/checkbox';
 import { GooglePlacesAutocomplete } from '@/components/GooglePlacesAutocomplete';
 import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 import { toast } from '@/components/ui/use-toast';
 
 export const RescheduleAddressVerification = ({ booking, newService, onAddressUpdated }) => {
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     // Safety check: provide default empty function if callback not provided
     const handleAddressUpdated = onAddressUpdated || (() => {
         console.warn('RescheduleAddressVerification: onAddressUpdated callback not provided');
@@ -90,7 +94,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
             const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
             const addressObj = toAddressObj(address, fullAddress);
             
-            const result = await fetchDistanceAndCalculateFee(fullAddress, newService?.id || booking?.plan?.id, mileageRate);
+            const result = await fetchDistanceAndCalculateFee(fullAddress, newService?.id || booking?.plan?.id, mileageRate, includedMiles, { ...(booking?.plan || {}), ...(newService || {}), mileage_rate: mileageRate });
 
             if (result.error) {
                 setError(result.error);
@@ -119,7 +123,7 @@ export const RescheduleAddressVerification = ({ booking, newService, onAddressUp
         } finally {
             setCalculating(false);
         }
-    }, [handleAddressUpdated, newService?.id, booking?.plan?.id, mileageRate]);
+    }, [handleAddressUpdated, newService?.id, booking?.plan?.id, mileageRate, includedMiles]);
 
     const handleAddressSelect = (details) => {
         const addressData = {

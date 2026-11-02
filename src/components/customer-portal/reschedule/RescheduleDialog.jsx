@@ -25,6 +25,8 @@ import {
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
 import { normalizeAddress, addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
 const STEPS = {
   SERVICE: 1,
@@ -56,6 +58,8 @@ export const RescheduleDialog = ({
   adminEmail = null,
 }) => {
   const { data, loading, error } = useRescheduleDataLoader(bookingId);
+  const { fee: adminFee } = useChargesAndFees();
+  const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
   const [currentStep, setCurrentStep] = useState(STEPS.SERVICE);
   const [submitting, setSubmitting] = useState(false);
 
@@ -349,6 +353,7 @@ export const RescheduleDialog = ({
           referralDiscountAmount: rewardAddons.referralDiscountAmount,
           coupon: rewardAddons.coupon,
         },
+        includedMiles,
       );
       const originalTotal = Number(data?.originalCosts?.total ?? originalBooking?.total_price ?? 0);
       const newTotal = Number(newCosts?.total ?? originalTotal);

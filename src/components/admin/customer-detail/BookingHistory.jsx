@@ -11,7 +11,7 @@ import { BookingRemovalDialog } from '@/components/admin/BookingRemovalDialog';
 import { calculateDistanceViaGoogleMaps, getBusinessAddress } from '@/utils/distanceCalculationHelper';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { listRentalExtensions } from '@/utils/rentalExtension';
-import { resolveOneWayMiles, formatMilesLabel } from '@/utils/bookingMileage';
+import { resolveOneWayMiles, formatMilesLabel, lockedExtraGpsMilesLabel } from '@/utils/bookingMileage';
 import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinStatus';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
@@ -132,6 +132,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
     const rescheduleApproval = resolveRescheduleApprovalDisplay(booking);
     const rentalExtensions = listRentalExtensions(booking);
     const oneWayMiles = resolveOneWayMiles(booking, customer);
+    const extraGpsMiles = lockedExtraGpsMilesLabel(booking);
 
     return (
         <div className="bg-white/10 p-4 rounded-md">
@@ -147,6 +148,11 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
                     <p className="text-sm text-blue-200 flex items-center mt-1">
                         <MapPin className="mr-2 h-4 w-4"/>Distance (one-way): {formatMilesLabel(oneWayMiles)}
                     </p>
+                    {extraGpsMiles && (
+                        <p className="text-sm text-blue-200 flex items-center mt-1">
+                            <MapPin className="mr-2 h-4 w-4"/>Extra GPS mileage: {extraGpsMiles}
+                        </p>
+                    )}
                     <p className="text-sm text-blue-200 flex items-center mt-1">
                         <Clock className="mr-2 h-4 w-4"/>Drive time: {booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes ? `${booking.addons?.distanceInfo?.duration || customer?.travel_time_minutes} mins` : 'N/A'}
                     </p>

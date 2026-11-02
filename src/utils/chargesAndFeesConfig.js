@@ -6,6 +6,8 @@ export const DEFAULT_FEES = {
   dump_loader_max_tons: 5,
   base_dump_fee: 150,
   dump_tonnage_rate: 45,
+  dump_rate_tons: 1,
+  included_delivery_miles: 30,
   special_item_fee_min: 20,
   special_item_fee_max: 50,
   cleaning_fee: 20,
@@ -43,6 +45,53 @@ export const createHppFeeLookup = (fees = {}, planPrice = null) => {
 export const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
 export const formatPercent = (value) => `${Number(value || 0).toFixed(2).replace(/\.00$/, '')}`;
 export const formatTons = (value) => Number(value || 0).toFixed(2).replace(/\.00$/, '');
+
+export const DUMP_RATE_TONS_KEY = 'dump_rate_tons';
+export const INCLUDED_DELIVERY_MILES_KEY = 'included_delivery_miles';
+export const DEFAULT_INCLUDED_DELIVERY_MILES = 30;
+
+/** Missing or invalid values stay at 30 included miles. Zero stays zero. */
+export function resolveIncludedDeliveryMiles(value) {
+  if (value == null || value === '') return DEFAULT_INCLUDED_DELIVERY_MILES;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return DEFAULT_INCLUDED_DELIVERY_MILES;
+  return amount;
+}
+
+/** "30", "20.5", or "1". */
+export function formatIncludedMileCount(miles) {
+  const amount = resolveIncludedDeliveryMiles(miles);
+  return String(Number(amount.toFixed(2)));
+}
+
+/** "1 mile" or "20 miles". */
+export function includedMilesPhrase(miles) {
+  const count = formatIncludedMileCount(miles);
+  return `${count} ${count === '1' ? 'mile' : 'miles'}`;
+}
+
+export function includedDeliveryMileageExplanation(miles) {
+  return `The first ${includedMilesPhrase(miles)} plus the mileage to the landfill are included in the basic delivery fee, and every additional mile beyond that is charged at the mileage rate.`;
+}
+
+/** "1" or "0.5". Missing or non-numeric values fall back to 1 ton. Zero stays zero. */
+export function formatLandfillTonCount(tons) {
+  if (tons == null || tons === '') return '1';
+  const amount = Number(tons);
+  if (!Number.isFinite(amount)) return '1';
+  return String(Number(amount.toFixed(2)));
+}
+
+/** "for 1 ton", "for 0.5 tons", "for 0 tons". */
+export function landfillTonClause(tons) {
+  const count = formatLandfillTonCount(tons);
+  return `for ${count} ${count === '1' ? 'ton' : 'tons'}`;
+}
+
+/** "$45.00 for 1 ton". */
+export function landfillRatePhrase(rate, tons) {
+  return `${formatMoney(rate)} ${landfillTonClause(tons)}`;
+}
 
 export const UNAVAILABLE_FEE_TEXT = 'Unavailable. Contact customer service.';
 

@@ -4,13 +4,17 @@ import { evaluateCoupon } from '@/utils/couponRules';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+/** Dumpster charge for each day after the first. A 7-day stay is a flat $500. */
+export const DUMPSTER_EXTRA_DAY_RATE = 50;
+
 export function rentalDaysForPlan(planId, dropOff, pickup) {
   const id = Number(planId);
   const start = startOfDay(dropOff instanceof Date ? dropOff : parseISO(String(dropOff)));
   const endRaw = pickup || dropOff;
   const end = startOfDay(endRaw instanceof Date ? endRaw : parseISO(String(endRaw)));
   if (!isValid(start) || !isValid(end)) return 1;
-  if (id === 3) {
+  // Morning delivery to the next morning window is one day (services 1, 3, and 4).
+  if (id === 1 || id === 3 || id === 4) {
     const diff = differenceInDays(end, start);
     return diff === 0 ? 1 : Math.max(1, diff);
   }
@@ -22,7 +26,7 @@ export function catalogBaseRental(service, days) {
   const id = Number(service?.id);
   const dayCount = Math.max(1, Number(days) || 1);
   if (id === 1) {
-    return dayCount === 7 ? 500 : basePrice + Math.max(0, dayCount - 1) * 50;
+    return dayCount === 7 ? 500 : basePrice + Math.max(0, dayCount - 1) * DUMPSTER_EXTRA_DAY_RATE;
   }
   if (id === 4) {
     const dailyRate = Number(service?.additional_day_rate) || 0;
@@ -32,6 +36,14 @@ export function catalogBaseRental(service, days) {
     return basePrice * dayCount;
   }
   return basePrice * dayCount;
+}
+
+/** Per-day rate shown as Extra day. Zero for services that multiply the base price instead. */
+export function extraDayRateForService(service) {
+  const id = Number(service?.id);
+  if (id === 1) return DUMPSTER_EXTRA_DAY_RATE;
+  if (id === 4) return Number(service?.additional_day_rate) || 0;
+  return 0;
 }
 
 function couponDollars(addons, gross, { rentalDays = 1, baseRental = 0 } = {}) {

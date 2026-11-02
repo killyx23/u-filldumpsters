@@ -175,3 +175,98 @@ export async function ensureBookingMileage(booking, {
 
   return { oneWayMiles: oneWay, logId, error };
 }
+
+/** Extra trailer GPS miles typed on the post-rental checklist. Null when the value is not a usable number. */
+export function parseExtraGpsMiles(value) {
+  if (value === '' || value == null) return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** Read-only label after finalize. Null until the checklist has locked the miles. */
+export function lockedExtraGpsMilesLabel(booking) {
+  if (booking?.addons?.extraGpsMilesLocked !== true) return null;
+  const miles = parseExtraGpsMiles(booking.addons?.extraGpsMiles);
+  if (miles == null) return null;
+  return `${miles.toFixed(1)} mi`;
+}
+
+export function extraGpsMilesAddonPatch(booking, miles, { locked = false } = {}) {
+  const parsed = parseExtraGpsMiles(miles);
+  if (parsed == null) {
+    return { error: new Error('Extra GPS miles cannot be negative.'), addons: null, miles: null };
+  }
+  const addons = {
+    ...(booking?.addons || {}),
+    extraGpsMiles: parsed,
+    extraGpsMilesSavedAt: new Date().toISOString(),
+  };
+  if (locked) addons.extraGpsMilesLocked = true;
+  return { error: null, addons, miles: parsed };
+}
+
+/**
+ * Copy finalized extra GPS miles onto the trip log. The mileage upsert leaves
+ * customer_gps_miles alone, so this update is what the financial books field reads.
+ */
+export async function writeCustomerGpsMilesLog(booking, miles, {
+  customer = null,
+  source = 'booking_complete',
+} = {}) {
+  const parsed = parseExtraGpsMiles(miles);
+  if (parsed == null) return { error: new Error('Extra GPS miles cannot be negative.'), logId: null };
+  if (!booking?.id) return { error: new Error('booking required'), logId: null };
+
+  try {
+    await ensureBookingMileage(booking, {
+      customer,
+      source,
+      recalculateIfMissing: true,
+    });
+  } catch (err) {
+    console.warn('[bookingMileage] trip log ensure before GPS miles failed:', err);
+  }
+
+  const { data, error } = await supabase
+    .from('booking_mileage_logs')
+    .update({
+      customer_gps_miles: parsed,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('booking_id', booking.id)
+    .select('id');
+
+  if (error) return { error, logId: null };
+  if (!data?.length) {
+    return {
+      error: new Error('No trip log exists for this booking yet.'),
+      logId: null,
+    };
+  }
+  return { error: null, logId: data[0].id };
+}
+
+/** Keep history and receipts on the same number when the trip log field is edited. */
+export async function syncLockedExtraGpsMiles(bookingId, miles) {
+  const parsed = parseExtraGpsMiles(miles);
+  if (parsed == null || !bookingId) {
+    return { error: new Error('Extra GPS miles cannot be negative.') };
+  }
+  const { data: row, error: readError } = await supabase
+    .from('bookings')
+    .select('addons')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (readError) return { error: readError };
+  if (!row) return { error: new Error('Booking not found.') };
+
+  const addons = {
+    ...(row.addons || {}),
+    extraGpsMiles: parsed,
+    extraGpsMilesLocked: true,
+    extraGpsMilesSavedAt: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('bookings').update({ addons }).eq('id', bookingId);
+  return { error };
+}

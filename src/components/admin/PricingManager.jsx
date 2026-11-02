@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, Save, Plus, Edit, Trash2, Calculator, Shield, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Save, Plus, Edit, Trash2, Calculator, Shield, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,12 +17,67 @@ import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
 const CUSTOM_PROMO = '__custom__';
 
+function MileMarkField({ label, miles, rate, onMiles, onRate, disabled }) {
+    const current = Math.max(0, Math.round(Number(miles) || 0));
+    return (
+        <div className="flex items-center gap-2">
+            <Label>{label}</Label>
+            <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-white"
+                disabled={disabled || current <= 0}
+                onClick={() => onMiles(String(Math.max(0, current - 1)))}
+                aria-label={`Decrease ${label}`}
+            >
+                <ChevronDown className="h-4 w-4" />
+            </Button>
+            <Input
+                type="number"
+                min="0"
+                step="1"
+                value={miles}
+                onChange={(e) => onMiles(e.target.value)}
+                className="w-20 bg-white/10 text-white"
+                disabled={disabled}
+            />
+            <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-white"
+                disabled={disabled}
+                onClick={() => onMiles(String(current + 1))}
+                aria-label={`Increase ${label}`}
+            >
+                <ChevronUp className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-gray-400">miles, then</span>
+            <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={rate}
+                onChange={(e) => onRate(e.target.value)}
+                className="w-24 bg-white/10 text-white"
+                disabled={disabled}
+            />
+            <span className="text-sm text-gray-400">/mile</span>
+        </div>
+    );
+}
+
 const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [price, setPrice] = useState(service.base_price || 0);
     const [unit, setUnit] = useState(service.price_unit || '/day');
     const [deliveryFee, setDeliveryFee] = useState(service.delivery_fee || 0);
     const [mileageRate, setMileageRate] = useState(service.mileage_rate !== undefined && service.mileage_rate !== null ? service.mileage_rate : 0.85);
+    const [band2Miles, setBand2Miles] = useState(service.mileage_band2_miles ?? 30);
+    const [band2Rate, setBand2Rate] = useState(service.mileage_band2_rate ?? service.mileage_rate ?? 0.85);
+    const [band3Miles, setBand3Miles] = useState(service.mileage_band3_miles ?? 50);
+    const [band3Rate, setBand3Rate] = useState(service.mileage_band3_rate ?? service.mileage_rate ?? 0.85);
     const [dailyRate, setDailyRate] = useState(service.additional_day_rate || 0);
     const [showPromo, setShowPromo] = useState(Boolean(service.show_promo_label));
     const [promoChoice, setPromoChoice] = useState(service.promo_label_id ? String(service.promo_label_id) : '');
@@ -35,6 +90,10 @@ const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => 
         setUnit(service.price_unit || '/day');
         setDeliveryFee(service.delivery_fee || 0);
         setMileageRate(service.mileage_rate !== undefined && service.mileage_rate !== null ? service.mileage_rate : 0.85);
+        setBand2Miles(service.mileage_band2_miles ?? 30);
+        setBand2Rate(service.mileage_band2_rate ?? service.mileage_rate ?? 0.85);
+        setBand3Miles(service.mileage_band3_miles ?? 50);
+        setBand3Rate(service.mileage_band3_rate ?? service.mileage_rate ?? 0.85);
         setDailyRate(service.additional_day_rate || 0);
         setShowPromo(Boolean(service.show_promo_label));
         setPromoChoice(service.promo_label_id ? String(service.promo_label_id) : '');
@@ -59,6 +118,12 @@ const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => 
                 homepage_price_unit: unit || '',
                 mileage_rate: parseFloat(mileageRate) || 0,
                 delivery_fee: parseFloat(deliveryFee) || 0,
+                ...(isDeliveryService ? {
+                    mileage_band2_miles: Math.max(0, Number(band2Miles) || 0),
+                    mileage_band2_rate: parseFloat(band2Rate) || 0,
+                    mileage_band3_miles: Math.max(0, Number(band3Miles) || 0),
+                    mileage_band3_rate: parseFloat(band3Rate) || 0,
+                } : {}),
                 ...(service.id === 4 ? { additional_day_rate: parseFloat(dailyRate) || 0 } : {}),
                 show_promo_label: Boolean(showPromo && promoLabelId),
                 promo_label_id: promoLabelId,
@@ -88,6 +153,39 @@ const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => 
                         disabled={isSaving}
                     />
                 </div>
+                {service.id === 4 && (
+                    <>
+                        <div className="flex items-center gap-2">
+                            <Label>Mileage Rate:</Label>
+                            <Input
+                                type="number"
+                                step="0.01"
+                                value={mileageRate}
+                                onChange={(e) => setMileageRate(e.target.value)}
+                                className="w-24 bg-white/10 text-white"
+                                placeholder="0.85"
+                                disabled={isSaving}
+                            />
+                            <span className="text-sm text-gray-400">/mile</span>
+                        </div>
+                        <MileMarkField
+                            label="After"
+                            miles={band2Miles}
+                            rate={band2Rate}
+                            onMiles={setBand2Miles}
+                            onRate={setBand2Rate}
+                            disabled={isSaving}
+                        />
+                        <MileMarkField
+                            label="After"
+                            miles={band3Miles}
+                            rate={band3Rate}
+                            onMiles={setBand3Miles}
+                            onRate={setBand3Rate}
+                            disabled={isSaving}
+                        />
+                    </>
+                )}
                 {service.id === 4 && (
                     <div className="flex items-center gap-2">
                         <Label>Daily rate:</Label>
@@ -157,6 +255,7 @@ const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => 
                                 disabled={isSaving}
                             />
                         </div>
+                        {service.id === 1 && (
                         <div className="flex items-center gap-2">
                             <Label>Mileage Rate:</Label>
                             <Input 
@@ -170,6 +269,27 @@ const ServicePricingCard = ({ service, promoLabels, onCreateLabel, onSave }) => 
                             />
                             <span className="text-sm text-gray-400">/mile</span>
                         </div>
+                        )}
+                        {service.id === 1 && (
+                            <>
+                                <MileMarkField
+                                    label="After"
+                                    miles={band2Miles}
+                                    rate={band2Rate}
+                                    onMiles={setBand2Miles}
+                                    onRate={setBand2Rate}
+                                    disabled={isSaving}
+                                />
+                                <MileMarkField
+                                    label="After"
+                                    miles={band3Miles}
+                                    rate={band3Rate}
+                                    onMiles={setBand3Miles}
+                                    onRate={setBand3Rate}
+                                    disabled={isSaving}
+                                />
+                            </>
+                        )}
                     </>
                 )}
                 <Button onClick={handleSave} size="sm" disabled={isSaving} className="ml-2 min-w-[90px] bg-blue-600 hover:bg-blue-700 text-white">

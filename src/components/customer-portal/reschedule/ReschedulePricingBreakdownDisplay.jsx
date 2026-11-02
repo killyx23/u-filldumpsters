@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle } from 'lucide-react';
-import { differenceInDays } from 'date-fns';
 import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
 import { supabase } from '@/lib/customSupabaseClient';
 import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { includedDeliveryMileageExplanation, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { chargeMileageBands } from '@/utils/mileageBands';
 
 /** Highest line total first so Original and New Request rows line up. */
 const byLineTotalDesc = (a, b) => {
@@ -34,6 +36,8 @@ export const ReschedulePricingBreakdownDisplay = ({
     const [taxRate, setTaxRate] = useState(7.45);
 
     const currencyInfo = { code: 'USD', symbol: '$' };
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
 
     // Fetch ALL original add-ons from booking_equipment table
     useEffect(() => {
@@ -98,12 +102,7 @@ export const ReschedulePricingBreakdownDisplay = ({
                 // Calculate days
                 let days = 1;
                 if (newDropOffDate && newPickupDate) {
-                    if (Number(newService.id) === 3 || Number(newService.id) === 4) {
-                        days = rentalDaysForPlan(newService.id, newDropOffDate, newPickupDate);
-                    } else {
-                        days = differenceInDays(newPickupDate, newDropOffDate) + 1;
-                        days = Math.max(1, days);
-                    }
+                    days = rentalDaysForPlan(newService.id, newDropOffDate, newPickupDate);
                 }
 
                 // Calculate BASE rental cost (without delivery or mileage)
@@ -117,9 +116,9 @@ export const ReschedulePricingBreakdownDisplay = ({
                 let mileageCharge = 0;
                 if (isDeliveryService && distanceMiles > 0 && !isManualAddress) {
                     if (Number(newService.id) === 4) {
-                        mileageCharge = Math.max(0, distanceMiles - 30) * mileageRate;
+                        mileageCharge = chargeMileageBands(distanceMiles, includedMiles, newService);
                     } else {
-                        mileageCharge = distanceMiles * 2 * mileageRate; // Round-trip
+                        mileageCharge = chargeMileageBands(distanceMiles * 2, 0, newService);
                     }
                 }
 
@@ -165,7 +164,7 @@ export const ReschedulePricingBreakdownDisplay = ({
         }, 600);
         
         return () => clearTimeout(timer);
-    }, [newService, newAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, taxRate]);
+    }, [newService, newAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, taxRate, includedMiles]);
 
     if (loading || !newCosts || !originalCosts) {
         return (
@@ -184,8 +183,8 @@ export const ReschedulePricingBreakdownDisplay = ({
     const originalDistanceMiles = Number(originalCosts.distanceMiles || 0);
     const originalMileageRate = Number(originalService.mileage_rate || 0.85);
     const originalMileageCharge = Number(originalService?.id) === 4
-        ? Math.max(0, originalDistanceMiles - 30) * originalMileageRate
-        : originalDistanceMiles * 2 * originalMileageRate;
+        ? chargeMileageBands(originalDistanceMiles, includedMiles, originalService)
+        : chargeMileageBands(originalDistanceMiles * 2, 0, originalService);
     
     const originalBaseRental = Number(originalCosts.serviceCost) - originalDeliveryFee - originalMileageCharge;
 
@@ -237,7 +236,7 @@ export const ReschedulePricingBreakdownDisplay = ({
                             {originalMileageCharge > 0 && (
                                 <div className="flex justify-between items-center text-gray-300">
                                     <span className="text-sm">{Number(originalService?.id) === 4
-                                        ? "Mileage Charge (the first 30 miles plus the mileage to the landfill are included in the basic delivery fee; every additional mile beyond that is charged at the mileage rate)"
+                                        ? `Mileage Charge (${includedDeliveryMileageExplanation(includedMiles)})`
                                         : `Mileage Charge (${originalDistanceMiles.toFixed(1)} mi × 2)`}</span>
                                     <span>{formatCurrency(originalMileageCharge * 100, currencyInfo)}</span>
                                 </div>
@@ -306,7 +305,7 @@ export const ReschedulePricingBreakdownDisplay = ({
                             ) : newCosts.mileageCharge > 0 ? (
                                 <div className="flex justify-between items-center text-gray-300">
                                     <span className="text-sm">{Number(newService?.id) === 4
-                                        ? "Mileage Charge (the first 30 miles plus the mileage to the landfill are included in the basic delivery fee; every additional mile beyond that is charged at the mileage rate)"
+                                        ? `Mileage Charge (${includedDeliveryMileageExplanation(includedMiles)})`
                                         : `Mileage Charge (${distanceMiles.toFixed(1)} mi × 2)`}</span>
                                     <span>{formatCurrency(newCosts.mileageCharge * 100, currencyInfo)}</span>
                                 </div>

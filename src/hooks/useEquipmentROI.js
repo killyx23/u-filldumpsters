@@ -6,7 +6,7 @@ import { useFinancialData } from './useFinancialData';
  * @returns {Object} ROI calculations
  */
 export const useEquipmentROI = () => {
-  const { data, loading } = useFinancialData();
+  const { data, loading, refetch } = useFinancialData();
 
   const roiData = useMemo(() => {
     const { equipment, bookings, expenses } = data;
@@ -66,5 +66,6 @@ export const useEquipmentROI = () => {
   return {
     roiData,
     loading,
+    refetch,
   };
 };

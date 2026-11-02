@@ -6,6 +6,9 @@ import { toast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useLoadScript } from '@react-google-maps/api';
 import { fetchDistanceAndCalculateFee, TRAILER_DYNAMIC_PRICING_NOTE, TRAILER_GREATER_RANGE_NOTE } from '@/services/DistanceCalculationService';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { includedMilesPhrase, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { mileageBandFeePhrase } from '@/utils/mileageBands';
 import { DeliveryServiceInfo } from './DeliveryServiceInfo';
 import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
 import { applySelectedAddress } from '@/utils/addressHelpers';
@@ -19,6 +22,8 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
   });
 
   const mileageRate = fetchedMileageRate !== undefined ? fetchedMileageRate : (plan?.mileage_rate || 20);
+  const { fee: adminFee } = useChargesAndFees();
+  const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
 
   const hasDelivery = !!addonsData.deliveryAddress?.street;
   const isSameAsContact = hasDelivery && contactAddress && addonsData.deliveryAddress.street === contactAddress.street;
@@ -35,9 +40,9 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
           return TRAILER_DYNAMIC_PRICING_NOTE;
       }
       if (plan?.id === 1) {
-          return `For the cost of delivery, it includes the first 30 miles for free, and then we take any additional miles from the delivery to the landfill, and from then on, the mileage is determined by the total cost per mile. The fees are based on the current gas price, which is currently ($${mileageRate.toFixed(2)}/mile).`;
+          return `For the cost of delivery, it includes the first ${includedMilesPhrase(includedMiles)} for free, and then we take any additional miles from the delivery to the landfill, and from then on, the mileage is determined by the total cost per mile. The fees are based on the current gas price, which is currently (${mileageBandFeePhrase({ ...plan, mileage_rate: mileageRate })}).`;
       }
-      return `Mileage is the driving distance for delivery, then to the landfill. The rate follows the current gas price ($${mileageRate.toFixed(2)}/mile).`;
+      return `Mileage is the driving distance for delivery, then to the landfill. The rate follows the current gas price (${mileageBandFeePhrase({ ...plan, mileage_rate: mileageRate })}).`;
   };
 
   const renderMileageNotice = (compact) => {
@@ -47,7 +52,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
       const noteClass = compact ? 'text-xs text-blue-100' : 'text-sm text-blue-100';
       const isTrailerDelivery = Number(plan?.id) === 4;
       const deliveryMiles = Number(addonsData.deliveryRoute?.businessToCustomer) || Number(addonsData.oneWayDistanceMiles) || 0;
-      const overageMiles = Math.round((deliveryMiles - 30) * 10) / 10;
+      const overageMiles = Math.round((deliveryMiles - includedMiles) * 10) / 10;
       const overageText = Number.isInteger(overageMiles) ? String(overageMiles) : overageMiles.toFixed(1);
       return (
         <div className={compact ? 'mt-2 space-y-1' : 'space-y-2'}>
@@ -90,7 +95,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
       const fullAddress = `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
       
       const [result, oneWayMiles] = await Promise.all([
-        fetchDistanceAndCalculateFee(fullAddress, plan?.id, mileageRate),
+        fetchDistanceAndCalculateFee(fullAddress, plan?.id, mileageRate, includedMiles, { ...plan, mileage_rate: mileageRate }),
         calculateOneWayMilesForAddress(fullAddress).catch(() => null),
       ]);
 
@@ -136,7 +141,7 @@ export const DeliveryAddressSection = ({ contactAddress, addonsData, setAddonsDa
     } finally {
       setCalculating(false);
     }
-  }, [isLoaded, setAddonsData, plan?.id, mileageRate]);
+  }, [isLoaded, setAddonsData, plan?.id, mileageRate, includedMiles]);
 
   const handleUseContact = () => {
     setUseDifferent(false);

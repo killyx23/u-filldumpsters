@@ -137,6 +137,10 @@ export function buildPlanSnapshot(service, overrides = {}) {
       overrides.mileage_rate !== undefined
         ? Number(overrides.mileage_rate)
         : Number(service.mileage_rate ?? 0),
+    mileage_band2_miles: service.mileage_band2_miles ?? null,
+    mileage_band2_rate: service.mileage_band2_rate ?? null,
+    mileage_band3_miles: service.mileage_band3_miles ?? null,
+    mileage_band3_rate: service.mileage_band3_rate ?? null,
     delivery_fee:
       overrides.delivery_fee !== undefined
         ? Number(overrides.delivery_fee)
@@ -213,6 +217,10 @@ export function resolveBookingService(booking, liveService = null) {
           price: auditPlan.price ?? auditPlan.base_price ?? service.base_price,
           base_price: auditPlan.base_price ?? service.base_price,
           mileage_rate: auditPlan.mileage_rate ?? service.mileage_rate,
+          mileage_band2_miles: auditPlan.mileage_band2_miles ?? service.mileage_band2_miles,
+          mileage_band2_rate: auditPlan.mileage_band2_rate ?? service.mileage_band2_rate,
+          mileage_band3_miles: auditPlan.mileage_band3_miles ?? service.mileage_band3_miles,
+          mileage_band3_rate: auditPlan.mileage_band3_rate ?? service.mileage_band3_rate,
           delivery_fee: auditPlan.delivery_fee ?? service.delivery_fee,
           additional_day_rate: auditPlan.additional_day_rate ?? service.additional_day_rate,
         }

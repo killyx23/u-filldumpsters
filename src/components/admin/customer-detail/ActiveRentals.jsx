@@ -19,7 +19,7 @@ import { PickupDirectionsMap } from '@/components/customer-portal/PickupDirectio
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { formatTimeWindowBetween } from '@/utils/timeWindowFormatter';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
-import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage } from '@/utils/bookingMileage';
+import { resolveOneWayMiles, formatMilesLabel, ensureBookingMileage, extraGpsMilesAddonPatch, writeCustomerGpsMilesLog } from '@/utils/bookingMileage';
 import { feeChargeEntries, feeIsCharged } from '@/utils/feeCharges';
 import { LockPinStatus, useLockPinsByOrder } from '@/components/admin/LockPinStatus';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
@@ -465,6 +465,11 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
     const [previewUrl, setPreviewUrl] = useState(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [photoPendingDelete, setPhotoPendingDelete] = useState(null);
+    const [gpsInput, setGpsInput] = useState(() => {
+        const saved = Number(booking.addons?.extraGpsMiles);
+        return Number.isFinite(saved) && saved >= 0 ? saved.toFixed(1) : '';
+    });
+    const [gpsSaving, setGpsSaving] = useState(false);
     const fileInputRef = React.useRef(null);
 
     const isChecklistReady = booking.status === 'pending_checklist';
@@ -544,7 +549,41 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
         }
     };
 
+    const saveExtraGpsMiles = async () => {
+        const patch = extraGpsMilesAddonPatch(booking, gpsInput, { locked: false });
+        if (patch.error) {
+            toast({
+                title: 'Enter miles as a number',
+                description: 'Extra GPS mileage cannot be negative.',
+                variant: 'destructive',
+            });
+            return null;
+        }
+        setGpsSaving(true);
+        const { error } = await supabase.from('bookings').update({ addons: patch.addons }).eq('id', booking.id);
+        setGpsSaving(false);
+        if (error) {
+            toast({ title: 'Could not save extra GPS mileage', description: error.message, variant: 'destructive' });
+            return null;
+        }
+        setGpsInput(patch.miles.toFixed(1));
+        toast({
+            title: 'Extra GPS mileage saved',
+            description: `${patch.miles.toFixed(1)} mi. Continue the checklist, then finalize to store it.`,
+        });
+        return patch;
+    };
+
     const handleFinalize = async () => {
+        const gpsPatch = extraGpsMilesAddonPatch(booking, gpsInput, { locked: true });
+        if (gpsPatch.error) {
+            toast({
+                title: 'Enter miles as a number',
+                description: 'Extra GPS mileage cannot be negative.',
+                variant: 'destructive',
+            });
+            return;
+        }
         setIsFinalizing(true);
         let finalStatus = 'Completed';
         const returnIssues = {};
@@ -605,17 +644,34 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
 
         const { error } = await supabase
             .from('bookings')
-            .update({ status: finalStatus, return_issues: returnIssues, damage_photos: damagePhotos })
+            .update({
+                status: finalStatus,
+                return_issues: returnIssues,
+                damage_photos: damagePhotos,
+                addons: gpsPatch.addons,
+            })
             .eq('id', booking.id);
 
         if (error) {
             toast({ title: 'Error finalizing checklist', description: error.message, variant: 'destructive' });
         } else {
             try {
-                await ensureBookingMileage(
-                    { ...booking, status: finalStatus },
-                    { customer, source: 'booking_complete', recalculateIfMissing: true }
+                const gpsWrite = await writeCustomerGpsMilesLog(
+                    { ...booking, status: finalStatus, addons: gpsPatch.addons },
+                    gpsPatch.miles,
+                    { customer, source: 'booking_complete' }
                 );
+                if (gpsWrite.error) {
+                    console.warn('[ActiveRentals] customer GPS miles were not copied to the trip log:', gpsWrite.error);
+                    toast({
+                        title: 'Checklist finalized',
+                        description: 'Extra GPS mileage is on the booking, but the trip log could not be updated.',
+                        variant: 'destructive',
+                    });
+                    onUpdate();
+                    setIsFinalizing(false);
+                    return;
+                }
             } catch (mileageErr) {
                 console.warn('[ActiveRentals] mileage log on finalize failed:', mileageErr);
             }
@@ -829,6 +885,29 @@ const PostRentalChecklist = ({ booking, equipment, onUpdate, customer = null }) 
             />
             <h4 className="text-lg font-bold text-yellow-400 mb-4">Post-Rental Checklist</h4>
             <div className="space-y-3">
+                <div className="bg-white/5 p-3 rounded-md space-y-2">
+                    <Label htmlFor={`extra-gps-${booking.id}`}>Extra GPS mileage</Label>
+                    <p className="text-sm text-blue-200">
+                        Check the returned trailer GPS. Enter any extra miles, save, then finish the rest of this checklist.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                            id={`extra-gps-${booking.id}`}
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            inputMode="decimal"
+                            value={gpsInput}
+                            onChange={(e) => setGpsInput(e.target.value)}
+                            placeholder="0.0"
+                            className="h-9 w-32 bg-gray-900 border-gray-600 text-white"
+                        />
+                        <Button type="button" size="sm" onClick={saveExtraGpsMiles} disabled={gpsSaving || isFinalizing}>
+                            {gpsSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            Save
+                        </Button>
+                    </div>
+                </div>
                 {returnableEquipment.length === 0 ? (
                     <p className="text-sm text-blue-200">No rental add-on equipment on this booking.</p>
                 ) : (

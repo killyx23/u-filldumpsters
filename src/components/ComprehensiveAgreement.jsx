@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,6 +14,8 @@ import {
   ArrowLeft,
   Loader2,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
@@ -29,6 +31,7 @@ import {
   formatMoney,
   formatPercent,
   formatTons,
+  landfillTonClause,
   readAdminFee,
   UNAVAILABLE_FEE_TEXT,
   mapFeeRowsToConfig,
@@ -69,7 +72,7 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
 
   return (
     <div className="prose prose-sm prose-invert text-blue-200 max-w-none space-y-4">
-      <h2 className="text-xl text-center font-bold text-yellow-300">TERMS AND CONDITIONS</h2>
+      <h2 className="text-xl text-center font-bold text-yellow-300">MASTER RENTAL TERMS AND CONDITIONS</h2>
       <p>
         <strong>IMPORTANT LEGAL NOTICE:</strong> PLEASE READ THIS AGREEMENT IN ITS ENTIRETY BEFORE ACCEPTING. BY
         CHECKING THE ACCEPTANCE BOX, CLICKING "I AGREE," PROVIDING AN ELECTRONIC OR WRITTEN SIGNATURE, OR BY TAKING
@@ -178,7 +181,7 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
         <li>
           <strong>Dumpster / Trailer Base Rates:</strong> If a Dumpster or Dump Trailer Rental is chosen, the
           base rental price includes one delivery and one pickup. Disposal is billed separately at a rate of{' '}
-          {money('dump_tonnage_rate')} per ton based on the actual post-disposal certified scale weight.
+          {money('dump_tonnage_rate')} {landfillTonClause(fee('dump_rate_tons'))} based on the actual post-disposal certified scale weight.
           Disposal charges are calculated after dump processing and charged to the Customer&apos;s payment method on file.
         </li>
         <li>
@@ -190,7 +193,7 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
         </li>
         <li>
           <strong>Municipal Dump Fees &amp; Special Item Fees:</strong> The Customer is responsible for municipal dump
-          fees at cost: {money('base_dump_fee')} plus {money('dump_tonnage_rate')} per ton.
+          fees at cost: {money('base_dump_fee')} plus {money('dump_tonnage_rate')} {landfillTonClause(fee('dump_rate_tons'))}.
           Special-item disposal fees apply to mattresses, box springs, televisions (charged per television), and
           major appliances that do not contain refrigerant. How those items must be handled is stated in Section 5.
           These items are billed at a dynamic range of{' '}
@@ -619,6 +622,48 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
   );
 };
 
+const CollapsibleAgreementSection = ({ title, children, footer = null }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="rounded-lg border border-white/20 bg-black/20">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-start gap-2 px-4 py-3 text-left"
+        aria-expanded={open}
+      >
+        <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-yellow-400" />
+        <span className="flex-1 text-lg font-semibold text-yellow-400">{title}</span>
+        {!open && (
+          <span className="mt-1 shrink-0 text-xs italic text-blue-200">(click here to read more)</span>
+        )}
+        {open ? (
+          <ChevronUp className="mt-1 h-5 w-5 shrink-0 text-yellow-400" />
+        ) : (
+          <ChevronDown className="mt-1 h-5 w-5 shrink-0 text-yellow-400" />
+        )}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-3 px-4 pb-4 text-lg leading-relaxed text-blue-100">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {footer}
+    </div>
+  );
+};
+
 export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProcessing }) => {
   const location = useLocation();
   const returnTo = currentReturnPath(location);
@@ -740,7 +785,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
 
     if (!hasScrolledToBottom) {
       missing.add('scroll');
-      messages.push('Scroll to the bottom of the Terms and Conditions');
+      messages.push('Scroll to the bottom of the Master Rental Terms and Conditions');
     }
     if (!agreedToSummary) {
       missing.add('summary');
@@ -748,7 +793,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
     }
     if (!agreedToTerms) {
       missing.add('terms');
-      messages.push('Check the box to agree to the Terms and Conditions');
+      messages.push('Check the box to agree to the Master Rental Terms and Conditions');
     }
     if (!trimmedSignature) {
       missing.add('signature');
@@ -841,35 +886,16 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
         </div>
 
         <div className="space-y-4">
-          <div
-            ref={summarySectionRef}
-            className={`rental-terms-summary-container transition-shadow ${
-              missingFields.has('scroll') || missingFields.has('summary') ? highlightClass : ''
-            }`}
-            style={{
-              marginTop: '30px',
-              padding: '20px',
-              border:
-                missingFields.has('scroll') || missingFields.has('summary')
-                  ? '2px solid #dc2626'
-                  : '2px solid #ff9900',
-              backgroundColor:
-                missingFields.has('scroll') || missingFields.has('summary') ? '#fee2e2' : '#fff9f0',
-              borderRadius: '8px',
-            }}
-          >
-            <h3 style={{ color: '#cc3300', marginTop: 0, fontWeight: 'bold' }}>
-              ⚠️ IMPORTANT RENTAL TERMS SUMMARY
-            </h3>
-            <p style={{ fontSize: '14px', lineHeight: 1.5, color: '#333' }}>
+          <CollapsibleAgreementSection title="IMPORTANT RENTAL TERMS SUMMARY">
+            <p>
               By checking this box and completing your booking, you explicitly authorize{' '}
-              <strong>U-Fill Dumpsters LLC</strong> to automatically charge your payment method on file for all rental
+              <strong className="text-white">U-Fill Dumpsters LLC</strong> to automatically charge your payment method on file for all rental
               fees, disposal overages, cleanings, and any equipment damage, loss, or theft. You acknowledge that you
-              are default <strong>100% financially liable</strong> for all equipment recovery costs, court fees,
+              are default <strong className="text-white">100% financially liable</strong> for all equipment recovery costs, court fees,
               administrative labor, and "Loss of Use" penalties if your payment method is declined or if equipment is
               returned damaged, overfilled, or violating safety transport laws. You certify that you are at least 18
               years of age, fully competent to operate or transport the rented equipment, and agree to the
-              comprehensive terms of our <strong>Terms and Conditions</strong>. If any optional
+              comprehensive terms of our <strong className="text-white">Terms and Conditions</strong>. If any optional
               insurance, protection, or peace-of-mind coverage is purchased, the Customer remains fully responsible for
               all amounts, losses, liabilities, and damages that exceed the purchased coverage limits, exclusions, or
               credit caps. The full{' '}
@@ -877,7 +903,7 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 to={HPP_TERMS_PATH}
                 state={{ returnTo }}
                 onClick={openSavedStep}
-                style={{ color: '#1d4ed8' }}
+                className="text-yellow-300 underline hover:text-yellow-200"
               >
                 Hardware Protection Plan
               </Link>{' '}
@@ -886,98 +912,96 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
                 to="/privacy"
                 state={{ returnTo }}
                 onClick={openSavedStep}
-                style={{ color: '#1d4ed8' }}
+                className="text-yellow-300 underline hover:text-yellow-200"
               >
                 Privacy Policy
               </Link>
               .
             </p>
+          </CollapsibleAgreementSection>
 
-            <div className="checkbox-wrapper" style={{ marginTop: '15px', display: 'flex', alignItems: 'flex-start' }}>
-              <input
-                type="checkbox"
-                id="requireSummaryScrollCheck"
-                disabled={!hasScrolledToBottom}
-                checked={agreedToSummary}
-                onChange={(e) => {
-                  setAgreedToSummary(e.target.checked);
-                  if (e.target.checked) clearMissingField('summary');
-                  if (error) setError('');
+          <CollapsibleAgreementSection
+            title="REPRESENTATION OF OPERATOR AND ABSOLUTE LIABILITY ACKNOWLEDGEMENT"
+            footer={
+              <div
+                ref={(node) => {
+                  summarySectionRef.current = node;
+                  termsSectionRef.current = node;
                 }}
-                style={{ marginRight: '10px', transform: 'scale(1.2)', marginTop: '3px' }}
-              />
-              <label
-                htmlFor="requireSummaryScrollCheck"
-                style={{ fontSize: '13px', color: '#555', fontWeight: 'bold', cursor: 'pointer' }}
+                className={`border-t border-white/10 p-4 transition-shadow ${
+                  missingFields.has('summary') || missingFields.has('terms')
+                    ? `${highlightClass} bg-red-950/40`
+                    : ''
+                }`}
               >
-                I have fully scrolled, read, and explicitly agree to the Important Rental Terms Summary and the
-                complete Terms and Conditions.
-              </label>
-            </div>
-            {!hasScrolledToBottom && (
-              <p className="text-xs mt-2 font-bold" style={{ color: '#7f1d1d' }}>
-                Scroll to the bottom of the Terms and Conditions to enable this checkbox.
-              </p>
-            )}
-            {hasScrolledToBottom && missingFields.has('summary') && (
-              <p className="text-xs mt-2 font-bold" style={{ color: '#7f1d1d' }}>
-                Check this box to acknowledge the Important Rental Terms Summary.
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-white/20 bg-black/20 p-4">
-            <h3 className="text-lg font-bold text-yellow-300 mb-2">
-              REPRESENTATION OF OPERATOR AND ABSOLUTE LIABILITY ACKNOWLEDGEMENT
-            </h3>
-            <div className="text-sm text-blue-200 leading-relaxed space-y-3">
-              <p>
-                By executing this Agreement, the individual signing below (
-                <strong className="text-yellow-300">{expectedName}</strong>) expressly warrants, represents, and
-                covenants that they are the primary authorized operator of the leased equipment (the roll-off trailer
-                and dumpster unit).
-              </p>
-              <p>
-                Renter affirms under penalty of fraud that the identification and documentation provided during
-                checkout belong to them and accurately represent their true identity.
-              </p>
-              <p>
-                Absolute Liability for Permitted or Unpermitted Use: Renter acknowledges and agrees that they assume
-                absolute, unconditional liability for the equipment from the moment of possession until it is returned
-                and accepted by the Owner. This liability remains fully binding regardless of who is physically driving
-                the tow vehicle or operating the equipment. If the Renter permits any other individual to transport,
-                load, dump, or operate the equipment, Renter agrees that such individual operates as the Renter's
-                direct agent. Renter accepts full, primary, and personal financial and legal responsibility for any
-                property damage, bodily injury, theft, or total loss resulting from such use, whether authorized or
-                unauthorized.
-              </p>
-            </div>
-          </div>
-
-          <div
-            ref={termsSectionRef}
-            className={`flex items-center space-x-3 pt-2 rounded-md p-2 transition-shadow ${
-              missingFields.has('terms') ? `${highlightClass} bg-red-950/40` : ''
-            }`}
+                <p className="mb-3 text-sm text-blue-200">
+                  By checking this box and typing your name below, I agree that I have read and understood and legally binding myself to the master rental terms and conditions above.
+                </p>
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="requireSummaryScrollCheck"
+                    disabled={!hasScrolledToBottom}
+                    checked={agreedToSummary && agreedToTerms}
+                    onCheckedChange={(checked) => {
+                      const next = checked === true;
+                      setAgreedToSummary(next);
+                      setAgreedToTerms(next);
+                      if (next) {
+                        clearMissingField('summary');
+                        clearMissingField('terms');
+                      }
+                      if (error) setError('');
+                    }}
+                    className={`mt-1 h-6 w-6 data-[state=checked]:bg-yellow-400 ${
+                      missingFields.has('summary') || missingFields.has('terms')
+                        ? 'border-red-500'
+                        : 'border-white/50'
+                    }`}
+                  />
+                  <label
+                    htmlFor="requireSummaryScrollCheck"
+                    className={`text-sm font-semibold text-white select-none ${
+                      hasScrolledToBottom ? 'cursor-pointer' : 'cursor-not-allowed'
+                    }`}
+                  >
+                    I have fully scrolled, read, and explicitly agree to the Important Rental Terms Summary, the
+                    Representation of Operator and Absolute Liability Acknowledgement, and the Master Rental Terms and Conditions.
+                  </label>
+                </div>
+                {!hasScrolledToBottom && (
+                  <p className="mt-2 text-xs font-bold text-red-300">
+                    Scroll to the bottom of the Master Rental Terms and Conditions to enable this checkbox.
+                  </p>
+                )}
+                {hasScrolledToBottom && missingFields.has('summary') && (
+                  <p className="mt-2 text-xs font-bold text-red-300">
+                    Check this box to acknowledge the Important Rental Terms Summary.
+                  </p>
+                )}
+              </div>
+            }
           >
-            <Checkbox
-              id="terms-agree"
-              checked={agreedToTerms}
-              onCheckedChange={(checked) => {
-                const next = Boolean(checked);
-                setAgreedToTerms(next);
-                if (next) clearMissingField('terms');
-                if (error) setError('');
-              }}
-              className={`h-6 w-6 data-[state=checked]:bg-yellow-400 ${
-                missingFields.has('terms') ? 'border-red-500' : 'border-white/50'
-              }`}
-            />
-            <Label htmlFor="terms-agree" className="text-sm text-white cursor-pointer select-none">
-              By checking this box and typing my name below, I agree that I have read, understood, and legally bind
-              myself to the Terms and Conditions above.
-            </Label>
-          </div>
+            <p>
+              By executing this Agreement, the individual signing below (
+              <strong className="text-yellow-300">{expectedName}</strong>) expressly warrants, represents, and
+              covenants that they are the primary authorized operator of the leased equipment (the roll-off trailer
+              and dumpster unit).
+            </p>
+            <p>
+              Renter affirms under penalty of fraud that the identification and documentation provided during
+              checkout belong to them and accurately represent their true identity.
+            </p>
+            <p>
+              Absolute Liability for Permitted or Unpermitted Use: Renter acknowledges and agrees that they assume
+              absolute, unconditional liability for the equipment from the moment of possession until it is returned
+              and accepted by the Owner. This liability remains fully binding regardless of who is physically driving
+              the tow vehicle or operating the equipment. If the Renter permits any other individual to transport,
+              load, dump, or operate the equipment, Renter agrees that such individual operates as the Renter's
+              direct agent. Renter accepts full, primary, and personal financial and legal responsibility for any
+              property damage, bodily injury, theft, or total loss resulting from such use, whether authorized or
+              unauthorized.
+            </p>
+          </CollapsibleAgreementSection>
 
           <div ref={signatureSectionRef}>
             <Label htmlFor="signature" className="text-lg font-semibold text-white flex items-center mb-2">

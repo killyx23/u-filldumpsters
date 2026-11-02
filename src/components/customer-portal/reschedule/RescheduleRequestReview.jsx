@@ -7,6 +7,8 @@ import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
 import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
 import { isDeliveryServiceId } from '@/utils/rescheduleTaxCalculator';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
 export const RescheduleRequestReview = ({
     originalBooking,
@@ -21,6 +23,8 @@ export const RescheduleRequestReview = ({
     deliveryAddress,
     comments,
 }) => {
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     const [costsLoading, setCostsLoading] = useState(true);
     const [originalCosts, setOriginalCosts] = useState(null);
     const [newCosts, setNewCosts] = useState(null);
@@ -38,8 +42,8 @@ export const RescheduleRequestReview = ({
                 const newDistance = isDeliveryServiceId(newService?.id) ? storedDistance : 0;
 
                 const [orig, updated] = await Promise.all([
-                    calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance),
-                    calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance),
+                    calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance, null, null, null, includedMiles),
+                    calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance, null, null, null, includedMiles),
                 ]);
 
                 if (!cancelled) {
@@ -72,6 +76,7 @@ export const RescheduleRequestReview = ({
         newDropOffDate,
         newPickupDate,
         selectedAddonsList,
+        includedMiles,
     ]);
 
     const diffVal = (newCosts?.total ?? 0) - (originalCosts?.total ?? 0);

@@ -1,3 +1,4 @@
+import { includedDeliveryMileageExplanation } from '@/utils/chargesAndFeesConfig';
 import {
   AlertCircle,
   Info,
@@ -24,7 +25,7 @@ import {
 const entry = (props) => ({ visible: true, ...props });
 
 export function getBookingGuideEntries(stepKey, context = {}) {
-  const { planId, isDelivery } = context;
+  const { planId, isDelivery, includedMiles } = context;
 
   switch (stepKey) {
     case 'details':
@@ -94,7 +95,7 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           shortLabel: 'Mileage note',
           summary: 'Distance-based fees',
           description: isDelivery
-            ? "The first 30 miles plus the mileage to the landfill are included in the basic delivery fee, and every additional mile beyond that is charged at the mileage rate."
+            ? includedDeliveryMileageExplanation(includedMiles)
             : 'Delivery mileage is calculated in a later step based on your address.',
           howToUse: 'Read the note under the price estimate. No action needed until the add-ons step.',
           visible: isDelivery || planId === 1,
@@ -200,10 +201,10 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           id: 'expand-section',
           icon: ChevronDown,
           iconClassName: 'text-blue-400',
-          shortLabel: 'Expand a section',
+          shortLabel: 'Open a section',
           summary: 'Read full terms',
-          description: 'Each policy section can be expanded to read the complete text.',
-          howToUse: 'Tap a section title to expand or collapse. Check the box when you agree.',
+          description: 'Each policy title opens the full text for that section.',
+          howToUse: 'Tap a section title to open it. Check the box beside the title when you agree.',
         }),
         entry({
           id: 'accept-all',
@@ -212,7 +213,7 @@ export function getBookingGuideEntries(stepKey, context = {}) {
           shortLabel: 'Accept All & Continue',
           summary: 'Required agreements',
           description: 'You must accept every section before the button becomes active.',
-          howToUse: 'Expand and accept each section, then tap Accept All & Continue.',
+          howToUse: 'Check each section, then tap Accept All & Continue.',
         }),
       ];
 

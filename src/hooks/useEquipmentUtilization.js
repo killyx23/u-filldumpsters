@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
 
@@ -12,49 +12,49 @@ export const useEquipmentUtilization = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async (silent = false) => {
+    if (silent !== true) {
       setLoading(true);
       setError(null);
+    }
 
-      try {
-        const [bookingEquipRes, equipmentRes] = await Promise.all([
-          supabase
-            .from('booking_equipment')
-            .select('*, bookings(drop_off_date, pickup_date), equipment(name)'),
-          
-          supabase
-            .from('equipment_inventory')
-            .select('*'),
-        ]);
+    try {
+      const [bookingEquipRes, equipmentRes] = await Promise.all([
+        supabase
+          .from('booking_equipment')
+          .select('*, bookings(drop_off_date, pickup_date), equipment(name)'),
 
-        if (bookingEquipRes.error) {
-          console.error('[Equipment Utilization] Booking equipment fetch error:', bookingEquipRes.error);
-          throw bookingEquipRes.error;
-        }
+        supabase
+          .from('equipment_inventory')
+          .select('*'),
+      ]);
 
-        if (equipmentRes.error) {
-          console.error('[Equipment Utilization] Equipment fetch error:', equipmentRes.error);
-          throw equipmentRes.error;
-        }
-
-        setBookingEquipment(bookingEquipRes.data || []);
-        setEquipment(equipmentRes.data || []);
-
-      } catch (err) {
-        console.error('[Equipment Utilization] Error fetching utilization data:', err);
-        setError(err.message);
-        // Don't throw - allow component to render with empty data
-      } finally {
-        setLoading(false);
+      if (bookingEquipRes.error) {
+        console.error('[Equipment Utilization] Booking equipment fetch error:', bookingEquipRes.error);
+        throw bookingEquipRes.error;
       }
-    };
 
-    fetchData();
+      if (equipmentRes.error) {
+        console.error('[Equipment Utilization] Equipment fetch error:', equipmentRes.error);
+        throw equipmentRes.error;
+      }
+
+      setBookingEquipment(bookingEquipRes.data || []);
+      setEquipment(equipmentRes.data || []);
+    } catch (err) {
+      console.error('[Equipment Utilization] Error fetching utilization data:', err);
+      setError(err.message);
+    } finally {
+      if (silent !== true) setLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    fetchData(false);
+  }, [fetchData]);
+
   const utilizationData = useMemo(() => {
-    if (!equipment.length || !bookingEquipment.length) return [];
+    if (!equipment.length) return [];
 
     return equipment.map(eq => {
       try {
@@ -122,6 +122,7 @@ export const useEquipmentUtilization = () => {
   return {
     utilizationData,
     loading,
-    error
+    error,
+    refetch: fetchData,
   };
 };

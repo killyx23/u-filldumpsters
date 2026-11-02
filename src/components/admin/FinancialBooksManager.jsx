@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { TaxCollectionModule } from './financial/TaxCollectionModule';
 import { PhoneOrderAdjustments } from '@/components/admin/phone-order/PhoneOrderAdjustments';
+import { OperatingCostRatesEditor } from './financial/OperatingCostRatesEditor';
 
 export const FinancialBooksManager = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -119,12 +120,7 @@ export const FinancialBooksManager = () => {
         </TabsContent>
 
         <TabsContent value="settings" className="mt-6">
-          <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 text-center">
-            <Settings className="h-16 w-16 text-gray-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">Settings & Customization</h3>
-            <p className="text-gray-400">Manage categories, formulas, and financial tracking preferences</p>
-            <p className="text-sm text-yellow-400 mt-4">Module under development</p>
-          </div>
+          <OperatingCostRatesEditor />
         </TabsContent>
 
         <TabsContent value="audit" className="mt-6 space-y-6">

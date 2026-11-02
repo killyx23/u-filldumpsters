@@ -19,7 +19,7 @@ import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { formatMoney } from '@/utils/chargesAndFeesConfig';
+import { includedDeliveryMileageExplanation, includedMilesPhrase, landfillRatePhrase, landfillTonClause } from '@/utils/chargesAndFeesConfig';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
@@ -42,7 +42,8 @@ import {
 import { getFormattedServiceTimes, isDeliveryServiceClosedForBooking } from '@/utils/serviceAvailabilityHelper';
 import { useNavigate } from 'react-router-dom';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
-import { catalogBaseRental, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
+import { catalogBaseRental, extraDayRateForService, rentalDaysForPlan } from '@/utils/phoneOrderQuote';
+import { mileageBandFeePhrase } from '@/utils/mileageBands';
 import { activePromoLabel } from '@/utils/servicePlan';
 import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 import { advertisedDealsForService } from '@/utils/advertisedDeals';
@@ -1068,6 +1069,19 @@ export const BookingForm = ({
 
   const planName = formatCustomerFacingPlanName(currentPlan?.name || plan?.name) || 'Selected Service';
   const labels = getFieldLabels();
+  const chargesExtraDay = currentPlan?.id === 1 || currentPlan?.id === 4;
+  const firstDayRental = Number(currentPlan?.base_price) || 0;
+  const extraDayAmount = chargesExtraDay
+    ? Math.max(0, Math.round((baseRentalPrice - firstDayRental) * 100) / 100)
+    : 0;
+  const extraDayCount = (() => {
+    if (!chargesExtraDay || !bookingData.dropOffDate || !bookingData.pickupDate) return 0;
+    const dropOff = startOfDay(new Date(bookingData.dropOffDate));
+    const pickup = startOfDay(new Date(bookingData.pickupDate));
+    if (!isValid(dropOff) || !isValid(pickup) || isBefore(pickup, dropOff)) return 0;
+    return Math.max(0, rentalDaysForPlan(currentPlan.id, dropOff, pickup) - 1);
+  })();
+  const extraDayLabel = extraDayCount >= 2 ? 'Extra days' : 'Extra day';
   
   const renderDescription = () => {
     const dumpFeeData = getFeeForService(currentPlan?.id);
@@ -1076,9 +1090,10 @@ export const BookingForm = ({
       : null;
     const dynamicFee = adminDumpFee ?? '45.00';
     const dynamicMaxTons = dumpFeeData?.max_tons ? parseFloat(dumpFeeData.max_tons) : null;
+    const landfillTons = adminFee('dump_rate_tons');
     const landfillRateText = adminFeesLoading
       ? '…'
-      : `${formatMoney(adminFee('dump_tonnage_rate'))} per ton`;
+      : landfillRatePhrase(adminFee('dump_tonnage_rate'), landfillTons);
 
     if (currentPlan?.id === 4) {
       return (
@@ -1141,7 +1156,7 @@ export const BookingForm = ({
                   <div className="mt-2">
                     <h5 className="font-bold text-blue-100">Disposal Fees</h5>
                     <p>
-                      Disposal fees are charged per ton. These charges will be applied to the card on file once the rental is complete and the load has been processed at the landfill.
+                      Disposal fees are charged {landfillTonClause(landfillTons)}. These charges will be applied to the card on file once the rental is complete and the load has been processed at the landfill.
                     </p>
                   </div>
                 </motion.div>
@@ -1151,10 +1166,11 @@ export const BookingForm = ({
           <div className="bg-black/20 p-3 rounded border border-blue-500/20">
             <p className="font-bold text-white mb-1">Fee Structure:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>Rental: Base rate once for the first day, then the daily rate for each additional day</li>
+              <li>Base rental: <span className="text-green-400">${Number(currentPlan.base_price || 0).toFixed(2)}</span></li>
               <li>Base Delivery Fee{currentDeliveryFee > 0 ? <>: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></> : ''}</li>
-              <li>The first 30 miles plus mileage to the landfill is included in the basic delivery fee.</li>
-              <li>Additional mileage fee at ${Number(currentMileageRate).toFixed(2)}/mile.</li>
+              <li>{extraDayLabel}: <span className="text-green-400">${extraDayRateForService(currentPlan).toFixed(2)}</span></li>
+              <li>The first {includedMilesPhrase(adminFee('included_delivery_miles'))} plus mileage to the landfill is included in the basic delivery fee.</li>
+              <li>Additional mileage fee at {mileageBandFeePhrase({ ...currentPlan, mileage_rate: currentMileageRate })}.</li>
               <li>Weight Limit: <span className="text-orange-400">{dynamicMaxTons || 2.5}-ton maximum capacity</span></li>
               <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
@@ -1172,9 +1188,10 @@ export const BookingForm = ({
           <div className="bg-black/20 p-3 rounded border border-blue-500/20 mt-4">
             <p className="font-bold text-white mb-1">Pricing Details:</p>
             <ul className="list-disc list-inside space-y-1">
-              <li>Rental: Base rate covers up to 7 days</li>
+              <li>Base rental: <span className="text-green-400">${Number(currentPlan.base_price || 0).toFixed(2)}</span></li>
               {currentDeliveryFee > 0 && <li>Base Delivery Fee: <span className="text-green-400">${currentDeliveryFee.toFixed(2)}</span></li>}
-              <li>Dump Fees: <span className="text-green-400">${dynamicFee} per ton {dynamicMaxTons ? `(${dynamicMaxTons} tons max)` : ''}</span></li>
+              <li>{extraDayLabel}: <span className="text-green-400">${extraDayRateForService(currentPlan).toFixed(2)}</span></li>
+              <li>Dump Fees: <span className="text-green-400">${dynamicFee} {landfillTonClause(landfillTons)} {dynamicMaxTons ? `(${dynamicMaxTons} tons max)` : ''}</span></li>
               <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
           </div>
@@ -1411,12 +1428,13 @@ export const BookingForm = ({
                 <span className="text-sm text-blue-200 ml-2">(plus tax)</span>
               </div>
               <div className="text-sm text-gray-300 mb-2">
-                 <span>Base Rental: ${baseRentalPrice.toFixed(2)}</span>
+                 <span>Base Rental: ${(chargesExtraDay ? firstDayRental : baseRentalPrice).toFixed(2)}</span>
                  {currentDeliveryFee > 0 && <span className="ml-4">Delivery Fee: ${currentDeliveryFee.toFixed(2)}</span>}
+                 {chargesExtraDay && extraDayAmount > 0 && <span className="ml-4">{extraDayLabel}: ${extraDayAmount.toFixed(2)}</span>}
               </div>
               {(isDelivery || plan?.id === 1) && <p className="text-xs text-yellow-300 italic flex items-center mt-2">
                    <Truck className="h-4 w-4 mr-1" /> {isDelivery
-                     ? 'The first 30 miles are covered. Additional miles will be calculated on the next step.'
+                     ? `The first ${includedMilesPhrase(adminFee('included_delivery_miles'))} are covered. Additional miles will be calculated on the next step.`
                      : 'Mileage charge will be calculated in the next step based on distance.'}
                 </p>}
             </div>
@@ -1544,7 +1562,7 @@ export const BookingForm = ({
               </Button>
               <UiControlGuide
                 stepTitle="Booking Details"
-                entries={getBookingGuideEntries('details', { planId: plan?.id, isDelivery })}
+                entries={getBookingGuideEntries('details', { planId: plan?.id, isDelivery, includedMiles: adminFee('included_delivery_miles') })}
                 className="mt-3 flex justify-end"
               />
             </motion.div>

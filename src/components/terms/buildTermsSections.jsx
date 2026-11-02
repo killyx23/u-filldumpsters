@@ -1,20 +1,35 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { formatAdminMoney, formatAdminPercent, UNAVAILABLE_FEE_TEXT } from '@/utils/chargesAndFeesConfig';
+import { formatAdminMoney, formatAdminPercent, landfillTonClause, UNAVAILABLE_FEE_TEXT } from '@/utils/chargesAndFeesConfig';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
-import { currentReturnPath } from '@/utils/smsFormReturn';
+import { currentReturnPath, markSmsReturnPending } from '@/utils/smsFormReturn';
 import { MASTER_RENTAL_AGREEMENT_PATH } from '@/pages/MasterRentalAgreementPage';
 
 const MasterAgreementLink = ({ className, children }) => {
   const location = useLocation();
   const inBooking = location.pathname === '/';
+  const returnTo = currentReturnPath(location);
+  const keepBookingOnBack = () => {
+    if (!inBooking) return;
+    markSmsReturnPending(returnTo);
+    try {
+      const current = window.history.state || {};
+      window.history.replaceState(
+        { ...current, usr: { ...(current.usr || {}), resumeDraft: true } },
+        '',
+      );
+    } catch {
+      // ignore history errors
+    }
+  };
   return (
     <Link
       to={MASTER_RENTAL_AGREEMENT_PATH}
       state={{
-        returnTo: currentReturnPath(location),
+        returnTo,
         resumeBooking: inBooking,
       }}
+      onClick={keepBookingOnBack}
       className={className}
     >
       {children}
@@ -176,7 +191,7 @@ export const buildTermsSections = (fee, options = {}) => {
           Dumpster Delivery Rental is chosen, than the following statement is applicable:
         </p>
         <p>
-          Base rental price includes delivery and pickup. <strong>Disposal is billed separately at {formatAdminMoney(fee('dump_tonnage_rate'))} per ton</strong>{' '}
+          Base rental price includes delivery and pickup. <strong>Disposal is billed separately at {formatAdminMoney(fee('dump_tonnage_rate'))} {landfillTonClause(fee('dump_rate_tons'))}</strong>{' '}
           based on actual post-disposal scale weight.
         </p>
         <p>

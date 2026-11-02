@@ -14,6 +14,8 @@ import {
 } from '@/utils/rentalEquipmentPricing';
 import { quoteAddonForComparison } from '@/utils/rescheduleComparison';
 import { trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationService';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { chargeMileageBands } from '@/utils/mileageBands';
 import { catalogBaseRental } from '@/utils/phoneOrderQuote';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
@@ -68,11 +70,11 @@ export function addonsListToAddonsData(addonsList = [], { deliveryFee = 0, milea
   return addonsData;
 }
 
-/** Reschedule day counts are inclusive. Rock counts the first day only when drop-off and pickup are one day apart. */
+/** Reschedule day counts are inclusive. Delivery-window services bill the span from one morning to the next as one day. */
 function countedServiceDays(service, inclusiveDays) {
   const days = Math.max(1, Number(inclusiveDays) || 1);
   const id = Number(service?.id);
-  if (id === 3) return days <= 1 ? 1 : days - 1;
+  if (id === 1 || id === 3 || id === 4) return days <= 1 ? 1 : days - 1;
   return days;
 }
 
@@ -98,6 +100,7 @@ export async function calculateRescheduleCosts({
   insurancePrice = 0,
   priceSnapshot = null,
   discounts = null,
+  includedMiles = null,
 }) {
   if (!service) {
     return {
@@ -116,19 +119,19 @@ export async function calculateRescheduleCosts({
   const baseRentalCost = calculateBaseRentalCost(service, days);
   const isDelivery = isDeliveryServiceId(service.id);
   const deliveryFee = isDelivery ? Number(service.delivery_fee || 0) : 0;
-  const mileageRate = Number(service.mileage_rate || 0.85);
+  const included = resolveIncludedDeliveryMiles(includedMiles);
 
   let mileageCharge = 0;
   if (presetMileageCharge != null && Number.isFinite(Number(presetMileageCharge))) {
     mileageCharge = Number(presetMileageCharge);
   } else if (isDelivery && (distanceMiles > 0 || route)) {
     if (Number(service.id) === 4 && route) {
-      const priced = trailerDeliveryChargeableMiles(route);
-      mileageCharge = priced.chargeableDistance * mileageRate;
+      const priced = trailerDeliveryChargeableMiles(route, included);
+      mileageCharge = chargeMileageBands(priced.businessToCustomer, included, service);
     } else if (Number(service.id) === 4) {
-      mileageCharge = Math.max(0, Number(distanceMiles) - 30) * mileageRate;
+      mileageCharge = chargeMileageBands(Number(distanceMiles), included, service);
     } else {
-      mileageCharge = Number(distanceMiles) * 2 * mileageRate;
+      mileageCharge = chargeMileageBands(Number(distanceMiles) * 2, 0, service);
     }
   }
 

@@ -7,8 +7,12 @@ import {
 } from '@/utils/rescheduleCalculations';
 import { filterRentableServices } from '@/utils/servicePlan';
 import { fetchPlansForService, DEFAULT_INSURANCE_PRICE } from '@/utils/protectionPlans';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
 export const useRescheduleDataLoader = (bookingId) => {
+    const { fee: adminFee } = useChargesAndFees();
+    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -64,7 +68,11 @@ export const useRescheduleDataLoader = (bookingId) => {
                     originalService,
                     origDays,
                     originalAddonsList,
-                    distanceMiles
+                    distanceMiles,
+                    null,
+                    null,
+                    null,
+                    includedMiles
                 );
 
                 setData({
@@ -92,7 +100,7 @@ export const useRescheduleDataLoader = (bookingId) => {
         };
 
         fetchAllData();
-    }, [bookingId]);
+    }, [bookingId, includedMiles]);
 
     return { data, loading, error };
 };

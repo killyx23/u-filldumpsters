@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 
 export const useFinancialData = ({ autoRefresh = false, refreshInterval = 30000 } = {}) => {
@@ -12,10 +12,13 @@ export const useFinancialData = ({ autoRefresh = false, refreshInterval = 30000 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const fetchFinancialData = async () => {
+  const fetchFinancialData = useCallback(async (background = false) => {
+    const silent = background === true;
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
 
       // Fetch bookings with customer and service information
       const { data: bookingsData, error: bookingsError } = await supabase
@@ -96,18 +99,20 @@ export const useFinancialData = ({ autoRefresh = false, refreshInterval = 30000 
       console.error('[useFinancialData] Error fetching data:', err);
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchFinancialData();
+    fetchFinancialData(false);
 
-    if (autoRefresh) {
-      const interval = setInterval(fetchFinancialData, refreshInterval);
-      return () => clearInterval(interval);
-    }
-  }, [autoRefresh, refreshInterval]);
+    if (!autoRefresh) return undefined;
+
+    const interval = setInterval(() => {
+      fetchFinancialData(true);
+    }, refreshInterval);
+    return () => clearInterval(interval);
+  }, [autoRefresh, refreshInterval, fetchFinancialData]);
 
   return {
     data,

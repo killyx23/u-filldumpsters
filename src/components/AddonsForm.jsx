@@ -12,6 +12,8 @@ import { DeclineWarningDialog } from './addons/DeclineWarningDialog';
 import { MattressDisposalAgreementDialog, ApplianceDisposalAgreementDialog } from './addons/MattressDisposalAgreementDialog';
 import { DeliveryAddressSection } from './DeliveryAddressSection';
 import { calculateDistanceAndFee } from '@/services/DistanceCalculationService';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 import { useInsurancePricing } from '@/hooks/useInsurancePricing';
 import { useDrivewayProtectionPrice } from '@/hooks/useDrivewayProtectionPrice';
 import { buildProtectionPlanIdsPayload } from '@/utils/protectionPlans';
@@ -49,6 +51,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [loadingInventory, setLoadingInventory] = useState(true);
   const [fetchedMileageRate, setFetchedMileageRate] = useState(plan?.mileage_rate !== undefined ? Number(plan.mileage_rate) : 0.85);
+  const [mileageBands, setMileageBands] = useState(null);
   const [fetchedDeliveryFeeFlat, setFetchedDeliveryFeeFlat] = useState(plan?.delivery_fee !== undefined ? Number(plan.delivery_fee) : 10.00);
   const [equipmentMetaWithPrices, setEquipmentMetaWithPrices] = useState(equipmentMeta);
   const [disposalMetaWithPrices, setDisposalMetaWithPrices] = useState(disposalMeta);
@@ -57,6 +60,8 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   const { insurancePrice, loading: insuranceLoading, rentalInsurance } = useInsurancePricing(plan?.id);
   const { drivewayPrice, loading: drivewayLoading, drivewayProtection } = useDrivewayProtectionPrice(plan?.id);
   const { taxRate, loading: loadingTaxRate } = useTaxRate();
+  const { fee: adminFee } = useChargesAndFees();
+  const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
   const { taxOptions, loading: loadingTaxOptions } = useBookingTaxOptions(plan?.id);
 
   const isDeliveryRequired = plan?.id === 1 || (plan?.id === 2 && deliveryService) || plan?.id === 4;
@@ -168,10 +173,11 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
   useEffect(() => {
     const fetchPricing = async () => {
       if (plan?.id) {
-        const { data, error } = await supabase.from('services').select('mileage_rate, delivery_fee').eq('id', plan.id).single();
+        const { data, error } = await supabase.from('services').select('mileage_rate, delivery_fee, mileage_band2_miles, mileage_band2_rate, mileage_band3_miles, mileage_band3_rate').eq('id', plan.id).single();
         if (!error && data) {
           if (data.mileage_rate !== null) setFetchedMileageRate(Number(data.mileage_rate));
           if (data.delivery_fee !== null) setFetchedDeliveryFeeFlat(Number(data.delivery_fee));
+          setMileageBands(data);
         }
       }
     };
@@ -373,7 +379,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
       }
     }
 
-    const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate, addonsData?.deliveryRoute);
+    const feeResult = calculateDistanceAndFee(addonsData?.deliveryDistance || 0, plan?.id, fetchedMileageRate, addonsData?.deliveryRoute, includedMiles, { ...plan, ...mileageBands, mileage_rate: fetchedMileageRate });
     const resolvedMileageCharge = calculatedMileageCharge !== undefined ? calculatedMileageCharge : (feeResult.trip_mileage_cost || 0);
 
     const updatedAddons = {
@@ -644,7 +650,7 @@ export const AddonsForm = ({ basePrice, addonsData, setAddonsData, onSubmit, onB
                 />
               )}
               <OrderSummary
-                  plan={{...plan, price: basePrice}}
+                  plan={{ ...plan, ...mileageBands, price: basePrice, mileage_rate: fetchedMileageRate }}
                   addons={addonsData}
                   contactAddress={contactAddress}
                   onProceed={handleProceed}

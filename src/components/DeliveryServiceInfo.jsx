@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, Info } from 'lucide-react';
 import { useDumpFees } from '@/hooks/useDumpFees';
-import { TRAILER_DELIVERY_MILEAGE_EXPLANATION } from '@/services/DistanceCalculationService';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { includedDeliveryMileageExplanation, includedMilesPhrase, landfillRatePhrase, landfillTonClause } from '@/utils/chargesAndFeesConfig';
+import { mileageBandFeePhrase } from '@/utils/mileageBands';
 
 const isTrailerDelivery = (service) => Number(service?.id) === 4;
 
@@ -11,6 +13,7 @@ export const DeliveryServiceInfo = ({ isOpen, onClose, planId = 2 }) => {
     const [service, setService] = useState(null);
     const [loading, setLoading] = useState(true);
     const { getFeeForService } = useDumpFees();
+    const { fee: adminFee } = useChargesAndFees();
 
     useEffect(() => {
         if (isOpen) {
@@ -60,26 +63,26 @@ export const DeliveryServiceInfo = ({ isOpen, onClose, planId = 2 }) => {
                             <div className="flex items-start">
                                 <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
                                 {isTrailerDelivery(service) ? (
-                                    <p>{TRAILER_DELIVERY_MILEAGE_EXPLANATION}</p>
+                                    <p>{includedDeliveryMileageExplanation(adminFee('included_delivery_miles'))}</p>
                                 ) : (
-                                    <p><strong>Mileage charge of ${formatCurrency(service?.mileage_rate)}</strong> per mile (round trip). {service?.id === 1 && <span className="text-green-400 ml-1">(First 30 miles are free!)</span>}</p>
+                                    <p><strong>Mileage charge of {mileageBandFeePhrase(service)}</strong> (round trip). {service?.id === 1 && <span className="text-green-400 ml-1">(First {includedMilesPhrase(adminFee('included_delivery_miles'))} are free!)</span>}</p>
                                 )}
                             </div>
                             {isTrailerDelivery(service) && (
                                 <div className="flex items-start">
                                     <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                    <p>Mileage rate ${formatCurrency(service?.mileage_rate)}/mile.</p>
+                                    <p>Mileage rate {mileageBandFeePhrase(service)}.</p>
                                 </div>
                             )}
                             {isTrailerDelivery(service) ? (
                                 <div className="flex items-start">
                                     <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                    <p>The dump will be charged $45 per ton.</p>
+                                    <p>The dump will be charged {landfillRatePhrase(adminFee('dump_tonnage_rate'), adminFee('dump_rate_tons'))}.</p>
                                 </div>
                             ) : (
                                 <div className="flex items-start">
                                     <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                    <p><strong>Dump fees:</strong> ${dynamicFee} per ton{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.</p>
+                                    <p><strong>Dump fees:</strong> ${dynamicFee} {landfillTonClause(adminFee('dump_rate_tons'))}{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.</p>
                                 </div>
                             )}
                         </div>

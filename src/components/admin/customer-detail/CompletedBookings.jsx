@@ -13,6 +13,7 @@ import { getInitiatedByLabel } from '@/utils/bookingArchiveHelper';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
+import { lockedExtraGpsMilesLabel } from '@/utils/bookingMileage';
 import {
     getFollowUpReasonLabel,
     isFollowUpHold,
@@ -309,6 +310,9 @@ export const CompletedBookings = ({ bookings, equipment, customerId, onUpdate })
                              <DetailItem icon={<Hash />} label="Stripe Charge ID" value={stripeChargeId} />
                              
                              {booking.returned_at && <DetailItem icon={<CheckCircle className="text-green-400" />} label="Returned On" value={format(parseISO(booking.returned_at), 'Pp')} />}
+                             {lockedExtraGpsMilesLabel(booking) && (
+                                <DetailItem icon={<MapPin />} label="Extra GPS mileage" value={lockedExtraGpsMilesLabel(booking)} />
+                             )}
                              {isCustomerPickupService(booking.plan, booking.addons || {}) && (
                                <DetailItem
                                  icon={<CheckCircle className={booking.return_lock_at ? 'text-green-400' : 'text-gray-500'} />}

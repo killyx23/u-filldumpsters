@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +9,11 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Gauge, Loader2, RefreshCw } from 'lucide-react';
 import { format, parseISO, subDays } from 'date-fns';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { DEFAULT_OPERATING_COST_RATES, bookingOperatingCost } from '@/utils/operatingCost';
+import { syncLockedExtraGpsMiles } from '@/utils/bookingMileage';
+import { OperatingCostRatesEditor } from './OperatingCostRatesEditor';
+import { BookingOperatingCost } from './BookingOperatingCost';
 
 const SOURCE_LABELS = {
   booking_create: 'Booking create',
@@ -16,12 +22,65 @@ const SOURCE_LABELS = {
   booking_complete: 'Booking complete',
 };
 
+function milesNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function CustomerGpsMilesInput({ miles, saving, onSave }) {
+  const [value, setValue] = useState(milesNumber(miles).toFixed(1));
+
+  useEffect(() => {
+    setValue(milesNumber(miles).toFixed(1));
+  }, [miles]);
+
+  const commit = () => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setValue(milesNumber(miles).toFixed(1));
+      toast({
+        title: 'Enter miles as a number',
+        description: 'Customer GPS miles cannot be negative.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const rounded = Math.round(parsed * 100) / 100;
+    if (rounded === milesNumber(miles)) {
+      setValue(rounded.toFixed(1));
+      return;
+    }
+    onSave(rounded);
+  };
+
+  return (
+    <Input
+      type="number"
+      min="0"
+      step="0.1"
+      inputMode="decimal"
+      aria-label="Customer GPS miles"
+      value={value}
+      disabled={saving}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
+      className="h-8 w-24 bg-gray-900 border-gray-700 text-white text-right ml-auto"
+    />
+  );
+}
+
 export const MileageServiceTrackingModule = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [serviceFilter, setServiceFilter] = useState('all');
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [savingId, setSavingId] = useState(null);
+  const [rates, setRates] = useState(DEFAULT_OPERATING_COST_RATES);
+  const handleRatesChange = useCallback((next) => setRates(next), []);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -37,12 +96,16 @@ export const MileageServiceTrackingModule = () => {
           service_type,
           one_way_miles,
           round_trip_miles,
+          customer_gps_miles,
+          truck_miles_override,
+          driver_minutes_override,
+          landfill_haul_override,
           trip_kind,
           source,
           recorded_at,
           updated_at,
-          customers:customer_id ( name, email ),
-          bookings:booking_id ( id, status, drop_off_date )
+          customers:customer_id ( name, email, travel_time_minutes ),
+          bookings:booking_id ( id, status, drop_off_date, addons, plan, assigned_inventory_items )
         `)
         .order('recorded_at', { ascending: false })
         .limit(500);
@@ -91,22 +154,90 @@ export const MileageServiceTrackingModule = () => {
     const map = new Map();
     filtered.forEach((row) => {
       const key = row.service_name || 'Unknown Service';
-      const prev = map.get(key) || { oneWay: 0, roundTrip: 0, count: 0 };
-      prev.oneWay += Number(row.one_way_miles) || 0;
-      prev.roundTrip += Number(row.round_trip_miles) || 0;
+      const prev = map.get(key) || { oneWay: 0, roundTrip: 0, customerGps: 0, operating: 0, count: 0 };
+      prev.oneWay += milesNumber(row.one_way_miles);
+      prev.roundTrip += milesNumber(row.round_trip_miles);
+      prev.customerGps += milesNumber(row.customer_gps_miles);
+      prev.operating += bookingOperatingCost(row, rates).total;
       prev.count += 1;
       map.set(key, prev);
     });
     return Array.from(map.entries())
       .map(([name, stats]) => ({ name, ...stats }))
       .sort((a, b) => b.roundTrip - a.roundTrip);
-  }, [filtered]);
+  }, [filtered, rates]);
 
   const grandRoundTrip = totalsByService.reduce((sum, row) => sum + row.roundTrip, 0);
   const grandOneWay = totalsByService.reduce((sum, row) => sum + row.oneWay, 0);
+  const grandCustomerGps = totalsByService.reduce((sum, row) => sum + row.customerGps, 0);
+  const grandTotal = grandRoundTrip + grandCustomerGps;
+  const grandOperating = totalsByService.reduce((sum, row) => sum + row.operating, 0);
+
+  const saveCustomerGpsMiles = async (row, miles) => {
+    setSavingId(row.id);
+    try {
+      const { error } = await supabase
+        .from('booking_mileage_logs')
+        .update({
+          customer_gps_miles: miles,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', row.id);
+      if (error) throw error;
+      const synced = await syncLockedExtraGpsMiles(row.booking_id, miles);
+      if (synced.error) {
+        console.warn('[MileageServiceTracking] booking GPS snapshot was not updated', synced.error);
+      }
+      setLogs((current) =>
+        current.map((entry) =>
+          entry.id === row.id ? { ...entry, customer_gps_miles: miles } : entry
+        )
+      );
+      toast({
+        title: 'Customer GPS miles saved',
+        description: `Booking #${row.booking_id} now includes ${miles.toFixed(1)} extra miles.`,
+      });
+    } catch (err) {
+      console.error('[MileageServiceTracking] customer GPS save failed', err);
+      toast({
+        title: 'Could not save customer GPS miles',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const saveCostFields = async (row, patch) => {
+    setSavingId(row.id);
+    try {
+      const { error } = await supabase
+        .from('booking_mileage_logs')
+        .update({
+          ...patch,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', row.id);
+      if (error) throw error;
+      setLogs((current) =>
+        current.map((entry) => (entry.id === row.id ? { ...entry, ...patch } : entry))
+      );
+    } catch (err) {
+      console.error('[MileageServiceTracking] operating cost save failed', err);
+      toast({
+        title: 'Could not save this booking cost',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
+      <OperatingCostRatesEditor onRatesChange={handleRatesChange} />
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -114,7 +245,7 @@ export const MileageServiceTrackingModule = () => {
             Mileage &amp; Service Tracking
           </h2>
           <p className="text-gray-400 text-sm mt-1">
-            One-way business↔customer miles from Google. Round-trip miles (×2) are logged for delivery/pickup trips by service type.
+            One-way business↔customer miles from Google. Round-trip miles (×2) are logged for delivery/pickup trips by service type. Add the extra trailer GPS miles from while the customer has the trailer.
           </p>
         </div>
         <Button
@@ -171,11 +302,23 @@ export const MileageServiceTrackingModule = () => {
             </p>
             <p>
               Round-trip total:{' '}
-              <span className="text-yellow-300 font-semibold">{grandRoundTrip.toFixed(1)} mi</span>
+              <span className="text-white font-semibold">{grandRoundTrip.toFixed(1)} mi</span>
+            </p>
+            <p>
+              Customer GPS:{' '}
+              <span className="text-white font-semibold">{grandCustomerGps.toFixed(1)} mi</span>
+            </p>
+            <p>
+              Total miles:{' '}
+              <span className="text-yellow-300 font-semibold">{grandTotal.toFixed(1)} mi</span>
             </p>
             <p>
               One-way total:{' '}
               <span className="text-white font-semibold">{grandOneWay.toFixed(1)} mi</span>
+            </p>
+            <p>
+              Operating cost:{' '}
+              <span className="text-yellow-300 font-semibold">{formatCurrency(grandOperating)}</span>
             </p>
           </div>
         </CardContent>
@@ -191,10 +334,22 @@ export const MileageServiceTrackingModule = () => {
               <p>{row.count} trip{row.count === 1 ? '' : 's'}</p>
               <p>
                 Round-trip:{' '}
-                <span className="text-yellow-300 font-semibold">{row.roundTrip.toFixed(1)} mi</span>
+                <span className="text-white font-semibold">{row.roundTrip.toFixed(1)} mi</span>
+              </p>
+              <p>
+                Customer GPS:{' '}
+                <span className="text-white font-semibold">{row.customerGps.toFixed(1)} mi</span>
+              </p>
+              <p>
+                Total:{' '}
+                <span className="text-yellow-300 font-semibold">{(row.roundTrip + row.customerGps).toFixed(1)} mi</span>
               </p>
               <p>
                 One-way: <span className="text-white font-semibold">{row.oneWay.toFixed(1)} mi</span>
+              </p>
+              <p>
+                Operating cost:{' '}
+                <span className="text-yellow-300 font-semibold">{formatCurrency(row.operating)}</span>
               </p>
             </CardContent>
           </Card>
@@ -225,35 +380,72 @@ export const MileageServiceTrackingModule = () => {
                     <th className="py-3 pr-3">Service</th>
                     <th className="py-3 pr-3 text-right">One-way</th>
                     <th className="py-3 pr-3 text-right">Round-trip</th>
-                    <th className="py-3">Source</th>
+                    <th className="py-3 pr-3 text-right">Customer GPS miles</th>
+                    <th className="py-3 pr-3">Source</th>
+                    <th className="py-3 text-right">Operating cost</th>
                   </tr>
                 </thead>
                 <tbody className="text-gray-200">
-                  {filtered.map((row) => (
-                    <tr key={row.id} className="border-b border-gray-800/80">
-                      <td className="py-3 pr-3 whitespace-nowrap">
-                        {row.recorded_at ? format(parseISO(row.recorded_at), 'MMM d, yyyy') : '—'}
-                      </td>
-                      <td className="py-3 pr-3">#{row.booking_id}</td>
-                      <td className="py-3 pr-3">
-                        {row.customers?.name || '—'}
-                        {row.customers?.email ? (
-                          <span className="block text-xs text-gray-500">{row.customers.email}</span>
-                        ) : null}
-                      </td>
-                      <td className="py-3 pr-3">
-                        <span className="font-medium text-white">{row.service_name || '—'}</span>
-                        {row.service_type ? (
-                          <span className="block text-xs text-gray-500">{row.service_type}</span>
-                        ) : null}
-                      </td>
-                      <td className="py-3 pr-3 text-right">{Number(row.one_way_miles || 0).toFixed(1)} mi</td>
-                      <td className="py-3 pr-3 text-right text-yellow-300 font-semibold">
-                        {Number(row.round_trip_miles || 0).toFixed(1)} mi
-                      </td>
-                      <td className="py-3">{SOURCE_LABELS[row.source] || row.source}</td>
-                    </tr>
-                  ))}
+                  {filtered.map((row) => {
+                    const cost = bookingOperatingCost(row, rates);
+                    return (
+                      <React.Fragment key={row.id}>
+                        <tr className="border-b border-gray-800/80">
+                          <td className="py-3 pr-3 whitespace-nowrap">
+                            {row.recorded_at ? format(parseISO(row.recorded_at), 'MMM d, yyyy') : '—'}
+                          </td>
+                          <td className="py-3 pr-3">#{row.booking_id}</td>
+                          <td className="py-3 pr-3">
+                            {row.customers?.name || '—'}
+                            {row.customers?.email ? (
+                              <span className="block text-xs text-gray-500">{row.customers.email}</span>
+                            ) : null}
+                          </td>
+                          <td className="py-3 pr-3">
+                            <span className="font-medium text-white">{row.service_name || '—'}</span>
+                            {row.service_type ? (
+                              <span className="block text-xs text-gray-500">{row.service_type}</span>
+                            ) : null}
+                          </td>
+                          <td className="py-3 pr-3 text-right">{Number(row.one_way_miles || 0).toFixed(1)} mi</td>
+                          <td className="py-3 pr-3 text-right text-yellow-300 font-semibold">
+                            {milesNumber(row.round_trip_miles).toFixed(1)} mi
+                          </td>
+                          <td className="py-3 pr-3">
+                            <div className="flex justify-end items-center gap-2">
+                              {row.customer_id ? (
+                                <Link
+                                  to={`/admin/customer/${row.customer_id}`}
+                                  className="text-xs text-blue-300 hover:underline whitespace-nowrap"
+                                >
+                                  {row.customers?.name || 'Customer'}
+                                </Link>
+                              ) : null}
+                              <CustomerGpsMilesInput
+                                miles={row.customer_gps_miles}
+                                saving={savingId === row.id}
+                                onSave={(miles) => saveCustomerGpsMiles(row, miles)}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-3 pr-3">{SOURCE_LABELS[row.source] || row.source}</td>
+                          <td className="py-3 text-right whitespace-nowrap text-yellow-300 font-semibold">
+                            {formatCurrency(cost.total)}
+                          </td>
+                        </tr>
+                        <tr className="border-b border-gray-800/80 bg-gray-900/40">
+                          <td colSpan={9} className="px-3 py-4">
+                            <BookingOperatingCost
+                              log={row}
+                              rates={rates}
+                              saving={savingId === row.id}
+                              onSave={(patch) => saveCostFields(row, patch)}
+                            />
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -23,7 +23,10 @@ import { calculateBookingTotal } from '@/utils/calculateBookingTotal';
 import { evaluateCoupon } from '@/utils/couponRules';
 import { calculateTaxFromLineItems } from '@/utils/bookingTaxCalculator';
 import { getPriceForEquipment } from '@/utils/equipmentPricingIntegration';
-import { fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
+import { calculateDistanceAndFee, fetchDistanceAndCalculateFee } from '@/services/DistanceCalculationService';
+import { calculateOneWayMilesForAddress } from '@/utils/bookingMileage';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 import { storePendingBooking } from '@/utils/bookingDataPersistence';
 import { activePromoLabel, buildPlanSnapshot } from '@/utils/servicePlan';
 import { buildCustomerPriceReview } from '@/utils/customerPriceReview';
@@ -137,6 +140,25 @@ async function invokeAdmin(body) {
   }
   return result.data;
 }
+
+/** Dumpster and trailer delivery are the services the booking site prices for mileage. */
+function sitePricesDeliveryMileage(plan) {
+  const id = Number(plan?.id);
+  return id === 1 || id === 4;
+}
+
+function deliveryAddressLine(address) {
+  return `${address.street}, ${address.city}, ${address.state} ${address.zip}`;
+}
+
+const emptyMileageQuote = {
+  charge: 0,
+  totalMiles: 0,
+  measuredMiles: 0,
+  oneWayMiles: 0,
+  route: null,
+  display: '',
+};
 
 function bookingDeliveryType(plan, isDelivery) {
   if (isDelivery) return 'delivery';
@@ -315,6 +337,8 @@ function CardCapture({ onPaid }) {
 
 export function PhoneOrderDesk() {
   const { user } = useAuth();
+  const { fee: adminFee } = useChargesAndFees();
+  const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
   const [section, setSection] = useState('call');
   const [form, setForm] = useState(emptyForm);
   const [address, setAddress] = useState(emptyAddress);
@@ -330,8 +354,8 @@ export function PhoneOrderDesk() {
   const [additionalDayPrices, setAdditionalDayPrices] = useState({});
   const [equipmentTypes, setEquipmentTypes] = useState({});
   const [coupon, setCoupon] = useState(null);
-  const [mileage, setMileage] = useState(0);
-  const [distanceMiles, setDistanceMiles] = useState(0);
+  const [mileageQuote, setMileageQuote] = useState(emptyMileageQuote);
+  const [mileageStatus, setMileageStatus] = useState('');
   const [availability, setAvailability] = useState({});
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
   const [fixedTimes, setFixedTimes] = useState({ drop: '', pick: '' });
@@ -480,15 +504,52 @@ export function PhoneOrderDesk() {
   }, [form.dropOff, form.pickup, effective, unlock]);
 
   useEffect(() => {
-    if (!isDelivery || !addressCanProceed(address) || !effective) return undefined;
+    const priced = isDelivery && sitePricesDeliveryMileage(effective) && address?.isVerified === true && addressCanProceed(address);
+    if (!priced) {
+      setMileageQuote(emptyMileageQuote);
+      setMileageStatus('');
+      return undefined;
+    }
     let cancelled = false;
-    fetchDistanceAndCalculateFee(address, effective.id, effective.mileage_rate).then((result) => {
-      if (cancelled || result?.error) return;
-      setMileage(Number(result.mileage_charge || result.trip_mileage_cost || 0));
-      setDistanceMiles(Number(result.distance || 0));
+    setMileageQuote(emptyMileageQuote);
+    setMileageStatus('loading');
+    const fullAddress = deliveryAddressLine(address);
+    const mileageRate = Number(effective.mileage_rate);
+    const bands = { ...effective, mileage_rate: mileageRate };
+    Promise.all([
+      fetchDistanceAndCalculateFee(fullAddress, effective.id, mileageRate, includedMiles, bands),
+      calculateOneWayMilesForAddress(fullAddress).catch(() => null),
+    ]).then(([result, oneWayMiles]) => {
+      if (cancelled) return;
+      if (result?.error) {
+        setMileageQuote(emptyMileageQuote);
+        setMileageStatus('error');
+        return;
+      }
+      const fee = calculateDistanceAndFee(
+        result.distance,
+        effective.id,
+        mileageRate,
+        result.deliveryRoute,
+        includedMiles,
+        bands,
+      );
+      setMileageQuote({
+        charge: Number(fee.trip_mileage_cost || 0),
+        totalMiles: Number(result.distance || 0),
+        measuredMiles: Number(fee.measuredMiles || 0),
+        oneWayMiles: Number(oneWayMiles || 0),
+        route: result.deliveryRoute || null,
+        display: fee.displayText || '',
+      });
+      setMileageStatus('ready');
+    }).catch(() => {
+      if (cancelled) return;
+      setMileageQuote(emptyMileageQuote);
+      setMileageStatus('error');
     });
     return () => { cancelled = true; };
-  }, [address, isDelivery, effective]);
+  }, [address, isDelivery, effective, includedMiles]);
 
   const loadQueue = async () => {
     const { data } = await supabase.from('phone_orders').select('*').order('created_at', { ascending: false }).limit(40);
@@ -563,8 +624,11 @@ export function PhoneOrderDesk() {
     insurance: form.insurance,
     drivewayProtection: Number(effective?.id) === 1 && isDelivery ? form.driveway : 'decline',
     deliveryFee,
-    mileageCharge: isDelivery ? mileage : 0,
-    oneWayDistanceMiles: distanceMiles,
+    mileageCharge: mileageQuote.charge,
+    oneWayDistanceMiles: mileageQuote.oneWayMiles,
+    deliveryDistance: mileageQuote.totalMiles,
+    deliveryRoute: mileageQuote.route,
+    distanceFeeDisplay: mileageQuote.display,
     coupon,
     mattressDisposal: showDisposal ? Number(qty[4] || 0) : 0,
     tvDisposal: showDisposal ? Number(qty[5] || 0) : 0,
@@ -976,8 +1040,11 @@ export function PhoneOrderDesk() {
         isDelivery,
         deliveryService: isDelivery,
         deliveryFee,
-        mileageCharge: isDelivery ? mileage : 0,
-        oneWayDistanceMiles: distanceMiles,
+        mileageCharge: mileageQuote.charge,
+        oneWayDistanceMiles: mileageQuote.oneWayMiles,
+        deliveryDistance: mileageQuote.totalMiles,
+        deliveryRoute: mileageQuote.route,
+        distanceFeeDisplay: mileageQuote.display,
         deliveryAddress: contactAddress,
         wasVerificationSkipped: false,
         smsTransactionalOptIn: false,
@@ -1385,7 +1452,14 @@ export function PhoneOrderDesk() {
                   Google did not verify this address. Accept it for the same manual review the website uses.
                 </label>
               )}
-              {address.isVerified && <p className="text-sm text-emerald-300">Address verified with Google. {isDelivery && distanceMiles ? `${distanceMiles.toFixed(1)} miles · mileage ${money(mileage)}.` : ''}</p>}
+              {address.isVerified && (
+                <p className="text-sm text-emerald-300">
+                  Address verified with Google.
+                  {sitePricesDeliveryMileage(effective) && mileageStatus === 'loading' ? ' Calculating route...' : ''}
+                  {sitePricesDeliveryMileage(effective) && mileageStatus === 'error' ? ' Could not calculate the delivery route. Try the address again.' : ''}
+                  {sitePricesDeliveryMileage(effective) && mileageStatus === 'ready' && mileageQuote.display ? ` ${mileageQuote.display}` : ''}
+                </p>
+              )}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <DeskDateField

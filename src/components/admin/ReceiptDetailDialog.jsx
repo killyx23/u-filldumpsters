@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Hash, User, Mail, Phone, Home, Clock, DollarSign, ShieldCheck, ShieldOff, AlertTriangle, Info, ShoppingBag, Key, Tag, Repeat, MapPin } from 'lucide-react';
 import { resolveRescheduleApprovalDisplay, formatRescheduleStripeLine } from '@/utils/rescheduleApprovalDisplay';
 import { formatFriendlyDateTime } from '@/utils/changeRequestNoteFormatter';
-import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery } from '@/utils/bookingMileage';
+import { resolveOneWayMiles, formatMilesLabel, bookingIsCompanyDelivery, lockedExtraGpsMilesLabel } from '@/utils/bookingMileage';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
 import { formatTimeWindow, formatTimeWindowBetween, shouldShowTimeWindow, isSelfServiceTrailer } from '@/utils/timeWindowFormatter';
@@ -121,6 +121,9 @@ import { feeChargeEntries } from '@/utils/feeCharges';
                             <DetailRow icon={<Info />} label="Service" value={formatCustomerFacingPlanName(plan.name)} />
                             {showOneWayDistance && (
                                 <DetailRow icon={<MapPin />} label="Distance (one-way)" value={formatMilesLabel(resolveOneWayMiles(booking, customers))} />
+                            )}
+                            {lockedExtraGpsMilesLabel(booking) && (
+                                <DetailRow icon={<MapPin />} label="Extra GPS mileage" value={lockedExtraGpsMilesLabel(booking)} />
                             )}
                             <DetailRow icon={<Clock />} label={isSelfService ? "Pickup" : "Drop-off"} value={`${format(parseISO(drop_off_date), 'PPP')} ${formatTime(drop_off_time_slot, { isReturnBy: false })}`} />
                             <DetailRow icon={<Clock />} label={isSelfService ? "Return" : "Pickup"} value={`${format(parseISO(pickup_date), 'PPP')} ${formatTime(pickup_time_slot, { isReturnBy: isSelfService })}`} />
