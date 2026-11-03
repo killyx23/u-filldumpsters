@@ -22,6 +22,9 @@ import {
   isCheckoutCompletedElsewhere,
   markCheckoutCompletedElsewhere,
   clearCheckoutCompletedElsewhere,
+  markCheckoutDraftStarted,
+  getCheckoutDraftStartedAt,
+  isBookingCreatedForCurrentDraft,
 } from '@/utils/checkoutTabSync';
 import { hasVerifiedEmailSession, markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
 
@@ -48,6 +51,35 @@ async function readCheckoutProgress(pendingId) {
   } catch {
     // Network failure must not block teardown — fall through to the normal path.
     return null;
+  }
+}
+
+/**
+ * True when a "completed" status belongs to THIS checkout attempt, not a prior
+ * paid order still attached to a reused pending_customers row / overlapping dates.
+ */
+async function isFreshCheckoutCompletion(progress, draftStartedAtMs) {
+  if (!progress?.completed) return false;
+  const bookingId = progress.booking_id;
+  const floor = draftStartedAtMs ?? getCheckoutDraftStartedAt();
+  if (bookingId == null || floor == null) {
+    // No floor yet — trust the server (e.g. payment tab / unknown start).
+    return true;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, created_at')
+      .eq('id', bookingId)
+      .maybeSingle();
+    if (error || !data?.created_at) {
+      // Fail open only when we cannot verify; prefer not to trap a real dual-tab pay.
+      return true;
+    }
+    return isBookingCreatedForCurrentDraft(data.created_at, floor);
+  } catch {
+    return true;
   }
 }
 
@@ -99,13 +131,24 @@ export function useCheckoutIdleGuard({
   const completedHandledRef = useRef(false);
   const verifiedAdvanceHandledRef = useRef(false);
   const teardownInFlightRef = useRef(false);
+  /** Wall-clock when this tab last entered protected checkout (step 5+). */
+  const draftStartedAtRef = useRef(null);
 
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
 
   useEffect(() => {
+    const previous = pendingTokenRef.current;
     pendingTokenRef.current = pendingToken;
+    // Reused pending UUID for the same email does not remount the idle effect;
+    // bump the draft floor whenever the active pending id is (re)assigned so a
+    // fresh contact save is not treated as the prior paid order.
+    if (pendingToken && pendingToken !== previous && enabledRef.current) {
+      draftStartedAtRef.current = markCheckoutDraftStarted();
+      completedHandledRef.current = false;
+      clearCheckoutCompletedElsewhere();
+    }
   }, [pendingToken]);
 
   useEffect(() => {
@@ -263,7 +306,10 @@ export function useCheckoutIdleGuard({
         // where no cross-tab event can reach us. Ask the server before cancelling.
         if (pendingId) {
           const progress = await readCheckoutProgress(pendingId);
-          if (progress?.completed) {
+          if (
+            progress?.completed &&
+            (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+          ) {
             handleOtherTabCompletedRef.current?.({
               bookingId: progress.booking_id,
               pendingId,
@@ -489,6 +535,9 @@ export function useCheckoutIdleGuard({
     sequenceStartedAtRef.current = null;
     moreTimeEndsAtRef.current = null;
     countdownEndsAtRef.current = null;
+    // New protected-checkout session: ignore paid bookings from earlier orders
+    // that still look "completed" on a reused pending row.
+    draftStartedAtRef.current = markCheckoutDraftStarted();
     if (!isCheckoutCompletedElsewhere({ pendingId: pendingTokenRef.current })) {
       clearCheckoutTeardownDone();
     }
@@ -536,7 +585,10 @@ export function useCheckoutIdleGuard({
       if (isPaymentInFlight()) return;
       if (isCheckoutCompletedElsewhere({ pendingId })) {
         const progress = await readCheckoutProgress(pendingId);
-        if (progress?.completed) {
+        if (
+          progress?.completed &&
+          (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+        ) {
           handleOtherTabCompletedRef.current?.({
             bookingId: progress.booking_id,
             pendingId,
@@ -547,7 +599,10 @@ export function useCheckoutIdleGuard({
       }
       try {
         const progress = await readCheckoutProgress(pendingId);
-        if (progress?.completed) {
+        if (
+          progress?.completed &&
+          (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+        ) {
           handleOtherTabCompletedRef.current?.({
             bookingId: progress.booking_id,
             pendingId,

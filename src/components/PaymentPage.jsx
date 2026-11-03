@@ -52,7 +52,11 @@ import {
   clearIdlePromptShownLocal,
   clearCheckoutTeardownDone,
 } from '@/utils/checkoutIdleGuard';
-import { publishCheckoutSyncEvent } from '@/utils/checkoutTabSync';
+import {
+  publishCheckoutSyncEvent,
+  isBookingCreatedForCurrentDraft,
+  getCheckoutDraftStartedAt,
+} from '@/utils/checkoutTabSync';
 import {
   EQUIPMENT_FRIENDLY_LABELS,
   isPurchaseEquipmentId,
@@ -954,6 +958,31 @@ export const PaymentPage = ({ onBack }) => {
         setBookingId(data.id);
 
         if (data.already_converted) {
+          // Reused pending rows can point at a prior paid booking for overlapping
+          // dates. Only treat it as "already paid this checkout" when that booking
+          // was created during this draft attempt.
+          let convertedCreatedAt = data.created_at || null;
+          if (!convertedCreatedAt) {
+            const { data: existingBooking } = await supabase
+              .from('bookings')
+              .select('created_at')
+              .eq('id', data.id)
+              .maybeSingle();
+            convertedCreatedAt = existingBooking?.created_at || null;
+          }
+          const draftStartedAt = getCheckoutDraftStartedAt();
+          if (
+            draftStartedAt != null &&
+            convertedCreatedAt &&
+            !isBookingCreatedForCurrentDraft(convertedCreatedAt, draftStartedAt)
+          ) {
+            console.warn(
+              `[${timestamp}] [PaymentPage] Ignoring stale already_converted booking #${data.id} from a prior order`,
+            );
+            throw new Error(
+              'We could not start a new payment hold for this checkout. Please refresh and try again, or contact support if this continues.',
+            );
+          }
           publishCheckoutSyncEvent({
             type: 'completed',
             pendingId: pendingData.id,

@@ -55,8 +55,11 @@ export function resolveCheckoutContext({ pendingToken = null, flowMeta = null } 
   const storedActive = Boolean(readStoredFlowMeta()?.isActive && readStoredFlowStep() > 0);
   const onTokenRoute = Boolean(urlToken);
 
+  // pendingId alone must not protect steps 1–4: a reused pending UUID from a
+  // prior paid order would arm the idle completion poll and redirect to that
+  // old confirmation before the customer finishes contact / terms.
   const isProtectedCheckout =
-    currentStep >= 5 || Boolean(pendingId) || Boolean(bookingId) || onTokenRoute;
+    currentStep >= 5 || Boolean(bookingId) || onTokenRoute;
 
   const isInCheckoutFlow =
     (flowMeta?.isActive && flowMeta?.currentStep > 0) || onTokenRoute || storedActive;

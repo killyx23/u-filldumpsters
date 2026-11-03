@@ -20,6 +20,7 @@ import {
   BOOKING_FLOW_STORAGE_KEY,
 } from '@/utils/checkoutIdleGuard';
 import { markVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
+import { clearCheckoutDraftStarted } from '@/utils/checkoutTabSync';
 import { toast } from '@/components/ui/use-toast';
 
 export { BOOKING_FLOW_STORAGE_KEY };
@@ -143,6 +144,7 @@ export function BookingFlowProvider({ children }) {
     setFlowMetaState(defaultFlowMeta);
     writeStoredFlowMeta(defaultFlowMeta);
     clearIdlePromptShownLocal();
+    clearCheckoutDraftStarted();
     navigate('/');
     window.scrollTo(0, 0);
   }, [navigate, setFlowMetaState]);
@@ -192,6 +194,7 @@ export function BookingFlowProvider({ children }) {
         setFlowMetaState(defaultFlowMeta);
         writeStoredFlowMeta(defaultFlowMeta);
         clearIdlePromptShownLocal();
+        clearCheckoutDraftStarted();
         if (paidId) {
           navigate(`/confirmation?booking_id=${paidId}`);
         } else {
@@ -214,6 +217,7 @@ export function BookingFlowProvider({ children }) {
       setFlowMetaState(defaultFlowMeta);
       writeStoredFlowMeta(defaultFlowMeta);
       clearIdlePromptShownLocal();
+      clearCheckoutDraftStarted();
       // Paying tab owns redirect via PaymentPage (with payment_intent). Skip SPA
       // navigate here so we do not finalize twice before the hard redirect.
       if (isPaymentInFlight()) {
@@ -247,6 +251,7 @@ export function BookingFlowProvider({ children }) {
     setFlowMetaState(defaultFlowMeta);
     writeStoredFlowMeta(defaultFlowMeta);
     clearIdlePromptShownLocal();
+    clearCheckoutDraftStarted();
 
     toast({
       title: 'Continuing in your other window',

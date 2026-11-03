@@ -2,8 +2,12 @@ const CHANNEL_NAME = 'ufill-checkout-sync';
 const STORAGE_KEY = 'ufill_checkout_sync_event';
 const TAB_ID_KEY = 'ufill_checkout_tab_id';
 export const CHECKOUT_COMPLETED_KEY = 'ufill_checkout_completed';
+/** When this browser tab entered protected checkout (step 5+) for the current draft. */
+export const CHECKOUT_DRAFT_STARTED_KEY = 'ufill_checkout_draft_started';
 /** Ignore completed markers older than this so a long-lived tab cannot be haunted. */
 const CHECKOUT_COMPLETED_TTL_MS = 6 * 60 * 60 * 1000;
+/** Clock / commit skew when comparing a paid booking to the draft start. */
+const DRAFT_COMPLETION_SKEW_MS = 15 * 1000;
 
 /**
  * Cross-tab checkout events: email verified, payment completed, or another tab
@@ -103,6 +107,53 @@ export function clearCheckoutCompletedElsewhere() {
   } catch (err) {
     // ignore
   }
+}
+
+export function markCheckoutDraftStarted(atMs = Date.now()) {
+  if (typeof window === 'undefined') return atMs;
+  try {
+    window.sessionStorage.setItem(
+      CHECKOUT_DRAFT_STARTED_KEY,
+      JSON.stringify({ at: atMs }),
+    );
+  } catch (err) {
+    // ignore
+  }
+  return atMs;
+}
+
+export function getCheckoutDraftStartedAt() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(CHECKOUT_DRAFT_STARTED_KEY);
+    if (!raw) return null;
+    const record = JSON.parse(raw);
+    const at = typeof record?.at === 'number' ? record.at : Number(record);
+    return Number.isFinite(at) ? at : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export function clearCheckoutDraftStarted() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(CHECKOUT_DRAFT_STARTED_KEY);
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
+ * True when a converted booking belongs to this draft attempt, not a prior order.
+ * Used by idle completion polls and payment already_converted redirects.
+ */
+export function isBookingCreatedForCurrentDraft(createdAt, draftStartedAtMs = getCheckoutDraftStartedAt()) {
+  if (draftStartedAtMs == null) return true;
+  const createdAtMs =
+    typeof createdAt === 'number' ? createdAt : Date.parse(createdAt || '');
+  if (!Number.isFinite(createdAtMs)) return true;
+  return createdAtMs + DRAFT_COMPLETION_SKEW_MS >= draftStartedAtMs;
 }
 
 export function publishCheckoutSyncEvent(options) {
