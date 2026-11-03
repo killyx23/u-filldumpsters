@@ -28,7 +28,10 @@ import {
 import { mapCustomerToBookingData } from '@/utils/returningCustomerMapper';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
 import { isCheckoutEmailVerified, isCheckoutEmailVerifiedSync, clearVerifiedEmailSession } from '@/utils/checkoutEmailVerification';
-import { clearCheckoutCompletedElsewhere } from '@/utils/checkoutTabSync';
+import {
+  clearCheckoutCompletedElsewhere,
+  markCheckoutDraftStarted,
+} from '@/utils/checkoutTabSync';
 import { useReturningCustomerDetection } from '@/hooks/useReturningCustomerDetection';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useBookingFlow } from '@/contexts/BookingFlowContext';
@@ -488,6 +491,10 @@ function BookingJourney({ reorderData, onReorderApplied }) {
 
       const token = result.token;
       const nextHighest = Math.max(highestStep, 5);
+      // Contact save rewrites the reused pending row — reset draft/completion
+      // markers before step 5 arms the idle completion poll.
+      clearCheckoutCompletedElsewhere();
+      markCheckoutDraftStarted();
       setBookingData((prev) => ({
         ...prev,
         firstName: contactPayload.firstName,

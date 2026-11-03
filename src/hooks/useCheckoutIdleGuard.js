@@ -56,31 +56,26 @@ async function readCheckoutProgress(pendingId) {
 
 /**
  * True when a "completed" status belongs to THIS checkout attempt, not a prior
- * paid order still attached to a reused pending_customers row / overlapping dates.
+ * paid order still attached to a reused pending_customers row.
+ *
+ * Prefer booking_created_at from get_checkout_completion_status — anon clients
+ * cannot SELECT bookings, so a table lookup always failed open and caused false
+ * redirects to old confirmations.
  */
-async function isFreshCheckoutCompletion(progress, draftStartedAtMs) {
+function isFreshCheckoutCompletion(progress, draftStartedAtMs) {
   if (!progress?.completed) return false;
-  const bookingId = progress.booking_id;
   const floor = draftStartedAtMs ?? getCheckoutDraftStartedAt();
-  if (bookingId == null || floor == null) {
-    // No floor yet — trust the server (e.g. payment tab / unknown start).
-    return true;
+  // No draft floor yet (e.g. cold payment tab): trust linked completion only.
+  if (floor == null) {
+    return progress.reason === 'linked_booking' && progress.booking_id != null;
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('id, created_at')
-      .eq('id', bookingId)
-      .maybeSingle();
-    if (error || !data?.created_at) {
-      // Fail open only when we cannot verify; prefer not to trap a real dual-tab pay.
-      return true;
-    }
-    return isBookingCreatedForCurrentDraft(data.created_at, floor);
-  } catch {
-    return true;
+  const createdAt = progress.booking_created_at || null;
+  if (!createdAt) {
+    // Cannot verify age — do not redirect; a real pay will re-link and poll again.
+    return false;
   }
+  return isBookingCreatedForCurrentDraft(createdAt, floor);
 }
 
 /**
@@ -308,7 +303,7 @@ export function useCheckoutIdleGuard({
           const progress = await readCheckoutProgress(pendingId);
           if (
             progress?.completed &&
-            (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+            isFreshCheckoutCompletion(progress, draftStartedAtRef.current)
           ) {
             handleOtherTabCompletedRef.current?.({
               bookingId: progress.booking_id,
@@ -587,7 +582,7 @@ export function useCheckoutIdleGuard({
         const progress = await readCheckoutProgress(pendingId);
         if (
           progress?.completed &&
-          (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+          isFreshCheckoutCompletion(progress, draftStartedAtRef.current)
         ) {
           handleOtherTabCompletedRef.current?.({
             bookingId: progress.booking_id,
@@ -601,7 +596,7 @@ export function useCheckoutIdleGuard({
         const progress = await readCheckoutProgress(pendingId);
         if (
           progress?.completed &&
-          (await isFreshCheckoutCompletion(progress, draftStartedAtRef.current))
+          isFreshCheckoutCompletion(progress, draftStartedAtRef.current)
         ) {
           handleOtherTabCompletedRef.current?.({
             bookingId: progress.booking_id,
@@ -647,10 +642,30 @@ export function useCheckoutIdleGuard({
       if (event.type === 'completed' || event.type === 'paid') {
         // Paying tab keeps payment-in-flight until redirect; skip so PaymentPage owns nav.
         if (isPaymentInFlight()) return;
-        handleOtherTabCompletedRef.current?.({
-          bookingId: event.bookingId,
-          pendingId: event.pendingId || localPending,
-        });
+        const eventPending = event.pendingId || localPending;
+        void (async () => {
+          const progress = eventPending
+            ? await readCheckoutProgress(eventPending)
+            : {
+                completed: true,
+                booking_id: event.bookingId,
+                reason: 'linked_booking',
+                booking_created_at: null,
+              };
+          // Stale cross-tab "completed" events for a reused pending UUID must not
+          // bounce a brand-new draft to an old confirmation.
+          if (
+            progress?.completed &&
+            isFreshCheckoutCompletion(progress, draftStartedAtRef.current)
+          ) {
+            handleOtherTabCompletedRef.current?.({
+              bookingId: progress.booking_id || event.bookingId,
+              pendingId: eventPending,
+            });
+          } else {
+            clearCheckoutCompletedElsewhere();
+          }
+        })();
       }
     });
 
