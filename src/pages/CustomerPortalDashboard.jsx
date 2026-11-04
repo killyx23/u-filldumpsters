@@ -10,7 +10,12 @@ import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
-import { mentionsDumpTrailer } from '@/utils/displayPlanName';
+import {
+  ACCESS_CODE_DELIVERY_BODY,
+  ACCESS_CODE_DELIVERY_TITLE,
+  bookingAccessCodeNotApplicable,
+  bookingNeedsYardAccessCode,
+} from '@/utils/yardAccessCode';
 
 export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
@@ -81,20 +86,19 @@ export const CustomerPortalDashboard = () => {
         throw new Error('Booking not found. Please check your Order ID.');
       }
 
-      // Check if this is a Dump Loader Trailer Rental
-      const isDumpLoaderRental = 
-        mentionsDumpTrailer(bookingData.plan?.name) ||
-        bookingData.plan?.name?.toLowerCase().includes('trailer') ||
-        parseInt(bookingData.plan?.id) === 2;
+      setBooking(bookingData);
 
-      if (!isDumpLoaderRental) {
-        setError('This service does not require an access code.');
-        setBooking(bookingData);
+      if (bookingAccessCodeNotApplicable(bookingData)) {
+        setAccessCode(null);
         setLoading(false);
         return;
       }
 
-      setBooking(bookingData);
+      if (!bookingNeedsYardAccessCode(bookingData)) {
+        setError('This service does not require an access code.');
+        setLoading(false);
+        return;
+      }
 
       // Fetch access code
       const { data: accessCodeData, error: accessCodeError } = await supabase
@@ -309,7 +313,17 @@ export const CustomerPortalDashboard = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.2 }}
           >
-            {isRentalExpired() ? (
+            {bookingAccessCodeNotApplicable(booking) ? (
+              <Card className="bg-blue-50/90 backdrop-blur-sm border-blue-200 mb-6">
+                <CardContent className="p-8 text-center">
+                  <Info className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+                  <h2 className="text-2xl font-bold text-blue-900 mb-2">{ACCESS_CODE_DELIVERY_TITLE}</h2>
+                  <p className="text-blue-800 text-lg">
+                    {ACCESS_CODE_DELIVERY_BODY}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : isRentalExpired() ? (
               <Card className="bg-red-900/30 backdrop-blur-lg border-red-500/50 mb-6">
                 <CardContent className="p-8 text-center">
                   <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { advertisedDealsForService } from './advertisedDeals.js';
+import { advertisedDealsForService, claimAdvertisedDealVisit } from './advertisedDeals.js';
 
 const now = new Date('2026-10-31T12:00:00Z');
 
@@ -68,4 +68,24 @@ test('a coupon with no service limit applies, and each advertised rule is listed
   assert.equal(deals[0].offer, '2 to 4 days, $10.00 off the whole order');
   assert.equal(deals[1].headline, '');
   assert.equal(deals[1].offer, '7 days, 1 free day');
+});
+
+test('deal visit offers once per service, then again after switching away and back', () => {
+  let visit = { serviceId: null, shown: false };
+
+  let result = claimAdvertisedDealVisit(visit, 2);
+  assert.equal(result.offer, true);
+  visit = result.visit;
+
+  result = claimAdvertisedDealVisit(visit, 2);
+  assert.equal(result.offer, false);
+  visit = result.visit;
+
+  result = claimAdvertisedDealVisit(visit, 4);
+  assert.equal(result.offer, true);
+  visit = result.visit;
+
+  result = claimAdvertisedDealVisit(visit, 2);
+  assert.equal(result.offer, true);
+  assert.deepEqual(result.visit, { serviceId: 2, shown: true });
 });

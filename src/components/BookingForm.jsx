@@ -46,7 +46,7 @@ import { catalogBaseRental, extraDayRateForService, rentalDaysForPlan } from '@/
 import { mileageBandFeePhrase } from '@/utils/mileageBands';
 import { activePromoLabel } from '@/utils/servicePlan';
 import { PromoTotalLabel } from '@/components/PromoTotalLabel';
-import { advertisedDealsForService } from '@/utils/advertisedDeals';
+import { advertisedDealsForService, claimAdvertisedDealVisit } from '@/utils/advertisedDeals';
 
 export const BookingForm = ({
   plan,
@@ -79,12 +79,10 @@ export const BookingForm = ({
   const [checkingDeliveryAvailability, setCheckingDeliveryAvailability] = useState(false);
   const [advertisedDeals, setAdvertisedDeals] = useState([]);
   const [dealPromptOpen, setDealPromptOpen] = useState(false);
-  const seenDealServices = useRef(new Set());
+  const dealVisitRef = useRef({ serviceId: null, shown: false });
   const dealPromptRef = useRef(null);
   const pendingDateOpen = useRef(null);
   const advertisedDealsRef = useRef({ status: 'idle', deals: [] });
-  const planIdRef = useRef(plan?.id);
-  planIdRef.current = plan?.id;
   const navigate = useNavigate();
   
   // Disposal fees state
@@ -110,10 +108,30 @@ export const BookingForm = ({
   console.log('Is Delivery:', isDelivery);
   console.groupEnd();
 
+  const currentPlan = useMemo(() => {
+    if (loadingPlans) return null;
+    const findById = (id) => allPlans.find((p) => Number(p.id) === Number(id));
+
+    if (isDelivery) {
+      const variantId = Number(plan?.delivery_variant_service_id ?? 4);
+      return findById(variantId) || findById(4) || (planId === 4 ? plan : null);
+    }
+
+    return findById(planId) || plan || null;
+  }, [isDelivery, allPlans, plan, planId, loadingPlans]);
+
+  // Effective catalog service (base vs delivery variant). Delivery toggle must
+  // start a fresh one-time promo visit for that service.
+  const dealServiceId = Number(currentPlan?.id) || null;
+  const dealServiceIdRef = useRef(dealServiceId);
+  dealServiceIdRef.current = dealServiceId;
+
   const offerAdvertisedDeal = useCallback((deals, resume) => {
-    const serviceId = Number(planIdRef.current);
-    if (!deals.length || !serviceId || seenDealServices.current.has(serviceId)) return false;
-    seenDealServices.current.add(serviceId);
+    const serviceId = Number(dealServiceIdRef.current);
+    if (!deals.length || !serviceId) return false;
+    const result = claimAdvertisedDealVisit(dealVisitRef.current, serviceId);
+    dealVisitRef.current = result.visit;
+    if (!result.offer) return false;
     dealPromptRef.current = { resume };
     setDealPromptOpen(true);
     return true;
@@ -143,7 +161,7 @@ export const BookingForm = ({
       if (!offerAdvertisedDeal(deals, waiting)) waiting();
     };
 
-    const serviceId = plan?.id;
+    const serviceId = dealServiceId;
     if (!serviceId) {
       advertisedDealsRef.current = { status: 'ready', deals: [] };
       setAdvertisedDeals([]);
@@ -174,19 +192,7 @@ export const BookingForm = ({
     return () => {
       cancelled = true;
     };
-  }, [plan?.id, offerAdvertisedDeal]);
-
-  const currentPlan = useMemo(() => {
-    if (loadingPlans) return null;
-    const findById = (id) => allPlans.find((p) => Number(p.id) === Number(id));
-
-    if (isDelivery) {
-      const variantId = Number(plan?.delivery_variant_service_id ?? 4);
-      return findById(variantId) || findById(4) || (planId === 4 ? plan : null);
-    }
-
-    return findById(planId) || plan || null;
-  }, [isDelivery, allPlans, plan, planId, loadingPlans]);
+  }, [dealServiceId, offerAdvertisedDeal]);
 
   const handleReorderSelect = async (pastBooking) => {
     if (onReorderSelect) onReorderSelect(pastBooking);

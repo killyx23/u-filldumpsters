@@ -3,7 +3,7 @@ import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import { parseISO } from 'date-fns';
 import { parseBookingTimeSlot, parseClockTime } from '@/utils/parseBookingTimeSlot';
-import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { formatBookingServiceLabel } from '@/utils/displayPlanName';
 
 /**
  * Build the event instant for one end of a booking.
@@ -27,8 +27,8 @@ const eventInstant = (dateIso, typedTime, textSlot, fallbackHour) => {
 
 export const PortalCalendar = ({ bookings }) => {
   const events = bookings.map(booking => {
-    const isDelivery = booking.addons?.isDelivery;
-    const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
+    const isDelivery = Boolean(booking.addons?.isDelivery || booking.addons?.deliveryService);
+    const serviceName = formatBookingServiceLabel(booking.plan?.name, isDelivery);
     const serviceType = booking.plan?.id;
 
     let bgColor = '#3b82f6'; // Scheduled (blue)

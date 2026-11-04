@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
-import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { formatBookingServiceLabel } from '@/utils/displayPlanName';
 import { canExtendBooking } from '@/utils/rentalExtension';
 import { bookingNeedsReview, isReviewPending, PENDING_REVIEW_MESSAGE } from '@/utils/reviewEligibility';
 import { formatAddressDeadlineMessage } from '@/utils/verificationDeadline';
@@ -127,8 +127,8 @@ export const BookingsList = ({ bookings, customerReviews = [], onReceiptClick, o
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredBookings.length > 0 ? filteredBookings.map(booking => {
-          const isDelivery = booking.addons?.isDelivery;
-          const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
+          const isDelivery = Boolean(booking.addons?.isDelivery || booking.addons?.deliveryService);
+          const serviceName = formatBookingServiceLabel(booking.plan?.name, isDelivery);
           const statusInfo = getStatusInfo(booking);
           const canModify = !booking.pending_address_verification && ['pending_payment', 'Confirmed', 'Rescheduled'].includes(booking.status);
           const canExtend = canExtendBooking(booking);

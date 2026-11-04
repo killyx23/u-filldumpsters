@@ -88,3 +88,29 @@ export function advertisedDealsForService(coupons, serviceId, now = new Date()) 
   }
   return deals;
 }
+
+/**
+ * One-time promo per visit to a service.
+ * Leaving for a different service and returning starts a fresh visit.
+ * @param {{ serviceId: number|null, shown: boolean }|null|undefined} visit
+ * @param {number|string|null|undefined} serviceId
+ * @returns {{ visit: { serviceId: number|null, shown: boolean }, offer: boolean }}
+ */
+export function claimAdvertisedDealVisit(visit, serviceId) {
+  const id = Number(serviceId);
+  if (!id) {
+    return {
+      visit: visit && typeof visit === 'object'
+        ? { serviceId: visit.serviceId ?? null, shown: Boolean(visit.shown) }
+        : { serviceId: null, shown: false },
+      offer: false,
+    };
+  }
+
+  const sameVisit = visit && Number(visit.serviceId) === id;
+  if (sameVisit && visit.shown) {
+    return { visit: { serviceId: id, shown: true }, offer: false };
+  }
+
+  return { visit: { serviceId: id, shown: true }, offer: true };
+}

@@ -13,15 +13,33 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
-import { mentionsDumpTrailer } from '@/utils/displayPlanName';
+import { formatBookingServiceLabel } from '@/utils/displayPlanName';
+import {
+  ACCESS_CODE_DELIVERY_BODY,
+  ACCESS_CODE_DELIVERY_TITLE,
+  bookingAccessCodeNotApplicable,
+  bookingNeedsYardAccessCode,
+  isTrailerAccessCodeService,
+} from '@/utils/yardAccessCode';
 
 const PENDING_POLL_MS = 30_000;
 const PENDING_POLL_MAX_MS = 20 * 60 * 1000;
+const ACTIVE_BOOKING_STATUSES = [
+  'Confirmed',
+  'confirmed',
+  'Delivered',
+  'delivered',
+  'waiting_to_be_returned',
+  'Rescheduled',
+  'rescheduled',
+];
 
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
   const [accessCode, setAccessCode] = useState(null);
   const [booking, setBooking] = useState(null);
+  const [eligibleBookings, setEligibleBookings] = useState([]);
+  const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [error, setError] = useState(null);
   const [magicLinkToken, setMagicLinkToken] = useState(null);
   const [generatingQR, setGeneratingQR] = useState(false);
@@ -31,9 +49,11 @@ export const AccessCodesPage = ({ customerData }) => {
   const MAX_RETRIES = 5;
   const hasLoadedOnceRef = useRef(false);
   const pendingPollStartedAtRef = useRef(null);
+  const selectedBookingIdRef = useRef(null);
   const customerId = customerData?.id;
+  selectedBookingIdRef.current = selectedBookingId;
 
-  const fetchAccessCode = useCallback(async ({ silent = false } = {}) => {
+  const fetchAccessCode = useCallback(async ({ silent = false, preferBookingId = null } = {}) => {
     const context = 'AccessCodesPage-fetchAccessCode';
     if (!customerData?.id) return;
 
@@ -45,36 +65,48 @@ export const AccessCodesPage = ({ customerData }) => {
 
       console.log(`[${context}] Starting fetch for customer:`, customerData.id);
 
-      const { data: bookingData, error: bookingError } = await supabase
+      const { data: bookingRows, error: bookingError } = await supabase
         .from('bookings')
         .select('*')
         .eq('customer_id', customerData.id)
-        .in('status', ['Confirmed', 'confirmed', 'Delivered', 'delivered', 'waiting_to_be_returned', 'Rescheduled', 'rescheduled'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .in('status', ACTIVE_BOOKING_STATUSES)
+        .order('drop_off_date', { ascending: true });
 
-      if (bookingError && bookingError.code !== 'PGRST116') {
+      if (bookingError) {
         console.error(`[${context}] Booking query error:`, bookingError);
         throw new Error('Failed to fetch booking details');
       }
 
-      if (!bookingData) {
+      const trailerBookings = (bookingRows || []).filter(isTrailerAccessCodeService);
+      setEligibleBookings(trailerBookings);
+
+      if (!trailerBookings.length) {
         console.log(`[${context}] No active rental found`);
         setError('No active rental found');
         setBooking(null);
+        setSelectedBookingId(null);
         setAccessCode(null);
         return;
       }
 
+      const requestedId = preferBookingId || selectedBookingIdRef.current;
+      const preferredPickup = trailerBookings.find(bookingNeedsYardAccessCode);
+      const bookingData =
+        trailerBookings.find((row) => Number(row.id) === Number(requestedId)) ||
+        preferredPickup ||
+        trailerBookings[0];
+
+      setSelectedBookingId(bookingData.id);
       setBooking(bookingData);
 
-      const isDumpLoaderRental =
-        mentionsDumpTrailer(bookingData.plan?.name) ||
-        bookingData.plan?.name?.toLowerCase().includes('trailer') ||
-        parseInt(bookingData.plan?.id) === 2;
+      if (bookingAccessCodeNotApplicable(bookingData)) {
+        setAccessCode(null);
+        setIssuingToLock(false);
+        setMagicLinkToken(null);
+        return;
+      }
 
-      if (!isDumpLoaderRental) {
+      if (!bookingNeedsYardAccessCode(bookingData)) {
         setError('This service does not require an access code');
         setAccessCode(null);
         return;
@@ -136,7 +168,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
   // While inside the PIN window and no confirmed PIN yet, poll quietly every 30s (max 20 min).
   useEffect(() => {
-    if (!booking) return;
+    if (!booking || bookingAccessCodeNotApplicable(booking) || !bookingNeedsYardAccessCode(booking)) return;
     const pinReady =
       !!accessCode?.access_pin &&
       (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
@@ -164,7 +196,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
   // Realtime: pick up PIN rows as soon as the server writes them.
   useEffect(() => {
-    if (!booking?.id) return;
+    if (!booking?.id || bookingAccessCodeNotApplicable(booking) || !bookingNeedsYardAccessCode(booking)) return;
 
     const channel = supabase
       .channel(`access-codes-order-${booking.id}`)
@@ -177,7 +209,7 @@ export const AccessCodesPage = ({ customerData }) => {
           filter: `order_id=eq.${booking.id}`,
         },
         () => {
-          fetchAccessCode({ silent: true });
+          fetchAccessCode({ silent: true, preferBookingId: booking.id });
         },
       )
       .subscribe();
@@ -185,11 +217,12 @@ export const AccessCodesPage = ({ customerData }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [booking?.id, fetchAccessCode]);
+  }, [booking, fetchAccessCode]);
 
   const generateMagicLinkToken = async () => {
     const context = 'AccessCodesPage-generateMagicLink';
-    
+    if (!booking?.id || bookingAccessCodeNotApplicable(booking)) return;
+
     try {
       setGeneratingQR(true);
 
@@ -241,10 +274,27 @@ export const AccessCodesPage = ({ customerData }) => {
   };
 
   useEffect(() => {
-    if (customerData && booking && !magicLinkToken && !generatingQR) {
+    setMagicLinkToken(null);
+    if (
+      customerData &&
+      booking &&
+      bookingNeedsYardAccessCode(booking) &&
+      !bookingAccessCodeNotApplicable(booking) &&
+      !generatingQR
+    ) {
       generateMagicLinkToken();
     }
-  }, [customerData, booking]);
+  }, [customerData, booking?.id]);
+
+  const handleSelectBooking = (nextId) => {
+    const id = Number(nextId);
+    if (!Number.isFinite(id) || id === Number(selectedBookingId)) return;
+    setSelectedBookingId(id);
+    setRetryCount(0);
+    setAccessCode(null);
+    setMagicLinkToken(null);
+    fetchAccessCode({ silent: false, preferBookingId: id });
+  };
 
   const handleRefreshClick = () => {
     console.log('[AccessCodesPage] Manual refresh button clicked');
@@ -270,6 +320,15 @@ export const AccessCodesPage = ({ customerData }) => {
         title: 'Booking Not Ready',
         description: 'Please refresh and try again.',
         variant: 'destructive'
+      });
+      return;
+    }
+
+    if (bookingAccessCodeNotApplicable(booking)) {
+      toast({
+        title: ACCESS_CODE_DELIVERY_TITLE,
+        description: ACCESS_CODE_DELIVERY_BODY,
+        variant: 'destructive',
       });
       return;
     }
@@ -365,14 +424,16 @@ export const AccessCodesPage = ({ customerData }) => {
     }
   };
 
-  const pinWindowOpen = booking ? isWithinPinGenerationWindow(booking) : false;
+  const deliveryOnly = booking ? bookingAccessCodeNotApplicable(booking) : false;
+  const pinWindowOpen = booking && !deliveryOnly ? isWithinPinGenerationWindow(booking) : false;
   const bookingEnded = booking ? isBookingEnded(booking) : false;
-  const pinEligibleFrom = booking ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
+  const pinEligibleFrom = booking && !deliveryOnly ? new Date(getBookingWindow(booking).pinEligibleFromMs) : null;
   const pinReady =
+    !deliveryOnly &&
     !!accessCode?.access_pin &&
     (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
   const isBackupPin = pinReady && accessCode?.pin_type === 'algopin';
-  const pinPendingInWindow = pinWindowOpen && !bookingEnded && !pinReady;
+  const pinPendingInWindow = !deliveryOnly && pinWindowOpen && !bookingEnded && !pinReady;
   // Customer-visible window uses appointment times (no hidden grace hour on end_time).
   const visibleStartLabel = booking
     ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
@@ -380,6 +441,10 @@ export const AccessCodesPage = ({ customerData }) => {
   const visibleEndLabel = booking
     ? formatDateTime(booking.pickup_date, booking.pickup_time_slot)
     : 'N/A';
+  const serviceLabel = formatBookingServiceLabel(
+    booking?.plan?.name,
+    Boolean(booking?.addons?.isDelivery || booking?.addons?.deliveryService),
+  );
 
   if (loading) {
     return (
@@ -461,6 +526,31 @@ export const AccessCodesPage = ({ customerData }) => {
               </div>
             </CardHeader>
             <CardContent className="space-y-3 text-white">
+              {eligibleBookings.length > 1 && (
+                <div>
+                  <p className="text-sm text-blue-200 mb-1">Booking</p>
+                  <select
+                    className="w-full rounded-md border border-white/20 bg-black/40 px-3 py-2 text-white"
+                    value={selectedBookingId || booking?.id || ''}
+                    onChange={(event) => handleSelectBooking(event.target.value)}
+                  >
+                    {eligibleBookings.map((row) => {
+                      const delivery = bookingAccessCodeNotApplicable(row);
+                      const label = formatBookingServiceLabel(
+                        row.plan?.name,
+                        Boolean(row.addons?.isDelivery || row.addons?.deliveryService),
+                      );
+                      return (
+                        <option key={row.id} value={row.id}>
+                          #{row.id} · {label}
+                          {delivery ? ' (delivery — no padlock code)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-blue-200">Customer Name</p>
@@ -479,7 +569,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
               <div>
                 <p className="text-sm text-blue-200">Service Type</p>
-                  <p className="font-medium text-lg">Dump Trailer Rental</p>
+                  <p className="font-medium text-lg">{serviceLabel || 'Dump Trailer Rental'}</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -512,7 +602,20 @@ export const AccessCodesPage = ({ customerData }) => {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.2 }}
         >
-          {isRentalExpired() ? (
+          {deliveryOnly ? (
+            <Card className="bg-blue-50/90 backdrop-blur-sm border-blue-200">
+              <CardContent className="p-8 text-center">
+                <Info className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-blue-900 mb-2">{ACCESS_CODE_DELIVERY_TITLE}</h2>
+                <p className="text-blue-800 text-lg mb-2">
+                  {ACCESS_CODE_DELIVERY_BODY}
+                </p>
+                <p className="text-sm text-blue-700">
+                  Delivery window: {formatDateTime(booking?.drop_off_date, booking?.drop_off_time_slot)}
+                </p>
+              </CardContent>
+            </Card>
+          ) : isRentalExpired() ? (
             <Card className="bg-red-900/30 backdrop-blur-lg border-red-500/50">
               <CardContent className="p-8 text-center">
                 <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />

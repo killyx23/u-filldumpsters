@@ -5,6 +5,10 @@ import { format } from 'https://deno.land/std@0.208.0/datetime/mod.ts';
 import { resolveBookingGrandTotal } from '../_shared/resolveBookingGrandTotal.ts';
 import { formatPlainBookingTime, formatDeliveryTimeWindowBetween } from '../_shared/formatBookingTime.ts';
 import { formatCustomerFacingPlanName } from '../_shared/displayPlanName.ts';
+import {
+  MATTRESS_CURBSIDE_RECEIPT_NOTE,
+  shouldShowMattressCurbsideReminder,
+} from '../_shared/mattressDisposalReminder.ts';
 
 const formatDate = (dateStr: string | null) =>
   dateStr ? format(new Date(dateStr), 'MM/dd/yyyy') : 'N/A';
@@ -87,7 +91,11 @@ async function generatePDFReceipt(booking: any) {
   drawText('SERVICE DETAILS', margin + 6, y, { font: fontBold, size: 9, color: rgb(1, 1, 1) });
   drawText('AMOUNT', width - margin, y, { font: fontBold, size: 9, color: rgb(1, 1, 1), align: 'right' });
   y -= 22;
-  const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (booking.addons?.isDelivery ? ' with Delivery' : '');
+  const formattedPlanName = formatCustomerFacingPlanName(booking.plan?.name) || 'Service';
+  const alreadySaysDelivery = /\bwith\s+delivery\b/i.test(formattedPlanName);
+  const serviceName = booking.addons?.isDelivery && !alreadySaysDelivery
+    ? `${formattedPlanName} with Delivery`
+    : formattedPlanName;
   const dropOff = formatDate(booking.drop_off_date);
   const pickup  = formatDate(booking.pickup_date);
   const isDelivery = Boolean(
@@ -102,6 +110,28 @@ async function generatePDFReceipt(booking: any) {
   drawText(`Drop-off: ${dropOff}  (${formatSlot(booking.drop_off_time_slot, isDelivery)})`, margin + 10, y, { size: 9, color: gray });
   y -= 12;
   drawText(`Pick-up:  ${pickup}  (${formatSlot(booking.pickup_time_slot, isDelivery)})`, margin + 10, y, { size: 9, color: gray });
+
+  if (shouldShowMattressCurbsideReminder(booking)) {
+    y -= 16;
+    const noteSize = 8;
+    const maxWidth = width - margin * 2;
+    const words = MATTRESS_CURBSIDE_RECEIPT_NOTE.split(/\s+/);
+    let line = '';
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (fontRegular.widthOfTextAtSize(next, noteSize) > maxWidth && line) {
+        drawText(line, margin, y, { size: noteSize, color: gray });
+        y -= 10;
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) {
+      drawText(line, margin, y, { size: noteSize, color: gray });
+      y -= 4;
+    }
+  }
 
   const equipmentLines = Array.isArray(booking.addons?.equipment) ? booking.addons.equipment : [];
   for (const item of equipmentLines) {

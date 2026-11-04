@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
-import { AlertCircle, Clock, Key, Loader2, RefreshCw } from 'lucide-react';
+import { AlertCircle, Clock, Info, Key, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -8,20 +8,17 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { BookingLockStatusSection } from '@/components/customer-portal/BookingLockStatusSection';
-import { mentionsDumpTrailer } from '@/utils/displayPlanName';
+import {
+  ACCESS_CODE_DELIVERY_BODY,
+  ACCESS_CODE_DELIVERY_TITLE,
+  bookingAccessCodeNotApplicable,
+  bookingNeedsYardAccessCode,
+  isTrailerAccessCodeService,
+} from '@/utils/yardAccessCode';
 
 const PENDING_POLL_MS = 30_000;
 const PENDING_POLL_MAX_MS = 20 * 60 * 1000;
 const MAX_RETRIES = 5;
-
-function requiresAccessCode(booking) {
-  const planName = booking?.plan?.name?.toLowerCase() || '';
-  return (
-    mentionsDumpTrailer(planName) ||
-    planName.includes('trailer') ||
-    parseInt(booking?.plan?.id, 10) === 2
-  );
-}
 
 function formatDateTime(dateStr, timeSlot) {
   if (!dateStr) return 'N/A';
@@ -46,11 +43,13 @@ export const BookingAccessCodeSection = ({ booking }) => {
   const hasLoadedOnceRef = useRef(false);
   const pendingPollStartedAtRef = useRef(null);
 
-  const needsCode = requiresAccessCode(booking);
+  const deliveryOnly = bookingAccessCodeNotApplicable(booking);
+  const needsCode = bookingNeedsYardAccessCode(booking);
+  const showSection = isTrailerAccessCodeService(booking);
   const bookingId = booking?.id;
 
   const fetchAccessCode = useCallback(async ({ silent = false } = {}) => {
-    if (!bookingId || !needsCode) return;
+    if (!bookingId || !needsCode || deliveryOnly) return;
 
     try {
       if (!silent || !hasLoadedOnceRef.current) {
@@ -96,19 +95,20 @@ export const BookingAccessCodeSection = ({ booking }) => {
       hasLoadedOnceRef.current = true;
       setLoading(false);
     }
-  }, [bookingId, needsCode, booking?.pin_failsafe_at]);
+  }, [bookingId, needsCode, deliveryOnly, booking?.pin_failsafe_at]);
 
   useEffect(() => {
-    if (bookingId && needsCode) {
+    if (bookingId && needsCode && !deliveryOnly) {
       fetchAccessCode({ silent: false });
     } else {
       setLoading(false);
       setAccessCode(null);
+      setAccessCodes([]);
     }
-  }, [bookingId, needsCode, fetchAccessCode]);
+  }, [bookingId, needsCode, deliveryOnly, fetchAccessCode]);
 
   useEffect(() => {
-    if (!booking || !needsCode) return;
+    if (!booking || !needsCode || deliveryOnly) return;
 
     const pinReady =
       !!accessCode?.access_pin &&
@@ -133,10 +133,10 @@ export const BookingAccessCodeSection = ({ booking }) => {
     }, PENDING_POLL_MS);
 
     return () => clearInterval(intervalId);
-  }, [booking, accessCode, needsCode, fetchAccessCode]);
+  }, [booking, accessCode, needsCode, deliveryOnly, fetchAccessCode]);
 
   useEffect(() => {
-    if (!bookingId || !needsCode) return;
+    if (!bookingId || !needsCode || deliveryOnly) return;
 
     const channel = supabase
       .channel(`booking-detail-access-codes-${bookingId}`)
@@ -157,7 +157,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [bookingId, needsCode, fetchAccessCode]);
+  }, [bookingId, needsCode, deliveryOnly, fetchAccessCode]);
 
   const handleRefreshClick = () => {
     if (retryCount >= MAX_RETRIES) {
@@ -252,7 +252,25 @@ export const BookingAccessCodeSection = ({ booking }) => {
     }
   };
 
-  if (!booking || !needsCode) return null;
+  if (!booking || !showSection) return null;
+
+  if (deliveryOnly) {
+    return (
+      <div className="bg-black/20 p-4 rounded-lg border border-white/5">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-blue-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-white">{ACCESS_CODE_DELIVERY_TITLE}</p>
+            <p className="text-sm text-gray-300 mt-2 leading-relaxed">
+              {ACCESS_CODE_DELIVERY_BODY}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!needsCode) return null;
 
   const pinWindowOpen = isWithinPinGenerationWindow(booking);
   const bookingEnded = isBookingEnded(booking);

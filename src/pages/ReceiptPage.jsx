@@ -17,6 +17,11 @@ import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEq
 import { includedDeliveryMileageExplanation, resolveIncludedDeliveryMiles, landfillTonClause } from '@/utils/chargesAndFeesConfig';
 import { chargeMileageBands } from '@/utils/mileageBands';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { bookingIsCompanyDelivery } from '@/utils/bookingMileage';
+import {
+    MATTRESS_CURBSIDE_RECEIPT_NOTE,
+    shouldShowMattressCurbsideReminder,
+} from '@/utils/mattressDisposalReminder';
 
 export const ReceiptPage = () => {
     const [searchParams] = useSearchParams();
@@ -539,6 +544,11 @@ export const ReceiptPage = () => {
                                                         </div>
                                                     ))}
                                                 </div>
+                                                {shouldShowMattressCurbsideReminder(bookingData, bookingIsCompanyDelivery) && (
+                                                    <p className="mt-3 text-[11px] leading-snug text-gray-500 italic">
+                                                        {MATTRESS_CURBSIDE_RECEIPT_NOTE}
+                                                    </p>
+                                                )}
                                                 <div className="flex justify-between text-sm mt-3 pt-3 border-t border-gray-800">
                                                     <span className="text-gray-400">Disposal Subtotal</span>
                                                     <span className="font-bold text-purple-300">{formatCurrency(receiptDetails.disposalTotal)}</span>

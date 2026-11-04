@@ -25,6 +25,10 @@ import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equi
 import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 import { includedDeliveryMileageExplanation, includedMilesPhrase, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import {
+    MATTRESS_CURBSIDE_RECEIPT_NOTE,
+    shouldShowMattressCurbsideReminder,
+} from '@/utils/mattressDisposalReminder';
 
 const LIABILITY_EQUIPMENT_DEFAULT =
     'Customer acknowledges full responsibility for any damage, loss, or theft of all rented equipment and authorizes U-Fill Dumpsters LLC to charge the payment method on file for the full repair or replacement cost.';
@@ -110,10 +114,20 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
         }
     }, [booking]);
 
-    // Generate magic link token for QR code
+    // Magic-link QR codes are yard self-pickup only (access PIN + safety guides).
     useEffect(() => {
         const generateToken = async () => {
             if (!booking?.customers) return;
+            const planForDelivery = booking.addons?.plan || booking.plan;
+            const deliveryReceipt = bookingIsCompanyDelivery({
+                ...booking,
+                plan: planForDelivery,
+                addons: booking.addons,
+            }) || Boolean(booking.addons?.deliveryService || booking.addons?.isDelivery);
+            if (deliveryReceipt) {
+                setMagicLinkToken(null);
+                return;
+            }
 
             try {
                 const { data, error } = await supabase.functions.invoke('generate-magic-link-token', {
@@ -158,11 +172,16 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
     const { customers, plan, drop_off_date, pickup_date, drop_off_time_slot, pickup_time_slot, addons, refund_details, status: bookingStatus, was_verification_skipped, pending_address_verification, unverified_address, reschedule_history, return_issues, payment_delta_details, receipt_original_snapshot, receipt_status_history } = booking;
     const { name, first_name, last_name, email, phone, street, city, state, zip, customer_id_text } = customers;
-    const isDelivery = addons?.deliveryService || addons?.isDelivery;
     const coupon = addons?.coupon;
     const hasInsurance = bookingHadInsurance(addons);
     
     const currentPlan = addons?.plan || plan;
+    const isDelivery = bookingIsCompanyDelivery({ ...booking, plan: currentPlan, addons })
+        || Boolean(addons?.deliveryService || addons?.isDelivery);
+    const showMattressCurbsideNote = shouldShowMattressCurbsideReminder(
+        { ...booking, plan: currentPlan, addons },
+        bookingIsCompanyDelivery,
+    );
     const serviceName = formatCustomerFacingPlanName(currentPlan.name);
 
     const isDumpLoaderRental = 
@@ -399,9 +418,9 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                 <p>Return was {entry.original_pickup_date}. It is now {entry.new_pickup_date} by {formatReceiptTime(entry.new_pickup_time || pickup_time_slot, { isReturnBy: isSelfService })}.</p>
                                 <p>Have it back, locked, and secured by that time.</p>
                                 <p>{entry.days} extra day{Number(entry.days) === 1 ? '' : 's'} · Charged ${Number(entry.amount || 0).toFixed(2)}</p>
-                                {entry.original_pin && <p>Original code {entry.original_pin} is valid until its original end.</p>}
-                                {entry.extension_pin && <p>Return code {entry.extension_pin}.</p>}
-                                {entry.activation_required && <p>Enter the return code once during the first 24 hours after it starts, or it will not work for the rest of the extension.</p>}
+                                {!isDelivery && entry.original_pin && <p>Original code {entry.original_pin} is valid until its original end.</p>}
+                                {!isDelivery && entry.extension_pin && <p>Return code {entry.extension_pin}.</p>}
+                                {!isDelivery && entry.activation_required && <p>Enter the return code once during the first 24 hours after it starts, or it will not work for the rest of the extension.</p>}
                             </div>
                         ))}
                         {(() => {
@@ -439,8 +458,8 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                     </section>
                 )}
                 
-                {/* QR Codes Section - For Dump Loader Trailer Rentals Only */}
-                {isDumpLoaderRental && !isCancelledAndRefunded && magicLinkUrl && (
+                {/* QR Codes — yard self-pickup dump trailers only (never delivery) */}
+                {isDumpLoaderRental && !isDelivery && !isCancelledAndRefunded && magicLinkUrl && (
                     <section className="mb-6 p-6 bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg" style={{ pageBreakInside: 'avoid' }}>
                         <div className="flex items-center gap-3 mb-4 pb-3 border-b border-blue-200">
                             <QrCode className="h-8 w-8 text-blue-600" />
@@ -671,6 +690,13 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
                                         <tr className="border-b">
                                             <td className="py-1 px-6">Mattress Disposal (x{mattressCount})</td>
                                             <td className="text-right py-1 pr-3">${mattressCost.toFixed(2)}</td>
+                                        </tr>
+                                    )}
+                                    {showMattressCurbsideNote && (
+                                        <tr>
+                                            <td colSpan="2" className="py-1 px-6 text-[10px] leading-snug text-gray-600 italic">
+                                                {MATTRESS_CURBSIDE_RECEIPT_NOTE}
+                                            </td>
                                         </tr>
                                     )}
                                     {tvCount > 0 && (

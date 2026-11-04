@@ -6,6 +6,10 @@ import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { sendEmail, sendSms } from "../_shared/notify.ts";
 import { formatCustomerFacingPlanName } from "../_shared/displayPlanName.ts";
 import { isDeliveryBooking } from "../_shared/deliveryBooking.ts";
+import {
+  MATTRESS_CURBSIDE_EMAIL_NOTE,
+  shouldShowMattressCurbsideReminder,
+} from "../_shared/mattressDisposalReminder.ts";
 import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
 
 const VERIFICATION_LEAD_HOURS = 12;
@@ -1124,10 +1128,13 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
      `;
   } else {
     nextStepsHTML = `
-      <li>We'll arrive at your location on ${formatDate(booking.drop_off_date)} ${deliveryWindowDropOff}.</li>
-      <li>Our team will place the dumpster in your designated area.</li>
-      <li>Fill the dumpster at your convenience during the rental period.</li>
-      <li>We'll pick up the dumpster on ${formatDate(booking.pickup_date)} ${deliveryWindowPickup}.</li>
+      <li><strong>🚚 Delivery:</strong> On ${formatDate(booking.drop_off_date)} ${deliveryWindowDropOff}, our team will deliver your dumpster along the front of your home next to the curb. You do not need to be present. We place it at the front of your property—not pulled into a driveway or yard away from the street. <em style="display: block; margin-top: 6px; font-size: 12px; color: #6b7280; font-weight: normal; line-height: 1.5;">*(A quick note on delivery placement: Curbside placement works best for this specific trailer. Because of its length, pulling it into a driveway can crowd the garage area and leave you with very little room to work. Keeping it at the curb ensures the sidewalk remains legally clear and gives the large rear doors plenty of room to swing completely open for your bulky items. If your project requires a long-term driveway setup instead, we also offer a 4-foot-high Dumpster bin that can fit in driveways.)*</em></li>
+      <li><strong>🅿️ Clearance:</strong> Between 6:00 and 8:00 AM on both your delivery day and your return/pickup day, the area in front of your home must be clear, with enough room for our truck to back up to the trailer and hitch up. Keeping that space clear is your responsibility.</li>
+      <li><strong>🪵 Filling:</strong> Fill the dumpster as you like until your scheduled return time. You have until pickup to load your materials.</li>
+      <li><strong>⏳ Pickup:</strong> On ${formatDate(booking.pickup_date)} ${deliveryWindowPickup}, we will collect the dumpster. You do not need to be present—we only need the area clear.</li>
+      <li><strong>🏭 Dump fee:</strong> After pickup, we take the dumpster to the dump and then let you know what the dump fee will be.</li>
+      <li><strong>💳 Payment:</strong> Your card will be charged within the following couple of days—not on the same day as pickup.</li>
+      <li><strong>🔑 Customer Portal:</strong> You can return to the Customer Portal anytime to view your booking details or leave a review if you wish.</li>
      `;
   }
   return `
@@ -1210,6 +1217,12 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
           ${addonsHTML}
         </ul>
       </div>
+      ` : ""}
+
+      ${shouldShowMattressCurbsideReminder(booking) ? `
+      <p style="margin: 12px 0 0 0; color: #6b7280; font-size: 11px; line-height: 1.45; font-style: italic;">
+        ${MATTRESS_CURBSIDE_EMAIL_NOTE}
+      </p>
       ` : ""}
 
       ${buildPriceSummaryHTML(booking, insuranceAmount)}

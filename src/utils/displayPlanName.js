@@ -32,3 +32,14 @@ export function mentionsDumpTrailer(name) {
   const n = String(name || '').toLowerCase();
   return n.includes('dump loader') || n.includes('dump trailer');
 }
+
+/**
+ * Customer-facing booking label. Appends "with Delivery" only when the plan
+ * name does not already include it (e.g. dump trailer delivery variant).
+ */
+export function formatBookingServiceLabel(planName, isDelivery = false) {
+  const base = formatCustomerFacingPlanName(planName) || 'Service';
+  if (!isDelivery) return base;
+  if (/\bwith\s+delivery\b/i.test(base)) return base;
+  return `${base} with Delivery`;
+}

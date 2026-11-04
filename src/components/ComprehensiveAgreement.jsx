@@ -981,6 +981,10 @@ export const ComprehensiveAgreement = ({ onBack, onAccept, bookingData, isProces
               </div>
             }
           >
+            <p className="text-sm text-blue-200">
+              This section applies only to Dump Trailer self-pickup and DIY heavy equipment rentals—not to company
+              delivery services.
+            </p>
             <p>
               By executing this Agreement, the individual signing below (
               <strong className="text-yellow-300">{expectedName}</strong>) expressly warrants, represents, and

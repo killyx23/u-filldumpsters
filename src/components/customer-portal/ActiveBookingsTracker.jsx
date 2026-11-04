@@ -3,7 +3,7 @@ import { Clock, Truck, CheckCircle, MapPin, KeyRound } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { format, parseISO, isValid } from 'date-fns';
 import { isCustomerPickupService } from '@/utils/customerPickupService';
-import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
+import { formatBookingServiceLabel } from '@/utils/displayPlanName';
 
 export const ActiveBookingsTracker = ({ bookings }) => {
   const activeBookings = bookings.filter(b => 
@@ -77,9 +77,9 @@ export const ActiveBookingsTracker = ({ bookings }) => {
 
       <div className="space-y-6">
         {activeBookings.map(booking => {
-          const isDelivery = booking.addons?.isDelivery;
+          const isDelivery = Boolean(booking.addons?.isDelivery || booking.addons?.deliveryService);
           const isPickup = isCustomerPickupService(booking.plan, booking.addons || {});
-          const serviceName = (formatCustomerFacingPlanName(booking.plan?.name) || 'Service') + (isDelivery ? ' with Delivery' : '');
+          const serviceName = formatBookingServiceLabel(booking.plan?.name, isDelivery);
           const { stage, text, color } = getStageInfo(booking);
 
           const step2Label = isPickup ? 'Rented' : 'In Transit';

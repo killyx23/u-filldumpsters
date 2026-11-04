@@ -188,7 +188,8 @@ function inventoryLines(items) {
 const tone = {
     delivery: 'bg-cyan-500/20 text-cyan-200 border-cyan-400/40',
     pickup: 'bg-amber-500/20 text-amber-200 border-amber-400/40',
-    customer_pickup: 'bg-violet-500/20 text-violet-200 border-violet-400/40',
+    // Black label text stays readable on the violet header tint.
+    customer_pickup: 'bg-violet-500/20 text-black border-violet-400/40',
     return: 'bg-orange-500/20 text-orange-200 border-orange-400/40',
 };
 
