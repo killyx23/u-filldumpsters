@@ -71,7 +71,7 @@ export const BookingForm = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentMileageRate, setCurrentMileageRate] = useState(0.85);
   const [currentDeliveryFee, setCurrentDeliveryFee] = useState(0);
-  const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(false);
+  const [isServiceTermsExpanded, setIsServiceTermsExpanded] = useState(true);
   const [trailerRentalHours, setTrailerRentalHours] = useState({ pickupStart: '', returnBy: '' });
   const [isReturningCustomerModalOpen, setIsReturningCustomerModalOpen] = useState(false);
   const [showDeliveryUnavailableDialog, setShowDeliveryUnavailableDialog] = useState(false);
@@ -1117,20 +1117,23 @@ export const BookingForm = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <h4 className="font-bold text-white text-base">Service Terms</h4>
-              <span 
-                role="button"
-                tabIndex={0}
-                onClick={toggleServiceTerms}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    toggleServiceTerms();
-                  }
-                }}
-                className="cursor-pointer text-sm font-medium underline-offset-2 hover:underline animate-see-more-pulse"
-              >
-                {isServiceTermsExpanded ? 'see less' : 'see more'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-blue-200/80">(*important information)</span>
+                <span 
+                  role="button"
+                  tabIndex={0}
+                  onClick={toggleServiceTerms}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleServiceTerms();
+                    }
+                  }}
+                  className="cursor-pointer text-sm font-medium underline-offset-2 hover:underline animate-see-more-pulse"
+                >
+                  {isServiceTermsExpanded ? 'see less' : 'see more'}
+                </span>
+              </div>
             </div>
             <AnimatePresence>
               {isServiceTermsExpanded && (
