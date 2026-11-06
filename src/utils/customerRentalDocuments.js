@@ -80,12 +80,14 @@ export function buildCustomerRentalDocuments(bookings = []) {
       title: 'Terms and Conditions',
       description: 'The rental agreement you signed. Service-specific terms apply to the equipment and delivery on your booking.',
       kind: 'master',
+      thumbnail: '/images/documents/terms-and-conditions.jpg',
     },
     {
       key: 'terms-and-conditions',
       title: 'Booking Terms Sections',
       description: 'Every terms section you accepted, plus protection and delivery terms that apply to your rental.',
       kind: 'terms',
+      thumbnail: '/images/documents/booking-terms.jpg',
     },
   ];
 
@@ -95,6 +97,7 @@ export function buildCustomerRentalDocuments(bookings = []) {
       title: 'Hardware Protection Plan',
       description: 'The hardware protection agreement for rentals where you purchased that plan.',
       kind: 'hpp',
+      thumbnail: '/images/documents/hardware-protection-plan.jpg',
     });
   }
   if (flags.driveway) {
@@ -111,6 +114,7 @@ export function buildCustomerRentalDocuments(bookings = []) {
       title: 'Delivery and Placement',
       description: 'Site access, placement, and delivery terms for rentals we deliver.',
       kind: 'delivery',
+      thumbnail: '/images/documents/delivery-and-placement.jpg',
     });
   }
   if (flags.towing) {
@@ -119,6 +123,7 @@ export function buildCustomerRentalDocuments(bookings = []) {
       title: 'Towing and Transport',
       description: 'Towing and transport terms for equipment you pick up and tow.',
       kind: 'towing',
+      thumbnail: '/images/documents/towing-and-transport.jpg',
     });
   }
   if (flags.compact) {

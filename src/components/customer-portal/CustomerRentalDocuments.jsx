@@ -312,8 +312,16 @@ export const CustomerRentalDocuments = ({ bookings = [], customerData = null, se
             onClick={() => openDocument(doc.key)}
             className="text-left bg-black/20 border border-white/10 rounded-xl overflow-hidden hover:bg-white/5 transition-colors group flex flex-col h-full"
           >
-            <div className="aspect-video bg-black/40 flex items-center justify-center">
-              <FileText className="w-12 h-12 text-gray-500" />
+            <div className="aspect-video relative bg-black/40 flex items-center justify-center overflow-hidden">
+              {doc.thumbnail ? (
+                <img
+                  src={doc.thumbnail}
+                  alt={doc.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+              ) : (
+                <FileText className="w-12 h-12 text-gray-500" />
+              )}
             </div>
             <div className="p-5 flex flex-col flex-grow">
               <div className="flex items-center gap-2 text-xs text-blue-200 mb-2">
