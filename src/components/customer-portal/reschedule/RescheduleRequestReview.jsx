@@ -1,19 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { format } from 'date-fns';
 import { Clock, Calendar, MapPin, MessageSquare, Package, CheckSquare, DollarSign, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { safeExtractString } from '@/utils/stringExtractors';
-import { calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
-import { isDeliveryServiceId } from '@/utils/rescheduleTaxCalculator';
-import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 
+/**
+ * Confirm Details — displays the same quote totals produced by Financial Breakdown.
+ * Does not reprice. Original = purchase receipt; New = pricing-step quote.
+ */
 export const RescheduleRequestReview = ({
     originalBooking,
     originalService,
-    originalAddonsList = [],
     newService,
     newDropOffDate,
     newPickupDate,
@@ -22,65 +21,9 @@ export const RescheduleRequestReview = ({
     selectedAddonsList,
     deliveryAddress,
     comments,
+    originalCosts = null,
+    newCosts = null,
 }) => {
-    const { fee: adminFee } = useChargesAndFees();
-    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
-    const [costsLoading, setCostsLoading] = useState(true);
-    const [originalCosts, setOriginalCosts] = useState(null);
-    const [newCosts, setNewCosts] = useState(null);
-
-    useEffect(() => {
-        let cancelled = false;
-
-        const loadCosts = async () => {
-            setCostsLoading(true);
-            try {
-                const origDays = calculateDays(originalBooking?.drop_off_date, originalBooking?.pickup_date);
-                const storedDistance = Number(originalBooking?.customers?.distance_miles || 0);
-                const originalDistance = isDeliveryServiceId(originalService?.id) ? storedDistance : 0;
-                const newDays = calculateDays(newDropOffDate, newPickupDate);
-                const newDistance = isDeliveryServiceId(newService?.id) ? storedDistance : 0;
-
-                const [orig, updated] = await Promise.all([
-                    calculateBookingCosts(originalService, origDays, originalAddonsList, originalDistance, null, null, null, includedMiles),
-                    calculateBookingCosts(newService, newDays, selectedAddonsList || [], newDistance, null, null, null, includedMiles),
-                ]);
-
-                if (!cancelled) {
-                    setOriginalCosts(orig);
-                    setNewCosts(updated);
-                }
-            } catch (err) {
-                console.error('[RescheduleRequestReview] Cost calculation failed:', err);
-                if (!cancelled) {
-                    setOriginalCosts({ total: 0 });
-                    setNewCosts({ total: 0 });
-                }
-            } finally {
-                if (!cancelled) setCostsLoading(false);
-            }
-        };
-
-        if (originalService && newService) {
-            loadCosts();
-        }
-
-        return () => {
-            cancelled = true;
-        };
-    }, [
-        originalBooking,
-        originalService,
-        originalAddonsList,
-        newService,
-        newDropOffDate,
-        newPickupDate,
-        selectedAddonsList,
-        includedMiles,
-    ]);
-
-    const diffVal = (newCosts?.total ?? 0) - (originalCosts?.total ?? 0);
-
     const originalServiceName = safeExtractString(originalService?.name, 'Standard Service');
     const newServiceName = safeExtractString(newService?.name, 'New Service');
 
@@ -100,17 +43,22 @@ export const RescheduleRequestReview = ({
         release: true,
     };
 
-    if (costsLoading || !originalCosts || !newCosts) {
+    if (!originalCosts || !newCosts || newCosts.total == null || originalCosts.total == null) {
         return (
             <div className="flex flex-col items-center justify-center py-24">
                 <Loader2 className="h-10 w-10 animate-spin text-gold mb-4" />
-                <p className="text-gray-400">Calculating review totals...</p>
+                <p className="text-gray-400">Waiting for pricing breakdown totals...</p>
+                <p className="text-gray-500 text-sm mt-2">Go back one step if this does not load.</p>
             </div>
         );
     }
 
+    const originalTotal = Number(originalCosts.total) || 0;
+    const newTotal = Number(newCosts.total) || 0;
+    const diffVal = Math.round((newTotal - originalTotal) * 100) / 100;
+
     return (
-        <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto w-full">
+        <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl mx-auto w-full pb-6">
             <div className="text-center space-y-4 mb-8">
                 <div className="inline-flex items-center justify-center px-6 py-2.5 rounded-full bg-[hsl(var(--gold)_/_0.1)] text-gold border border-gold/40 text-sm font-bold shadow-gold">
                     <ShieldCheck className="w-5 h-5 mr-2" /> Official Request Review
@@ -145,7 +93,7 @@ export const RescheduleRequestReview = ({
                         </div>
                         <div className="pt-6 border-t border-gray-800 flex justify-between items-end">
                             <span className="text-xs font-black text-gray-500 uppercase tracking-widest">Original Receipt</span>
-                            <span className="text-2xl font-bold text-gray-300">{formatCurrency(originalCosts.total * 100, {code: 'USD', symbol: '$'})}</span>
+                            <span className="text-2xl font-bold text-gray-300">{formatCurrency(originalTotal * 100, {code: 'USD', symbol: '$'})}</span>
                         </div>
                     </CardContent>
                 </Card>
@@ -190,7 +138,7 @@ export const RescheduleRequestReview = ({
                         </div>
                         <div className="pt-6 border-t border-[hsl(var(--gold)_/_0.2)] flex justify-between items-end">
                             <span className="text-xs font-black text-gold-light uppercase tracking-widest">New Receipt</span>
-                            <span className="text-3xl font-black text-gold drop-shadow-[0_0_8px_hsla(var(--gold),0.4)]">{formatCurrency(newCosts.total * 100, {code: 'USD', symbol: '$'})}</span>
+                            <span className="text-3xl font-black text-gold drop-shadow-[0_0_8px_hsla(var(--gold),0.4)]">{formatCurrency(newTotal * 100, {code: 'USD', symbol: '$'})}</span>
                         </div>
                     </CardContent>
                 </Card>

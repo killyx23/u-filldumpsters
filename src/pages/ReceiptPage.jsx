@@ -14,7 +14,12 @@ import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 import { activePromoLabel } from '@/utils/servicePlan';
 import { PromoTotalLabel } from '@/components/PromoTotalLabel';
 import { additionalDayFinePrint, resolveEquipmentCharge } from '@/utils/rentalEquipmentPricing';
-import { includedDeliveryMileageExplanation, resolveIncludedDeliveryMiles, landfillTonClause } from '@/utils/chargesAndFeesConfig';
+import {
+    includedDeliveryMileageExplanation,
+    resolveIncludedDeliveryMiles,
+    landfillRatePhrase,
+} from '@/utils/chargesAndFeesConfig';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 import { chargeMileageBands } from '@/utils/mileageBands';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 import { bookingIsCompanyDelivery } from '@/utils/bookingMileage';
@@ -392,12 +397,20 @@ export const ReceiptPage = () => {
                           <div>
                             <h3 className="text-xl font-bold text-amber-400 mb-2 uppercase tracking-wider">Dump Fee Notice</h3>
                             <p className="text-amber-100 leading-relaxed font-medium">
-                              Dump Fees: Customers will be charged separately after the delivery is taken to the dump and completed. 
-                              These charges will be applied to the card on file based on the actual tonnage disposed.
+                              Pending dump fees are calculated based on actual waste processed.
+                              These charges will be applied to the card on file after pickup and landfill processing.
+                            </p>
+                            <p className="text-amber-100 leading-relaxed font-medium mt-2">
+                              <IncludedDumpFlatRateCopy
+                                rate={adminFee('dump_tonnage_rate')}
+                                tons={adminFee('dump_rate_tons')}
+                              />
                             </p>
                             <div className="mt-4 inline-block bg-black/40 border border-amber-500/30 px-4 py-2 rounded-lg">
                               <span className="text-amber-200">Current Rate: </span>
-                              <span className="text-amber-400 font-bold text-lg">${parseFloat(dumpFeeInfo.fee_per_ton).toFixed(2)} {landfillTonClause(adminFee('dump_rate_tons'))}</span>
+                              <span className="text-amber-400 font-bold text-lg">
+                                {landfillRatePhrase(adminFee('dump_tonnage_rate'), adminFee('dump_rate_tons'))}
+                              </span>
                             </div>
                           </div>
                         </div>

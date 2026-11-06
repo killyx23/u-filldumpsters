@@ -28,6 +28,184 @@ import { phoneOrderLabel } from '@/utils/phoneOrderQuote';
 import { extensionOrderLabel } from '@/utils/rentalExtension';
 import { resolveCustomerUploadSignedUrl } from '@/utils/verificationImageHelper';
 import { ManualYardReturnDialog } from '@/components/admin/customer-detail/ManualYardReturnDialog';
+import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import {
+  calculateLandfillDisposalAmount,
+  formatLbs,
+  formatLandfillTonCount,
+  landfillRatePhrase,
+  tonsToPounds,
+} from '@/utils/chargesAndFeesConfig';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
+
+const LANDFILL_DISPOSAL_FEE_KEY = 'landfill_disposal';
+
+function LandfillDisposalChargePanel({ booking, onUpdate }) {
+  const { fee, loading: feesLoading } = useChargesAndFees();
+  const [open, setOpen] = useState(false);
+  const [actualTons, setActualTons] = useState('');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [isCharging, setIsCharging] = useState(false);
+
+  const rate = fee('dump_tonnage_rate');
+  const rateTons = fee('dump_rate_tons');
+  const existing = booking?.fees?.[LANDFILL_DISPOSAL_FEE_KEY];
+  const alreadyCharged = feeIsCharged(existing);
+
+  const calculated = calculateLandfillDisposalAmount(actualTons, rate, rateTons);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const tonLabel = formatLandfillTonCount(actualTons || rateTons);
+    const lbs = formatLbs(tonsToPounds(Number(tonLabel)));
+    setDescription(
+      `Landfill/disposal fee for ${tonLabel} ton${tonLabel === '1' ? '' : 's'}${lbs ? ` (${lbs} lbs)` : ''} at ${landfillRatePhrase(rate, rateTons)}.`,
+    );
+    if (calculated != null) {
+      setAmount(String(calculated.toFixed(2)));
+    }
+  }, [open, actualTons, calculated, rate, rateTons]);
+
+  const handleCharge = async () => {
+    const chargeAmount = parseFloat(amount);
+    if (!Number.isFinite(chargeAmount) || chargeAmount <= 0 || !description.trim()) {
+      toast({
+        title: 'Missing information',
+        description: 'Enter a positive amount and a description before charging.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsCharging(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('charge-customer', {
+        body: {
+          customerId: booking.customer_id,
+          amount: chargeAmount,
+          description: description.trim(),
+          bookingId: booking.id,
+          feeType: LANDFILL_DISPOSAL_FEE_KEY,
+        },
+      });
+      if (error) {
+        const errContext = await error.context?.json().catch(() => null);
+        throw new Error(errContext?.error || error.message);
+      }
+      if (data?.error) throw new Error(data.error);
+      toast({ title: 'Disposal fee charged', description: data.message });
+      setOpen(false);
+      onUpdate?.();
+    } catch (err) {
+      toast({ title: 'Charging failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsCharging(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 p-4 rounded-lg border border-yellow-500/40 bg-yellow-900/20 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-yellow-300">Landfill / Disposal Fees</p>
+          <p className="text-xs text-yellow-100/90 mt-1">
+            {feesLoading
+              ? 'Loading admin landfill rates…'
+              : <IncludedDumpFlatRateCopy rate={rate} tons={rateTons} />}
+          </p>
+          <p className="text-xs text-blue-200 mt-1">
+            Charge after delivery is complete once the load has been weighed at the landfill.
+          </p>
+        </div>
+        {alreadyCharged ? (
+          <div className="flex items-center text-green-400 text-sm">
+            <CheckCircle className="mr-2 h-4 w-4" />
+            Charged ${Number(existing.amount).toFixed(2)}
+          </div>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            className="bg-yellow-500 hover:bg-yellow-400 text-gray-900"
+            onClick={() => {
+              setActualTons(String(formatLandfillTonCount(rateTons)));
+              setOpen(true);
+            }}
+          >
+            <DollarSign className="mr-2 h-4 w-4" />
+            Add Disposal Fee
+          </Button>
+        )}
+      </div>
+      {alreadyCharged && existing?.description && (
+        <p className="text-xs text-gray-300">{existing.description}</p>
+      )}
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="bg-gray-900 text-white border-yellow-400">
+          <DialogHeader>
+            <DialogTitle>Charge Landfill Disposal Fee</DialogTitle>
+            <DialogDescription>
+              Uses Admin → Charges and Fees landfill rates ({landfillRatePhrase(rate, rateTons)}).
+              Enter actual tons from the scale ticket, then charge the card on file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor={`landfill-tons-${booking.id}`}>Actual tons</Label>
+              <Input
+                id={`landfill-tons-${booking.id}`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={actualTons}
+                onChange={(e) => setActualTons(e.target.value)}
+                className="bg-white/20"
+                placeholder="e.g. 1.25"
+              />
+              {calculated != null && (
+                <p className="text-xs text-blue-200 mt-1">
+                  Calculated: ${calculated.toFixed(2)}
+                  {formatLbs(tonsToPounds(Number(actualTons)))
+                    ? ` · ${formatLbs(tonsToPounds(Number(actualTons)))} lbs`
+                    : ''}
+                </p>
+              )}
+            </div>
+            <div>
+              <Label htmlFor={`landfill-amount-${booking.id}`}>Amount (USD)</Label>
+              <Input
+                id={`landfill-amount-${booking.id}`}
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="bg-white/20"
+              />
+            </div>
+            <div>
+              <Label htmlFor={`landfill-desc-${booking.id}`}>Description</Label>
+              <Input
+                id={`landfill-desc-${booking.id}`}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="bg-white/20"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleCharge} disabled={isCharging}>
+              {isCharging ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <DollarSign className="mr-2 h-4 w-4" />}
+              Charge Customer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 function BackupReturnCodeButton({ bookingId }) {
     const [busy, setBusy] = useState(false);
@@ -1149,6 +1327,10 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 <AppointmentCountdown booking={booking} />
                             </div>
                         </div>
+
+                        {!isPickup && booking.delivered_at && (
+                          <LandfillDisposalChargePanel booking={booking} onUpdate={onUpdate} />
+                        )}
 
                         {isPickup && (
                             <div className="mt-3 max-w-md">

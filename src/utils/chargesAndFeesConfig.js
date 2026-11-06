@@ -95,6 +95,56 @@ export function landfillRatePhrase(rate, tons) {
 
 export const UNAVAILABLE_FEE_TEXT = 'Unavailable. Contact customer service.';
 
+/** Tons × 2000. Invalid tonnage returns null. */
+export function tonsToPounds(tons) {
+  const amount = Number(tons);
+  if (!Number.isFinite(amount)) return null;
+  return amount * 2000;
+}
+
+/** "2,000" / "1,000". Invalid values return null. */
+export function formatLbs(lbs) {
+  const amount = Number(lbs);
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount).toLocaleString('en-US');
+}
+
+/** Shown after the flat-rate inclusion sentence (smaller / italic in UI). */
+export const DUMP_FLAT_RATE_CHARGE_NOTE = '(Charged upon the completion of delivery)';
+
+/**
+ * "Your rental includes up to 1 ton (2,000 lbs) for only $45.00 Flat Rate."
+ * Uses Municipal Landfill Scale Rate + Landfill Rate Tonnage from Charges and Fees.
+ */
+export function includedDumpFlatRateSentence(rate, tons) {
+  const tonCount = formatLandfillTonCount(tons);
+  const lbs = formatLbs(tonsToPounds(Number(tonCount)));
+  if (lbs == null || rate == null || rate === '' || !Number.isFinite(Number(rate))) {
+    return UNAVAILABLE_FEE_TEXT;
+  }
+  const tonWord = tonCount === '1' ? 'ton' : 'tons';
+  return `Your rental includes up to ${tonCount} ${tonWord} (${lbs} lbs) for only ${formatMoney(rate)} Flat Rate.`;
+}
+
+/** Pending dump notice + included flat-rate sentence from admin landfill rates. */
+export function pendingDumpFeesBody(rate, tons) {
+  const inclusion = includedDumpFlatRateSentence(rate, tons);
+  if (inclusion === UNAVAILABLE_FEE_TEXT) {
+    return 'Pending dump fees are calculated based on actual waste processed.';
+  }
+  return `Pending dump fees are calculated based on actual waste processed. ${inclusion} ${DUMP_FLAT_RATE_CHARGE_NOTE}`;
+}
+
+/** Dollars for actual tons at the admin landfill scale rate ($rate covers dump_rate_tons). */
+export function calculateLandfillDisposalAmount(actualTons, rate, rateTons) {
+  const tons = Number(actualTons);
+  const dollarRate = Number(rate);
+  const coveredTons = Number(rateTons);
+  if (!Number.isFinite(tons) || tons < 0) return null;
+  if (!Number.isFinite(dollarRate) || !Number.isFinite(coveredTons) || coveredTons <= 0) return null;
+  return Number(((tons / coveredTons) * dollarRate).toFixed(2));
+}
+
 export function readAdminFee(fees, key) {
   if (!fees || !Object.prototype.hasOwnProperty.call(fees, key)) return null;
   const amount = Number(fees[key]);

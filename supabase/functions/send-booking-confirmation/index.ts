@@ -11,6 +11,11 @@ import {
   shouldShowMattressCurbsideReminder,
 } from "../_shared/mattressDisposalReminder.ts";
 import { buildCustomerPortalUrl, portalCredentialsFromBooking } from "../_shared/portalLink.ts";
+import {
+  landfillRatesFromRows,
+  pendingDumpFeesBodyHtml,
+  type LandfillRateFees,
+} from "../_shared/landfillDisposalCopy.ts";
 
 const VERIFICATION_LEAD_HOURS = 12;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
@@ -1024,9 +1029,19 @@ const generateActionRequiredEmailHTML = (
   `;
 };
 
-const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl = resolvePublicSiteUrl()) => {
+const generateEmailHTML = (
+  booking,
+  serviceDetails,
+  insuranceAmount = 0,
+  siteUrl = resolvePublicSiteUrl(),
+  landfillRates: LandfillRateFees = { dump_tonnage_rate: 45, dump_rate_tons: 1 },
+) => {
   const grandTotal = resolveReceiptPricing(booking, insuranceAmount).total;
   const plan = booking.plan || {};
+  const dumpFeeNotice = pendingDumpFeesBodyHtml(
+    landfillRates.dump_tonnage_rate,
+    landfillRates.dump_rate_tons,
+  );
   const addons = booking.addons || {};
   const deliveryAddress = booking.delivery_address || booking.contact_address || {};
   const customerIdText = booking.customers?.customer_id_text || 'N/A';
@@ -1132,7 +1147,7 @@ const generateEmailHTML = (booking, serviceDetails, insuranceAmount = 0, siteUrl
       <li><strong>🅿️ Clearance:</strong> Between 6:00 and 8:00 AM on both your delivery day and your return/pickup day, the area in front of your home must be clear, with enough room for our truck to back up to the trailer and hitch up. Keeping that space clear is your responsibility.</li>
       <li><strong>🪵 Filling:</strong> Fill the dumpster as you like until your scheduled return time. You have until pickup to load your materials.</li>
       <li><strong>⏳ Pickup:</strong> On ${formatDate(booking.pickup_date)} ${deliveryWindowPickup}, we will collect the dumpster. You do not need to be present—we only need the area clear.</li>
-      <li><strong>🏭 Dump fee:</strong> After pickup, we take the dumpster to the dump and then let you know what the dump fee will be.</li>
+      <li><strong>🏭 Dump fee:</strong> ${dumpFeeNotice} After pickup, we process the load at the landfill and charge your card on file based on actual weight.</li>
       <li><strong>💳 Payment:</strong> Your card will be charged within the following couple of days—not on the same day as pickup.</li>
       <li><strong>🔑 Customer Portal:</strong> You can return to the Customer Portal anytime to view your booking details or leave a review if you wish.</li>
      `;
@@ -2172,6 +2187,12 @@ Deno.serve(async (req)=>{
       }
     }
 
+    const { data: landfillFeeRows } = await supabase
+      .from("charges_and_fees")
+      .select("fee_key, fee_value")
+      .in("fee_key", ["dump_tonnage_rate", "dump_rate_tons"]);
+    const landfillRates = landfillRatesFromRows(landfillFeeRows);
+
     const emailHTML = isCancelledRefund
       ? generateRefundEmailHTML(booking)
       : actionRequiredKind
@@ -2181,7 +2202,7 @@ Deno.serve(async (req)=>{
           isPastDeadline: deadlineInfo.isPastDeadline,
           cancellationFeeNote,
         })
-        : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl);
+        : generateEmailHTML(booking, serviceDetails, insuranceAmount, siteUrl, landfillRates);
     const subject = isCancelledRefund
       ? `Refund Confirmation #${booking.id} — U-Fill Dumpsters`
       : actionRequiredKind === "pending_verification"

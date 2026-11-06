@@ -19,7 +19,13 @@ import { DeliveryServiceInfo } from '@/components/DeliveryServiceInfo.jsx';
 import { UnavailableServiceModal } from '@/components/UnavailableServiceModal';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { includedDeliveryMileageExplanation, includedMilesPhrase, landfillRatePhrase, landfillTonClause } from '@/utils/chargesAndFeesConfig';
+import {
+  includedDeliveryMileageExplanation,
+  includedMilesPhrase,
+  landfillRatePhrase,
+  landfillTonClause,
+} from '@/utils/chargesAndFeesConfig';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 import { ReturningCustomerVerificationModal } from '@/components/ReturningCustomerVerificationModal';
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
@@ -1165,7 +1171,16 @@ export const BookingForm = ({
                   <div className="mt-2">
                     <h5 className="font-bold text-blue-100">Disposal Fees</h5>
                     <p>
-                      Disposal fees are charged {landfillTonClause(landfillTons)}. These charges will be applied to the card on file once the rental is complete and the load has been processed at the landfill.
+                      Pending dump fees are calculated based on actual waste processed.
+                      {' '}
+                      {!adminFeesLoading && (
+                        <IncludedDumpFlatRateCopy
+                          rate={adminFee('dump_tonnage_rate')}
+                          tons={landfillTons}
+                        />
+                      )}
+                      {' '}
+                      These charges will be applied to the card on file once the rental is complete and the load has been processed at the landfill.
                     </p>
                   </div>
                 </motion.div>
@@ -1183,6 +1198,14 @@ export const BookingForm = ({
               <li>Weight Limit: <span className="text-orange-400">{dynamicMaxTons || 2.5}-ton maximum capacity</span></li>
               <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
+            {!adminFeesLoading && (
+              <p className="mt-3 pt-2 border-t border-white/10 text-yellow-200 text-sm leading-relaxed break-words">
+                <IncludedDumpFlatRateCopy
+                  rate={adminFee('dump_tonnage_rate')}
+                  tons={landfillTons}
+                />
+              </p>
+            )}
           </div>
         </div>
       );
@@ -1203,6 +1226,14 @@ export const BookingForm = ({
               <li>Dump Fees: <span className="text-green-400">${dynamicFee} {landfillTonClause(landfillTons)} {dynamicMaxTons ? `(${dynamicMaxTons} tons max)` : ''}</span></li>
               <li>Landfill disposal fees current rate: <span className="text-green-400">{landfillRateText}</span></li>
             </ul>
+            {!adminFeesLoading && (
+              <p className="mt-3 pt-2 border-t border-white/10 text-yellow-200 text-sm leading-relaxed break-words">
+                <IncludedDumpFlatRateCopy
+                  rate={adminFee('dump_tonnage_rate')}
+                  tons={landfillTons}
+                />
+              </p>
+            )}
           </div>
         </div>
       );
@@ -1423,7 +1454,7 @@ export const BookingForm = ({
               )}
             </div>
             
-            <div className="max-h-[350px] overflow-y-auto mb-4 pr-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+            <div className="max-h-[350px] overflow-y-auto mb-4 pr-2 pb-3 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
               {renderDescription()}
             </div>
             

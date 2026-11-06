@@ -4,7 +4,13 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2, Info } from 'lucide-react';
 import { useDumpFees } from '@/hooks/useDumpFees';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { includedDeliveryMileageExplanation, includedMilesPhrase, landfillRatePhrase, landfillTonClause } from '@/utils/chargesAndFeesConfig';
+import {
+  includedDeliveryMileageExplanation,
+  includedMilesPhrase,
+  landfillRatePhrase,
+  landfillTonClause,
+} from '@/utils/chargesAndFeesConfig';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 import { mileageBandFeePhrase } from '@/utils/mileageBands';
 
 const isTrailerDelivery = (service) => Number(service?.id) === 4;
@@ -77,12 +83,26 @@ export const DeliveryServiceInfo = ({ isOpen, onClose, planId = 2 }) => {
                             {isTrailerDelivery(service) ? (
                                 <div className="flex items-start">
                                     <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                    <p>The dump will be charged {landfillRatePhrase(adminFee('dump_tonnage_rate'), adminFee('dump_rate_tons'))}.</p>
+                                    <p>
+                                      The dump will be charged {landfillRatePhrase(adminFee('dump_tonnage_rate'), adminFee('dump_rate_tons'))}.
+                                      {' '}
+                                      <IncludedDumpFlatRateCopy
+                                        rate={adminFee('dump_tonnage_rate')}
+                                        tons={adminFee('dump_rate_tons')}
+                                      />
+                                    </p>
                                 </div>
                             ) : (
                                 <div className="flex items-start">
                                     <div className="h-2 w-2 rounded-full bg-cyan-400 mt-2 mr-3 flex-shrink-0"></div>
-                                    <p><strong>Dump fees:</strong> ${dynamicFee} {landfillTonClause(adminFee('dump_rate_tons'))}{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.</p>
+                                    <p>
+                                      <strong>Dump fees:</strong> ${dynamicFee} {landfillTonClause(adminFee('dump_rate_tons'))}{dynamicMaxTons ? ` (${dynamicMaxTons} tons max)` : ''}.
+                                      {' '}
+                                      <IncludedDumpFlatRateCopy
+                                        rate={adminFee('dump_tonnage_rate')}
+                                        tons={adminFee('dump_rate_tons')}
+                                      />
+                                    </p>
                                 </div>
                             )}
                         </div>

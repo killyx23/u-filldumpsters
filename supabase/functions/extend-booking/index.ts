@@ -5,6 +5,7 @@ import { businessWallTimeToUtc, parseClockTime } from "../_shared/parseBookingTi
 import { chargeCardOffSession } from "../_shared/cardCharge.ts";
 import { issueExtensionReturnPin } from "../_shared/extensionReturnPin.ts";
 import { portalCallerOwnsBooking, requirePortalCaller } from "../_shared/phoneOrderAuth.ts";
+import { evaluateCoupon, resolveRentalDays } from "../_shared/couponEvaluate.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -256,6 +257,8 @@ Deno.serve(async (req) => {
     const newPickupDate = dateKey(body.newPickupDate);
     const signature = String(body.agreementSignature || "").trim();
     const signatureDate = String(body.agreementSignatureDate || "").trim();
+    const requestCoupon = body.coupon && typeof body.coupon === "object" ? body.coupon : null;
+    const originalCouponId = Number(body.originalCouponId ?? body.original_coupon_id ?? 0);
     if (!bookingId || !newPickupDate || !signature || !signatureDate) {
       return fail(400, "Choose a return date and sign the agreement.");
     }
@@ -316,8 +319,56 @@ Deno.serve(async (req) => {
     const equipmentCharge = equipmentExtensionCharge(equipment, dates.length, catalogRates);
     const serviceSubtotal = round2(dayRate * dates.length);
     const subtotal = round2(serviceSubtotal + equipmentCharge.subtotal);
-    const tax = round2(subtotal * (taxRate / 100));
-    const total = round2(subtotal + tax);
+    const totalRentalDays = resolveRentalDays(booking.drop_off_date, newPickupDate, dates.length);
+
+    let activeCoupon: Record<string, unknown> | null = null;
+    let couponDiscount = 0;
+    const requestedCode = String(requestCoupon?.code || "").trim();
+    if (requestedCode) {
+      const { data: couponRow } = await supabaseAdmin
+        .from("coupons")
+        .select("id, code, discount_type, discount_value, coupon_kind, rules, service_ids, is_active, expires_at, usage_limit, usage_count")
+        .ilike("code", requestedCode)
+        .maybeSingle();
+      const serviceIds = Array.isArray(couponRow?.service_ids) ? couponRow.service_ids.map(Number) : [];
+      const expired = couponRow?.expires_at ? new Date(couponRow.expires_at).getTime() < Date.now() : false;
+      const overLimit = couponRow?.usage_limit != null
+        && Number(couponRow.usage_count || 0) >= Number(couponRow.usage_limit);
+      const serviceOk = serviceIds.length === 0 || serviceIds.includes(serviceId);
+      // Same booking coupon may already be counted — allow re-use without usage_limit blocking.
+      const sameAsOriginal = Number(couponRow?.id || 0) > 0
+        && Number(couponRow?.id) === Number(booking.addons?.coupon?.id || originalCouponId || 0);
+      if (
+        couponRow?.is_active
+        && !expired
+        && serviceOk
+        && (sameAsOriginal || !overLimit)
+      ) {
+        activeCoupon = {
+          isValid: true,
+          id: couponRow.id,
+          code: couponRow.code,
+          discountType: couponRow.discount_type,
+          discountValue: Number(couponRow.discount_value || 0),
+          coupon_kind: couponRow.coupon_kind || (Array.isArray(couponRow.rules) && couponRow.rules.length ? "rules" : "flat"),
+          rules: Array.isArray(couponRow.rules) ? couponRow.rules : [],
+        };
+        const evaluation = evaluateCoupon({
+          coupon: activeCoupon,
+          rentalDays: totalRentalDays,
+          baseRental: serviceSubtotal,
+          grossBeforeDiscount: subtotal,
+        });
+        couponDiscount = round2(Math.min(evaluation.discount, subtotal));
+        if (couponDiscount > 0) {
+          activeCoupon = { ...activeCoupon, discountAmount: couponDiscount };
+        }
+      }
+    }
+
+    const discountedSubtotal = round2(Math.max(0, subtotal - couponDiscount));
+    const tax = round2(discountedSubtotal * (taxRate / 100));
+    const total = round2(discountedSubtotal + tax);
     const description = equipmentCharge.subtotal > 0
       ? `Rental extension: ${dates.length} day(s) for booking #${bookingId}, including equipment extra days`
       : `Rental extension: ${dates.length} day(s) for booking #${bookingId}`;
@@ -342,6 +393,8 @@ Deno.serve(async (req) => {
       day_rate: dayRate,
       equipment_subtotal: equipmentCharge.subtotal,
       subtotal,
+      coupon_discount: couponDiscount,
+      coupon_code: activeCoupon?.code || null,
       tax,
       amount: total,
       stripe_type: "charge",
@@ -359,25 +412,32 @@ Deno.serve(async (req) => {
       payment_intent_id: charge.paymentIntentId,
       invoice_id: charge.invoiceId,
       created_at: approvedAt,
+      coupon_discount: couponDiscount || null,
+      coupon_code: activeCoupon?.code || null,
     };
     const nextPlan = {
       ...(booking.plan || {}),
       price: round2(Number(booking.plan?.price || 0) + serviceSubtotal),
     };
+    const nextAddons: Record<string, unknown> = {
+      ...(booking.addons || {}),
+      equipment: applyEquipmentExtension(equipment, dates.length, catalogRates),
+      extensions: [...extensions, entry],
+    };
+    if (activeCoupon) {
+      nextAddons.coupon = activeCoupon;
+      nextAddons.couponDiscountAmount = couponDiscount;
+    }
     const { data: updated, error: updateError } = await supabaseAdmin
       .from("bookings")
       .update({
         pickup_date: newPickupDate,
         plan: nextPlan,
-        subtotal_before_tax: round2(Number(booking.subtotal_before_tax || 0) + subtotal),
+        subtotal_before_tax: round2(Number(booking.subtotal_before_tax || 0) + discountedSubtotal),
         tax_amount: round2(Number(booking.tax_amount || 0) + tax),
         total_price: round2(Number(booking.total_price || 0) + total),
         receipt_status_history: [...history, entry],
-        addons: {
-          ...(booking.addons || {}),
-          equipment: applyEquipmentExtension(equipment, dates.length, catalogRates),
-          extensions: [...extensions, entry],
-        },
+        addons: nextAddons,
         fees: {
           ...fees,
           rental_extension: feeRecord,
@@ -398,6 +458,22 @@ Deno.serve(async (req) => {
           ? "Those dates were just booked. The card was refunded. Return the rental and start a new booking."
           : "The return date could not be saved. The card was refunded.",
       );
+    }
+
+    const approvedCouponId = Number(activeCoupon?.id || 0);
+    const bookingOriginalCouponId = Number(booking.addons?.coupon?.id || originalCouponId || 0);
+    if (approvedCouponId > 0 && approvedCouponId !== bookingOriginalCouponId) {
+      const { data: couponRow } = await supabaseAdmin
+        .from("coupons")
+        .select("id, usage_count")
+        .eq("id", approvedCouponId)
+        .maybeSingle();
+      if (couponRow?.id) {
+        await supabaseAdmin
+          .from("coupons")
+          .update({ usage_count: Number(couponRow.usage_count || 0) + 1 })
+          .eq("id", approvedCouponId);
+      }
     }
 
     const returnPin = await issueExtensionReturnPin(supabaseAdmin, updated, newPickupDate);

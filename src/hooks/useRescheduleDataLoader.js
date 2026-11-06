@@ -1,18 +1,15 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import {
-    calculateBookingCosts,
-    calculateDays,
     buildOriginalAddonsList,
 } from '@/utils/rescheduleCalculations';
 import { filterRentableServices } from '@/utils/servicePlan';
 import { fetchPlansForService, DEFAULT_INSURANCE_PRICE } from '@/utils/protectionPlans';
-import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { resolvePurchaseReceiptTotals } from '@/utils/purchaseReceiptTotals';
+
+const round2 = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
 
 export const useRescheduleDataLoader = (bookingId) => {
-    const { fee: adminFee } = useChargesAndFees();
-    const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -62,18 +59,7 @@ export const useRescheduleDataLoader = (bookingId) => {
                 const originalService = services.find((s) => s.id === originalServiceId) || services[0];
 
                 const distanceMiles = Number(booking.customers?.distance_miles || 0);
-                const origDays = calculateDays(booking.drop_off_date, booking.pickup_date);
-
-                const originalCosts = await calculateBookingCosts(
-                    originalService,
-                    origDays,
-                    originalAddonsList,
-                    distanceMiles,
-                    null,
-                    null,
-                    null,
-                    includedMiles
-                );
+                const receipt = resolvePurchaseReceiptTotals(booking);
 
                 setData({
                     originalBooking: booking,
@@ -81,13 +67,19 @@ export const useRescheduleDataLoader = (bookingId) => {
                     availableServices: services,
                     allEquipment: allEquipment || [],
                     originalAddonsList,
+                    // Frozen at purchase — do not reprice the original booking from live catalog.
                     originalCosts: {
-                        serviceCost: originalCosts.serviceCost,
-                        addonsCost: originalCosts.addonsCost,
-                        mileageCharge: originalCosts.mileageCharge,
-                        subtotal: originalCosts.subtotal,
-                        tax: originalCosts.tax,
-                        total: originalCosts.total,
+                        serviceCost: round2(
+                            Math.max(0, receipt.subtotal - receipt.deliveryFee - receipt.mileageCharge),
+                        ),
+                        addonsCost: 0,
+                        deliveryFee: receipt.deliveryFee,
+                        mileageCharge: receipt.mileageCharge,
+                        subtotal: receipt.subtotal,
+                        tax: receipt.tax,
+                        total: receipt.total,
+                        taxRate: receipt.taxRate,
+                        source: receipt.source,
                     },
                     distanceMiles,
                 });
@@ -100,7 +92,7 @@ export const useRescheduleDataLoader = (bookingId) => {
         };
 
         fetchAllData();
-    }, [bookingId, includedMiles]);
+    }, [bookingId]);
 
     return { data, loading, error };
 };

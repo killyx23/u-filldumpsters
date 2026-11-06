@@ -1324,6 +1324,9 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             ?? booking.plan?.id;
         const quoteDropOff = pendingRescheduleLog?.new_drop_off_date || pendingSnapshot?.new_drop_off_date || booking.drop_off_date;
         const quotePickup = pendingRescheduleLog?.new_pickup_date || pendingSnapshot?.new_pickup_date || booking.pickup_date;
+        const snapshotCoupon = quotedPricing.coupon?.isValid
+            ? quotedPricing.coupon
+            : (quotedPricing.coupon === null ? null : undefined);
         const rescheduleQuoteInput = {
             plan: booking.plan,
             serviceId: quoteServiceId,
@@ -1336,6 +1339,7 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
             taxRate: Number(quotedPricing.taxRate ?? booking.tax_rate_used ?? 0),
             dropOff: quoteDropOff,
             pickup: quotePickup,
+            coupon: snapshotCoupon,
         };
         const rescheduleQuote = isRescheduleApprove && Array.isArray(pendingSnapshot?.new_addons)
             ? quoteRescheduleBreakdown(rescheduleQuoteInput)
@@ -1635,7 +1639,51 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
                     nextAddons.nonTaxableSubtotal = breakdown.nonTaxableSubtotal;
                 }
 
+                const approvedCoupon = rescheduleQuote?.coupon !== undefined
+                    ? rescheduleQuote.coupon
+                    : (quotedPricing.coupon?.isValid ? quotedPricing.coupon : null);
+                if (approvedCoupon?.isValid) {
+                    nextAddons.coupon = approvedCoupon;
+                    nextAddons.couponDiscountAmount = Number(
+                        rescheduleQuote?.couponDiscountAmount
+                        ?? quotedPricing.couponDiscountAmount
+                        ?? approvedCoupon.discountAmount
+                        ?? 0,
+                    );
+                } else {
+                    delete nextAddons.coupon;
+                    delete nextAddons.couponDiscountAmount;
+                }
+
                 bookingUpdate.addons = nextAddons;
+
+                const originalCouponId = Number(
+                    quotedPricing.original_coupon_id
+                    ?? existingAddons.coupon?.id
+                    ?? 0,
+                );
+                const approvedCouponId = Number(approvedCoupon?.id || 0);
+                const couponIsNew = Boolean(
+                    quotedPricing.coupon_is_new
+                    ?? (approvedCouponId > 0 && approvedCouponId !== originalCouponId),
+                );
+                if (couponIsNew && approvedCouponId > 0) {
+                    try {
+                        const { data: couponRow } = await supabase
+                            .from('coupons')
+                            .select('id, usage_count')
+                            .eq('id', approvedCouponId)
+                            .maybeSingle();
+                        if (couponRow?.id) {
+                            await supabase
+                                .from('coupons')
+                                .update({ usage_count: Number(couponRow.usage_count || 0) + 1 })
+                                .eq('id', approvedCouponId);
+                        }
+                    } catch (couponBumpErr) {
+                        console.error('[handleApprove] coupon usage bump failed:', couponBumpErr);
+                    }
+                }
             }
 
             bookingUpdate.payment_delta_details = {

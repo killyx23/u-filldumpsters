@@ -25,6 +25,7 @@ import { getEquipmentReturnDisplay, formatReturnIssueStatus } from '@/utils/equi
 import { isUnfinishedUnpaidBooking } from '@/utils/unfinishedBooking';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
 import { includedDeliveryMileageExplanation, includedMilesPhrase, resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { LandfillDisposalFeesNotice } from '@/components/LandfillDisposalFeesNotice';
 import {
     MATTRESS_CURBSIDE_RECEIPT_NOTE,
     shouldShowMattressCurbsideReminder,
@@ -834,10 +835,10 @@ export const PrintableReceipt = React.forwardRef(({ booking }, ref) => {
 
                     {/* 8. Landfill/Disposal Fees */}
                     {isDeliveryServiceForFees && !isCancelledAndRefunded && (
-                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded">
-                            <p className="font-bold text-sm">🏗️ Landfill/Disposal Fees (TBD)</p>
-                            <p className="text-xs text-gray-700 mt-1">Pending dump fees will be calculated based on actual waste processed and charged separately.</p>
-                        </div>
+                        <LandfillDisposalFeesNotice
+                          variant="print"
+                          className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded"
+                        />
                     )}
 
                     {isCancelledAndRefunded ? (

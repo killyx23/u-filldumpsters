@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatCurrency } from '@/api/EcommerceApi';
 import { Receipt, Loader2, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react';
@@ -17,6 +17,7 @@ import {
   calculateRescheduleCosts,
   isDeliveryServiceId,
 } from '@/utils/rescheduleTaxCalculator';
+import { resolvePurchaseReceiptTotals } from '@/utils/purchaseReceiptTotals';
 import { RescheduleFeeInfoPopover } from '@/components/customer-portal/reschedule/RescheduleFeeInfoPopover';
 
 const round2 = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
@@ -58,7 +59,11 @@ function BreakdownColumn({
             {showDelivery && (
                 <div className={`flex justify-between items-center ${bodyText}`}>
                     <span>Delivery Fee (Flat)</span>
-                    <span className="font-bold">{money(costs.deliveryFee, currencyInfo)}</span>
+                    <span className="font-bold">
+                        {Number(costs.deliveryFee) > 0
+                            ? money(costs.deliveryFee, currencyInfo)
+                            : 'Non-applicable'}
+                    </span>
                 </div>
             )}
 
@@ -67,10 +72,16 @@ function BreakdownColumn({
                     <div className={`flex justify-between items-center ${bodyText}`}>
                         <span className="font-semibold">Mileage Charge</span>
                         <span className="font-bold">
-                            {showMileagePending ? 'Pending' : money(costs.mileageCharge, currencyInfo)}
+                            {showMileagePending
+                                ? 'Pending'
+                                : Number(costs.mileageCharge) > 0
+                                    ? money(costs.mileageCharge, currencyInfo)
+                                    : 'Non-applicable'}
                         </span>
                     </div>
-                    {mileageNote && <p className={`text-xs mt-1 min-h-4 ${mutedText}`}>{mileageNote}</p>}
+                    {mileageNote && Number(costs.mileageCharge) > 0 && (
+                        <p className={`text-xs mt-1 min-h-4 ${mutedText}`}>{mileageNote}</p>
+                    )}
                 </div>
             )}
 
@@ -133,6 +144,8 @@ export const ReschedulePricingBreakdown = ({
     distanceMiles,
     isManualAddress,
     verifiedAddress = null,
+    onCostsResolved = null,
+    appliedCoupon = null,
 }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -147,6 +160,8 @@ export const ReschedulePricingBreakdown = ({
     const { fee: adminFee } = useChargesAndFees();
     const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
     const { taxOptions, insurancePrice, loading: loadingTaxOptions } = useBookingTaxOptions(newService?.id);
+    const onCostsResolvedRef = useRef(onCostsResolved);
+    onCostsResolvedRef.current = onCostsResolved;
 
     const currencyInfo = { code: 'USD', symbol: '$' };
 
@@ -261,6 +276,7 @@ export const ReschedulePricingBreakdown = ({
                     referralDiscountAmount: booking.addons?.referralDiscountAmount,
                     coupon: booking.addons?.coupon,
                 };
+                // Original column uses the purchase coupon; new quote uses the live applied coupon.
                 const originalCostResult = await calculateRescheduleCosts({
                     service: originalService,
                     days: originalDays,
@@ -274,20 +290,46 @@ export const ReschedulePricingBreakdown = ({
                     },
                     insurancePrice,
                     discounts: rewardDiscounts,
+                    coupon: booking.addons?.coupon || null,
                     includedMiles,
                 });
 
+                // Original column is locked to purchase-time receipt totals (same as portal/email).
+                const receipt = resolvePurchaseReceiptTotals(booking);
+                const useStoredTotals = receipt.source === 'booking_receipt' && receipt.total > 0;
+                const storedDeliveryFee = useStoredTotals
+                    ? receipt.deliveryFee
+                    : (originalIsDelivery ? originalCostResult.deliveryFee : 0);
+                const storedMileageCharge = useStoredTotals
+                    ? receipt.mileageCharge
+                    : (originalIsDelivery ? originalCostResult.mileageCharge : 0);
+                const originalDiscountTotal = Number(originalCostResult.discount || 0);
+                const receiptAlignedBase = useStoredTotals
+                    ? round2(
+                        receipt.subtotal
+                        - storedDeliveryFee
+                        - storedMileageCharge
+                        - Number(originalCostResult.addonsCost || 0)
+                        + originalDiscountTotal,
+                    )
+                    : originalCostResult.baseRentalCost;
+
                 const originalCostsData = {
-                    baseRentalCost: originalCostResult.baseRentalCost,
-                    deliveryFee: originalCostResult.deliveryFee,
-                    mileageCharge: originalIsDelivery ? originalCostResult.mileageCharge : 0,
-                    mileageDistance: originalIsDelivery ? originalTotalMiles : 0,
+                    baseRentalCost: receiptAlignedBase > 0 ? receiptAlignedBase : originalCostResult.baseRentalCost,
+                    deliveryFee: storedDeliveryFee,
+                    mileageCharge: storedMileageCharge,
+                    mileageDistance: originalIsDelivery
+                        ? (Number(booking.addons?.distanceInfo?.miles
+                            ?? booking.addons?.distanceInfo?.roundTripMiles
+                            ?? booking.addons?.deliveryDistance
+                            ?? originalTotalMiles) || originalTotalMiles)
+                        : 0,
                     mileageRate: originalMileageRate,
                     addonsTotal: originalCostResult.addonsCost,
                     discounts: originalCostResult.discounts || {},
-                    subtotal: originalCostResult.subtotal,
-                    tax: originalCostResult.tax,
-                    total: originalCostResult.total,
+                    subtotal: useStoredTotals ? receipt.subtotal : originalCostResult.subtotal,
+                    tax: useStoredTotals ? receipt.tax : originalCostResult.tax,
+                    total: useStoredTotals ? receipt.total : originalCostResult.total,
                     days: originalDays,
                 };
 
@@ -369,6 +411,11 @@ export const ReschedulePricingBreakdown = ({
                     }
                 }
 
+                const newRewardDiscounts = {
+                    loyaltyDiscountAmount: booking.addons?.loyaltyDiscountAmount,
+                    loyaltyPointsToRedeem: booking.addons?.loyaltyPointsToRedeem,
+                    referralDiscountAmount: booking.addons?.referralDiscountAmount,
+                };
                 const newCostResult = await calculateRescheduleCosts({
                     service: newService,
                     days: newDays,
@@ -379,7 +426,8 @@ export const ReschedulePricingBreakdown = ({
                     taxRate,
                     taxOptions,
                     insurancePrice,
-                    discounts: rewardDiscounts,
+                    discounts: newRewardDiscounts,
+                    coupon: appliedCoupon?.isValid ? appliedCoupon : null,
                     includedMiles,
                 });
 
@@ -400,6 +448,8 @@ export const ReschedulePricingBreakdown = ({
                     mileageRate: newMileageRate,
                     addonsTotal: sumSide('next'),
                     discounts: newCostResult.discounts || {},
+                    coupon: newCostResult.coupon || null,
+                    couponDiscountAmount: newCostResult.couponDiscountAmount || 0,
                     subtotal: newCostResult.subtotal,
                     tax: newCostResult.tax,
                     total: newCostResult.total,
@@ -412,6 +462,10 @@ export const ReschedulePricingBreakdown = ({
                 if (!isMounted) return;
                 setOriginalDetailedCosts(originalCostsData);
                 setNewCosts(newCostsData);
+                onCostsResolvedRef.current?.({
+                    original: originalCostsData,
+                    next: newCostsData,
+                });
 
                 setMileageLogic(
                     isNewDeliveryService
@@ -443,7 +497,7 @@ export const ReschedulePricingBreakdown = ({
             isMounted = false;
             if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [bookingId, originalService, newService, newAddonsList, originalAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, verifiedAddress, retryCount, taxRate, taxOptions, insurancePrice, loadingTaxRate, loadingTaxOptions, includedMiles]);
+    }, [bookingId, originalService, newService, newAddonsList, originalAddonsList, newDropOffDate, newPickupDate, distanceMiles, isManualAddress, verifiedAddress, retryCount, taxRate, taxOptions, insurancePrice, loadingTaxRate, loadingTaxOptions, includedMiles, appliedCoupon]);
 
     const handleRetry = () => {
         setRetryCount(prev => prev + 1);
@@ -476,9 +530,14 @@ export const ReschedulePricingBreakdown = ({
     const isCredit = difference < 0;
     const isCharge = difference > 0;
     const alignedAddons = newCosts.alignedAddons || originalDetailedCosts.alignedAddons || [];
-    const showDelivery = Number(originalDetailedCosts.deliveryFee) > 0 || Number(newCosts.deliveryFee) > 0;
+    const showDelivery = Number(originalDetailedCosts.deliveryFee) > 0
+        || Number(newCosts.deliveryFee) > 0
+        || isDeliveryServiceId(originalService?.id)
+        || isDeliveryServiceId(newService?.id);
     const showMileage = Number(originalDetailedCosts.mileageCharge) > 0
         || Number(newCosts.mileageCharge) > 0
+        || isDeliveryServiceId(originalService?.id)
+        || isDeliveryServiceId(newService?.id)
         || Boolean(mileageLogic);
     const taxLabel = `Estimated Tax (${Number(taxRateUsed || taxRate).toFixed(2)}%)`;
     const discountRows = DISCOUNT_ROWS.flatMap((row) => {
@@ -520,11 +579,11 @@ export const ReschedulePricingBreakdown = ({
                             alignedAddons={alignedAddons}
                             showDelivery={showDelivery}
                             showMileage={showMileage}
-                            mileageNote={Number(originalService?.id) === 4
-                                ? includedDeliveryMileageExplanation(includedMiles)
-                                : (originalDetailedCosts.mileageCharge > 0
-                                ? `${Number(originalDetailedCosts.mileageDistance || 0).toFixed(2)} miles (complete route) @ $${Number(originalDetailedCosts.mileageRate || 0).toFixed(2)}/mile`
-                                : 'Not included')}
+                            mileageNote={Number(originalDetailedCosts.mileageCharge) > 0
+                                ? (Number(originalService?.id) === 4
+                                    ? includedDeliveryMileageExplanation(includedMiles)
+                                    : `${Number(originalDetailedCosts.mileageDistance || 0).toFixed(2)} miles (complete route) @ $${Number(originalDetailedCosts.mileageRate || 0).toFixed(2)}/mile`)
+                                : null}
                             discountRows={discountRows.map((row) => ({ key: row.key, label: row.label, amount: row.originalAmount }))}
                             taxLabel={taxLabel}
                             currencyInfo={currencyInfo}
@@ -558,7 +617,9 @@ export const ReschedulePricingBreakdown = ({
                             showDelivery={showDelivery}
                             showMileage={showMileage}
                             showMileagePending={Boolean(mileageLogic?.isManualAddress)}
-                            mileageNote={mileageLogic?.explanation || (newCosts.mileageCharge > 0 ? 'Mileage charge' : 'Not included')}
+                            mileageNote={Number(newCosts.mileageCharge) > 0
+                                ? (mileageLogic?.explanation || 'Mileage charge')
+                                : null}
                             discountRows={discountRows.map((row) => ({ key: row.key, label: row.label, amount: row.nextAmount }))}
                             taxLabel={taxLabel}
                             currencyInfo={currencyInfo}

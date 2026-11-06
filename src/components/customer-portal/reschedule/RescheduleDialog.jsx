@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, CheckCircle2, ArrowLeft, ArrowRight } from 'lucide-react';
 import { RescheduleServiceSelectionSection } from './RescheduleServiceSelectionSection';
 import { RescheduleDateTimeSelector, verifyRescheduleDatesAvailable } from './RescheduleDateTimeSelector';
@@ -13,7 +14,7 @@ import { RescheduleRequestReview } from './RescheduleRequestReview';
 import { useRescheduleDataLoader } from '@/hooks/useRescheduleDataLoader';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { calculateAddonsDifference, calculateBookingCosts, calculateDays } from '@/utils/rescheduleCalculations';
+import { calculateAddonsDifference, calculateDays } from '@/utils/rescheduleCalculations';
 import { stampRescheduleAddons } from '@/utils/rescheduleComparison';
 import { assertRescheduleStock } from '@/utils/equipmentInventoryManager';
 import { filterAddonsForService } from '@/utils/rescheduleAddons';
@@ -25,8 +26,11 @@ import {
 import { UiControlGuide } from '@/components/UiControlGuide';
 import { getRescheduleGuideEntries } from '@/config/uiControlGuideEntries';
 import { normalizeAddress, addressesAreEqual, formatAddressDisplay } from '@/utils/addressHelpers';
-import { useChargesAndFees } from '@/hooks/useChargesAndFees';
-import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
+import { resolvePurchaseReceiptTotals } from '@/utils/purchaseReceiptTotals';
+import { resolveRescheduleCoupon } from '@/utils/rescheduleCoupon';
+import { CouponApplyField } from '@/components/CouponApplyField';
+
+const round2 = (amount) => Math.round((Number(amount) || 0) * 100) / 100;
 
 const STEPS = {
   SERVICE: 1,
@@ -58,10 +62,14 @@ export const RescheduleDialog = ({
   adminEmail = null,
 }) => {
   const { data, loading, error } = useRescheduleDataLoader(bookingId);
-  const { fee: adminFee } = useChargesAndFees();
-  const includedMiles = resolveIncludedDeliveryMiles(adminFee('included_delivery_miles'));
   const [currentStep, setCurrentStep] = useState(STEPS.SERVICE);
   const [submitting, setSubmitting] = useState(false);
+  /** Locked quote from Financial Breakdown — Confirm Details + submit must reuse this. */
+  const [quoteCosts, setQuoteCosts] = useState(null);
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponStatusMessage, setCouponStatusMessage] = useState(null);
+  const [originalCouponId, setOriginalCouponId] = useState(null);
+  const [couponUserCleared, setCouponUserCleared] = useState(false);
 
   // Form state
   const [selectedService, setSelectedService] = useState(null);
@@ -90,9 +98,15 @@ export const RescheduleDialog = ({
 
   useEffect(() => {
     if (data) {
+      setQuoteCosts(null);
       setSelectedService(data.originalService);
       setOriginalAddonsList(data.originalAddonsList || []);
       setSelectedAddonsList(data.originalAddonsList || []);
+      const storedCoupon = data.originalBooking?.addons?.coupon || null;
+      setAppliedCoupon(storedCoupon?.isValid ? storedCoupon : null);
+      setOriginalCouponId(storedCoupon?.id ?? null);
+      setCouponUserCleared(false);
+      setCouponStatusMessage(storedCoupon?.isValid ? `Coupon ${storedCoupon.code} still applied.` : null);
 
       const originalAddress = data.originalBooking?.delivery_address || data.originalBooking?.contact_address;
       if (originalAddress) {
@@ -121,20 +135,102 @@ export const RescheduleDialog = ({
     }
   }, [data]);
 
+  // Stale quotes must not carry into Confirm Details / submit after the customer changes the request.
+  useEffect(() => {
+    setQuoteCosts(null);
+  }, [
+    selectedService?.id,
+    newDropOffDate,
+    newPickupDate,
+    newDropOffTime,
+    newPickupTime,
+    selectedAddonsList,
+    distanceMiles,
+    verifiedAddress,
+    isManualAddress,
+    appliedCoupon,
+  ]);
+
+  // Revalidate stored/applied coupon whenever service or rental length changes.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!selectedService?.id || !data?.originalBooking) return;
+      if (couponUserCleared) return;
+      const days = calculateDays(
+        newDropOffDate || data.originalBooking.drop_off_date,
+        newPickupDate || data.originalBooking.pickup_date,
+      );
+      const stored = data.originalBooking.addons?.coupon;
+      const sourceCoupon = appliedCoupon?.isValid ? appliedCoupon : (stored?.isValid ? stored : null);
+      if (!sourceCoupon?.code) {
+        if (!cancelled) {
+          setAppliedCoupon(null);
+          setCouponStatusMessage(null);
+        }
+        return;
+      }
+      const resolved = await resolveRescheduleCoupon({
+        storedCoupon: sourceCoupon,
+        newServiceId: selectedService.id,
+        rentalDays: days,
+        previousServiceId: data.originalService?.id,
+      });
+      if (cancelled) return;
+      setAppliedCoupon(resolved.coupon);
+      setCouponStatusMessage(
+        [resolved.message, resolved.dayRuleMissHint].filter(Boolean).join(' ') || null,
+      );
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- manual apply/remove uses handleCouponChange
+  }, [
+    selectedService?.id,
+    newDropOffDate,
+    newPickupDate,
+    data?.originalBooking,
+    data?.originalService?.id,
+    couponUserCleared,
+  ]);
+
+  // Keep Review blocked until Pricing has published a fresh quote for the current request.
+  const quoteReady = Boolean(quoteCosts?.original && quoteCosts?.next && quoteCosts.next.total != null);
+
   // Callback to handle service selection (null clears when a service becomes unavailable)
   const handleServiceSelect = useCallback((service) => {
     if (!service) {
       setSelectedService(null);
+      setQuoteCosts(null);
       return;
     }
 
     setSelectedService(service);
     setSelectedAddonsList((prev) => filterAddonsForService(prev, service.id));
+    setQuoteCosts(null);
 
     toast({
       title: "Service Selected",
       description: `You've selected ${service.name}. Continue to the next step.`,
     });
+  }, []);
+
+  const handleQuoteCostsResolved = useCallback((costs) => {
+    setQuoteCosts(costs);
+  }, []);
+
+  const handleCouponChange = useCallback((coupon, meta = {}) => {
+    if (!coupon) {
+      setAppliedCoupon(null);
+      setCouponUserCleared(true);
+      setCouponStatusMessage(meta.status === 'removed' ? 'Coupon removed from this quote.' : null);
+      return;
+    }
+    setCouponUserCleared(false);
+    setAppliedCoupon(coupon);
+    setCouponStatusMessage(`Coupon ${coupon.code} applied.`);
   }, []);
 
   // Callback to handle address updates from RescheduleAddressVerification
@@ -248,6 +344,17 @@ export const RescheduleDialog = ({
       console.log('All agreements accepted:', agreementsAccepted);
     }
 
+    if (currentStep === STEPS.PRICING) {
+      if (!quoteCosts?.next || quoteCosts.next.total == null || !quoteCosts?.original) {
+        toast({
+          title: 'Pricing still calculating',
+          description: 'Wait for the financial breakdown to finish before continuing.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
     setCurrentStep(prev => prev + 1);
   };
 
@@ -338,25 +445,26 @@ export const RescheduleDialog = ({
         (isDumpLoaderPickup ? null : verifiedAddress) ||
         '';
 
-      const days = daysForQuote;
-      const rewardAddons = originalBooking?.addons || {};
-      const newCosts = await calculateBookingCosts(
-        selectedService,
-        days,
-        quotedAddons,
-        selectedService?.id === 2 ? 0 : distanceMiles,
-        null,
-        null,
-        {
-          loyaltyDiscountAmount: rewardAddons.loyaltyDiscountAmount,
-          loyaltyPointsToRedeem: rewardAddons.loyaltyPointsToRedeem,
-          referralDiscountAmount: rewardAddons.referralDiscountAmount,
-          coupon: rewardAddons.coupon,
-        },
-        includedMiles,
+      const receiptTotals = resolvePurchaseReceiptTotals(originalBooking);
+      const originalFromQuote = quoteCosts?.original;
+      const newFromQuote = quoteCosts?.next;
+      if (!newFromQuote || newFromQuote.total == null) {
+        toast({
+          title: 'Pricing required',
+          description: 'Open the Pricing Breakdown step so totals can be locked before submit.',
+          variant: 'destructive',
+        });
+        setSubmitting(false);
+        return;
+      }
+      const originalTotal = Number(
+        originalFromQuote?.total
+        ?? data?.originalCosts?.total
+        ?? receiptTotals.total
+        ?? 0,
       );
-      const originalTotal = Number(data?.originalCosts?.total ?? originalBooking?.total_price ?? 0);
-      const newTotal = Number(newCosts?.total ?? originalTotal);
+      const newTotal = Number(newFromQuote.total);
+      const newCosts = newFromQuote;
 
       const rescheduleData = {
         booking_id: bookingId,
@@ -393,16 +501,26 @@ export const RescheduleDialog = ({
         original_total_price: originalTotal,
         new_total_price: newTotal,
         pricing: {
-          serviceCost: newCosts.serviceCost,
-          baseRentalCost: newCosts.baseRentalCost,
-          deliveryFee: newCosts.deliveryFee,
-          addonsCost: newCosts.addonsCost,
-          mileageCharge: newCosts.mileageCharge,
-          discount: newCosts.discount,
-          discounts: newCosts.discounts,
-          subtotal: newCosts.subtotal,
-          tax: newCosts.tax,
-          taxRate: newCosts.taxRate,
+          serviceCost: round2(
+            Number(newCosts.baseRentalCost || 0)
+            + Number(newCosts.deliveryFee || 0)
+            + Number(newCosts.mileageCharge || 0),
+          ),
+          baseRentalCost: Number(newCosts.baseRentalCost || 0),
+          deliveryFee: Number(newCosts.deliveryFee || 0),
+          addonsCost: Number(newCosts.addonsTotal ?? newCosts.addonsCost ?? 0),
+          mileageCharge: Number(newCosts.mileageCharge || 0),
+          discount: Number(newCosts.discounts?.total ?? newCosts.discount ?? 0),
+          discounts: newCosts.discounts || {},
+          coupon: newCosts.coupon || appliedCoupon || null,
+          couponDiscountAmount: Number(newCosts.couponDiscountAmount || 0),
+          original_coupon_id: originalCouponId,
+          coupon_is_new:
+            Boolean(newCosts.coupon?.id || appliedCoupon?.id)
+            && Number(newCosts.coupon?.id || appliedCoupon?.id) !== Number(originalCouponId),
+          subtotal: Number(newCosts.subtotal || 0),
+          tax: Number(newCosts.tax || 0),
+          taxRate: Number(newCosts.taxRate || 0),
           total: newTotal,
         },
       };
@@ -619,27 +737,44 @@ export const RescheduleDialog = ({
           )}
 
           {currentStep === STEPS.PRICING && (
-            <ReschedulePricingBreakdown
-              bookingId={bookingId}
-              originalService={data.originalService}
-              originalAddonsList={originalAddonsList}
-              originalCosts={data.originalCosts}
-              newService={selectedService}
-              newAddonsList={selectedAddonsList}
-              newDropOffDate={newDropOffDate}
-              newPickupDate={newPickupDate}
-              distanceMiles={isDumpLoaderPickup ? 0 : distanceMiles}
-              isManualAddress={isManualAddress}
-              verifiedAddress={verifiedAddress}
-              contactAddress={contactAddress}
-            />
+            <div className="space-y-6">
+              <Card className="bg-gray-900/60 border-gray-800 max-w-6xl mx-auto">
+                <CardContent className="p-6">
+                  <CouponApplyField
+                    serviceId={selectedService?.id}
+                    rentalDays={calculateDays(
+                      newDropOffDate || data.originalBooking?.drop_off_date,
+                      newPickupDate || data.originalBooking?.pickup_date,
+                    )}
+                    appliedCoupon={appliedCoupon}
+                    onCouponChange={handleCouponChange}
+                    statusMessage={couponStatusMessage}
+                  />
+                </CardContent>
+              </Card>
+              <ReschedulePricingBreakdown
+                bookingId={bookingId}
+                originalService={data.originalService}
+                originalAddonsList={originalAddonsList}
+                originalCosts={data.originalCosts}
+                newService={selectedService}
+                newAddonsList={selectedAddonsList}
+                newDropOffDate={newDropOffDate}
+                newPickupDate={newPickupDate}
+                distanceMiles={isDumpLoaderPickup ? 0 : distanceMiles}
+                isManualAddress={isManualAddress}
+                verifiedAddress={verifiedAddress}
+                contactAddress={contactAddress}
+                onCostsResolved={handleQuoteCostsResolved}
+                appliedCoupon={appliedCoupon}
+              />
+            </div>
           )}
 
           {currentStep === STEPS.REVIEW && (
             <RescheduleRequestReview
               originalBooking={data.originalBooking}
               originalService={data.originalService}
-              originalAddonsList={originalAddonsList}
               newService={selectedService}
               newDropOffDate={newDropOffDate}
               newPickupDate={newPickupDate}
@@ -648,6 +783,8 @@ export const RescheduleDialog = ({
               selectedAddonsList={selectedAddonsList}
               deliveryAddress={verifiedAddress}
               comments={comments}
+              originalCosts={quoteCosts?.original || data.originalCosts}
+              newCosts={quoteCosts?.next || null}
             />
           )}
         </div>
@@ -670,7 +807,11 @@ export const RescheduleDialog = ({
           )}
 
           {currentStep < STEPS.REVIEW ? (
-            <Button onClick={handleNext} className="bg-gold hover:bg-gold-light text-black">
+            <Button
+              onClick={handleNext}
+              className="bg-gold hover:bg-gold-light text-black"
+              disabled={currentStep === STEPS.PRICING && !quoteReady}
+            >
               Next <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           ) : (

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, format, parseISO } from 'date-fns';
 import { CalendarClock, Loader2, Printer } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
@@ -9,7 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from '@/components/ui/use-toast';
 import { ComprehensiveAgreement } from '@/components/ComprehensiveAgreement';
 import { PrintableReceipt } from '@/components/PrintableReceipt';
+import { CouponApplyField } from '@/components/CouponApplyField';
+import { resolveRescheduleCoupon } from '@/utils/rescheduleCoupon';
 import { canExtendBooking, quoteRentalExtension } from '@/utils/rentalExtension';
+import { resolveRentalDays } from '@/utils/couponRules';
 
 const formatClock = (timeString) => {
   if (!timeString) return 'the scheduled return time';
@@ -38,6 +41,10 @@ export const ExtendServiceDialog = ({
   const [charging, setCharging] = useState(false);
   const [catalogRates, setCatalogRates] = useState({});
   const [extendedBooking, setExtendedBooking] = useState(null);
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponStatusMessage, setCouponStatusMessage] = useState(null);
+  const [originalCouponId, setOriginalCouponId] = useState(null);
+  const [couponUserCleared, setCouponUserCleared] = useState(false);
   const receiptRef = useRef(null);
   const handlePrint = useReactToPrint({ content: () => receiptRef.current });
 
@@ -53,7 +60,11 @@ export const ExtendServiceDialog = ({
     setStep('dates');
     setCharging(false);
     setExtendedBooking(null);
-  }, [open, booking?.id]);
+    setAppliedCoupon(null);
+    setCouponStatusMessage(null);
+    setOriginalCouponId(booking?.addons?.coupon?.id ?? null);
+    setCouponUserCleared(false);
+  }, [open, booking?.id, booking?.addons?.coupon?.id]);
 
   useEffect(() => {
     if (!open || !booking?.addons?.equipment) {
@@ -124,8 +135,52 @@ export const ExtendServiceDialog = ({
 
   const quote = useMemo(() => {
     if (!booking || !selectedDate) return null;
-    return quoteRentalExtension(booking, format(selectedDate, 'yyyy-MM-dd'), availability, catalogRates);
-  }, [booking, selectedDate, availability, catalogRates]);
+    return quoteRentalExtension(
+      booking,
+      format(selectedDate, 'yyyy-MM-dd'),
+      availability,
+      catalogRates,
+      appliedCoupon,
+    );
+  }, [booking, selectedDate, availability, catalogRates, appliedCoupon]);
+
+  useEffect(() => {
+    if (!open || !booking || !selectedDate || couponUserCleared) return;
+    let cancelled = false;
+    const newPickup = format(selectedDate, 'yyyy-MM-dd');
+    const totalDays = resolveRentalDays(booking.drop_off_date, newPickup, 1);
+    (async () => {
+      const result = await resolveRescheduleCoupon({
+        storedCoupon: appliedCoupon?.isValid ? appliedCoupon : booking.addons?.coupon,
+        newServiceId: booking.plan?.id,
+        rentalDays: totalDays,
+        previousServiceId: booking.plan?.id,
+      });
+      if (cancelled) return;
+      setAppliedCoupon(result.coupon);
+      setCouponStatusMessage(result.message || result.dayRuleMissHint || null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only revalidate when date/booking opens
+  }, [open, booking?.id, selectedDate, couponUserCleared]);
+
+  const handleCouponChange = useCallback((coupon, meta = {}) => {
+    if (meta.status === 'removed' || !coupon) {
+      setAppliedCoupon(null);
+      setCouponUserCleared(true);
+      setCouponStatusMessage(null);
+      return;
+    }
+    setCouponUserCleared(false);
+    setAppliedCoupon(coupon);
+    setCouponStatusMessage(
+      meta.status === 'applied'
+        ? `Coupon ${coupon.code} applied.`
+        : null,
+    );
+  }, []);
 
   const nextDayBlocked = useMemo(() => {
     if (!firstExtraDay || loadingDates) return false;
@@ -143,7 +198,13 @@ export const ExtendServiceDialog = ({
 
   const handleDayClick = (day) => {
     if (!booking || !firstExtraDay || day < firstExtraDay) return;
-    const result = quoteRentalExtension(booking, format(day, 'yyyy-MM-dd'), availability, catalogRates);
+    const result = quoteRentalExtension(
+      booking,
+      format(day, 'yyyy-MM-dd'),
+      availability,
+      catalogRates,
+      appliedCoupon,
+    );
     if (!result.ok) {
       setSelectedDate(null);
       setReorderDate(day);
@@ -163,6 +224,8 @@ export const ExtendServiceDialog = ({
           newPickupDate: quote.newPickup,
           agreementSignature,
           agreementSignatureDate,
+          coupon: appliedCoupon?.isValid ? appliedCoupon : null,
+          originalCouponId,
         },
       });
       if (error) {
@@ -257,22 +320,36 @@ export const ExtendServiceDialog = ({
             )}
 
             {quote?.ok && (
-              <div className="rounded-md border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm space-y-1">
-                <p className="font-semibold text-emerald-200">Extra dates</p>
-                <p>{quote.dates.map((date) => format(parseISO(date), 'MMM d, yyyy')).join(', ')}</p>
-                <p>{quote.days} day{quote.days === 1 ? '' : 's'} at {money(quote.dayRate)} per day</p>
-                {quote.equipmentLines?.length > 0 && quote.equipmentLines.map((line) => (
-                  <p key={`${line.equipmentId}-${line.addedDays}`} className="text-xs text-emerald-100">
-                    {line.name || 'Rental equipment'}: {money(line.additionalDayPrice)} × {line.addedDays} additional day{line.addedDays === 1 ? '' : 's'}
-                    {line.quantity > 1 ? ` × ${line.quantity}` : ''} = {money(line.amount)}
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm space-y-3">
+                <div className="space-y-1">
+                  <p className="font-semibold text-emerald-200">Extra dates</p>
+                  <p>{quote.dates.map((date) => format(parseISO(date), 'MMM d, yyyy')).join(', ')}</p>
+                  <p>{quote.days} day{quote.days === 1 ? '' : 's'} at {money(quote.dayRate)} per day</p>
+                  {quote.equipmentLines?.length > 0 && quote.equipmentLines.map((line) => (
+                    <p key={`${line.equipmentId}-${line.addedDays}`} className="text-xs text-emerald-100">
+                      {line.name || 'Rental equipment'}: {money(line.additionalDayPrice)} × {line.addedDays} additional day{line.addedDays === 1 ? '' : 's'}
+                      {line.quantity > 1 ? ` × ${line.quantity}` : ''} = {money(line.amount)}
+                    </p>
+                  ))}
+                  {Number(quote.couponDiscount) > 0 && (
+                    <p className="text-emerald-300">
+                      Coupon{quote.coupon?.code ? ` (${quote.coupon.code})` : ''}: −{money(quote.couponDiscount)}
+                    </p>
+                  )}
+                  <p>Tax ({Number(quote.taxRate).toFixed(2)}%): {money(quote.tax)}</p>
+                  <p className="font-semibold text-white">Added total: {money(quote.total)}</p>
+                  <p>
+                    The return moves to {format(parseISO(quote.newPickup), 'MMM d, yyyy')} by {formatClock(booking.pickup_time_slot)}.
+                    It must be back, locked, and secured by that time.
                   </p>
-                ))}
-                <p>Tax ({Number(quote.taxRate).toFixed(2)}%): {money(quote.tax)}</p>
-                <p className="font-semibold text-white">Added total: {money(quote.total)}</p>
-                <p>
-                  The return moves to {format(parseISO(quote.newPickup), 'MMM d, yyyy')} by {formatClock(booking.pickup_time_slot)}.
-                  It must be back, locked, and secured by that time.
-                </p>
+                </div>
+                <CouponApplyField
+                  serviceId={booking.plan?.id}
+                  rentalDays={quote.totalRentalDays || resolveRentalDays(booking.drop_off_date, quote.newPickup, 1)}
+                  appliedCoupon={appliedCoupon}
+                  onCouponChange={handleCouponChange}
+                  statusMessage={couponStatusMessage}
+                />
                 <Button className="mt-2" onClick={() => setStep('agreement')}>Continue to agreement</Button>
               </div>
             )}

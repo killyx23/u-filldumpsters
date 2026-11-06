@@ -10,6 +10,7 @@ import { formatMoney } from '@/utils/chargesAndFeesConfig';
 import { getTaxRate } from '@/utils/getTaxRate';
 import { calculateTaxAmount } from '@/utils/calculateTaxAmount';
 import { serviceOffersDrivewayProtection } from '@/utils/protectionPlans';
+import { LandfillDisposalFeesNotice } from '@/components/LandfillDisposalFeesNotice';
 
 /**
  * Reusable Price Breakdown Component
@@ -325,17 +326,7 @@ export const PriceBreakdown = ({
         </div>
 
         {/* 8. Landfill/Disposal Fees (For Delivery Services Only) */}
-        {showLandfillFees && isDeliveryService && (
-          <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mt-4">
-            <div className="flex items-start">
-              <span className="text-xl mr-2">🏗️</span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-yellow-400">Landfill/Disposal Fees (TBD)</p>
-                <p className="text-xs text-yellow-200 mt-1">Pending dump fees will be calculated based on actual waste processed</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {showLandfillFees && isDeliveryService && <LandfillDisposalFeesNotice />}
       </div>
     </div>
   );

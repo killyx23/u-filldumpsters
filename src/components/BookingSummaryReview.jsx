@@ -17,6 +17,7 @@ import { UiControlGuide } from '@/components/UiControlGuide';
 import { getBookingGuideEntries } from '@/config/uiControlGuideEntries';
 import { getProtectionOptionsInfoDescription } from '@/content/protectionOptionsInfoText';
 import { useChargesAndFees } from '@/hooks/useChargesAndFees';
+import { LandfillDisposalFeesNotice } from '@/components/LandfillDisposalFeesNotice';
 import { formatMoney } from '@/utils/chargesAndFeesConfig';
 import { formatCustomerFacingPlanName } from '@/utils/displayPlanName';
 
@@ -480,17 +481,7 @@ export const BookingSummaryReview = ({
                             </div>
 
                             {/* 8. Landfill/Disposal Fees */}
-                            {isDeliveryServiceForFees && (
-                                <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mt-4">
-                                    <div className="flex items-start">
-                                        <span className="text-xl mr-2">🏗️</span>
-                                        <div className="flex-1">
-                                            <p className="text-sm font-semibold text-yellow-400">Landfill/Disposal Fees (TBD)</p>
-                                            <p className="text-xs text-yellow-200 mt-1">Pending dump fees will be calculated based on actual waste processed</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
+                            {isDeliveryServiceForFees && <LandfillDisposalFeesNotice />}
                         </div>
                     </div>
 

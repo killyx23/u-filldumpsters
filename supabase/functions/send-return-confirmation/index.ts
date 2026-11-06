@@ -88,7 +88,7 @@ function buildEmailHTML(opts: {
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${name || "there"},</p>
       <p>Thank you for using <strong>U-Fill Dumpsters</strong>. We confirmed that your rental was locked and returned at <strong>${returnedAt}</strong>.</p>
-      <p>Our team will complete a final inspection shortly. <strong>Any final charges</strong> (dump fees, overtime, damage, or other adjustments) will be sent to this email separately. If there are no additional charges, you are all set.</p>
+      <p>Our team will complete a final inspection shortly. <strong>Any final charges</strong> (landfill/disposal fees, overtime, damage, or other adjustments) will be sent to this email separately. Pending dump fees are calculated based on actual waste processed. If there are no additional charges, you are all set.</p>
       ${referralBlock}
       <div style="background:#eff6ff;border:1px solid #3b82f6;border-radius:8px;padding:16px;margin:20px 0;">
         <p style="margin:0 0 8px 0;font-weight:bold;color:#1e3a8a;">Loved the service?</p>

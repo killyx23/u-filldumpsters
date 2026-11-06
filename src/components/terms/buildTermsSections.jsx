@@ -1,6 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { formatAdminMoney, formatAdminPercent, landfillTonClause, UNAVAILABLE_FEE_TEXT } from '@/utils/chargesAndFeesConfig';
+import {
+  formatAdminMoney,
+  formatAdminPercent,
+  landfillTonClause,
+  UNAVAILABLE_FEE_TEXT,
+} from '@/utils/chargesAndFeesConfig';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 import { SmsDisclosure } from '@/components/SmsOptInFields';
 import { currentReturnPath, markSmsReturnPending } from '@/utils/smsFormReturn';
 import { MASTER_RENTAL_AGREEMENT_PATH } from '@/pages/MasterRentalAgreementPage';
@@ -192,7 +198,8 @@ export const buildTermsSections = (fee, options = {}) => {
         </p>
         <p>
           Base rental price includes delivery and pickup. <strong>Disposal is billed separately at {formatAdminMoney(fee('dump_tonnage_rate'))} {landfillTonClause(fee('dump_rate_tons'))}</strong>{' '}
-          based on actual post-disposal scale weight.
+          based on actual post-disposal scale weight.{' '}
+          <IncludedDumpFlatRateCopy rate={fee('dump_tonnage_rate')} tons={fee('dump_rate_tons')} />
         </p>
         <p>
           Customer authorizes U-Fill Dumpsters LLC to charge the payment method on file for all disposal charges,

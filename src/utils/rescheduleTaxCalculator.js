@@ -17,6 +17,7 @@ import { trailerDeliveryChargeableMiles } from '@/services/DistanceCalculationSe
 import { resolveIncludedDeliveryMiles } from '@/utils/chargesAndFeesConfig';
 import { chargeMileageBands } from '@/utils/mileageBands';
 import { catalogBaseRental } from '@/utils/phoneOrderQuote';
+import { discountsFromTaxBreakdown, stampCouponDiscountAmounts } from '@/utils/rescheduleCoupon';
 
 const round2 = (num) => Math.round((Number(num) || 0) * 100) / 100;
 
@@ -71,18 +72,26 @@ export function addonsListToAddonsData(addonsList = [], { deliveryFee = 0, milea
 }
 
 /** Reschedule day counts are inclusive. Delivery-window services bill the span from one morning to the next as one day. */
-function countedServiceDays(service, inclusiveDays) {
+export function countedServiceDays(service, inclusiveDays) {
   const days = Math.max(1, Number(inclusiveDays) || 1);
   const id = Number(service?.id);
   if (id === 1 || id === 3 || id === 4) return days <= 1 ? 1 : days - 1;
   return days;
 }
 
+/** Daily catalog rate — never a multi-day total. */
+function catalogDailyRate(service) {
+  const daily = Number(service?.base_price);
+  if (Number.isFinite(daily) && daily > 0) return daily;
+  const fallback = Number(service?.price);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
+}
+
 export function calculateBaseRentalCost(service, days) {
   if (!service) return 0;
   const id = Number(service.id);
   const counted = countedServiceDays(service, days);
-  return catalogBaseRental({ ...service, id }, counted);
+  return catalogBaseRental({ ...service, id, base_price: catalogDailyRate(service) }, counted);
 }
 
 /**
@@ -100,6 +109,8 @@ export async function calculateRescheduleCosts({
   insurancePrice = 0,
   priceSnapshot = null,
   discounts = null,
+  /** Explicit coupon from reschedule UI; overrides discounts.coupon when provided (including null). */
+  coupon = undefined,
   includedMiles = null,
 }) {
   if (!service) {
@@ -113,9 +124,14 @@ export async function calculateRescheduleCosts({
       total: 0,
       taxRate: 0,
       lineItems: [],
+      discounts: { loyalty: 0, referral: 0, coupon: 0, couponCode: null, total: 0 },
+      coupon: null,
+      couponDiscountAmount: 0,
     };
   }
 
+  const countedDays = countedServiceDays(service, days);
+  const dailyRate = catalogDailyRate(service);
   const baseRentalCost = calculateBaseRentalCost(service, days);
   const isDelivery = isDeliveryServiceId(service.id);
   const deliveryFee = isDelivery ? Number(service.delivery_fee || 0) : 0;
@@ -184,12 +200,17 @@ export async function calculateRescheduleCosts({
     addonsData.referralDiscountAmount = Number(discounts.referralDiscountAmount || 0);
     if (discounts.coupon) addonsData.coupon = discounts.coupon;
   }
+  if (coupon !== undefined) {
+    addonsData.coupon = coupon?.isValid ? coupon : null;
+  }
 
+  // Keep daily catalog rates on the plan. Passing a multi-day total as base_price
+  // made resolveBaseRentalAmount multiply by days again (e.g. $200 → $400).
   const breakdown = calculateBookingTaxBreakdown({
     plan: {
       ...service,
-      price: baseRentalCost,
-      base_price: baseRentalCost,
+      base_price: dailyRate,
+      price: dailyRate,
     },
     addonsData,
     equipmentPrices,
@@ -201,19 +222,23 @@ export async function calculateRescheduleCosts({
     drivewayIsTaxable: taxOptions.drivewayIsTaxable,
     serviceTaxFlags: taxOptions.serviceTaxFlags ?? {},
     equipmentTaxFlags: taxOptions.equipmentTaxFlags ?? {},
-    rentalDays: days,
+    rentalDays: countedDays,
   });
 
-  const gross = (breakdown.lineItems || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-  const discountDetail = discountDetailFromAddons(addonsData, gross);
+  const activeCoupon = addonsData.coupon?.isValid ? addonsData.coupon : null;
+  const discountDetail = discountsFromTaxBreakdown(breakdown, activeCoupon);
+  const stamped = stampCouponDiscountAmounts(activeCoupon, breakdown.couponDiscount);
+  const baseFromLines = (breakdown.lineItems || []).find((line) => line.key === 'base_rental')?.amount;
 
   return {
-    baseRentalCost: round2(baseRentalCost),
+    baseRentalCost: round2(baseFromLines ?? baseRentalCost),
     deliveryFee: round2(deliveryFee),
     mileageCharge: round2(mileageCharge),
     addonsCost: round2(addonsCost),
     discount: discountDetail.total,
     discounts: discountDetail,
+    coupon: stamped.coupon,
+    couponDiscountAmount: stamped.couponDiscountAmount,
     subtotal: breakdown.subtotalBeforeTax,
     tax: breakdown.tax,
     total: breakdown.total,
@@ -221,27 +246,7 @@ export async function calculateRescheduleCosts({
     lineItems: breakdown.lineItems,
     taxableSubtotal: breakdown.taxableSubtotal,
     nonTaxableSubtotal: breakdown.nonTaxableSubtotal,
-  };
-}
-
-function discountDetailFromAddons(addonsData, gross) {
-  let coupon = 0;
-  const couponData = addonsData?.coupon;
-  if (couponData?.isValid) {
-    if (couponData.discountType === 'fixed') {
-      coupon = Number(couponData.discountValue || 0);
-    } else if (couponData.discountType === 'percentage') {
-      coupon = (Number(gross) * Number(couponData.discountValue || 0)) / 100;
-    }
-  }
-  const loyalty = Number(addonsData?.loyaltyDiscountAmount || 0);
-  const referral = Number(addonsData?.referralDiscountAmount || 0);
-  return {
-    loyalty: round2(loyalty),
-    referral: round2(referral),
-    coupon: round2(coupon),
-    couponCode: couponData?.isValid ? couponData.code || null : null,
-    total: round2(loyalty + referral + coupon),
+    countedDays,
   };
 }
 
@@ -263,6 +268,8 @@ export function quoteRescheduleBreakdown({
   rentalDays = null,
   dropOff = null,
   pickup = null,
+  /** When provided (including null), overrides existingAddons.coupon. */
+  coupon = undefined,
 }) {
   const mapped = addonsListToAddonsData(newAddonsList, { deliveryFee, mileageCharge });
   const stayDays = rentalDays ?? ((dropOff || pickup) ? rentalDayCount(dropOff, pickup) : null);
@@ -308,6 +315,9 @@ export function quoteRescheduleBreakdown({
       lineTotal: quote.lineTotal,
     };
   });
+  const resolvedCoupon = coupon !== undefined
+    ? (coupon?.isValid ? coupon : null)
+    : (existingAddons.coupon || null);
   const addonsData = {
     equipment: mapped.equipment,
     insurance: mapped.insurance,
@@ -319,10 +329,18 @@ export function quoteRescheduleBreakdown({
     loyaltyDiscountAmount: Number(existingAddons.loyaltyDiscountAmount || 0),
     loyaltyPointsToRedeem: existingAddons.loyaltyPointsToRedeem || 0,
     referralDiscountAmount: Number(existingAddons.referralDiscountAmount || 0),
-    coupon: existingAddons.coupon || null,
+    coupon: resolvedCoupon,
   };
+  const dailyRate = catalogDailyRate(plan);
+  // Quoted multi-day total goes on plan.price only. Keep base_price as the daily
+  // catalog rate so resolveBaseRentalAmount does not multiply days twice.
   const breakdown = calculateBookingTaxBreakdown({
-    plan: { ...(plan || {}), price: rentalPrice, base_price: rentalPrice, id: planId },
+    plan: {
+      ...(plan || {}),
+      id: planId,
+      base_price: dailyRate,
+      price: rentalPrice,
+    },
     addonsData,
     equipmentPrices,
     taxRate,
@@ -334,5 +352,14 @@ export function quoteRescheduleBreakdown({
     dropOff,
     pickup,
   });
-  return { mapped, breakdown, baseRentalCost: rentalPrice };
+  const discounts = discountsFromTaxBreakdown(breakdown, resolvedCoupon);
+  const stamped = stampCouponDiscountAmounts(resolvedCoupon, breakdown.couponDiscount);
+  return {
+    mapped,
+    breakdown,
+    baseRentalCost: rentalPrice,
+    discounts,
+    coupon: stamped.coupon,
+    couponDiscountAmount: stamped.couponDiscountAmount,
+  };
 }

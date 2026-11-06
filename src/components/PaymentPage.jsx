@@ -62,6 +62,7 @@ import {
   isPurchaseEquipmentId,
   resolveEquipmentId,
 } from '@/utils/equipmentReturnDisplay';
+import { LandfillDisposalFeesNotice } from '@/components/LandfillDisposalFeesNotice';
 
 const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
 const stripePromise =
@@ -533,17 +534,7 @@ const CheckoutForm = ({
             </div>
           </div>
           
-          {isDeliveryService && (
-            <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-lg p-3 mt-4">
-              <div className="flex items-start">
-                <span className="text-xl mr-2">🏗️</span>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-yellow-400">Landfill/Disposal Fees (TBD)</p>
-                  <p className="text-xs text-yellow-200 mt-1">Pending dump fees will be calculated based on actual waste processed</p>
-                </div>
-              </div>
-            </div>
-          )}
+          {isDeliveryService && <LandfillDisposalFeesNotice />}
         </div>
       </div>
 

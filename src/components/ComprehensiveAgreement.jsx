@@ -37,6 +37,7 @@ import {
   mapFeeRowsToConfig,
 } from '@/utils/chargesAndFeesConfig';
 import { HardwareProtectionPlanTerms, HPP_TERMS_PATH } from '@/components/terms/HardwareProtectionPlanTerms';
+import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 
 export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
   const fee = createFeeLookup(fees);
@@ -182,6 +183,9 @@ export const AgreementText = ({ fees, hppPlanPrice, strictFees = false }) => {
           <strong>Dumpster / Trailer Base Rates:</strong> If a Dumpster or Dump Trailer Rental is chosen, the
           base rental price includes one delivery and one pickup. Disposal is billed separately at a rate of{' '}
           {money('dump_tonnage_rate')} {landfillTonClause(fee('dump_rate_tons'))} based on the actual post-disposal certified scale weight.
+          {' '}
+          <IncludedDumpFlatRateCopy rate={fee('dump_tonnage_rate')} tons={fee('dump_rate_tons')} />
+          {' '}
           Disposal charges are calculated after dump processing and charged to the Customer&apos;s payment method on file.
         </li>
         <li>

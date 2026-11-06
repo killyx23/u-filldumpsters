@@ -1,5 +1,6 @@
 import { addDays, differenceInCalendarDays, eachDayOfInterval, format, parseISO, startOfDay } from 'date-fns';
 import { quoteEquipmentExtension } from './rentalEquipmentPricing.js';
+import { evaluateCoupon, resolveRentalDays } from './couponRules.js';
 
 const CLOSED_STATUSES = new Set([
   'Completed',
@@ -135,10 +136,34 @@ function dayIsBlocked(availability, date, { returnDay = false } = {}) {
 }
 
 /**
+ * Discount the extension charge only (never re-discount the original paid rental).
+ * Day rules use the full stay length after the extension so "book longer" coupons can unlock.
+ */
+export function extensionCouponDiscount({
+  coupon,
+  serviceSubtotal = 0,
+  grossSubtotal = 0,
+  totalRentalDays = 1,
+}) {
+  if (!coupon?.isValid) {
+    return { discount: 0, coupon: null };
+  }
+  const gross = Math.max(0, Number(grossSubtotal) || 0);
+  const evaluation = evaluateCoupon({
+    coupon,
+    rentalDays: Math.max(1, Number(totalRentalDays) || 1),
+    baseRental: Math.max(0, Number(serviceSubtotal) || 0),
+    grossBeforeDiscount: gross,
+  });
+  const discount = roundExtensionMoney(Math.min(evaluation.discount, gross));
+  return { discount, coupon };
+}
+
+/**
  * Quote an extension to a new return date.
  * Days after the current return must be free. The new return day must also be open.
  */
-export function quoteRentalExtension(booking, newPickupDate, availability = {}, catalogRates = {}) {
+export function quoteRentalExtension(booking, newPickupDate, availability = {}, catalogRates = {}, coupon = null) {
   const currentPickup = dateKey(booking?.pickup_date);
   const nextReturn = dateKey(newPickupDate);
   const dayRate = dayRateFromBooking(booking);
@@ -166,8 +191,21 @@ export function quoteRentalExtension(booking, newPickupDate, availability = {}, 
   const serviceSubtotal = roundExtensionMoney(dayRate * dates.length);
   const equipment = quoteEquipmentExtension(booking, dates.length, catalogRates);
   const subtotal = roundExtensionMoney(serviceSubtotal + equipment.subtotal);
-  const tax = roundExtensionMoney(subtotal * (taxRate / 100));
-  const total = roundExtensionMoney(subtotal + tax);
+  const totalRentalDays = resolveRentalDays(
+    booking?.drop_off_date,
+    nextReturn,
+    Math.max(1, differenceInCalendarDays(parseISO(nextReturn), parseISO(dateKey(booking?.drop_off_date) || nextReturn)) + 1),
+  );
+  const activeCoupon = coupon?.isValid ? coupon : null;
+  const { discount: couponDiscount } = extensionCouponDiscount({
+    coupon: activeCoupon,
+    serviceSubtotal,
+    grossSubtotal: subtotal,
+    totalRentalDays,
+  });
+  const discountedSubtotal = roundExtensionMoney(Math.max(0, subtotal - couponDiscount));
+  const tax = roundExtensionMoney(discountedSubtotal * (taxRate / 100));
+  const total = roundExtensionMoney(discountedSubtotal + tax);
   return {
     ok: true,
     days: dates.length,
@@ -178,6 +216,9 @@ export function quoteRentalExtension(booking, newPickupDate, availability = {}, 
     equipmentSubtotal: equipment.subtotal,
     equipmentLines: equipment.lines,
     subtotal,
+    couponDiscount,
+    coupon: activeCoupon,
+    totalRentalDays,
     tax,
     total,
     currentPickup,
