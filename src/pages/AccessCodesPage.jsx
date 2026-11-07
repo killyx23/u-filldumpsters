@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Helmet } from 'react-helmet';
 import { motion } from 'framer-motion';
 import { Loader2, Key, Calendar, Clock, Info, RefreshCw, AlertCircle, QrCode, Shield, BookOpen } from 'lucide-react';
+import { IglooKeyUnlockPanel } from '@/components/customer-portal/IglooKeyUnlockPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
@@ -172,8 +173,9 @@ export const AccessCodesPage = ({ customerData }) => {
     const pinReady =
       !!accessCode?.access_pin &&
       (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
+    const iglooReady = Boolean(booking?.iglookey_shareable_url) && !booking?.iglookey_revoked_at;
     const windowOpen = isWithinPinGenerationWindow(booking) && !isBookingEnded(booking);
-    if (!windowOpen || pinReady) {
+    if (!windowOpen || (pinReady && iglooReady)) {
       pendingPollStartedAtRef.current = null;
       return;
     }
@@ -194,7 +196,7 @@ export const AccessCodesPage = ({ customerData }) => {
     return () => clearInterval(intervalId);
   }, [booking, accessCode, fetchAccessCode]);
 
-  // Realtime: pick up PIN rows as soon as the server writes them.
+  // Realtime: pick up PIN rows and iglooKey fields as soon as the server writes them.
   useEffect(() => {
     if (!booking?.id || bookingAccessCodeNotApplicable(booking) || !bookingNeedsYardAccessCode(booking)) return;
 
@@ -207,6 +209,18 @@ export const AccessCodesPage = ({ customerData }) => {
           schema: 'public',
           table: 'rental_access_codes',
           filter: `order_id=eq.${booking.id}`,
+        },
+        () => {
+          fetchAccessCode({ silent: true, preferBookingId: booking.id });
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookings',
+          filter: `id=eq.${booking.id}`,
         },
         () => {
           fetchAccessCode({ silent: true, preferBookingId: booking.id });
@@ -434,6 +448,10 @@ export const AccessCodesPage = ({ customerData }) => {
     (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
   const isBackupPin = pinReady && accessCode?.pin_type === 'algopin';
   const pinPendingInWindow = !deliveryOnly && pinWindowOpen && !bookingEnded && !pinReady;
+  const iglooKeyUrl = !deliveryOnly && !booking?.iglookey_revoked_at
+    ? booking?.iglookey_shareable_url
+    : null;
+  const iglooKeyReady = Boolean(iglooKeyUrl);
   // Customer-visible window uses appointment times (no hidden grace hour on end_time).
   const visibleStartLabel = booking
     ? formatDateTime(booking.drop_off_date, booking.drop_off_time_slot)
@@ -631,7 +649,7 @@ export const AccessCodesPage = ({ customerData }) => {
                 <Clock className="h-16 w-16 text-blue-600 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-blue-900 mb-2">Access Code Not Yet Available</h2>
                 <p className="text-blue-800 text-lg mb-4">
-                  Your access code will be available 12 hours before your scheduled pickup
+                  Your unlock link will be available 12 hours before your scheduled pickup
                   {pinEligibleFrom ? (
                     <> on <strong>{format(pinEligibleFrom, 'MMM dd, yyyy')} at {format(pinEligibleFrom, 'h:mm a')}</strong></>
                   ) : null}.
@@ -641,14 +659,41 @@ export const AccessCodesPage = ({ customerData }) => {
                 </p>
               </CardContent>
             </Card>
-          ) : pinReady ? (
+          ) : (
+            <div className="space-y-6">
+              {iglooKeyReady ? (
+                <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl">
+                  <CardContent className="p-8">
+                    <IglooKeyUnlockPanel shareableUrl={iglooKeyUrl} />
+                    {(booking?.drop_off_date) && (
+                      <p className="text-white font-medium mt-6 border-t border-white/10 pt-6">
+                        Valid from:{' '}
+                        <span className="text-yellow-400">{visibleStartLabel}</span>
+                        {' '}to{' '}
+                        <span className="text-yellow-400">{visibleEndLabel}</span>
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">
+                  <CardContent className="p-8 text-center">
+                    <Loader2 className="h-12 w-12 text-yellow-600 animate-spin mx-auto mb-4" />
+                    <h2 className="text-2xl font-bold text-yellow-900 mb-2">Preparing your unlock link</h2>
+                    <p className="text-yellow-800">
+                      Your digital key is being created. This page checks automatically. Refresh if it does not appear within a few minutes.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+          {pinReady ? (
             <>
               <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl">
                 <CardContent className="p-8 md:p-12">
                   <div className="text-center space-y-6">
                     <div>
                       <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold mb-2">
-                        {isBackupPin ? 'YOUR ACCESS PIN (BACKUP)' : 'YOUR ACCESS PIN'}
+                        {isBackupPin ? 'KEYPAD PIN (BACKUP)' : 'KEYPAD PIN'}
                       </p>
                       <div className="bg-slate-950 rounded-lg p-8 inline-block">
                         <p className="text-6xl md:text-7xl lg:text-8xl font-bold font-mono text-white tracking-wider">
@@ -715,7 +760,7 @@ export const AccessCodesPage = ({ customerData }) => {
               <CardContent className="p-8 text-center">
                 <Key className="h-16 w-16 text-yellow-600 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-yellow-900 mb-2">
-                  {issuingToLock || accessCode?.access_pin ? 'Issuing to Lock…' : 'Preparing Your Access PIN'}
+                  {issuingToLock || accessCode?.access_pin ? 'Issuing keypad PIN to lock…' : 'Keypad PIN (optional backup)'}
                 </h2>
                 
                 {retryCount >= MAX_RETRIES ? (
@@ -731,8 +776,8 @@ export const AccessCodesPage = ({ customerData }) => {
                   <>
                     <p className="text-yellow-800 text-lg mb-6">
                       {issuingToLock || accessCode?.access_pin
-                        ? 'Your PIN was sent to the padlock and we are waiting for confirmation. This usually finishes within a few minutes.'
-                        : 'Your pickup window is open. Our system creates your PIN automatically within about 5 minutes. You can also generate it manually below.'}
+                        ? 'Your keypad PIN was sent to the padlock and we are waiting for confirmation. This usually finishes within a few minutes.'
+                        : 'A keypad PIN is generated in the background for pickup without a smart device. It appears here when the lock accepts it. You can also generate it manually below if it is missing.'}
                     </p>
                     {retryCount > 0 && (
                       <p className="text-sm text-yellow-700 mb-4">
@@ -743,6 +788,7 @@ export const AccessCodesPage = ({ customerData }) => {
                 )}
                 
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  {!accessCode?.access_pin && (
                   <Button 
                     onClick={handleGeneratePin}
                     disabled={generatingPin || !pinWindowOpen}
@@ -760,6 +806,7 @@ export const AccessCodesPage = ({ customerData }) => {
                       </>
                     )}
                   </Button>
+                  )}
 
                   <Button 
                     onClick={handleRefreshClick}
@@ -784,10 +831,12 @@ export const AccessCodesPage = ({ customerData }) => {
               </CardContent>
             </Card>
           )}
+            </div>
+          )}
         </motion.div>
 
         {/* QR Codes Section */}
-        {pinReady && pinWindowOpen && !isRentalExpired() && (
+        {(pinReady || iglooKeyReady) && pinWindowOpen && !isRentalExpired() && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

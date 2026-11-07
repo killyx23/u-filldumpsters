@@ -318,7 +318,7 @@ function DayStopCard({ booking, actions, nowMs, onOpen, pinCodes, pinsLoading })
                         </Info>
                         {pickupService && (
                             <div className="sm:col-span-2 space-y-2">
-                                <LockPinStatus codes={pinCodes} loading={pinsLoading} />
+                                <LockPinStatus codes={pinCodes} loading={pinsLoading} booking={booking} />
                                 {booking.pin_failsafe_note && (
                                     <p className="text-sm text-amber-200">{booking.pin_failsafe_note}</p>
                                 )}

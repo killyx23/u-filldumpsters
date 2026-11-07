@@ -10,6 +10,7 @@
 
 import { createAlgoPinWithVariance } from "./algoPin.ts";
 import { bookingNeedsYardLockPin } from "./deliveryBooking.ts";
+import { extendIglooKeyForBooking } from "./iglooKeyAccess.ts";
 import { BRIDGE_PIN_SCOPES, GENERATE_PIN_SCOPES, getOAuthToken } from "./iglooAuth.ts";
 import { ensurePinOnLock } from "./lockPin.ts";
 import { addGraceHour, buildBookingDateUTC, clampIgloohomeStart, getPinActivationStart } from "./pinTiming.ts";
@@ -155,6 +156,12 @@ export async function issueExtensionReturnPin(
   newPickupDate: string,
 ): Promise<ExtensionPinResult> {
   if (!bookingNeedsYardLockPin(booking)) return { ok: true, skipped: true };
+
+  try {
+    await extendIglooKeyForBooking(supabase, booking, newPickupDate);
+  } catch (err) {
+    console.warn("[extensionReturnPin] iglooKey extend failed:", err);
+  }
 
   if (!booking.rented_out_at) {
     return replaceCustomPinForExtension(supabase, booking, newPickupDate);

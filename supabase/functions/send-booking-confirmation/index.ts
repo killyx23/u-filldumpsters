@@ -1132,7 +1132,7 @@ const generateEmailHTML = (
   let nextStepsHTML = "";
   if (selfService) {
     nextStepsHTML = `
-      <li><strong>🔑 Access Codes:</strong> At least 12 hours before your scheduled pickup time, you will receive a text and email with the exact location address and unlock code.</li>
+      <li><strong>🔑 Access:</strong> At least 12 hours before your scheduled pickup time, you will receive a text and email with the exact location address and a digital unlock link. If you will not have access to a smart device during pickup, a keypad PIN may be available under Access Codes in the Customer Portal.</li>
       <li><strong>🗓️ Pickup:</strong> You can pick up the trailer at our location on the south side of Saratoga Springs on ${pickupDateFormatted} ${pickupStartTimeFormatted}.</li>
       <li><strong>🛻 Towing Requirements:</strong> Ensure your towing vehicle meets the minimum requirements. Your truck must have a 2-5/16 inch ball hitch.</li>
       <li><strong>📖 Safety & Operation:</strong> Follow all safety and operating instructions. Detailed operating instructions and videos can be found in the Customer Portal.</li>
@@ -1777,10 +1777,9 @@ Deno.serve(async (req)=>{
       }
     }
     if (emailType === "pin_update") {
-      const pin = body.pin || body.access_pin;
-      const pinFailsafe = body.pin_failsafe === true;
-      if (!pin) {
-        return new Response(JSON.stringify({ error: "pin is required for pin_update" }), {
+      const shareableUrl = String(body.shareable_url || body.shareableUrl || booking.iglookey_shareable_url || "");
+      if (!shareableUrl) {
+        return new Response(JSON.stringify({ error: "shareable_url is required for pin_update" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1792,33 +1791,31 @@ Deno.serve(async (req)=>{
       const activationLabel = pickupTimeLabel
         ? `${pickupDateLabel} at ${pickupTimeLabel}`
         : pickupDateLabel;
+      const keypadNote =
+        "If you will not have access to a smart device during pickup, you can use a keypad PIN under Access Codes in the Customer Portal.";
       const pinHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
-      <h1 style="margin:0;font-size:22px;">Your Access Code — Order #${booking.id}</h1>
+      <h1 style="margin:0;font-size:22px;">Your Unlock Link — Order #${booking.id}</h1>
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>${pinFailsafe
-        ? `Your access code was updated because the original code could not be verified on the lock before your appointment window. Enter this code on the padlock keypad:`
-        : `Your Dump Trailer access code is ready. Enter it on the padlock at pickup.`}</p>
-      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
-        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
-        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
-      </div>
+      <p>Your Dump Trailer digital key is ready. Open this link on your phone at the padlock to unlock over Bluetooth.</p>
+      <p style="text-align:center;margin:28px 0;">
+        <a href="${shareableUrl}" style="display:inline-block;background:#fbbf24;color:#111827;padding:14px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">Open unlock link</a>
+      </p>
+      <p style="word-break:break-all;font-size:13px;color:#4b5563;">${shareableUrl}</p>
       <p><strong>Activates:</strong> ${activationLabel}</p>
       <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
-      <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
+      <p style="color:#6b7280;font-size:13px;">${keypadNote}</p>
       <p style="text-align:center;margin:24px 0;">
-        <a href="${dashboardUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
+        <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
 </body></html>`;
-      const pinSubject = pinFailsafe
-        ? `Updated Access Code for Order #${booking.id} — U-Fill Dumpsters`
-        : `Your Access Code for Order #${booking.id} — U-Fill Dumpsters`;
-      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_update to ${recipientEmail}`);
+      const pinSubject = `Your Unlock Link for Order #${booking.id} — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_update (iglooKey) to ${recipientEmail}`);
       const pinResult = await sendEmailWithRetry(recipientEmail, pinSubject, pinHtml);
       if (!pinResult.success) {
         return new Response(JSON.stringify({
@@ -1834,9 +1831,8 @@ Deno.serve(async (req)=>{
       // SMS companion (respects customers.sms_opt_in). Email success is enough to mark notified.
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
-      const smsContent = pinFailsafe
-        ? `U-Fill Dumpsters: Your access PIN for Order #${booking.id} was updated because the original code could not be verified before your appointment. Your code is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`
-        : `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`;
+      const smsContent =
+        `U-Fill Dumpsters: Your unlock link for Order #${booking.id} is ready. Open it on your phone at the lock: ${shareableUrl}. Activates ${activationLabel}. If you will not have a smart device at pickup, a keypad PIN may be under Access Codes: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_update SMS:`, smsResult);
 
@@ -1995,9 +1991,9 @@ Deno.serve(async (req)=>{
     }
 
     if (emailType === "pin_reminder") {
-      const pin = body.pin || body.access_pin;
-      if (!pin) {
-        return new Response(JSON.stringify({ error: "pin is required for pin_reminder" }), {
+      const shareableUrl = String(body.shareable_url || body.shareableUrl || booking.iglookey_shareable_url || "");
+      if (!shareableUrl) {
+        return new Response(JSON.stringify({ error: "shareable_url is required for pin_reminder" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -2005,6 +2001,8 @@ Deno.serve(async (req)=>{
       const pickupDateLabel = formatDate(booking.drop_off_date);
       const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
       const whenLabel = pickupTimeLabel ? `${pickupDateLabel} at ${pickupTimeLabel}` : pickupDateLabel;
+      const keypadNote =
+        "If you will not have access to a smart device during pickup, you can use a keypad PIN under Access Codes in the Customer Portal.";
       const reminderHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
@@ -2012,19 +2010,20 @@ Deno.serve(async (req)=>{
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>. Your padlock code:</p>
-      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
-        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
-        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
-      </div>
+      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>. Open your unlock link on your phone at the padlock:</p>
+      <p style="text-align:center;margin:28px 0;">
+        <a href="${shareableUrl}" style="display:inline-block;background:#fbbf24;color:#111827;padding:14px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">Open unlock link</a>
+      </p>
+      <p style="word-break:break-all;font-size:13px;color:#4b5563;">${shareableUrl}</p>
+      <p style="color:#6b7280;font-size:13px;">${keypadNote}</p>
       <p style="text-align:center;margin:24px 0;">
         <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
 </body></html>`;
-      const reminderSubject = `Pickup soon — Order #${booking.id} access code — U-Fill Dumpsters`;
-      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_reminder to ${recipientEmail}`);
+      const reminderSubject = `Pickup soon — Order #${booking.id} unlock link — U-Fill Dumpsters`;
+      console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_reminder (iglooKey) to ${recipientEmail}`);
       const reminderResult = await sendEmailWithRetry(recipientEmail, reminderSubject, reminderHtml);
       if (!reminderResult.success) {
         return new Response(JSON.stringify({
@@ -2039,8 +2038,8 @@ Deno.serve(async (req)=>{
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
       const smsContent =
-        `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. ` +
-        `View: ${accessCodesUrl}`;
+        `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Open your unlock link at the lock: ${shareableUrl}. ` +
+        `No smart device? A keypad PIN may be under Access Codes: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_reminder SMS:`, smsResult);
       const remindedAt = new Date().toISOString();

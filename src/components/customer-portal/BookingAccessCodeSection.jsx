@@ -8,6 +8,7 @@ import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { getBookingWindow, isBookingEnded, isWithinPinGenerationWindow } from '@/utils/pinTiming';
 import { convertTo12Hour } from '@/utils/timeFormatConverter';
 import { BookingLockStatusSection } from '@/components/customer-portal/BookingLockStatusSection';
+import { IglooKeyUnlockPanel } from '@/components/customer-portal/IglooKeyUnlockPanel';
 import {
   ACCESS_CODE_DELIVERY_BODY,
   ACCESS_CODE_DELIVERY_TITLE,
@@ -321,7 +322,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
           <div>
             <p className="text-sm font-semibold text-white">Access Code Not Yet Available</p>
             <p className="text-sm text-gray-300 mt-2 leading-relaxed">
-              Your access code will be available 12 hours before your scheduled pickup
+              Your unlock link will be available 12 hours before your scheduled pickup
               {Number.isFinite(pinEligibleFrom.getTime()) ? (
                 <>
                   {' '}
@@ -342,6 +343,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
     );
   }
 
+  const iglooKeyUrl = !booking?.iglookey_revoked_at ? booking?.iglookey_shareable_url : null;
   const rentalStarted = Boolean(booking.rented_out_at) || getBookingWindow(booking).startMs <= Date.now();
   const requestBackupCode = async () => {
     setIssuingBackup(true);
@@ -371,6 +373,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
     );
     return (
       <div className="space-y-3">
+        {iglooKeyUrl ? <IglooKeyUnlockPanel shareableUrl={iglooKeyUrl} compact /> : null}
         {listed.map((code) => {
           const hours = code.start_time && code.end_time
             ? (new Date(code.end_time).getTime() - new Date(code.start_time).getTime()) / (60 * 60 * 1000)
@@ -413,13 +416,16 @@ export const BookingAccessCodeSection = ({ booking }) => {
 
   return (
     <div className="bg-yellow-500/10 p-4 rounded-lg border border-yellow-500/30 space-y-3">
+      {iglooKeyUrl ? <IglooKeyUnlockPanel shareableUrl={iglooKeyUrl} compact /> : (
+        <p className="text-sm text-gray-300">Preparing your digital unlock link…</p>
+      )}
       <div className="flex items-start gap-3">
         <Key className="h-5 w-5 text-yellow-400 mt-0.5 shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white">
             {issuingToLock || accessCode?.access_pin
-              ? 'Issuing to Lock…'
-              : 'Preparing Your Access PIN'}
+              ? 'Issuing keypad PIN to lock…'
+              : 'Keypad PIN (optional backup)'}
           </p>
           {retryCount >= MAX_RETRIES ? (
             <p className="text-sm text-red-300 mt-2">
@@ -447,6 +453,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
         </Button>
       )}
       <div className="flex flex-col sm:flex-row gap-2">
+        {!accessCode?.access_pin && (
         <Button
           onClick={handleGeneratePin}
           disabled={generatingPin || !pinWindowOpen}
@@ -465,6 +472,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
             </>
           )}
         </Button>
+        )}
         <Button
           onClick={handleRefreshClick}
           disabled={retryCount >= MAX_RETRIES || generatingPin}

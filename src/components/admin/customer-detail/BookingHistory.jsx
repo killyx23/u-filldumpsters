@@ -168,7 +168,7 @@ const BookingHistoryItem = ({ booking, customer, onReceiptSelect, onBookingDelet
 
             {isCustomerPickupService(booking.plan, booking.addons || {}) && (
                 <div className="mt-3 max-w-md">
-                    <LockPinStatus codes={pinCodes} loading={pinsLoading} />
+                    <LockPinStatus codes={pinCodes} loading={pinsLoading} booking={booking} />
                     {booking.pin_failsafe_note && (
                         <p className="mt-2 text-sm text-amber-200">{booking.pin_failsafe_note}</p>
                     )}

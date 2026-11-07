@@ -7,7 +7,6 @@ import {
   getHourlyAlgoPinWindow,
   getPinActivationStart,
   isBookingEnded,
-  isDueForFirstPinNotify,
   isWithinPinGenerationWindow,
 } from "../_shared/pinTiming.ts";
 import { ensurePinOnLock } from "../_shared/lockPin.ts";
@@ -69,26 +68,9 @@ function generateRandomPin() {
   return buildBookingDateUTC(date, timeSlot, fallbackHourUTC);
 }
 
-async function maybeSendPinNotification(supabase, booking, pin, startTime, endTime) {
+async function maybeSendPinNotification(_supabase, booking, _pin, _startTime, _endTime) {
+  // Automated customer messages send the iglooKey link (reconcile notify pass), not keypad digits.
   if (isDeliveryBooking(booking)) return;
-  if (booking.pin_notification_sent_at) return;
-  if (!isDueForFirstPinNotify(booking)) return;
-  const { error } = await supabase.functions.invoke("send-booking-confirmation", {
-    body: {
-      booking_id: booking.id,
-      email_type: "pin_update",
-      pin,
-      start_time: startTime,
-      end_time: endTime,
-    },
-  });
-  if (error) {
-    console.error(`[generate-pin] PIN notification failed for booking #${booking.id}:`, error.message);
-    return;
-  }
-  const now = new Date().toISOString();
-  await supabase.from("bookings").update({ pin_notification_sent_at: now }).eq("id", booking.id);
-  await supabase.from("rental_access_codes").update({ notified_at: now }).eq("order_id", booking.id).eq("status", "active");
 }
 async function getOAuthTokenForPin(clientId, clientSecret) {
   const result = await getOAuthToken(clientId, clientSecret, GENERATE_PIN_SCOPES);

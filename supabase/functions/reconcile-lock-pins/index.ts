@@ -32,6 +32,7 @@ import { reserveMissingYardPins, reserveYardPinForBooking } from "../_shared/res
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 import { notifyPinReady, notifyPinReminder, notifyPinUnavailable } from "../_shared/pinNotify.ts";
+import { ensureIglooKeyForBooking, revokeCancelledIglooKeys } from "../_shared/iglooKeyAccess.ts";
 import { alertAlgoFailsafeFailed } from "../_shared/lockAlerts.ts";
 import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { BUSINESS_TIME_ZONE } from "../_shared/parseBookingTimeSlot.ts";
@@ -215,7 +216,6 @@ async function issueAlgoLastResort(
       notes: failsafeNote,
     });
     booking.pin_failsafe_at = new Date().toISOString();
-    await notifyPinReady(supabase, booking, algo.pin, algo.startDate, algo.endDate);
     console.log(`${LOG} AlgoPIN failsafe for order #${orderId} (variance ${algo.variance})`);
     issued.push({ orderId, action: "algopin_fallback", variance: algo.variance });
   }
@@ -229,8 +229,7 @@ async function runPinNotifyPass(
   let query = supabase
     .from("bookings")
     .select("*")
-    .eq("status", "Confirmed")
-    .not("pin_generated_at", "is", null);
+    .eq("status", "Confirmed");
   if (focusOrderId) query = query.eq("id", focusOrderId);
   const { data: bookings, error } = await query;
   if (error) {
@@ -239,44 +238,44 @@ async function runPinNotifyPass(
 
   const first: Array<Record<string, unknown>> = [];
   const reminders: Array<Record<string, unknown>> = [];
+  const keys: Array<Record<string, unknown>> = [];
   for (const booking of bookings ?? []) {
     if (!isTrailerRental(booking)) continue;
-    const { data: activePin } = await supabase
-      .from("rental_access_codes")
-      .select("access_pin, start_time, end_time, lock_confirmed_at")
-      .eq("order_id", booking.id)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!activePin?.lock_confirmed_at || !activePin.access_pin) continue;
+    if (isBookingEnded(booking as never)) continue;
+    const dueFirst = isDueForFirstPinNotify(booking as never) && !booking.pin_notification_sent_at;
+    const dueReminder = isDueForPinReminder(booking as never);
+    if (!dueFirst && !dueReminder) continue;
 
-    const pin = String(activePin.access_pin);
-    const startTime = String(activePin.start_time || "");
-    const endTime = String(activePin.end_time || "");
+    const issued = await ensureIglooKeyForBooking(supabase, booking);
+    keys.push({ bookingId: booking.id, ...issued });
 
-    if (isDueForFirstPinNotify(booking as never) && !booking.pin_notification_sent_at) {
+    const shareableUrl = String(booking.iglookey_shareable_url || "");
+    if (!shareableUrl) continue;
+    const startTime = String(booking.iglookey_starts_at || "");
+    const endTime = String(booking.iglookey_ends_at || "");
+
+    if (dueFirst) {
       const { data: fresh } = await supabase
         .from("bookings")
         .select("status")
         .eq("id", booking.id)
         .maybeSingle();
       if (fresh?.status !== "Confirmed") continue;
-      await notifyPinReady(supabase, booking, pin, startTime, endTime);
+      await notifyPinReady(supabase, booking, shareableUrl, startTime, endTime);
       first.push({ bookingId: booking.id });
     }
-    if (isDueForPinReminder(booking as never)) {
+    if (dueReminder) {
       const { data: fresh } = await supabase
         .from("bookings")
         .select("status")
         .eq("id", booking.id)
         .maybeSingle();
       if (fresh?.status !== "Confirmed") continue;
-      await notifyPinReminder(supabase, booking, pin, startTime, endTime);
+      await notifyPinReminder(supabase, booking, shareableUrl, startTime, endTime);
       reminders.push({ bookingId: booking.id });
     }
   }
-  return { success: true as const, first, reminders };
+  return { success: true as const, first, reminders, keys };
 }
 
 async function isLockOnline(accessToken: string, lockId: string): Promise<boolean> {
@@ -419,10 +418,13 @@ Deno.serve(async (req) => {
       if (!notifyResult.success) {
         return jsonResponse({ success: false, error: notifyResult.error }, 500);
       }
+      const revokedKeys = await revokeCancelledIglooKeys(supabase, focusOrderId);
       return jsonResponse({
         success: true,
         reason,
         reserved: reserved.reserved,
+        iglooKeys: notifyResult.keys,
+        revokedKeys,
         notify: {
           first: notifyResult.first,
           reminders: notifyResult.reminders,
@@ -473,6 +475,7 @@ Deno.serve(async (req) => {
     // PHASE 1: DELETE PINs for cancelled / pending_review / cancellation_pending
     // ================================================================
     console.log(`${LOG} === PHASE 1: DELETIONS ===`);
+    const revokedKeys = await revokeCancelledIglooKeys(supabase, focusOrderId);
     let deleteQuery = supabase
       .from("rental_access_codes")
       .select("id, order_id, access_pin, pin_type, status, bookings!inner(id, status)")
@@ -693,6 +696,7 @@ Deno.serve(async (req) => {
       },
       confirmed: { processed: confirmResults.length, results: confirmResults },
       failsafe,
+      revokedKeys,
     });
   } catch (error) {
     console.error(`${LOG} Unhandled exception:`, error);

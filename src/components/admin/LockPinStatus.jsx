@@ -144,7 +144,7 @@ function StatusBody({ summary }) {
     return <p className="text-gray-300">No PIN yet</p>;
 }
 
-export function LockPinStatus({ codes, loading = false }) {
+export function LockPinStatus({ codes, loading = false, booking = null }) {
     const summary = summarizeLockPins(codes);
 
     return (
@@ -157,7 +157,22 @@ export function LockPinStatus({ codes, loading = false }) {
                 {loading ? (
                     <p className="text-gray-300">Checking lock…</p>
                 ) : (
-                    <StatusBody summary={summary} />
+                    <>
+                        {booking?.iglookey_shareable_url && !booking?.iglookey_revoked_at && (
+                            <p className="mb-2 break-all text-emerald-200">
+                                iglooKey:{' '}
+                                <a
+                                    href={booking.iglookey_shareable_url}
+                                    className="underline"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    {booking.iglookey_shareable_url}
+                                </a>
+                            </p>
+                        )}
+                        <StatusBody summary={summary} />
+                    </>
                 )}
             </div>
         </div>

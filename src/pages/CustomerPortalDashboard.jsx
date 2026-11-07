@@ -16,6 +16,7 @@ import {
   bookingAccessCodeNotApplicable,
   bookingNeedsYardAccessCode,
 } from '@/utils/yardAccessCode';
+import { IglooKeyUnlockPanel } from '@/components/customer-portal/IglooKeyUnlockPanel';
 
 export const CustomerPortalDashboard = () => {
   const navigate = useNavigate();
@@ -333,14 +334,23 @@ export const CustomerPortalDashboard = () => {
                   </p>
                 </CardContent>
               </Card>
-            ) : accessCode?.access_pin ? (
+            ) : (booking?.iglookey_shareable_url && !booking?.iglookey_revoked_at) || accessCode?.access_pin ? (
               <>
+                {booking?.iglookey_shareable_url && !booking?.iglookey_revoked_at && (
+                  <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl mb-6">
+                    <CardContent className="p-8">
+                      <IglooKeyUnlockPanel shareableUrl={booking.iglookey_shareable_url} />
+                    </CardContent>
+                  </Card>
+                )}
+                {accessCode?.access_pin ? (
+                <>
                 <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl mb-6">
                   <CardContent className="p-8 md:p-12">
                     <div className="text-center space-y-6">
                       <div>
                         <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold mb-2">
-                          YOUR ACCESS PIN
+                          KEYPAD PIN
                         </p>
                         <div className="bg-slate-950 rounded-lg p-8 inline-block">
                           <p className="text-6xl md:text-7xl lg:text-8xl font-bold font-mono text-white tracking-wider">
@@ -397,6 +407,8 @@ export const CustomerPortalDashboard = () => {
                     </CardContent>
                   </Card>
                 </motion.div>
+                </>
+                ) : null}
               </>
             ) : (
               <Card className="bg-yellow-50/90 backdrop-blur-sm border-yellow-200">

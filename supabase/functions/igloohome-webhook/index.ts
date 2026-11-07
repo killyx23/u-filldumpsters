@@ -7,6 +7,8 @@
  *   3  Job Complete           — result of a command we issued (lock_jobs)
  *   5  Activity Log Received  — real activity at the lock (the primary event)
  *   10 Bridge Connection      — bridge network connectivity heartbeat
+ *   1000 iglooKey Claimed     — recipient opened the shareable token
+ *   1001 iglooKey Used        — recipient unlocked with the token
  *
  * Register in the igloohome portal:
  *   https://<project>.supabase.co/functions/v1/igloohome-webhook
@@ -39,6 +41,8 @@ type SupabaseClient = any;
 const EVENT_JOB_COMPLETE = 3;
 const EVENT_ACTIVITY_LOG = 5;
 const EVENT_BRIDGE_CONNECTION = 10;
+const EVENT_IGLOOKEY_CLAIMED = 1000;
+const EVENT_IGLOOKEY_USED = 1001;
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -415,6 +419,40 @@ async function processDeferred(
   }
 }
 
+async function handleIglooKeyEvent(
+  supabase: SupabaseClient,
+  event: Record<string, unknown>,
+  type: number,
+): Promise<Record<string, unknown>> {
+  const data = asRecord(event.data) || event;
+  const tokenId = pickString(data, ["tokenId", "token_id", "id"]);
+  if (!tokenId) return { handled: false, reason: "missing tokenId" };
+
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, iglookey_token_id, iglookey_claimed_at, rented_out_at, returned_at, status")
+    .eq("iglookey_token_id", tokenId)
+    .maybeSingle();
+  if (!booking) return { handled: false, reason: "unknown_token", tokenId };
+
+  if (type === EVENT_IGLOOKEY_CLAIMED) {
+    const claimedAt = pickString(data, ["claimedAt", "claimed_at"]) || new Date().toISOString();
+    if (!booking.iglookey_claimed_at) {
+      await supabase.from("bookings").update({ iglookey_claimed_at: claimedAt }).eq("id", booking.id);
+    }
+    return { handled: true, eventType: type, orderId: booking.id, claimedAt };
+  }
+
+  const unlockedAt = pickString(data, ["unlockedAt", "unlocked_at"]) || new Date().toISOString();
+  const action = await applyLockEvent(supabase, {
+    orderId: Number(booking.id),
+    eventType: "unlock",
+    eventTimestamp: unlockedAt,
+    notes: `unlock via iglooKey Used (${tokenId})`,
+  });
+  return { handled: true, eventType: type, orderId: booking.id, action, unlockedAt };
+}
+
 function runDeferred(work: Promise<unknown>): void {
   // deno-lint-ignore no-explicit-any
   const runtime = (globalThis as any).EdgeRuntime;
@@ -492,6 +530,11 @@ Deno.serve(async (req) => {
         eventsStored: stored,
         verifiedBy: verification.method,
       });
+    }
+
+    if (type === EVENT_IGLOOKEY_CLAIMED || type === EVENT_IGLOOKEY_USED) {
+      const result = await handleIglooKeyEvent(supabase, event!, type);
+      return jsonResponse({ success: true, eventType: type, ...result });
     }
 
     console.log(`[igloohome-webhook] Unhandled event type: ${type}`);

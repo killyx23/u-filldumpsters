@@ -1337,6 +1337,7 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 <LockPinStatus
                                     codes={pinsByOrder[String(booking.id)]}
                                     loading={pinsLoading}
+                                    booking={booking}
                                 />
                                 {booking.pin_failsafe_note && (
                                     <p className="mt-2 text-sm text-amber-200">{booking.pin_failsafe_note}</p>

@@ -1,10 +1,11 @@
 /**
- * Shared PIN customer notifications (email + SMS via send-booking-confirmation).
+ * Shared yard-access customer notifications (email + SMS via send-booking-confirmation).
  *
- * First message (pin_update) is claimed on bookings.pin_notification_sent_at.
+ * First message (pin_update) sends the iglooKey shareable link, not a keypad PIN.
+ * Claimed on bookings.pin_notification_sent_at.
  * 1-hour reminder (pin_reminder) is claimed on bookings.pin_reminder_sent_at.
  * Failsafe miss (pin_unavailable) is claimed on bookings.pin_unavailable_notified_at.
- * Delivery bookings never get PIN mail (see deliveryBooking.ts).
+ * Delivery bookings never get access mail (see deliveryBooking.ts).
  */
 
 import { isDeliveryBooking } from "./deliveryBooking.ts";
@@ -16,19 +17,17 @@ async function invokePinEmail(
   supabase: SupabaseClient,
   bookingId: unknown,
   emailType: "pin_update" | "pin_reminder" | "pin_unavailable",
-  pin = "",
+  shareableUrl = "",
   startTime = "",
   endTime = "",
-  pinFailsafe = false,
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
     body: {
       booking_id: bookingId,
       email_type: emailType,
-      pin,
+      shareable_url: shareableUrl,
       start_time: startTime,
       end_time: endTime,
-      pin_failsafe: pinFailsafe,
     },
   });
   if (error || data?.success === false) {
@@ -40,7 +39,7 @@ async function invokePinEmail(
 export async function notifyPinReady(
   supabase: SupabaseClient,
   booking: Record<string, unknown>,
-  pin: string,
+  shareableUrl: string,
   startTime: string,
   endTime: string,
 ): Promise<void> {
@@ -67,10 +66,9 @@ export async function notifyPinReady(
     supabase,
     bookingId,
     "pin_update",
-    pin,
+    shareableUrl,
     startTime,
     endTime,
-    Boolean(booking.pin_failsafe_at),
   );
   if (!sent.ok) {
     console.error(`[pinNotify] Email notification failed for booking #${bookingId}:`, sent.error);
@@ -93,7 +91,7 @@ export async function notifyPinReady(
 export async function notifyPinReminder(
   supabase: SupabaseClient,
   booking: Record<string, unknown>,
-  pin: string,
+  shareableUrl: string,
   startTime: string,
   endTime: string,
 ): Promise<void> {
@@ -118,7 +116,7 @@ export async function notifyPinReminder(
   }
   if (!claimed) return;
 
-  const sent = await invokePinEmail(supabase, bookingId, "pin_reminder", pin, startTime, endTime);
+  const sent = await invokePinEmail(supabase, bookingId, "pin_reminder", shareableUrl, startTime, endTime);
   if (!sent.ok) {
     console.error(`[pinNotify] Reminder email failed for booking #${bookingId}:`, sent.error);
     await supabase
