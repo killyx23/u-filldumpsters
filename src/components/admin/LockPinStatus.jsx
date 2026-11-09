@@ -20,6 +20,10 @@ function formatWhen(value) {
 export function summarizeLockPins(rows) {
     const list = Array.isArray(rows) ? rows : [];
     const active = list.filter((row) => row.status === 'active' || row.status == null);
+    const iglooKey = active.find((row) => row.pin_type === 'iglookey' && row.shareable_url) || null;
+    const expiredIglooKey = list.find(
+        (row) => row.pin_type === 'iglookey' && row.status !== 'active',
+    );
     const customConfirmed = active.find((row) => row.pin_type === 'bridge_proxied' && row.lock_confirmed_at);
     const customPending = active.find((row) => row.pin_type === 'bridge_proxied' && !row.lock_confirmed_at);
     const algos = active.filter((row) => row.pin_type === 'algopin');
@@ -28,19 +32,24 @@ export function summarizeLockPins(rows) {
         (row) => row.pin_type === 'bridge_proxied' && !row.lock_confirmed_at && row.status !== 'active',
     );
 
+    const withKey = (base) => ({ ...base, iglooKey, expiredIglooKey: expiredIglooKey || null });
+
     if (customConfirmed) {
-        return { kind: 'custom_confirmed', custom: customConfirmed, algo: algo || null, algos };
+        return withKey({ kind: 'custom_confirmed', custom: customConfirmed, algo: algo || null, algos });
     }
     if (customPending && algo) {
-        return { kind: 'custom_pending_with_algo', custom: customPending, algo, algos };
+        return withKey({ kind: 'custom_pending_with_algo', custom: customPending, algo, algos });
     }
     if (algo) {
-        return { kind: 'algo', custom: expiredUnconfirmedCustom || null, algo, algos };
+        return withKey({ kind: 'algo', custom: expiredUnconfirmedCustom || null, algo, algos });
     }
     if (customPending) {
-        return { kind: 'custom_pending', custom: customPending, algo: null, algos };
+        return withKey({ kind: 'custom_pending', custom: customPending, algo: null, algos });
     }
-    return { kind: 'none', custom: null, algo: null, algos };
+    if (iglooKey) {
+        return withKey({ kind: 'iglookey_only', custom: null, algo: null, algos: [] });
+    }
+    return withKey({ kind: 'none', custom: null, algo: null, algos: [] });
 }
 
 function PinLine({ pin }) {
@@ -71,11 +80,31 @@ function AlgoLines({ algos }) {
     ));
 }
 
+function IglooKeyLine({ keyRow, expiredRow }) {
+    if (keyRow?.shareable_url) {
+        return (
+            <p className="text-sky-200 break-all">
+                IglooKey live ·{' '}
+                <a href={keyRow.shareable_url} target="_blank" rel="noreferrer" className="underline text-sky-100">
+                    open link
+                </a>
+            </p>
+        );
+    }
+    if (expiredRow) {
+        return <p className="text-gray-400">IglooKey revoked</p>;
+    }
+    return null;
+}
+
 function StatusBody({ summary }) {
+    const keyLine = <IglooKeyLine keyRow={summary.iglooKey} expiredRow={summary.expiredIglooKey} />;
+
     if (summary.kind === 'custom_confirmed') {
         const when = formatWhen(summary.custom.lock_confirmed_at);
         return (
             <>
+                {keyLine}
                 <p className="text-white">
                     <PinLine pin={summary.custom.access_pin} />
                     <span className="text-gray-300"> · Custom PIN</span>
@@ -95,6 +124,7 @@ function StatusBody({ summary }) {
         const sent = Boolean(summary.algo.notified_at);
         return (
             <>
+                {keyLine}
                 <p className="text-white">
                     <PinLine pin={summary.custom.access_pin} />
                     <span className="text-gray-300"> · Custom PIN</span>
@@ -112,6 +142,7 @@ function StatusBody({ summary }) {
         const sent = Boolean(summary.algo.notified_at);
         return (
             <>
+                {keyLine}
                 {summary.custom && (
                     <p className="text-amber-300">Custom PIN was not confirmed. Customer has the AlgoPIN below.</p>
                 )}
@@ -129,6 +160,7 @@ function StatusBody({ summary }) {
         const sent = Boolean(summary.custom.notified_at);
         return (
             <>
+                {keyLine}
                 <p className="text-white">
                     <PinLine pin={summary.custom.access_pin} />
                     <span className="text-gray-300"> · Custom PIN</span>
@@ -141,7 +173,21 @@ function StatusBody({ summary }) {
         );
     }
 
-    return <p className="text-gray-300">No PIN yet</p>;
+    if (summary.kind === 'iglookey_only') {
+        return (
+            <>
+                {keyLine}
+                <p className="text-gray-300">Keypad PIN not reserved yet</p>
+            </>
+        );
+    }
+
+    return (
+        <>
+            {keyLine}
+            <p className="text-gray-300">No PIN yet</p>
+        </>
+    );
 }
 
 export function LockPinStatus({ codes, loading = false }) {
@@ -182,7 +228,7 @@ export function useLockPinsByOrder(orderIds) {
 
         supabase
             .from('rental_access_codes')
-            .select('id, order_id, access_pin, pin_type, lock_confirmed_at, notified_at, created_at, status, start_time, end_time, programmed_end_time')
+            .select('id, order_id, access_pin, pin_type, shareable_url, lock_confirmed_at, lock_deleted_at, notified_at, created_at, status, start_time, end_time, programmed_end_time')
             .in('order_id', ids)
             .order('created_at', { ascending: false })
             .then(({ data, error }) => {

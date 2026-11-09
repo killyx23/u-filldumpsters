@@ -31,7 +31,11 @@ export function reinstatePinTrackingPatch(previousStatus, newStatus) {
     console.log('[reinstatePinTrackingPatch] Resetting PIN tracking fields for pending_review -> Confirmed transition');
     return {
       pin_generated_at: null,
-      pin_notification_sent_at: null
+      pin_notification_sent_at: null,
+      pin_reminder_sent_at: null,
+      pin_failsafe_at: null,
+      pin_failsafe_note: null,
+      pin_unavailable_notified_at: null,
     };
   }
   
@@ -98,7 +102,7 @@ export async function expireActiveRentalAccessCodesForOrder(orderId, callerType 
       },
     });
 
-    if (!deleteError && deleteData?.dbExpired === true) {
+    if (!deleteError && (deleteData?.dbExpired === true || deleteData?.revoked)) {
       console.log(`[expireActiveRentalAccessCodesForOrder] delete-pin revoked portal access for booking #${orderId}`, deleteData);
       return {
         success: true,
@@ -106,6 +110,7 @@ export async function expireActiveRentalAccessCodesForOrder(orderId, callerType 
         lockDeleted: deleteData.lockDeleted === true,
         dbExpired: true,
         message: deleteData.message,
+        revoked: deleteData.revoked,
       };
     }
 

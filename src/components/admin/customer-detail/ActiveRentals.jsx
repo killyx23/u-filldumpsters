@@ -37,6 +37,7 @@ import {
   tonsToPounds,
 } from '@/utils/chargesAndFeesConfig';
 import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
+import { listBookingAddonItems } from '@/utils/equipmentReturnDisplay';
 
 const LANDFILL_DISPOSAL_FEE_KEY = 'landfill_disposal';
 
@@ -1338,6 +1339,19 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                     codes={pinsByOrder[String(booking.id)]}
                                     loading={pinsLoading}
                                 />
+                                <div className="mt-2 space-y-1 text-xs text-blue-100/80">
+                                    {booking.pin_generated_at && (
+                                        <p>PIN reserved{booking.pin_notification_sent_at ? ' · customer notified' : ' · not notified yet'}</p>
+                                    )}
+                                    {booking.pin_failsafe_at && (
+                                        <p className="text-amber-200">AlgoPIN failsafe stamped — investigate bridge</p>
+                                    )}
+                                    {(pinsByOrder[String(booking.id)] || []).some(
+                                        (row) => row.status === 'expired' && row.pin_type === 'bridge_proxied' && !row.lock_deleted_at,
+                                    ) && (
+                                        <p className="text-amber-200">Bridge delete pending for an expired custom PIN</p>
+                                    )}
+                                </div>
                                 {booking.pin_failsafe_note && (
                                     <p className="mt-2 text-sm text-amber-200">{booking.pin_failsafe_note}</p>
                                 )}
@@ -1347,6 +1361,33 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
 
                         <DistanceWarning booking={booking} customer={customer} />
                         <DeliveryRoute booking={booking} customer={customer} />
+
+                        {(() => {
+                            const addonItems = listBookingAddonItems(booking).filter((item) => item.kind !== 'protection');
+                            if (addonItems.length === 0) return null;
+                            return (
+                                <div className="mt-4 rounded-lg border border-yellow-400/30 bg-yellow-400/5 p-4">
+                                    <p className="text-sm font-semibold text-yellow-300 mb-2">
+                                        Add-ons &amp; equipment on this rental
+                                    </p>
+                                    <ul className="space-y-1 text-sm text-blue-100">
+                                        {addonItems.map((item) => (
+                                            <li key={item.key}>
+                                                {item.name}
+                                                {item.quantity > 1 ? ` × ${item.quantity}` : ''}
+                                                {item.returnable ? (
+                                                    <span className="ml-2 text-xs text-emerald-300">(returnable)</span>
+                                                ) : item.kind === 'disposal' ? (
+                                                    <span className="ml-2 text-xs text-orange-300">(disposal)</span>
+                                                ) : item.kind === 'purchase' ? (
+                                                    <span className="ml-2 text-xs text-cyan-300">(customer keeps)</span>
+                                                ) : null}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            );
+                        })()}
 
                         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             <DetailItem icon={<Package />} label="Service" value={formatCustomerFacingPlanName(booking.plan?.name)} />

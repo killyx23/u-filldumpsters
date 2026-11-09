@@ -12,23 +12,33 @@ import { isDeliveryBooking } from "./deliveryBooking.ts";
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
 
+export type PinNotifyOptions = {
+  pin?: string;
+  startTime?: string;
+  endTime?: string;
+  pinFailsafe?: boolean;
+  iglooKeyUrl?: string | null;
+  pinConfirmed?: boolean;
+  replacesPrevious?: boolean;
+};
+
 async function invokePinEmail(
   supabase: SupabaseClient,
   bookingId: unknown,
   emailType: "pin_update" | "pin_reminder" | "pin_unavailable",
-  pin = "",
-  startTime = "",
-  endTime = "",
-  pinFailsafe = false,
+  opts: PinNotifyOptions = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const { data, error } = await supabase.functions.invoke("send-booking-confirmation", {
     body: {
       booking_id: bookingId,
       email_type: emailType,
-      pin,
-      start_time: startTime,
-      end_time: endTime,
-      pin_failsafe: pinFailsafe,
+      pin: opts.pin || "",
+      start_time: opts.startTime || "",
+      end_time: opts.endTime || "",
+      pin_failsafe: opts.pinFailsafe === true,
+      igloo_key_url: opts.iglooKeyUrl || "",
+      pin_confirmed: opts.pinConfirmed !== false,
+      replaces_previous: opts.replacesPrevious === true,
     },
   });
   if (error || data?.success === false) {
@@ -43,6 +53,7 @@ export async function notifyPinReady(
   pin: string,
   startTime: string,
   endTime: string,
+  opts: Omit<PinNotifyOptions, "pin" | "startTime" | "endTime"> = {},
 ): Promise<void> {
   if (isDeliveryBooking(booking)) return;
   const bookingId = booking.id;
@@ -63,15 +74,15 @@ export async function notifyPinReady(
   }
   if (!claimed) return;
 
-  const sent = await invokePinEmail(
-    supabase,
-    bookingId,
-    "pin_update",
+  const sent = await invokePinEmail(supabase, bookingId, "pin_update", {
     pin,
     startTime,
     endTime,
-    Boolean(booking.pin_failsafe_at),
-  );
+    pinFailsafe: opts.pinFailsafe ?? Boolean(booking.pin_failsafe_at),
+    iglooKeyUrl: opts.iglooKeyUrl,
+    pinConfirmed: opts.pinConfirmed,
+    replacesPrevious: opts.replacesPrevious,
+  });
   if (!sent.ok) {
     console.error(`[pinNotify] Email notification failed for booking #${bookingId}:`, sent.error);
     await supabase
@@ -96,6 +107,7 @@ export async function notifyPinReminder(
   pin: string,
   startTime: string,
   endTime: string,
+  opts: Omit<PinNotifyOptions, "pin" | "startTime" | "endTime" | "pinFailsafe"> = {},
 ): Promise<void> {
   if (isDeliveryBooking(booking)) return;
   const bookingId = booking.id;
@@ -118,7 +130,14 @@ export async function notifyPinReminder(
   }
   if (!claimed) return;
 
-  const sent = await invokePinEmail(supabase, bookingId, "pin_reminder", pin, startTime, endTime);
+  const sent = await invokePinEmail(supabase, bookingId, "pin_reminder", {
+    pin,
+    startTime,
+    endTime,
+    iglooKeyUrl: opts.iglooKeyUrl,
+    pinConfirmed: opts.pinConfirmed,
+    replacesPrevious: opts.replacesPrevious,
+  });
   if (!sent.ok) {
     console.error(`[pinNotify] Reminder email failed for booking #${bookingId}:`, sent.error);
     await supabase

@@ -189,6 +189,12 @@ export async function clearKnownPins(
       continue;
     }
 
+    if (row.pin_type === "iglookey") {
+      // Bridge clear must not touch Bluetooth keys; revoke via iglooKey helpers instead.
+      details.push({ id: row.id, pin_type: "iglookey", skipped: true, reason: "use_iglookey_revoke" });
+      continue;
+    }
+
     if (!row.access_pin) continue;
     attempted += 1;
     const remaining = Math.max(5_000, deadline - Date.now());

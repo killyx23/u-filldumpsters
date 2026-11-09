@@ -8,8 +8,8 @@
  * updated. A code already sent to the customer is never replaced.
  *
  * Hourly notify (reason=notify): reserve a custom PIN for newly confirmed
- * yard pickups (no Igloohome call), then email/SMS only a lock-confirmed
- * code. A 1h-before reminder follows. AlgoPIN is not created on this pass.
+ * yard pickups, create iglooKey at T_drop−12h, then email/SMS key link + PIN
+ * (even if the custom PIN is still unconfirmed). A 1h-before reminder follows.
  *
  * Also invoked by igloohome-webhook on bridge reconnect (lock work only).
  */
@@ -18,9 +18,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
   addGraceHour,
+  BOOKING_WINDOW_COLUMNS,
   buildBookingDateUTC,
   denverCalendarDate,
   getAlgoFailsafeWindow,
+  getBookingWindow,
   getPinActivationStart,
   isBookingEnded,
   isDueForFirstPinNotify,
@@ -31,10 +33,12 @@ import { ensurePinOnLock, pollJob, deletePinVerified, pushReservedPin } from "..
 import { reserveMissingYardPins, reserveYardPinForBooking } from "../_shared/reserveYardPin.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
+import { createIglooKeyForBooking, revokeIglooKeysForOrder } from "../_shared/iglooKey.ts";
 import { notifyPinReady, notifyPinReminder, notifyPinUnavailable } from "../_shared/pinNotify.ts";
 import { alertAlgoFailsafeFailed } from "../_shared/lockAlerts.ts";
 import { bookingNeedsYardLockPin } from "../_shared/deliveryBooking.ts";
 import { BUSINESS_TIME_ZONE } from "../_shared/parseBookingTimeSlot.ts";
+import { revokeYardCredentials } from "../_shared/revokeYardCredentials.ts";
 
 const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
 const PUSH_PHASE_BUDGET_MS = 90_000;
@@ -146,6 +150,12 @@ async function issueAlgoLastResort(
     if (activePin.lock_confirmed_at) continue;
     if (activePin.pin_type !== "bridge_proxied") continue;
 
+    const key = await createIglooKeyForBooking(supabase, booking);
+    const iglooKeyUrl = key.ok ? key.url : null;
+    if (!key.ok) {
+      console.warn(`${LOG} iglooKey create failed during failsafe for #${orderId}: ${key.error}`);
+    }
+
     const algoWindow = getAlgoFailsafeWindow(booking as never);
     const algo = await createAlgoPinWithVariance({
       supabase,
@@ -190,20 +200,32 @@ async function issueAlgoLastResort(
           error: algo.error || null,
         });
       }
-      await notifyPinUnavailable(supabase, booking);
+      if (iglooKeyUrl && !booking.pin_notification_sent_at) {
+        booking.pin_failsafe_at = new Date().toISOString();
+        await notifyPinReady(supabase, booking, "", "", "", {
+          iglooKeyUrl,
+          pinConfirmed: false,
+          pinFailsafe: true,
+        });
+      } else {
+        await notifyPinUnavailable(supabase, booking);
+      }
       issued.push({ orderId, action: "algopin_failed", error: algo.error });
       continue;
     }
 
+    // Retire unconfirmed custom PIN; keep the new AlgoPIN and any iglooKey.
     await supabase
       .from("rental_access_codes")
       .update({ status: "expired" })
       .eq("order_id", orderId)
       .eq("status", "active")
-      .neq("id", algo.rowId);
+      .eq("pin_type", "bridge_proxied");
     const failsafeNote =
       `Custom PIN for Order #${orderId} was not confirmed on the lock before the pickup window. ` +
-      `Customer was sent AlgoPIN ${algo.pin} at 5:00 AM. Review why the lock did not confirm the original code.`;
+      `Customer was sent AlgoPIN ${algo.pin} at 5:00 AM` +
+      (iglooKeyUrl ? " with iglooKey link" : "") +
+      `. Review why the lock did not confirm the original code.`;
     await supabase.from("bookings").update({
       pin_failsafe_at: new Date().toISOString(),
       pin_failsafe_note: failsafeNote,
@@ -215,9 +237,22 @@ async function issueAlgoLastResort(
       notes: failsafeNote,
     });
     booking.pin_failsafe_at = new Date().toISOString();
-    await notifyPinReady(supabase, booking, algo.pin, algo.startDate, algo.endDate);
+    booking.pin_failsafe_note = failsafeNote;
+    // Allow a fresh notify claim if first email never went out; otherwise still stamp failsafe.
+    if (booking.pin_notification_sent_at) {
+      await supabase
+        .from("bookings")
+        .update({ pin_notification_sent_at: null })
+        .eq("id", orderId);
+      booking.pin_notification_sent_at = null;
+    }
+    await notifyPinReady(supabase, booking, algo.pin, algo.startDate, algo.endDate, {
+      iglooKeyUrl,
+      pinConfirmed: true,
+      pinFailsafe: true,
+    });
     console.log(`${LOG} AlgoPIN failsafe for order #${orderId} (variance ${algo.variance})`);
-    issued.push({ orderId, action: "algopin_fallback", variance: algo.variance });
+    issued.push({ orderId, action: "algopin_fallback", variance: algo.variance, hasKey: Boolean(iglooKeyUrl) });
   }
   return { issued };
 }
@@ -241,42 +276,103 @@ async function runPinNotifyPass(
   const reminders: Array<Record<string, unknown>> = [];
   for (const booking of bookings ?? []) {
     if (!isTrailerRental(booking)) continue;
+    if (!isDueForFirstPinNotify(booking as never) && !isDueForPinReminder(booking as never)) {
+      continue;
+    }
+
     const { data: activePin } = await supabase
       .from("rental_access_codes")
-      .select("access_pin, start_time, end_time, lock_confirmed_at")
+      .select("access_pin, start_time, end_time, lock_confirmed_at, pin_type")
       .eq("order_id", booking.id)
       .eq("status", "active")
+      .in("pin_type", ["bridge_proxied", "algopin"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!activePin?.lock_confirmed_at || !activePin.access_pin) continue;
 
-    const pin = String(activePin.access_pin);
-    const startTime = String(activePin.start_time || "");
-    const endTime = String(activePin.end_time || "");
+    const pin = activePin?.access_pin ? String(activePin.access_pin) : "";
+    const pinConfirmed = Boolean(activePin?.lock_confirmed_at) || activePin?.pin_type === "algopin";
+    const startTime = String(activePin?.start_time || "");
+    const endTime = String(activePin?.end_time || "");
+
+    // Create iglooKey at first notify window (and reuse for reminder).
+    let iglooKeyUrl: string | null = null;
+    if (isDueForFirstPinNotify(booking as never) || booking.pin_notification_sent_at) {
+      const key = await createIglooKeyForBooking(supabase, booking);
+      if (key.ok) iglooKeyUrl = key.url;
+      else console.warn(`${LOG} iglooKey create failed for #${booking.id}: ${key.error}`);
+    }
 
     if (isDueForFirstPinNotify(booking as never) && !booking.pin_notification_sent_at) {
+      if (!iglooKeyUrl && !pin) continue;
       const { data: fresh } = await supabase
         .from("bookings")
         .select("status")
         .eq("id", booking.id)
         .maybeSingle();
       if (fresh?.status !== "Confirmed") continue;
-      await notifyPinReady(supabase, booking, pin, startTime, endTime);
-      first.push({ bookingId: booking.id });
+      await notifyPinReady(supabase, booking, pin, startTime, endTime, {
+        iglooKeyUrl,
+        pinConfirmed,
+        pinFailsafe: Boolean(booking.pin_failsafe_at),
+        replacesPrevious: Boolean(booking.pin_failsafe_note),
+      });
+      first.push({ bookingId: booking.id, pinConfirmed, hasKey: Boolean(iglooKeyUrl) });
     }
     if (isDueForPinReminder(booking as never)) {
+      if (!iglooKeyUrl && !pin) continue;
       const { data: fresh } = await supabase
         .from("bookings")
         .select("status")
         .eq("id", booking.id)
         .maybeSingle();
       if (fresh?.status !== "Confirmed") continue;
-      await notifyPinReminder(supabase, booking, pin, startTime, endTime);
+      await notifyPinReminder(supabase, booking, pin, startTime, endTime, {
+        iglooKeyUrl,
+        pinConfirmed,
+      });
       reminders.push({ bookingId: booking.id });
     }
   }
   return { success: true as const, first, reminders };
+}
+
+/** After T_return + grace, revoke all three credential layers. */
+async function sweepExpiredYardCredentials(
+  supabase: SupabaseClient,
+  focusOrderId: number | null,
+) {
+  let query = supabase
+    .from("bookings")
+    .select(`id, status, plan, addons, email, phone, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at`)
+    .in("status", ["Confirmed", "Delivered", "pending_checklist", "late_return", "failure_to_return", "Completed"]);
+  if (focusOrderId) query = query.eq("id", focusOrderId);
+  const { data: bookings, error } = await query;
+  if (error) return { swept: [], error: error.message };
+
+  const swept: Array<Record<string, unknown>> = [];
+  const nowMs = Date.now();
+  for (const booking of bookings ?? []) {
+    if (!isTrailerRental(booking)) continue;
+    const { graceEndMs } = getBookingWindow(booking as never);
+    if (!Number.isFinite(graceEndMs) || nowMs < graceEndMs) continue;
+
+    const { data: active } = await supabase
+      .from("rental_access_codes")
+      .select("id")
+      .eq("order_id", booking.id)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+    if (!active) continue;
+
+    const result = await revokeYardCredentials(supabase, booking, {
+      clearBookingPinFlags: false,
+      attemptBridgeDelete: true,
+    });
+    swept.push({ bookingId: booking.id, ...result });
+  }
+  return { swept };
 }
 
 async function isLockOnline(accessToken: string, lockId: string): Promise<boolean> {
@@ -416,6 +512,7 @@ Deno.serve(async (req) => {
       console.log(`${LOG} Notify pass (focusOrderId=${focusOrderId ?? "none"})`);
       const reserved = await reserveMissingYardPins(supabase, focusOrderId);
       const notifyResult = await runPinNotifyPass(supabase, focusOrderId);
+      const expiredSweep = await sweepExpiredYardCredentials(supabase, focusOrderId);
       if (!notifyResult.success) {
         return jsonResponse({ success: false, error: notifyResult.error }, 500);
       }
@@ -427,6 +524,7 @@ Deno.serve(async (req) => {
           first: notifyResult.first,
           reminders: notifyResult.reminders,
         },
+        expiredSweep,
       });
     }
 
@@ -495,7 +593,12 @@ Deno.serve(async (req) => {
       (pin, index, self) => self.findIndex((p) => p.id === pin.id) === index,
     );
     const deleteResults: Array<Record<string, unknown>> = [];
+    const iglooKeyOrders = new Set<number>();
     for (const record of allPinsToProcess) {
+      if (record.pin_type === "iglookey") {
+        iglooKeyOrders.add(Number(record.order_id));
+        continue;
+      }
       if (record.pin_type === "algopin") {
         if (record.status === "expired") {
           deleteResults.push({ bookingId: record.order_id, success: true, method: "algopin_natural_expiry" });
@@ -503,9 +606,17 @@ Deno.serve(async (req) => {
         }
         await supabase
           .from("rental_access_codes")
-          .update({ status: "expired", notified_at: now })
+          .update({ status: "expired", notified_at: now, lock_deleted_at: now })
           .eq("id", record.id);
         deleteResults.push({ bookingId: record.order_id, success: true, method: "algopin_natural_expiry" });
+        continue;
+      }
+      if (!record.access_pin) {
+        await supabase
+          .from("rental_access_codes")
+          .update({ status: "expired", notified_at: now })
+          .eq("id", record.id);
+        deleteResults.push({ bookingId: record.order_id, success: true, method: "empty_pin_expired" });
         continue;
       }
       await pace();
@@ -527,6 +638,17 @@ Deno.serve(async (req) => {
       } catch (err) {
         deleteResults.push({ bookingId: record.order_id, success: false, error: String(err) });
       }
+    }
+
+    for (const orderId of iglooKeyOrders) {
+      const revoked = await revokeIglooKeysForOrder(supabase, orderId);
+      deleteResults.push({
+        bookingId: orderId,
+        success: revoked.errors.length === 0,
+        method: "iglookey_revoked",
+        revoked: revoked.revoked,
+        errors: revoked.errors,
+      });
     }
 
     // ================================================================
@@ -672,6 +794,8 @@ Deno.serve(async (req) => {
       failsafe = await issueAlgoLastResort(supabase, focusOrderId);
     }
 
+    const expiredSweep = await sweepExpiredYardCredentials(supabase, focusOrderId);
+
     const deletedCount = deleteResults.filter((r) => r.success).length;
     const generatedCount = generateResults.length;
     console.log(
@@ -693,6 +817,7 @@ Deno.serve(async (req) => {
       },
       confirmed: { processed: confirmResults.length, results: confirmResults },
       failsafe,
+      expiredSweep,
     });
   } catch (error) {
     console.error(`${LOG} Unhandled exception:`, error);

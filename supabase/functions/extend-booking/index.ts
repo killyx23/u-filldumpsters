@@ -542,6 +542,7 @@ Deno.serve(async (req) => {
         extensionStart: returnPin.start,
         extensionEnd: returnPin.end,
         activationRequired: returnPin.activationRequired,
+        igloo_key_url: returnPin.iglooKeyUrl || "",
         amount: total,
         oldReturn: currentPickup,
         newReturn: newPickupDate,
@@ -552,6 +553,9 @@ Deno.serve(async (req) => {
           email_type: "pin_update",
           email: booking.email || booking.customers?.email,
           pin: returnPin.pin,
+          igloo_key_url: returnPin.iglooKeyUrl || "",
+          pin_confirmed: true,
+          replaces_previous: true,
         }
         : {
           bookingId,

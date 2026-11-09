@@ -1777,10 +1777,13 @@ Deno.serve(async (req)=>{
       }
     }
     if (emailType === "pin_update") {
-      const pin = body.pin || body.access_pin;
+      const pin = body.pin || body.access_pin || "";
       const pinFailsafe = body.pin_failsafe === true;
-      if (!pin) {
-        return new Response(JSON.stringify({ error: "pin is required for pin_update" }), {
+      const iglooKeyUrl = String(body.igloo_key_url || body.iglooKeyUrl || "").trim();
+      const pinConfirmed = body.pin_confirmed !== false && body.pinConfirmed !== false;
+      const replacesPrevious = body.replaces_previous === true || body.replacesPrevious === true;
+      if (!pin && !iglooKeyUrl) {
+        return new Response(JSON.stringify({ error: "pin or igloo_key_url is required for pin_update" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1792,23 +1795,42 @@ Deno.serve(async (req)=>{
       const activationLabel = pickupTimeLabel
         ? `${pickupDateLabel} at ${pickupTimeLabel}`
         : pickupDateLabel;
+      const keyBlock = iglooKeyUrl
+        ? `<p><strong>Primary access — tap the link on your phone:</strong></p>
+      <p style="text-align:center;margin:20px 0;">
+        <a href="${iglooKeyUrl}" style="display:inline-block;background:#eab308;color:#111827;padding:14px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">Open unlock link</a>
+      </p>
+      <p style="color:#6b7280;font-size:13px;">Works on Android (Chrome, no app needed). iPhone users may be prompted to use the Igloo app. Open the link at the padlock to unlock over Bluetooth.</p>`
+        : "";
+      const pinBlock = pin
+        ? (pinConfirmed
+          ? `<div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">${pinFailsafe ? "Backup AlgoPIN" : "Backup keypad PIN"}</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>
+      <p style="color:#6b7280;font-size:13px;">If you will not have a smart device at pickup, enter this code on the padlock keypad.</p>`
+          : `<p style="margin:20px 0;padding:14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;color:#92400e;font-size:14px;">Your keypad backup PIN is still syncing to the lock. You can use the unlock link above, or check <strong>Access Codes</strong> in the Customer Portal closer to pickup.</p>`)
+        : `<p style="color:#6b7280;font-size:13px;">A keypad backup PIN will appear under Access Codes in the Customer Portal when it is ready.</p>`;
+      const replaceNote = replacesPrevious
+        ? `<p style="color:#991b1b;font-size:14px;"><strong>This replaces your previous access codes.</strong> Your old key link and PIN no longer work.</p>`
+        : "";
+      const intro = pinFailsafe
+        ? `Your access was updated because the original keypad code could not be verified on the lock before your appointment window.`
+        : `Your Dump Trailer digital key is ready.`;
       const pinHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
-      <h1 style="margin:0;font-size:22px;">Your Access Code — Order #${booking.id}</h1>
+      <h1 style="margin:0;font-size:22px;">${iglooKeyUrl ? "Your Unlock Link" : "Your Access Code"} — Order #${booking.id}</h1>
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>${pinFailsafe
-        ? `Your access code was updated because the original code could not be verified on the lock before your appointment window. Enter this code on the padlock keypad:`
-        : `Your Dump Trailer access code is ready. Enter it on the padlock at pickup.`}</p>
-      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
-        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
-        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
-      </div>
+      ${replaceNote}
+      <p>${intro}</p>
+      ${keyBlock}
+      ${pinBlock}
       <p><strong>Activates:</strong> ${activationLabel}</p>
       <p><strong>Return by:</strong> ${returnDateLabel}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</p>
-      <p style="color:#6b7280;font-size:13px;">The code works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
+      <p style="color:#6b7280;font-size:13px;">Access works during your scheduled rental window. Have everything loaded and locked by your return time.</p>
       <p style="text-align:center;margin:24px 0;">
         <a href="${dashboardUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
@@ -1816,8 +1838,10 @@ Deno.serve(async (req)=>{
   </div>
 </body></html>`;
       const pinSubject = pinFailsafe
-        ? `Updated Access Code for Order #${booking.id} — U-Fill Dumpsters`
-        : `Your Access Code for Order #${booking.id} — U-Fill Dumpsters`;
+        ? `Updated access for Order #${booking.id} — U-Fill Dumpsters`
+        : iglooKeyUrl
+          ? `Your Unlock Link — Order #${booking.id} — U-Fill Dumpsters`
+          : `Your Access Code for Order #${booking.id} — U-Fill Dumpsters`;
       console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_update to ${recipientEmail}`);
       const pinResult = await sendEmailWithRetry(recipientEmail, pinSubject, pinHtml);
       if (!pinResult.success) {
@@ -1834,9 +1858,13 @@ Deno.serve(async (req)=>{
       // SMS companion (respects customers.sms_opt_in). Email success is enough to mark notified.
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
-      const smsContent = pinFailsafe
-        ? `U-Fill Dumpsters: Your access PIN for Order #${booking.id} was updated because the original code could not be verified before your appointment. Your code is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`
-        : `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`;
+      const smsContent = iglooKeyUrl
+        ? (pin && pinConfirmed
+          ? `U-Fill Dumpsters: Order #${booking.id} unlock link ${iglooKeyUrl} (Bluetooth). Backup PIN ${pin}. Activates ${activationLabel}. Portal: ${accessCodesUrl}`
+          : `U-Fill Dumpsters: Order #${booking.id} unlock link ${iglooKeyUrl} (Bluetooth). Activates ${activationLabel}. Keypad backup in portal: ${accessCodesUrl}`)
+        : pinFailsafe
+          ? `U-Fill Dumpsters: Your access PIN for Order #${booking.id} was updated because the original code could not be verified before your appointment. Your code is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`
+          : `U-Fill Dumpsters: Your access PIN for Order #${booking.id} is ${pin}. Activates ${activationLabel}. View: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_update SMS:`, smsResult);
 
@@ -1876,12 +1904,19 @@ Deno.serve(async (req)=>{
       const oldReturn = formatDate(body.oldReturn || booking.pickup_date);
       const newReturn = formatDate(body.newReturn || booking.pickup_date);
       const returnTimeLabel = formatPlainBookingTime(booking.pickup_time_slot) || booking.pickup_time_slot || "";
+      const iglooKeyUrl = String(body.igloo_key_url || body.iglooKeyUrl || "").trim();
       const activationNote = activationRequired
         ? `<p><strong>Enter this new code on the padlock once during the first 24 hours after it starts.</strong> That single entry keeps it working through your new return. If you do not enter it in that window, this code will not work.</p>`
         : `<p>This return code is 24 hours or shorter, so you can enter it when you bring the trailer back.</p>`;
       const intro = isBackup
         ? `<p>Here is a backup return code for Order #${booking.id}. Bring the trailer back by <strong>${newReturn}${returnTimeLabel ? ` at ${returnTimeLabel}` : ""}</strong>.</p>`
         : `<p>Your return is now <strong>${newReturn}${returnTimeLabel ? ` by ${returnTimeLabel}` : ""}</strong>. It was ${oldReturn}.${amountLabel ? ` We charged ${amountLabel} for the extra time.` : ""}</p>`;
+      const keyBlock = iglooKeyUrl
+        ? `<p><strong>Primary access for the extended window — tap on your phone:</strong></p>
+      <p style="text-align:center;margin:20px 0;">
+        <a href="${iglooKeyUrl}" style="display:inline-block;background:#eab308;color:#111827;padding:14px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">Open your updated Igloo Key</a>
+      </p>`
+        : "";
       const extensionHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
@@ -1890,9 +1925,10 @@ Deno.serve(async (req)=>{
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
       ${intro}
+      ${keyBlock}
       ${originalPin ? `<p>Your original code <strong style="font-family:monospace;letter-spacing:0.12em;">${originalPin}</strong> still works until ${originalEndLabel || "its original end"}.</p>` : ""}
       <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
-        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">New return code</p>
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Backup return AlgoPIN</p>
         <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${extensionPin}</p>
       </div>
       ${activationNote}
@@ -1905,7 +1941,7 @@ Deno.serve(async (req)=>{
 </body></html>`;
       const extensionSubject = isBackup
         ? `Backup return code for Order #${booking.id} — U-Fill Dumpsters`
-        : `Rental extended — return code for Order #${booking.id} — U-Fill Dumpsters`;
+        : `Rental extended — Order #${booking.id} — U-Fill Dumpsters`;
       const extensionResult = await sendEmailWithRetry(recipientEmail, extensionSubject, extensionHtml);
       if (!extensionResult.success) {
         return new Response(JSON.stringify({
@@ -1920,9 +1956,11 @@ Deno.serve(async (req)=>{
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
       const smsLead = isBackup ? "backup return code" : "extended. New return code";
-      const smsContent = activationRequired
-        ? `U-Fill Dumpsters: Order #${booking.id} ${smsLead} ${extensionPin}. Enter it once on the lock within 24 hours of its start or it will not work. Return ${newReturn}.`
-        : `U-Fill Dumpsters: Order #${booking.id} ${smsLead} ${extensionPin}. Use it when you bring the trailer back by ${newReturn}.`;
+      const smsContent = iglooKeyUrl
+        ? `U-Fill Dumpsters: Order #${booking.id} extended. Unlock link ${iglooKeyUrl}. Backup code ${extensionPin}. Return ${newReturn}.`
+        : activationRequired
+          ? `U-Fill Dumpsters: Order #${booking.id} ${smsLead} ${extensionPin}. Enter it once on the lock within 24 hours of its start or it will not work. Return ${newReturn}.`
+          : `U-Fill Dumpsters: Order #${booking.id} ${smsLead} ${extensionPin}. Use it when you bring the trailer back by ${newReturn}.`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       const notifiedAt = new Date().toISOString();
       await supabase
@@ -1995,9 +2033,11 @@ Deno.serve(async (req)=>{
     }
 
     if (emailType === "pin_reminder") {
-      const pin = body.pin || body.access_pin;
-      if (!pin) {
-        return new Response(JSON.stringify({ error: "pin is required for pin_reminder" }), {
+      const pin = body.pin || body.access_pin || "";
+      const iglooKeyUrl = String(body.igloo_key_url || body.iglooKeyUrl || "").trim();
+      const pinConfirmed = body.pin_confirmed !== false && body.pinConfirmed !== false;
+      if (!pin && !iglooKeyUrl) {
+        return new Response(JSON.stringify({ error: "pin or igloo_key_url is required for pin_reminder" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -2005,6 +2045,17 @@ Deno.serve(async (req)=>{
       const pickupDateLabel = formatDate(booking.drop_off_date);
       const pickupTimeLabel = formatPlainBookingTime(booking.drop_off_time_slot) || booking.drop_off_time_slot || "";
       const whenLabel = pickupTimeLabel ? `${pickupDateLabel} at ${pickupTimeLabel}` : pickupDateLabel;
+      const keyBlock = iglooKeyUrl
+        ? `<p style="text-align:center;margin:20px 0;">
+        <a href="${iglooKeyUrl}" style="display:inline-block;background:#eab308;color:#111827;padding:14px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">Open unlock link</a>
+      </p>`
+        : "";
+      const pinBlock = pin && pinConfirmed
+        ? `<div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
+        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Backup keypad PIN</p>
+        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
+      </div>`
+        : "";
       const reminderHtml = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f3f4f6;padding:24px;">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
     <div style="background:#1e3a8a;color:#fff;padding:20px 24px;">
@@ -2012,18 +2063,16 @@ Deno.serve(async (req)=>{
     </div>
     <div style="padding:28px 24px;color:#1f2937;line-height:1.55;">
       <p>Hi ${booking.name || "there"},</p>
-      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>. Your padlock code:</p>
-      <div style="text-align:center;margin:28px 0;padding:20px;background:#0f172a;border-radius:10px;">
-        <p style="margin:0 0 8px;color:#fbbf24;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;">Access PIN</p>
-        <p style="margin:0;color:#fff;font-size:40px;font-weight:bold;letter-spacing:0.2em;font-family:monospace;">${pin}</p>
-      </div>
+      <p>Reminder: your Dump Trailer pickup is around <strong>${whenLabel}</strong>.</p>
+      ${keyBlock}
+      ${pinBlock}
       <p style="text-align:center;margin:24px 0;">
         <a href="${accessCodesUrl}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 22px;text-decoration:none;border-radius:8px;font-weight:bold;">View in Customer Portal</a>
       </p>
     </div>
   </div>
 </body></html>`;
-      const reminderSubject = `Pickup soon — Order #${booking.id} access code — U-Fill Dumpsters`;
+      const reminderSubject = `Pickup soon — Order #${booking.id} access — U-Fill Dumpsters`;
       console.log(`[${timestamp}] [send-booking-confirmation] Sending pin_reminder to ${recipientEmail}`);
       const reminderResult = await sendEmailWithRetry(recipientEmail, reminderSubject, reminderHtml);
       if (!reminderResult.success) {
@@ -2038,9 +2087,9 @@ Deno.serve(async (req)=>{
       }
       const phone = booking.customers?.phone || booking.phone || "";
       const smsOptIn = booking.customers?.sms_opt_in !== false;
-      const smsContent =
-        `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. ` +
-        `View: ${accessCodesUrl}`;
+      const smsContent = iglooKeyUrl
+        ? `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Unlock link: ${iglooKeyUrl}${pin && pinConfirmed ? ` Backup PIN: ${pin}.` : ""} View: ${accessCodesUrl}`
+        : `U-Fill Dumpsters: Pickup in about an hour for Order #${booking.id}. Your access PIN is ${pin}. View: ${accessCodesUrl}`;
       const smsResult = await sendSms(phone, smsContent, { smsOptIn });
       console.log(`[${timestamp}] [send-booking-confirmation] pin_reminder SMS:`, smsResult);
       const remindedAt = new Date().toISOString();
