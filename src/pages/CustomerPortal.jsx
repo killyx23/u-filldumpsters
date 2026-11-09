@@ -33,6 +33,7 @@ import { PortalLoyaltySummary } from '@/components/customer-portal/PortalLoyalty
 import { PortalReferralsSection } from '@/components/customer-portal/PortalReferralsSection';
 import { ReturningCustomerBenefits } from '@/components/ReturningCustomerBenefits';
 import { getPortalMenuAlerts, isUnreadTicketReply } from '@/utils/portalMenuAlerts';
+import { toTenDigitPhone } from '@/utils/toTenDigitPhone';
 
 const PORTAL_TAB_ALIASES = {
     communication: 'messages',
@@ -114,6 +115,7 @@ export const CustomerPortal = () => {
     const [selectedBookingForReschedule, setSelectedBookingForReschedule] = useState(null);
     const [selectedBookingForExtend, setSelectedBookingForExtend] = useState(null);
     const autoLoginAttemptedRef = useRef(false);
+    const loginInFlightRef = useRef(false);
 
     const mergeSearchParams = useCallback((updates = {}, options = {}) => {
         const next = new URLSearchParams(searchParams);
@@ -143,12 +145,17 @@ export const CustomerPortal = () => {
     }, [searchParams]);
 
     const performPortalLogin = useCallback(async (portalId, phone) => {
-        const rawPhone = String(phone).replace(/\D/g, '');
-        if (!portalId || rawPhone.length !== 10) {
+        const rawPhone = toTenDigitPhone(phone);
+        if (!portalId || !rawPhone) {
             throw new Error('Invalid portal credentials.');
         }
 
-        await clearLocalSession();
+        const expectedEmail = `${String(portalId).toLowerCase()}@ufilldumpsters.com`;
+        const { data: sessionData } = await supabase.auth.getSession();
+        const currentEmail = (sessionData?.session?.user?.email ?? '').toLowerCase();
+        if (currentEmail && currentEmail !== expectedEmail) {
+            await clearLocalSession();
+        }
 
         const { data, error } = await supabase.functions.invoke('customer-portal-login', {
             body: {
@@ -176,83 +183,145 @@ export const CustomerPortal = () => {
     }, []);
 
     useEffect(() => {
-        const handleMagicLink = async () => {
-            const token = searchParams.get('token');
-            if (!token || authLoading) {
-                return;
-            }
-
-            if (user) {
-                const requestedTab = searchParams.get('tab') || 'access-codes';
-                setActiveTab(requestedTab);
-                mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
-                return;
-            }
-            
-            console.log('[CustomerPortal] Magic link token detected, validating...');
-            
-            try {
-                const requestedTab = searchParams.get('tab') || 'access-codes';
-                const requestedOrderId = searchParams.get('order_id');
-                const { data, error } = await supabase.functions.invoke('validate-magic-link-token', {
-                    body: { token, order_id: requestedOrderId }
-                });
-
-                if (error || !data?.valid) {
-                    throw new Error(data?.error || 'Invalid or expired link');
-                }
-
-                console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
-
-                const { data: loginData, error: loginError } = await supabase.functions.invoke('customer-portal-login', {
-                    body: {
-                        portal_number: data.customer.customer_id_text,
-                        phone: data.customer.phone
-                    }
-                });
-
-                if (loginError || loginData?.error) {
-                    throw new Error(loginData?.error || 'Failed to create session');
-                }
-
-                if (loginData?.session) {
-                    await supabase.auth.setSession(loginData.session);
-                    mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
-                    setActiveTab(requestedTab);
-                    
-                    toast({
-                        title: 'Login Successful',
-                        description: 'Welcome! Redirecting to your portal...'
-                    });
-                }
-
-            } catch (err) {
-                console.error('[CustomerPortal] Magic link error:', err);
-                toast({
-                    title: 'Invalid Link',
-                    description: err.message || 'This link has expired or is invalid. Please log in manually.',
-                    variant: 'destructive'
-                });
-                mergeSearchParams({}, { removeKeys: ['token'] });
-            }
-        };
-
-        handleMagicLink();
-    }, [searchParams, user, authLoading, mergeSearchParams]);
-
-    useEffect(() => {
         const pid = searchParams.get('portal_id');
         const pnum = searchParams.get('portal_number');
         const cid = searchParams.get('cid');
         const ph = searchParams.get('phone');
-        
+
         const foundPid = pid || pnum || cid;
-        
-        console.log('[CustomerPortal] URL params detected:', { foundPid, phone: ph });
-        
+        const normalizedPhone = toTenDigitPhone(ph) || ph;
+
+        console.log('[CustomerPortal] URL params detected:', { foundPid, phone: normalizedPhone });
+
         if (foundPid) setLoginPortalId(foundPid);
-        if (ph) setLoginPhone(ph);
+        if (normalizedPhone) setLoginPhone(normalizedPhone);
     }, [searchParams]);
+
+    // Single auto-login orchestrator: magic-link first (when token present),
+    // soft-fail → deeplink credentials; otherwise deeplink-only. Never run both at once.
+    useEffect(() => {
+        if (authLoading) return;
+
+        const token = searchParams.get('token');
+        const { portalId, phone } = getDeeplinkCredentials();
+        const requestedTab = searchParams.get('tab') || (token ? 'access-codes' : 'dashboard');
+
+        if (user) {
+            if (token) {
+                setActiveTab(requestedTab);
+                mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
+            }
+            return;
+        }
+
+        if (isLoggingIn || autoLoginAttemptedRef.current || loginInFlightRef.current) {
+            return;
+        }
+
+        if (!token && (!portalId || !phone)) {
+            return;
+        }
+
+        autoLoginAttemptedRef.current = true;
+        loginInFlightRef.current = true;
+
+        const finishSuccess = (tab) => {
+            mergeSearchParams({ tab }, { removeKeys: ['token'] });
+            setActiveTab(tab);
+            toast({
+                title: 'Login Successful',
+                description: 'Welcome to your customer portal.',
+            });
+        };
+
+        const seedFormCredentials = (nextPortalId, nextPhone) => {
+            if (nextPortalId) setLoginPortalId(nextPortalId);
+            const normalized = toTenDigitPhone(nextPhone) || nextPhone;
+            if (normalized) setLoginPhone(normalized);
+        };
+
+        const runAutoLogin = async () => {
+            setIsLoggingIn(true);
+            try {
+                if (token) {
+                    console.log('[CustomerPortal] Magic link token detected, validating...');
+                    try {
+                        const requestedOrderId = searchParams.get('order_id');
+                        const { data, error } = await supabase.functions.invoke('validate-magic-link-token', {
+                            body: { token, order_id: requestedOrderId },
+                        });
+
+                        if (error || !data?.valid) {
+                            const softFail = data?.error_code === 'booking_inactive';
+                            const err = new Error(data?.error || 'Invalid or expired link');
+                            err.softFail = softFail;
+                            err.errorCode = data?.error_code;
+                            throw err;
+                        }
+
+                        const magicPortalId = data.customer?.customer_id_text;
+                        const magicPhone = data.customer?.phone;
+                        seedFormCredentials(magicPortalId, magicPhone);
+
+                        console.log('[CustomerPortal] Magic link validated, logging in customer:', data.customer_id);
+                        await performPortalLogin(magicPortalId, magicPhone);
+                        finishSuccess(requestedTab);
+                        return;
+                    } catch (magicErr) {
+                        console.error('[CustomerPortal] Magic link error:', magicErr);
+                        seedFormCredentials(portalId, phone);
+
+                        if (portalId && phone) {
+                            console.log('[CustomerPortal] Falling back to deeplink auto-login after magic-link failure');
+                            try {
+                                await performPortalLogin(portalId, phone);
+                                finishSuccess(requestedTab);
+                                return;
+                            } catch (deeplinkErr) {
+                                console.error('[CustomerPortal] Deeplink fallback failed:', deeplinkErr);
+                            }
+                        }
+
+                        autoLoginAttemptedRef.current = false;
+                        toast({
+                            title: 'Invalid Link',
+                            description: magicErr.message || 'This link has expired or is invalid. Please log in manually.',
+                            variant: 'destructive',
+                        });
+                        mergeSearchParams({}, { removeKeys: ['token'] });
+                        return;
+                    }
+                }
+
+                console.log('[CustomerPortal] Auto-login from deeplink params');
+                seedFormCredentials(portalId, phone);
+                await performPortalLogin(portalId, phone);
+                finishSuccess(requestedTab);
+            } catch (err) {
+                console.error('[CustomerPortal] Deeplink auto-login failed:', err);
+                autoLoginAttemptedRef.current = false;
+                seedFormCredentials(portalId, phone);
+                toast({
+                    title: 'Login Failed',
+                    description: err.message || 'Could not sign in automatically. Use the form below.',
+                    variant: 'destructive',
+                });
+            } finally {
+                setIsLoggingIn(false);
+                loginInFlightRef.current = false;
+            }
+        };
+
+        runAutoLogin();
+    }, [
+        authLoading,
+        user,
+        isLoggingIn,
+        getDeeplinkCredentials,
+        performPortalLogin,
+        searchParams,
+        mergeSearchParams,
+    ]);
 
     const handleTabChange = (tabId, options = {}) => {
         const section = options.section || null;
@@ -473,46 +542,6 @@ export const CustomerPortal = () => {
     }, [user, session, authLoading, fetchData, getDeeplinkCredentials]);
 
     useEffect(() => {
-        if (authLoading || user || isLoggingIn) {
-            return;
-        }
-
-        const { portalId, phone } = getDeeplinkCredentials();
-        if (!portalId || !phone || autoLoginAttemptedRef.current) {
-            return;
-        }
-
-        autoLoginAttemptedRef.current = true;
-
-        const runAutoLogin = async () => {
-            setIsLoggingIn(true);
-            try {
-                console.log('[CustomerPortal] Auto-login from deeplink params');
-                await performPortalLogin(portalId, phone);
-                const requestedTab = searchParams.get('tab') || 'dashboard';
-                mergeSearchParams({ tab: requestedTab }, { removeKeys: ['token'] });
-                setActiveTab(requestedTab);
-                toast({
-                    title: 'Login Successful',
-                    description: 'Welcome to your customer portal.',
-                });
-            } catch (err) {
-                console.error('[CustomerPortal] Deeplink auto-login failed:', err);
-                autoLoginAttemptedRef.current = false;
-                toast({
-                    title: 'Login Failed',
-                    description: err.message || 'Could not sign in automatically. Use the form below.',
-                    variant: 'destructive',
-                });
-            } finally {
-                setIsLoggingIn(false);
-            }
-        };
-
-        runAutoLogin();
-    }, [authLoading, user, isLoggingIn, getDeeplinkCredentials, performPortalLogin, searchParams, mergeSearchParams]);
-
-    useEffect(() => {
         if (!user || !session?.access_token) return;
         
         console.log('[CustomerPortal] Setting up auto-refresh interval (5m)');
@@ -622,9 +651,9 @@ export const CustomerPortal = () => {
     const handleLoginSubmit = async (e) => {
         e.preventDefault();
         const timestamp = new Date().toISOString();
-        
-        const rawPhone = loginPhone.replace(/\D/g, '');
-        
+
+        const rawPhone = toTenDigitPhone(loginPhone);
+
         console.log(`[${timestamp}] [CustomerPortal] Login attempt initiated`, {
             portal_number: loginPortalId,
             phone: rawPhone

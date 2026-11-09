@@ -1,3 +1,5 @@
+import { toTenDigitPhone } from "./toTenDigitPhone.ts";
+
 /**
  * Customer-portal links that sign the customer in.
  * Same query names as the receipt QR links: portal_number and phone.
@@ -23,7 +25,8 @@ export function buildCustomerPortalUrl(siteUrl: string, options: PortalLinkOptio
   if (options.tab) params.set("tab", options.tab);
   if (options.section) params.set("section", options.section);
   const portalNumber = usable(options.portalNumber);
-  const phone = usable(options.phone);
+  const rawPhone = usable(options.phone);
+  const phone = toTenDigitPhone(rawPhone) || rawPhone;
   if (portalNumber) params.set("portal_number", portalNumber);
   if (phone) params.set("phone", phone);
   if (options.orderId != null && String(options.orderId).trim()) {

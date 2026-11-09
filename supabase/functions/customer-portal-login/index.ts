@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.30.0";
 import { getCorsHeaders } from "./cors.ts";
+import { toTenDigitPhone } from "../_shared/toTenDigitPhone.ts";
 const DOMAIN = "ufilldumpsters.com";
 const ENV_PASSWORD_SUFFIX = (Deno.env.get("SUPABASE_PASSWORD_SUFFIX") ?? "").trim();
 function buildPasswordFromPhone(cleanedPhone) {
@@ -67,8 +68,8 @@ serve(async (req)=>{
         }
       });
     }
-    const cleanedPhone = String(phone || "").replace(/\D/g, "");
-    if (cleanedPhone.length !== 10) {
+    const cleanedPhone = toTenDigitPhone(phone);
+    if (!cleanedPhone) {
       return new Response(JSON.stringify({
         error: "Invalid phone number format. Must be 10 digits."
       }), {
@@ -114,10 +115,10 @@ serve(async (req)=>{
         }
       });
     }
-    // 2. Validate phone
-    const cleanDbPhone = String(customer.phone || "").replace(/\D/g, "");
+    // 2. Validate phone (normalize both sides to last-10 US digits)
+    const cleanDbPhone = toTenDigitPhone(customer.phone);
     console.log(`[Customer Portal Login] Phone comparison - Input: ${cleanedPhone}, DB: ${cleanDbPhone}`);
-    if (cleanedPhone !== cleanDbPhone) {
+    if (!cleanDbPhone || cleanedPhone !== cleanDbPhone) {
       console.log(`[Customer Portal Login] Phone mismatch for CID: ${identifier}`);
       return new Response(JSON.stringify({
         error: "Invalid customer ID or phone number."

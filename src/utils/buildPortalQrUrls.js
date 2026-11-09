@@ -1,9 +1,12 @@
 import { getQrCodeOrigin } from '@/utils/getAppOrigin';
+import { toTenDigitPhone } from '@/utils/toTenDigitPhone';
 
 const normalizeValue = (value) => {
   if (value === null || value === undefined) return '';
   return String(value).trim();
 };
+
+const normalizePhoneParam = (phone) => toTenDigitPhone(phone) || normalizeValue(phone);
 
 export function buildAccessCodesQrUrl({ token, portalNumber, phone, orderId }) {
   const params = new URLSearchParams();
@@ -11,7 +14,7 @@ export function buildAccessCodesQrUrl({ token, portalNumber, phone, orderId }) {
 
   const normalizedToken = normalizeValue(token);
   const normalizedPortal = normalizeValue(portalNumber);
-  const normalizedPhone = normalizeValue(phone);
+  const normalizedPhone = normalizePhoneParam(phone);
   const normalizedOrderId = normalizeValue(orderId);
 
   if (normalizedToken) params.set('token', normalizedToken);
@@ -28,7 +31,7 @@ export function buildCustomerDocumentQrUrl({ documentKey, portalNumber, phone, o
   params.set('document', normalizeValue(documentKey));
 
   const normalizedPortal = normalizeValue(portalNumber);
-  const normalizedPhone = normalizeValue(phone);
+  const normalizedPhone = normalizePhoneParam(phone);
   const normalizedOrderId = normalizeValue(orderId);
 
   if (normalizedPortal) params.set('portal_number', normalizedPortal);
@@ -44,7 +47,7 @@ export function buildHowToGuidesQrUrl({ token, portalNumber, phone, orderId }) {
 
   const normalizedToken = normalizeValue(token);
   const normalizedPortal = normalizeValue(portalNumber);
-  const normalizedPhone = normalizeValue(phone);
+  const normalizedPhone = normalizePhoneParam(phone);
   const normalizedOrderId = normalizeValue(orderId);
 
   if (normalizedToken) params.set('token', normalizedToken);
