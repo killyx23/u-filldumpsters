@@ -11,8 +11,12 @@
 - [Edge Function Diagnostics - Igloohome Integration](/edgefunctiondiagnostic): No description available
 - [FAQ - U-Fill Dumpsters](/faq): Find answers to frequently asked questions about our dumpster rental services, pricing, allowed materials, and booking process.
 - [Gorilla Heavy-Duty Dump Cart - Product Showcase | U-Fill Dumpsters](/productshowcase): Explore the Gorilla Heavy-Duty Dump Cart - a professional-grade material handling solution with 1,200 lb capacity, patented quick-release dumping system, and all-terrain capability.
+- [Hardware Protection Plan - U-Fill Dumpsters](/hardwareprotectionplan): Optional Hardware Protection Plan terms for U-Fill Dumpsters LLC premium Sure-Trac equipment rentals.
 - [How Can We Do Better - U-Fill Dumpsters](/howcanwedobetter): Tell U-Fill Dumpsters how we can serve you better. Share feedback after leaving checkout.
 - [Igloohome OAuth Diagnostic - Admin](/igloohomedebug): No description available
 - [Loading - Customer Portal](/customerportaldashboard): No description available
+- [Master Rental Agreement - U-Fill Dumpsters](/masterrentalagreement): Master Rental Agreement for U-Fill Dumpsters LLC, including the charges and fees in effect on the date this document is opened.
+- [Privacy Policy - U-Fill Dumpsters](/privacypolicy): How U-Fill Dumpsters LLC collects, uses, and protects customer information, including phone numbers and text-message consent.
 - [Resource Library | U-Fill Dumpsters](/resourcelibrary): Access our library of helpful guides, videos, and documents to make your dumpster rental experience seamless.
 - [Supabase Connection Test - U-Fill Dumpsters](/supabaseconnectiontest): No description available
+- [Terms and Conditions - U-Fill Dumpsters](/terms): Terms and Conditions for U-Fill Dumpsters LLC rentals, including email, text messages, liability, cancellation, payment, and equipment rules.

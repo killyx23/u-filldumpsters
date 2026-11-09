@@ -4,14 +4,23 @@ export const RENTAL_EQUIPMENT_IDS = new Set([1, 2]);
 /** Equipment IDs that are purchased (not inventory-returned). */
 export const PURCHASE_EQUIPMENT_IDS = new Set([3]);
 
+/** Equipment IDs that are one-way disposal services (not returned). */
+export const DISPOSAL_EQUIPMENT_IDS = new Set([4, 5, 6]);
+
 /** Friendly checkout labels keyed by equipment id or addon string id. */
 export const EQUIPMENT_FRIENDLY_LABELS = {
   1: 'Wheelbarrow',
   2: 'Hand Truck',
   3: 'Working Gloves (Pair)',
+  4: 'Mattress Disposal',
+  5: 'TV Disposal',
+  6: 'Appliance Disposal',
   wheelbarrow: 'Wheelbarrow',
   handTruck: 'Hand Truck',
   gloves: 'Working Gloves (Pair)',
+  mattress: 'Mattress Disposal',
+  tv: 'TV Disposal',
+  appliance: 'Appliance Disposal',
 };
 
 /** DB / catalog names that map to rental ids (for return_issues lookup). */
@@ -31,14 +40,23 @@ export function isPurchaseEquipmentId(id) {
   return Number.isFinite(n) && PURCHASE_EQUIPMENT_IDS.has(n);
 }
 
+export function isDisposalEquipmentId(id) {
+  const n = Number(id);
+  return Number.isFinite(n) && DISPOSAL_EQUIPMENT_IDS.has(n);
+}
+
 export function resolveEquipmentId(item = {}) {
   const raw = item.equipment_id ?? item.dbId ?? item.equipment?.id ?? item.id;
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return n;
   if (typeof raw === 'string') {
-    if (raw === 'wheelbarrow') return 1;
-    if (raw === 'handTruck') return 2;
-    if (raw === 'gloves') return 3;
+    const slug = raw.toLowerCase().replace(/[\s_-]/g, '');
+    if (slug === 'wheelbarrow') return 1;
+    if (slug === 'handtruck') return 2;
+    if (slug === 'gloves') return 3;
+    if (slug === 'mattress' || slug === 'mattressdisposal') return 4;
+    if (slug === 'tv' || slug === 'tvdisposal') return 5;
+    if (slug === 'appliance' || slug === 'appliancedisposal') return 6;
   }
   return null;
 }
@@ -142,6 +160,73 @@ export function splitAddonEquipmentList(addonEquipment = []) {
     else if (isRentalEquipmentId(id)) rentals.push(item);
   }
   return { rentals, purchases };
+}
+
+function addonEquipmentDisplayName(item, equipmentId) {
+  return (
+    item?.name ||
+    item?.label ||
+    EQUIPMENT_FRIENDLY_LABELS[equipmentId] ||
+    EQUIPMENT_FRIENDLY_LABELS[item?.id] ||
+    (equipmentId != null ? `Equipment #${equipmentId}` : 'Add-on')
+  );
+}
+
+function classifyBookingAddonEquipment(item) {
+  const equipmentId = resolveEquipmentId(item);
+  const type = String(item?.type || '').toLowerCase();
+  const name = addonEquipmentDisplayName(item, equipmentId);
+  const quantity = Math.max(1, Number(item?.quantity || 1) || 1);
+  const key = `eq-${equipmentId ?? item?.id ?? name}`;
+
+  if (isRentalEquipmentId(equipmentId) || type === 'rental') {
+    return { key, name, quantity, returnable: true, kind: 'rental' };
+  }
+  if (isPurchaseEquipmentId(equipmentId) || type === 'purchase' || type === 'consumable') {
+    return { key, name, quantity, returnable: false, kind: 'purchase' };
+  }
+  if (isDisposalEquipmentId(equipmentId) || type === 'service' || type === 'disposal') {
+    return { key, name, quantity, returnable: false, kind: 'disposal' };
+  }
+
+  return { key, name, quantity, returnable: false, kind: 'other' };
+}
+
+/**
+ * Flatten booking.addons into display rows for admin rental detail.
+ * @returns {Array<{ key: string, name: string, quantity: number, returnable: boolean, kind: string }>}
+ */
+export function listBookingAddonItems(booking) {
+  const addons = booking?.addons && typeof booking.addons === 'object' ? booking.addons : {};
+  const items = [];
+
+  if (addons.insurance === 'accept') {
+    items.push({
+      key: 'insurance',
+      name: 'Premium Insurance (HPP)',
+      quantity: 1,
+      returnable: false,
+      kind: 'protection',
+    });
+  }
+
+  if (addons.drivewayProtection === 'accept') {
+    items.push({
+      key: 'driveway',
+      name: 'Driveway Protection',
+      quantity: 1,
+      returnable: false,
+      kind: 'protection',
+    });
+  }
+
+  const equipment = Array.isArray(addons.equipment) ? addons.equipment : [];
+  for (const item of equipment) {
+    if (!item) continue;
+    items.push(classifyBookingAddonEquipment(item));
+  }
+
+  return items;
 }
 
 /** Booking statuses that do not count as physically holding rental equipment. */
