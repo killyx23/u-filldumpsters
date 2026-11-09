@@ -1,9 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import { getJwtAal } from "../_shared/jwtAal.ts";
-import { deletePinVerified } from "../_shared/lockPin.ts";
-const IGLOOHOME_OAUTH_URL = "https://auth.igloohome.co/oauth2/token";
-const IGLOOHOME_API_BASE_URL = "https://api.igloodeveloper.co/igloohome";
+import { revokeYardCredentials } from "../_shared/revokeYardCredentials.ts";
 function makeJsonResponse(corsHeaders) {
   return (body, status = 200) => new Response(JSON.stringify(body), {
     status,
@@ -12,46 +10,6 @@ function makeJsonResponse(corsHeaders) {
       "Content-Type": "application/json"
     }
   });
-}
-async function readResponse(res) {
-  const text = await res.text();
-  try {
-    return {
-      text,
-      json: text ? JSON.parse(text) : null
-    };
-  } catch  {
-    return {
-      text,
-      json: null
-    };
-  }
-}
-async function getOAuthToken(clientId, clientSecret) {
-  const credentials = btoa(`${clientId}:${clientSecret}`);
-  const res = await fetch(IGLOOHOME_OAUTH_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
-    },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      scope: [
-        "igloohomeapi/delete-pin-bridge-proxied-job",
-        "igloohomeapi/get-devices",
-        "igloohomeapi/get-job-status"
-      ].join(" ")
-    })
-  });
-  const body = await readResponse(res);
-  console.log("[delete-pin] OAuth status:", res.status);
-  if (!res.ok || !body.json?.access_token) {
-    console.error("[delete-pin] OAuth failed:", body.text);
-    return null;
-  }
-  return body.json.access_token;
 }
 Deno.serve(async (req)=>{
   const corsHeaders = getCorsHeaders(req);
@@ -67,11 +25,7 @@ Deno.serve(async (req)=>{
     console.log("[delete-pin] Started:", new Date().toISOString());
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const clientId = Deno.env.get("IGLOOHOME_CLIENT_ID");
-    const clientSecret = Deno.env.get("IGLOOHOME_CLIENT_SECRET");
-    const lockId = Deno.env.get("IGLOOHOME_LOCK_ID") || Deno.env.get("IGLOOHOME_DEVICE_ID");
-    const bridgeId = Deno.env.get("IGLOOHOME_BRIDGE_ID");
-    if (!supabaseUrl || !serviceRoleKey || !clientId || !clientSecret || !lockId || !bridgeId) {
+    if (!supabaseUrl || !serviceRoleKey) {
       return jsonResponse({
         success: false,
         error: "Missing required environment variables"
@@ -161,86 +115,32 @@ Deno.serve(async (req)=>{
         }, 403);
       }
     }
-    // ----------------------------------------------------------------
-    // Find active PIN for this booking
-    // ----------------------------------------------------------------
-    const { data: activePin, error: pinFetchError } = await supabase.from("rental_access_codes").select("id, access_pin, pin_type").eq("order_id", bookingId).eq("status", "active").single();
-    if (pinFetchError || !activePin) {
-      console.log(`[delete-pin] No active PIN found for booking #${bookingId}`);
+    const { data: booking } = await supabase.from("bookings").select("*").eq("id", bookingId).maybeSingle();
+    const revoked = await revokeYardCredentials(supabase, booking || Number(bookingId), {
+      clearBookingPinFlags: false,
+      attemptBridgeDelete: true,
+    });
+    const touched = revoked.iglooKeysRevoked + revoked.pinsExpired;
+    if (!touched) {
+      console.log(`[delete-pin] No active credentials for booking #${bookingId}`);
       return jsonResponse({
         success: true,
-        message: "No active PIN found for this booking — nothing to delete",
+        message: "No active credentials found for this booking — nothing to delete",
         lockDeleted: false,
-        dbExpired: false
+        dbExpired: false,
+        revoked,
       });
     }
-    const now = new Date().toISOString();
-    // ----------------------------------------------------------------
-    // Step 1: Expire in DB immediately regardless of bridge status.
-    // Customer portal loses access right away.
-    // ----------------------------------------------------------------
-    const { error: expireError } = await supabase.from("rental_access_codes").update({
-      status: "expired",
-      notified_at: now,
-      lock_deleted_at: null
-    }).eq("id", activePin.id);
-    if (expireError) {
-      console.error(`[delete-pin] Failed to expire PIN in DB for booking #${bookingId}:`, expireError.message);
-      return jsonResponse({
-        success: false,
-        error: "Failed to expire PIN in database"
-      }, 500);
-    }
-    console.log(`[delete-pin] ✓ PIN expired in DB for booking #${bookingId} — portal access revoked`);
-    // ----------------------------------------------------------------
-    // Step 2: Try to delete from lock via bridge.
-    // Non-fatal if bridge is offline — cron Phase 1 will retry.
-    // AlgoPINs cannot be deleted via bridge, so skip the lock call.
-    // ----------------------------------------------------------------
-    if (activePin.pin_type === "algopin") {
-      console.log(`[delete-pin] PIN is algopin type — cannot delete from lock, will expire naturally`);
-      return jsonResponse({
-        success: true,
-        bookingId,
-        lockDeleted: false,
-        dbExpired: true,
-        message: "AlgoPIN expired in DB. It cannot be remotely deleted — it will expire naturally at its scheduled end time."
-      });
-    }
-    const accessToken = await getOAuthToken(clientId, clientSecret);
-    if (!accessToken) {
-      console.error("[delete-pin] Failed to get OAuth token — DB already expired, lock will retry via cron");
-      return jsonResponse({
-        success: true,
-        bookingId,
-        lockDeleted: false,
-        dbExpired: true,
-        message: "PIN expired in DB. Lock deletion will be retried on the next cron run."
-      });
-    }
-    const lockResult = await deletePinVerified(accessToken, lockId, bridgeId, activePin.access_pin);
-    if (lockResult.ok) {
-      // Mark lock deletion confirmed
-      await supabase.from("rental_access_codes").update({
-        lock_deleted_at: now
-      }).eq("id", activePin.id);
-      console.log(`[delete-pin] ✓ PIN deleted from lock for booking #${bookingId}`);
-      return jsonResponse({
-        success: true,
-        bookingId,
-        lockDeleted: true,
-        dbExpired: true,
-        message: "PIN fully deleted — portal access revoked and lock cleared."
-      });
-    }
-    // Bridge offline — DB is already expired, cron will retry lock deletion
-    console.warn(`[delete-pin] Bridge offline for booking #${bookingId} — lock deletion will retry via cron. Error: ${lockResult.error}`);
+    console.log(`[delete-pin] Revoked credentials for booking #${bookingId}`, revoked);
     return jsonResponse({
       success: true,
       bookingId,
-      lockDeleted: false,
+      lockDeleted: revoked.bridgeDeletesConfirmed > 0,
       dbExpired: true,
-      message: "PIN expired in DB — portal access revoked. Lock deletion will be retried on the next cron run."
+      revoked,
+      message: revoked.bridgeDeletesPending > 0
+        ? "Credentials expired in DB — portal access revoked. Bridge delete will retry via cron if needed."
+        : "All yard credentials revoked (iglooKey + PINs).",
     });
   } catch (error) {
     console.error("[delete-pin] Unhandled exception:", error);

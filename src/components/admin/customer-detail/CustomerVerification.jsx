@@ -2043,6 +2043,12 @@ export const CustomerVerification = ({ customer, verificationBookings, notes, on
 
             if (prevStatus === 'pending_review' && nextStatus === 'Confirmed') {
                 await expireActiveRentalAccessCodesForOrder(booking.id);
+                const { error: reissueError } = await supabase.functions.invoke('reissue-yard-credentials', {
+                    body: { bookingId: booking.id },
+                });
+                if (reissueError) {
+                    console.error('[handleApprove] reissue-yard-credentials failed:', reissueError.message);
+                }
             }
 
             if (isRescheduleApprove) {

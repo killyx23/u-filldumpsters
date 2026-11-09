@@ -72,15 +72,20 @@ export const BookingAccessCodeSection = ({ booking }) => {
       setAccessCodes(rows);
       if (rows.length > 0) {
         const codeRecord = booking?.pin_failsafe_at
-          ? (rows.find((row) => row.pin_type === 'algopin') || rows[0])
-          : (rows.find((row) => row.pin_type === 'bridge_proxied') || rows[0]);
+          ? (rows.find((row) => row.pin_type === 'algopin') || rows.find((row) => row.pin_type === 'bridge_proxied') || rows[0])
+          : (rows.find((row) => row.pin_type === 'bridge_proxied') ||
+            rows.find((row) => row.pin_type === 'algopin') ||
+            rows[0]);
         setAccessCode(codeRecord);
         setIssuingToLock(
-          !!codeRecord.access_pin &&
+          !!codeRecord?.access_pin &&
             !codeRecord.lock_confirmed_at &&
             codeRecord.pin_type === 'bridge_proxied'
         );
-        if (codeRecord.access_pin && (codeRecord.lock_confirmed_at || codeRecord.pin_type === 'algopin')) {
+        if (
+          (codeRecord?.access_pin && (codeRecord.lock_confirmed_at || codeRecord.pin_type === 'algopin')) ||
+          rows.some((row) => row.pin_type === 'iglookey' && row.shareable_url)
+        ) {
           setRetryCount(0);
           pendingPollStartedAtRef.current = null;
         }
@@ -365,19 +370,52 @@ export const BookingAccessCodeSection = ({ booking }) => {
     }
   };
 
-  if (pinReady) {
+  const iglooKeyRow = (accessCodes || []).find((row) => row.pin_type === 'iglookey' && row.shareable_url);
+  const pinReadyOrKey = pinReady || Boolean(iglooKeyRow);
+
+  if (pinReadyOrKey) {
     const listed = (accessCodes.length ? accessCodes : [accessCode]).filter(
-      (code) => code && (!booking?.pin_failsafe_at || code.pin_type === 'algopin'),
+      (code) =>
+        code &&
+        code.pin_type !== 'iglookey' &&
+        (!booking?.pin_failsafe_at || code.pin_type === 'algopin' || code.pin_type === 'bridge_proxied'),
     );
     return (
       <div className="space-y-3">
+        {iglooKeyRow?.shareable_url && (
+          <div className="bg-black/30 p-4 rounded-lg border border-sky-400/40 space-y-3">
+            <div className="flex items-center gap-2">
+              <Key className="h-4 w-4 text-sky-300" />
+              <p className="text-xs uppercase tracking-widest text-sky-300 font-semibold">Primary — Bluetooth unlock link</p>
+            </div>
+            <a
+              href={iglooKeyRow.shareable_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex w-full items-center justify-center rounded-lg bg-yellow-400 px-4 py-3 text-center text-base font-bold text-slate-900 hover:bg-yellow-300"
+            >
+              Open unlock link
+            </a>
+            <p className="text-sm text-gray-300">
+              Open this on your phone at the padlock. Android Chrome works without an app; iPhone may prompt for the Igloo app.
+            </p>
+          </div>
+        )}
         {listed.map((code) => {
           const hours = code.start_time && code.end_time
             ? (new Date(code.end_time).getTime() - new Date(code.start_time).getTime()) / (60 * 60 * 1000)
             : 0;
               const label = booking?.pin_failsafe_at
-                ? 'Access code'
-                : (code.pin_type === 'algopin' ? 'Return code' : 'Original code');
+                ? 'Backup AlgoPIN'
+                : (code.pin_type === 'algopin' ? 'Backup return code' : 'Backup keypad PIN');
+          if (!code.access_pin) return null;
+          if (code.pin_type === 'bridge_proxied' && !code.lock_confirmed_at && !booking?.pin_failsafe_at) {
+            return (
+              <div key={code.id || 'pending-pin'} className="bg-amber-500/10 p-4 rounded-lg border border-amber-400/30">
+                <p className="text-sm text-amber-100">Keypad backup PIN is still syncing to the lock. Use the unlock link above, or check back closer to pickup.</p>
+              </div>
+            );
+          }
           return (
             <div key={code.id || code.access_pin} className="bg-black/30 p-4 rounded-lg border border-yellow-400/40 space-y-3">
               <div className="flex items-center gap-2">
@@ -395,7 +433,7 @@ export const BookingAccessCodeSection = ({ booking }) => {
         })}
         {booking?.pin_failsafe_at && (
           <p className="text-sm text-amber-200">
-            This code replaced your custom PIN because the lock did not confirm it before your appointment window.
+            The AlgoPIN replaced your custom keypad PIN because the lock did not confirm it before your appointment window.
           </p>
         )}
         <p className="text-sm text-gray-300">

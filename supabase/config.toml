@@ -385,6 +385,10 @@ verify_jwt = false
 # Deploy with: supabase functions deploy reconcile-lock-pins --no-verify-jwt
 verify_jwt = false
 
+[functions.reissue-yard-credentials]
+# Admin MFA (or service role) after reschedule approve / reinstate to Confirmed.
+verify_jwt = true
+
 [functions.send-abandoned-checkout-reminder]
 # Invoked by pg_cron via pg_net with the service_role Bearer token. Keep JWT
 # verification on so only cron/service role can trigger mass reminder sends —

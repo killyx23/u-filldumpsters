@@ -11,6 +11,7 @@
 import { createAlgoPinWithVariance } from "./algoPin.ts";
 import { bookingNeedsYardLockPin } from "./deliveryBooking.ts";
 import { BRIDGE_PIN_SCOPES, GENERATE_PIN_SCOPES, getOAuthToken } from "./iglooAuth.ts";
+import { createIglooKeyForBooking } from "./iglooKey.ts";
 import { ensurePinOnLock } from "./lockPin.ts";
 import { addGraceHour, buildBookingDateUTC, clampIgloohomeStart, getPinActivationStart } from "./pinTiming.ts";
 
@@ -29,6 +30,7 @@ export type ExtensionPinResult = {
   activationRequired?: boolean;
   originalPin?: string | null;
   originalEnd?: string | null;
+  iglooKeyUrl?: string | null;
   error?: string;
 };
 
@@ -142,11 +144,28 @@ async function replaceCustomPinForExtension(
       (lockError ? ` Lock update failed: ${lockError}` : ""),
   });
 
-  if (lockError) {
-    return { ok: false, replacedCustom: true, pin, start: startDate, end: endDate, error: lockError };
+  const key = await createIglooKeyForBooking(supabase, {
+    ...booking,
+    pickup_date: newPickupDate,
+  }, { forceNew: true });
+  const iglooKeyUrl = key.ok ? key.url : null;
+  if (!key.ok) {
+    console.warn(`[extensionReturnPin] iglooKey create failed for #${orderId}: ${key.error}`);
   }
 
-  return { ok: true, replacedCustom: true, pin, start: startDate, end: endDate };
+  if (lockError) {
+    return {
+      ok: false,
+      replacedCustom: true,
+      pin,
+      start: startDate,
+      end: endDate,
+      iglooKeyUrl,
+      error: lockError,
+    };
+  }
+
+  return { ok: true, replacedCustom: true, pin, start: startDate, end: endDate, iglooKeyUrl };
 }
 
 export async function issueExtensionReturnPin(
@@ -193,8 +212,25 @@ export async function issueExtensionReturnPin(
   const hours = (new Date(endDate).getTime() - new Date(startDate).getTime()) / (60 * 60 * 1000);
   const activationRequired = hours > 24;
 
+  const key = await createIglooKeyForBooking(supabase, {
+    ...booking,
+    pickup_date: newPickupDate,
+  }, {
+    forceNew: true,
+    startOverride: new Date().toISOString(),
+    endOverride: addGraceHour(
+      buildBookingDateUTC(newPickupDate, booking.pickup_time_slot as string | null, 23),
+    ),
+  });
+  const iglooKeyUrl = key.ok ? key.url : null;
+  if (!key.ok) {
+    console.warn(`[extensionReturnPin] iglooKey create failed for #${orderId}: ${key.error}`);
+  }
+
   const oauth = await getOAuthToken(clientId, clientSecret, GENERATE_PIN_SCOPES);
-  if (!oauth.token) return { ok: false, error: oauth.reason || "Could not reach the lock service" };
+  if (!oauth.token) {
+    return { ok: false, iglooKeyUrl, error: oauth.reason || "Could not reach the lock service" };
+  }
 
   const algo = await createAlgoPinWithVariance({
     supabase,
@@ -219,6 +255,7 @@ export async function issueExtensionReturnPin(
       exhausted: algo.exhausted,
       originalPin: original?.access_pin ? String(original.access_pin) : null,
       originalEnd,
+      iglooKeyUrl,
       error: algo.exhausted
         ? "Three return codes are already active for this window. Use one of those codes."
         : algo.error,
@@ -255,5 +292,6 @@ export async function issueExtensionReturnPin(
     activationRequired,
     originalPin: original?.access_pin ? String(original.access_pin) : null,
     originalEnd,
+    iglooKeyUrl,
   };
 }

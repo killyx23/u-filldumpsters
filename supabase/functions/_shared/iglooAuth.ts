@@ -57,9 +57,35 @@ export const REMOTE_LOCK_SCOPE = "igloohomeapi/lock-bridge-proxied-job";
 export const REMOTE_UNLOCK_SCOPE = "igloohomeapi/unlock-bridge-proxied-job";
 
 /**
+ * iglooKey (shareable Bluetooth pass) Access API.
+ * Docs: POST/PATCH/DELETE https://api.igloohome.co/home/pass
+ * Cognito may grant these under create-ekey-access or an unscoped client grant.
+ */
+export const IGLOOKEY_API_BASE_URL = "https://api.igloohome.co";
+export const IGLOOKEY_CREATE_SCOPE = "igloohomeapi/create-ekey-access";
+export const IGLOOKEY_SCOPES = [IGLOOKEY_CREATE_SCOPE] as const;
+
+/**
  * Obtain a fresh token for one remote lock operation.
  * Igloohome requires the operation scope to be explicitly requested.
  */
+/** Token for iglooKey create / update / revoke (Access API /home/pass). */
+export async function getIglooKeyToken(
+  clientId: string,
+  clientSecret: string,
+): Promise<OAuthResult> {
+  const withScope = await requestOAuthToken(clientId, clientSecret, IGLOOKEY_SCOPES);
+  if (withScope.token) return withScope;
+  // Some app clients grant pass endpoints under the default (unscoped) Cognito set.
+  const unscoped = await requestOAuthToken(clientId, clientSecret, []);
+  if (unscoped.token) return unscoped;
+  return {
+    token: null,
+    reason: withScope.reason || unscoped.reason || "iglooKey OAuth failed",
+    scopesUsed: withScope.scopesUsed || unscoped.scopesUsed,
+  };
+}
+
 export async function getRemoteLockJobToken(
   clientId: string,
   clientSecret: string,
