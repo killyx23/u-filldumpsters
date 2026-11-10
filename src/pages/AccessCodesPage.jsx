@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { format, parseISO, isPast } from 'date-fns';
-import QRCode from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 import { buildAccessCodesQrUrl, buildHowToGuidesQrUrl } from '@/utils/buildPortalQrUrls';
 import { parseEdgeFunctionError } from '@/utils/parseEdgeFunctionError';
 import { PickupLocationInfoButton } from '@/components/customer-portal/PickupLocationInfoButton';
@@ -37,6 +37,7 @@ const ACTIVE_BOOKING_STATUSES = [
 export const AccessCodesPage = ({ customerData }) => {
   const [loading, setLoading] = useState(true);
   const [accessCode, setAccessCode] = useState(null);
+  const [accessCodes, setAccessCodes] = useState([]);
   const [booking, setBooking] = useState(null);
   const [eligibleBookings, setEligibleBookings] = useState([]);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
@@ -101,6 +102,7 @@ export const AccessCodesPage = ({ customerData }) => {
 
       if (bookingAccessCodeNotApplicable(bookingData)) {
         setAccessCode(null);
+        setAccessCodes([]);
         setIssuingToLock(false);
         setMagicLinkToken(null);
         return;
@@ -109,6 +111,7 @@ export const AccessCodesPage = ({ customerData }) => {
       if (!bookingNeedsYardAccessCode(bookingData)) {
         setError('This service does not require an access code');
         setAccessCode(null);
+        setAccessCodes([]);
         return;
       }
 
@@ -126,12 +129,15 @@ export const AccessCodesPage = ({ customerData }) => {
       }
 
       const visibleCodes = bookingData.pin_failsafe_at
-        ? (accessCodeData || []).filter((row) => row.pin_type === 'algopin')
+        ? (accessCodeData || []).filter((row) => row.pin_type === 'algopin' || row.pin_type === 'iglookey')
         : (accessCodeData || []);
+      setAccessCodes(visibleCodes);
       if (visibleCodes.length > 0) {
         const codeRecord = bookingData.pin_failsafe_at
-          ? visibleCodes[0]
-          : (visibleCodes.find((row) => row.pin_type === 'bridge_proxied') || visibleCodes[0]);
+          ? (visibleCodes.find((row) => row.pin_type === 'algopin') || visibleCodes[0])
+          : (visibleCodes.find((row) => row.pin_type === 'bridge_proxied') ||
+            visibleCodes.find((row) => row.pin_type === 'algopin') ||
+            visibleCodes[0]);
         setAccessCode(codeRecord);
         setIssuingToLock(!!codeRecord.access_pin && !codeRecord.lock_confirmed_at && codeRecord.pin_type === 'bridge_proxied');
         if (codeRecord.access_pin && (codeRecord.lock_confirmed_at || codeRecord.pin_type === 'algopin')) {
@@ -142,6 +148,7 @@ export const AccessCodesPage = ({ customerData }) => {
         }
       } else {
         setAccessCode(null);
+        setAccessCodes([]);
         setIssuingToLock(false);
       }
     } catch (err) {
@@ -432,7 +439,8 @@ export const AccessCodesPage = ({ customerData }) => {
     !deliveryOnly &&
     !!accessCode?.access_pin &&
     (!!accessCode.lock_confirmed_at || accessCode.pin_type === 'algopin');
-  const isBackupPin = pinReady && accessCode?.pin_type === 'algopin';
+  const iglooKeyUrl = (accessCodes || []).find((row) => row.pin_type === 'iglookey' && row.shareable_url)?.shareable_url || '';
+  const isBackupPin = pinReady && (accessCode?.pin_type === 'algopin' || Boolean(iglooKeyUrl));
   const pinPendingInWindow = !deliveryOnly && pinWindowOpen && !bookingEnded && !pinReady;
   // Customer-visible window uses appointment times (no hidden grace hour on end_time).
   const visibleStartLabel = booking
@@ -643,12 +651,36 @@ export const AccessCodesPage = ({ customerData }) => {
             </Card>
           ) : pinReady ? (
             <>
+              {iglooKeyUrl && (
+                <Card className="bg-slate-900 backdrop-blur-lg border-sky-400/50 shadow-2xl">
+                  <CardContent className="p-8 md:p-12">
+                    <div className="text-center space-y-6">
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-sky-300 font-semibold mb-2">
+                          Primary — Bluetooth unlock
+                        </p>
+                        <div className="bg-white rounded-lg p-4 inline-block">
+                          <QRCodeSVG value={iglooKeyUrl} size={220} level="M" />
+                        </div>
+                        <p className="text-sm text-gray-300 mt-3 max-w-md mx-auto">
+                          Scan this with your phone at the padlock. Android Chrome works without an app; iPhone may prompt for the Igloo app.
+                        </p>
+                      </div>
+                      <Button asChild className="bg-yellow-400 hover:bg-yellow-300 text-slate-900 font-bold">
+                        <a href={iglooKeyUrl} target="_blank" rel="noreferrer">
+                          Open unlock link
+                        </a>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               <Card className="bg-slate-900 backdrop-blur-lg border-yellow-400/50 shadow-2xl">
                 <CardContent className="p-8 md:p-12">
                   <div className="text-center space-y-6">
                     <div>
                       <p className="text-xs uppercase tracking-widest text-yellow-400 font-semibold mb-2">
-                        {isBackupPin ? 'YOUR ACCESS PIN (BACKUP)' : 'YOUR ACCESS PIN'}
+                        {isBackupPin ? 'BACKUP KEYPAD PIN' : 'YOUR ACCESS PIN'}
                       </p>
                       <div className="bg-slate-950 rounded-lg p-8 inline-block">
                         <p className="text-6xl md:text-7xl lg:text-8xl font-bold font-mono text-white tracking-wider">
@@ -805,6 +837,20 @@ export const AccessCodesPage = ({ customerData }) => {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {iglooKeyUrl && (
+                    <div className="bg-white rounded-lg p-6 text-center space-y-4">
+                      <div className="bg-sky-100 rounded-full p-3 w-fit mx-auto">
+                        <Key className="h-6 w-6 text-sky-700" />
+                      </div>
+                      <h3 className="font-bold text-gray-900 text-lg">IglooKey unlock</h3>
+                      <div className="bg-gray-50 p-4 rounded-lg inline-block">
+                        <QRCodeSVG value={iglooKeyUrl} size={200} level="M" />
+                      </div>
+                      <p className="text-sm text-gray-600 italic">
+                        Scan at the padlock to open the Bluetooth unlock link
+                      </p>
+                    </div>
+                  )}
                   {/* Access Code QR */}
                   <div className="bg-white rounded-lg p-6 text-center space-y-4">
                     <div className="bg-yellow-100 rounded-full p-3 w-fit mx-auto">
@@ -814,7 +860,7 @@ export const AccessCodesPage = ({ customerData }) => {
                     {magicLinkUrl ? (
                       <>
                         <div className="bg-gray-50 p-4 rounded-lg inline-block">
-                          <QRCode value={magicLinkUrl} size={200} level="H" />
+                          <QRCodeSVG value={magicLinkUrl} size={200} level="H" />
                         </div>
                         <p className="text-sm text-gray-600 italic">
                           Scan this QR code with your phone camera to quickly access your PIN
@@ -834,7 +880,7 @@ export const AccessCodesPage = ({ customerData }) => {
                     </div>
                     <h3 className="font-bold text-gray-900 text-lg">Safety Instructions</h3>
                     <div className="bg-gray-50 p-4 rounded-lg inline-block">
-                      <QRCode value={safetyVideoUrl} size={200} level="H" />
+                      <QRCodeSVG value={safetyVideoUrl} size={200} level="H" />
                     </div>
                     <p className="text-sm text-gray-600 italic">
                       Scan to watch safety videos and operating instructions

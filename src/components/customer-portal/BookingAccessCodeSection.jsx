@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { AlertCircle, Clock, Info, Key, Loader2, RefreshCw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -387,6 +388,11 @@ export const BookingAccessCodeSection = ({ booking }) => {
             <div className="flex items-center gap-2">
               <Key className="h-4 w-4 text-sky-300" />
               <p className="text-xs uppercase tracking-widest text-sky-300 font-semibold">Primary — Bluetooth unlock link</p>
+            </div>
+            <div className="flex justify-center">
+              <div className="bg-white rounded-lg p-3">
+                <QRCodeSVG value={iglooKeyRow.shareable_url} size={180} level="M" />
+              </div>
             </div>
             <a
               href={iglooKeyRow.shareable_url}
