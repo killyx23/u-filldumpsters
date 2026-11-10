@@ -65,6 +65,15 @@ export function bookingIglooKeyWindow(
   return { start, end };
 }
 
+/** Igloo Access API rejects pass labels longer than 32 characters. */
+export const IGLOOKEY_LABEL_MAX = 32;
+
+/** Short admin-facing pass name; never shown in our customer email/portal copy. */
+export function iglooKeyLabel(orderId: number | string): string {
+  const label = `Dump Trailer #${orderId}`;
+  return label.length <= IGLOOKEY_LABEL_MAX ? label : label.slice(0, IGLOOKEY_LABEL_MAX);
+}
+
 async function createPassOnIgloo(
   accessToken: string,
   deviceId: string,
@@ -72,6 +81,10 @@ async function createPassOnIgloo(
   startsAt: string,
   endsAt: string,
 ): Promise<{ ok: true; id: string; shareableUrl: string } | { ok: false; error: string }> {
+  const safeLabel = label.length <= IGLOOKEY_LABEL_MAX ? label : label.slice(0, IGLOOKEY_LABEL_MAX);
+  // Do not send offlineAccessSeconds. An explicit 24h value fails when the pass
+  // window is shorter ("failed to generate iglooKey token"); omitting lets Igloo
+  // apply its default and cap to the validity window.
   const res = await fetch(`${IGLOOKEY_API_BASE_URL}/home/pass`, {
     method: "POST",
     headers: {
@@ -81,17 +94,16 @@ async function createPassOnIgloo(
     },
     body: JSON.stringify({
       deviceIds: [deviceId],
-      label,
+      label: safeLabel,
       startsAt,
       endsAt,
-      offlineAccessSeconds: 24 * 60 * 60,
     }),
   });
   const body = await readResponse(res);
   if (!res.ok && res.status !== 201) {
     return {
       ok: false,
-      error: `iglooKey create HTTP ${res.status}: ${body.json?.message || body.json?.error || body.text}`,
+      error: `iglooKey create HTTP ${res.status}: ${body.json?.message || body.json?.error || body.text} (label=${safeLabel.length}ch, ${startsAt}→${endsAt})`,
     };
   }
   const id = String(body.json?.id || "");
@@ -192,7 +204,7 @@ export async function createIglooKeyForBooking(
   const created = await createPassOnIgloo(
     oauth.token,
     lockId,
-    `Dump Trailer Rental - Order #${orderId}`,
+    iglooKeyLabel(orderId),
     window.start,
     window.end,
   );
