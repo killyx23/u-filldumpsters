@@ -35,6 +35,11 @@ import {
   returnPollMinMs,
   sweepGraceHourReturns,
 } from "../_shared/lockEventState.ts";
+import {
+  bookingHasBridgeReturnPending,
+  BRIDGE_RETURN_RETRY_MS,
+  processPendingBridgeReturns,
+} from "../_shared/bridgeReturnConfirm.ts";
 import { isManualAutolockClose, recordDeviceEvents } from "../_shared/lockDeviceState.ts";
 import {
   getActivitySyncToken,
@@ -166,9 +171,13 @@ async function bridgeWakeReason(
   let reason: string | null = openDevice?.device_id ? "lock_still_open" : null;
   let pollMinMs = ACTIVITY_PULL_MIN_MS;
   for (const booking of bookings ?? []) {
+    if (bookingHasBridgeReturnPending(booking)) {
+      reason = "bridge_return_pending";
+      if (BRIDGE_RETURN_RETRY_MS < pollMinMs) pollMinMs = BRIDGE_RETURN_RETRY_MS;
+    }
     const wake = bookingNeedsBridgeWake(booking);
     if (wake === "return") {
-      reason = "return";
+      if (reason !== "bridge_return_pending") reason = "return";
       const tier = returnPollMinMs(nowMs, getBookingWindow(booking).endMs);
       if (tier != null && tier < pollMinMs) pollMinMs = tier;
     } else if (wake && !reason) {
@@ -189,7 +198,7 @@ function syncEmptyHint(activityRows: number, eventsParsed: number): string | und
   }
   return (
     `Fetched ${activityRows} activity row(s) from Igloohome, but none were unlock/lock events ` +
-    "we could match to a booking PIN. Confirm the PIN was used (not Bluetooth app unlock)."
+    "we could match to a booking PIN or iglooKey. Confirm the PIN or Bluetooth key link was used."
   );
 }
 
@@ -249,6 +258,12 @@ Deno.serve(async (req) => {
 
     if (!probe && !force && !ingest) {
       const sweptEarly = await sweepGraceHourReturns(supabase);
+      const pendingBridge = await processPendingBridgeReturns(supabase);
+      if (pendingBridge.attempted > 0) {
+        console.log(
+          `[sync-lock-activity] Bridge return confirm retries: attempted=${pendingBridge.attempted} due=${pendingBridge.due}`,
+        );
+      }
       const wake = await bridgeWakeReason(supabase);
       if (!wake) {
         console.log("[sync-lock-activity] Bridge left asleep; no pickup or return window");
@@ -444,11 +459,13 @@ Deno.serve(async (req) => {
         eventType: event.eventType,
         eventTimestamp: event.eventTimestamp,
         notes: `${event.eventType} via sync-lock-activity job ${jobId || "ingest"}`,
+        bridgeSourced: true,
       });
       actions.push({ pin: event.pinCode, orderId, action });
     }
 
     const swept = await sweepGraceHourReturns(supabase);
+    await processPendingBridgeReturns(supabase);
 
     return jsonResponse({
       success: true,

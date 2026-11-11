@@ -13,6 +13,8 @@
 import { type LockActivityEvent, redactPins } from "./iglooActivity.ts";
 import {
   AUTOLOCK_DWELL_MS,
+  MANUAL_UNLOCK_KEY,
+  resolveOrderIdByKeyId,
   resolveOrderIdByPin,
   resolvePrecedingUnlockOrderId,
 } from "./lockEventState.ts";
@@ -34,7 +36,7 @@ export type RecordResult = {
 
 /** Igloo activity log type for a padlock auto-lock / shackle relock. */
 export const PADLOCK_AUTOLOCK_LOG_TYPE = 13;
-const MANUAL_UNLOCK_KEY = "remote-unlock";
+export { MANUAL_UNLOCK_KEY };
 /** Hardware clock may sit slightly behind the server timestamp we stored for the unlock. */
 const MANUAL_AUTOLOCK_SKEW_MS = 30 * 1000;
 
@@ -252,10 +254,12 @@ export async function recordDeviceEvents(
     }
     const device = deviceCache.get(deviceId) ?? null;
 
-    // The PIN is used in memory to match a booking, then stripped before the
-    // payload is stored. It is never written to the table or to the logs.
-    // A close with no PIN belongs to the unlock this device just matched.
+    // PIN first, then iglooKey / token id. PIN material is stripped before storage.
+    // A close with no credential inherits the unlock this device already matched.
     let orderId = await resolveOrderIdByPin(supabase, event.pinCode, event.eventTimestamp);
+    if (!orderId) {
+      orderId = await resolveOrderIdByKeyId(supabase, event.keyId, event.eventTimestamp);
+    }
     if (!orderId && event.eventType === "lock" && !event.pinCode) {
       orderId = await resolvePrecedingUnlockOrderId(supabase, deviceId, event.eventTimestamp);
     }
