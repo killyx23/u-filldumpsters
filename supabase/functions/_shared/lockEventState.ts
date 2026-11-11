@@ -13,15 +13,29 @@
 
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow, RETURN_GRACE_MS } from "./pinTiming.ts";
 import { isDeliveryBooking } from "./deliveryBooking.ts";
+import {
+  bookingHasBridgeReturnPending,
+  clearBridgeReturnPending,
+  getBridgeReturnPending,
+  requestBridgeReturnConfirm,
+} from "./bridgeReturnConfirm.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
+
+/** Admin remote unlock tag — never match to a customer iglooKey / booking. */
+export const MANUAL_UNLOCK_KEY = "remote-unlock";
 
 export type LockEventInput = {
   orderId: number;
   eventType: "unlock" | "lock" | "breakin";
   eventTimestamp: string;
   notes?: string;
+  /**
+   * True when the event was delivered by the yard Bridge (webhook type 5 or
+   * sync-lock-activity pull). False/omitted for phone-only signals (iglooKey Used 1001).
+   */
+  bridgeSourced?: boolean;
 };
 
 /** A close this soon after an unlock is the padlock auto-locking, not a return. */
@@ -124,8 +138,9 @@ export function bookingNeedsBridgeWake(
 
   if (
     booking.rented_out_at &&
-    nowMs >= window.endMs - RETURN_LISTEN_LEAD_MS &&
-    nowMs < window.endMs + RETURN_LISTEN_TAIL_MS
+    (bookingHasBridgeReturnPending(booking) ||
+      (nowMs >= window.endMs - RETURN_LISTEN_LEAD_MS &&
+        nowMs < window.endMs + RETURN_LISTEN_TAIL_MS))
   ) {
     return "return";
   }
@@ -227,12 +242,26 @@ async function markReturned(
   eventTimestamp: string,
 ): Promise<boolean> {
   if (!booking.rented_out_at || booking.returned_at) return false;
+  const addons = (() => {
+    if (!getBridgeReturnPending(booking.addons)) {
+      return booking.addons && typeof booking.addons === "object" && !Array.isArray(booking.addons)
+        ? booking.addons
+        : undefined;
+    }
+    const next =
+      booking.addons && typeof booking.addons === "object" && !Array.isArray(booking.addons)
+        ? { ...(booking.addons as Record<string, unknown>) }
+        : {};
+    delete next.bridgeReturnPending;
+    return next;
+  })();
   const { data, error } = await supabase
     .from("bookings")
     .update({
       returned_at: eventTimestamp,
       return_lock_at: eventTimestamp,
       status: "pending_checklist",
+      ...(addons !== undefined ? { addons } : {}),
     })
     .eq("id", booking.id)
     .is("returned_at", null)
@@ -243,6 +272,8 @@ async function markReturned(
     if (error) console.error(`[lockEventState] markReturned failed for #${booking.id}:`, error);
     return false;
   }
+  booking.returned_at = eventTimestamp;
+  if (addons !== undefined) booking.addons = addons;
   console.log(`[lockEventState] Booking #${booking.id} marked Returned at ${eventTimestamp}`);
 
   if (!booking.return_notified_at) {
@@ -251,6 +282,41 @@ async function markReturned(
       lock_event_timestamp: eventTimestamp,
     });
   }
+  return true;
+}
+
+/** Mark returned after Bridge yard contact is confirmed; clears pending state. */
+export async function confirmBridgeYardReturn(
+  supabase: SupabaseClient,
+  orderId: number,
+  confirmedAt: string,
+): Promise<boolean> {
+  const { data: booking, error } = await supabase
+    .from("bookings")
+    .select(
+      `id, status, plan, addons, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, rental_started_notified_at, return_notified_at`,
+    )
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error || !booking) {
+    if (error) console.error(`[lockEventState] confirmBridgeYardReturn load failed:`, error);
+    return false;
+  }
+  const pending = getBridgeReturnPending(booking.addons);
+  const stamp = pending?.unlockedAt || confirmedAt;
+  const ok = await markReturned(supabase, booking, stamp);
+  if (ok) await clearBridgeReturnPending(supabase, booking);
+  return ok;
+}
+
+/** True when a key/token id can be used to match an iglooKey row. */
+export function isUsableAccessKeyId(keyId: string | null | undefined): boolean {
+  if (!keyId) return false;
+  const trimmed = keyId.trim();
+  if (!trimmed) return false;
+  if (trimmed === "0") return false;
+  if (trimmed === MANUAL_UNLOCK_KEY) return false;
+  if (trimmed.startsWith("remote-")) return false;
   return true;
 }
 
@@ -289,17 +355,43 @@ export async function applyLockEvent(
   const eventMs = new Date(event.eventTimestamp).getTime();
   if (Number.isNaN(eventMs)) return "invalid_timestamp";
 
-  if (event.eventType === "unlock") {
-    if (eventMs >= window.startMs && !booking.rented_out_at) {
-      await markRented(supabase, booking, event.eventTimestamp);
-      return "marked_rented";
-    }
-    return inserted ? "logged_unlock" : "duplicate_unlock";
-  }
-
   const rentedOutMs = booking.rented_out_at
     ? new Date(String(booking.rented_out_at)).getTime()
     : null;
+
+  if (event.eventType === "unlock") {
+    let rentedNow = false;
+    if (eventMs >= window.startMs && !booking.rented_out_at) {
+      rentedNow = await markRented(supabase, booking, event.eventTimestamp);
+      if (rentedNow) {
+        booking.rented_out_at = event.eventTimestamp;
+      }
+    }
+
+    const rentedForReturn = booking.rented_out_at
+      ? new Date(String(booking.rented_out_at)).getTime()
+      : null;
+    const unlockInReturnWindow = closeCountsAsReturn(
+      eventMs,
+      window.endMs,
+      rentedForReturn,
+    );
+
+    // Any matched unlock inside the return window must prove yard Bridge contact
+    // before we mark returned (and send the return email).
+    if (unlockInReturnWindow && booking.rented_out_at && !booking.returned_at) {
+      if (event.bridgeSourced) {
+        await markReturned(supabase, booking, event.eventTimestamp);
+        return rentedNow ? "marked_rented_and_returned" : "marked_returned";
+      }
+      await requestBridgeReturnConfirm(supabase, booking, event.eventTimestamp);
+      return rentedNow ? "marked_rented_bridge_return_pending" : "bridge_return_pending";
+    }
+
+    if (rentedNow) return "marked_rented";
+    return inserted ? "logged_unlock" : "duplicate_unlock";
+  }
+
   const inReturnWindow = closeCountsAsReturn(eventMs, window.endMs, rentedOutMs);
 
   // Pickup-time auto-locks stay outside the return window and never finish the rental.
@@ -315,8 +407,17 @@ export async function applyLockEvent(
     return inserted ? "logged_lock" : "duplicate_lock";
   }
 
-  // Only the latest event counts. An automatic lock inside the window is a
-  // return when nothing newer has opened the lock again.
+  // Bridge-pending returns: a Bridge-heard close confirms the unit is at the yard.
+  if (bookingHasBridgeReturnPending(booking)) {
+    if (event.bridgeSourced === false) {
+      return inserted ? "logged_lock_awaiting_bridge" : "duplicate_lock";
+    }
+    const pending = getBridgeReturnPending(booking.addons);
+    await markReturned(supabase, booking, pending?.unlockedAt || event.eventTimestamp);
+    return "marked_returned";
+  }
+
+  // Outside the Bridge-pending path (normal PIN return): only the latest close counts.
   const latest = await latestTrackingEvent(supabase, event.orderId);
   if (!latest || latest.event_type !== "lock") {
     return inserted ? "logged_lock_not_latest" : "duplicate_lock";
@@ -440,6 +541,38 @@ export async function resolveOrderIdByPin(
     }
   }
   // Fallback: most recent matching PIN
+  return Number(data[0].order_id);
+}
+
+/**
+ * Resolve order_id from an iglooKey / eKey id stored on rental_access_codes.pin_id.
+ * Also accepts Access API token ids (lnk_…) from iglooKey Used (webhook type 1001).
+ */
+export async function resolveOrderIdByKeyId(
+  supabase: SupabaseClient,
+  keyId: string | null,
+  eventTimestamp: string,
+): Promise<number | null> {
+  if (!isUsableAccessKeyId(keyId)) return null;
+  const { data, error } = await supabase
+    .from("rental_access_codes")
+    .select("order_id, start_time, end_time, status, pin_type")
+    .eq("pin_id", String(keyId).trim())
+    .eq("pin_type", "iglookey")
+    .in("status", ["active", "expired", "used"])
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (error || !data?.length) return null;
+
+  const eventMs = new Date(eventTimestamp).getTime();
+  for (const row of data) {
+    const start = new Date(row.start_time).getTime();
+    const end = new Date(row.end_time).getTime();
+    if (eventMs >= start - 60 * 60 * 1000 && eventMs <= end + 2 * 60 * 60 * 1000) {
+      return Number(row.order_id);
+    }
+  }
   return Number(data[0].order_id);
 }
 

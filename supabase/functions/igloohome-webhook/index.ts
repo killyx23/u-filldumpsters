@@ -7,6 +7,8 @@
  *   3  Job Complete           — result of a command we issued (lock_jobs)
  *   5  Activity Log Received  — real activity at the lock (the primary event)
  *   10 Bridge Connection      — bridge network connectivity heartbeat
+ *   1000 iglooKey Claimed     — token claimed (log only)
+ *   1001 iglooKey Used        — Bluetooth key unlock with tokenId
  *
  * Register in the igloohome portal:
  *   https://<project>.supabase.co/functions/v1/igloohome-webhook
@@ -22,7 +24,12 @@ import {
   parseActivityLogEntry,
   redactPins,
 } from "../_shared/iglooActivity.ts";
-import { applyLockEvent, sweepGraceHourReturns } from "../_shared/lockEventState.ts";
+import {
+  applyLockEvent,
+  confirmBridgeYardReturn,
+  resolveOrderIdByKeyId,
+  sweepGraceHourReturns,
+} from "../_shared/lockEventState.ts";
 import {
   defaultBridgeId,
   defaultDeviceId,
@@ -30,6 +37,12 @@ import {
   type RecordedEvent,
   recordDeviceEvents,
 } from "../_shared/lockDeviceState.ts";
+import {
+  BRIDGE_RETURN_JOB_PURPOSE,
+  JOB_TYPE_GET_LOGS,
+  orderIdFromBridgeReturnJob,
+  processPendingBridgeReturns,
+} from "../_shared/bridgeReturnConfirm.ts";
 import { verifyIglooWebhook } from "../_shared/iglooWebhookAuth.ts";
 import { alertBreakInAttempt, alertBridgeOfflineWhileUnlocked } from "../_shared/lockAlerts.ts";
 
@@ -39,6 +52,8 @@ type SupabaseClient = any;
 const EVENT_JOB_COMPLETE = 3;
 const EVENT_ACTIVITY_LOG = 5;
 const EVENT_BRIDGE_CONNECTION = 10;
+const EVENT_IGLOOKEY_CLAIMED = 1000;
+const EVENT_IGLOOKEY_USED = 1001;
 
 function makeJsonResponse(corsHeaders: Record<string, string>) {
   return (body: unknown, status = 200) =>
@@ -85,7 +100,6 @@ function eventTypeOf(event: Record<string, unknown> | null): number | null {
 
 const JOB_TYPE_CREATE_PIN = 4;
 const JOB_TYPE_DELETE_PIN = 5;
-const JOB_TYPE_GET_LOGS = 15;
 
 /** Igloohome job statuses: 0 = completed, 2 = failed (matches _shared/lockPin.ts pollJob). */
 function isJobCompleted(jobStatus: unknown, completedFlag: unknown): boolean {
@@ -148,6 +162,7 @@ async function handleJobComplete(
   pinConfirmed: { orderId: number; booking: Record<string, unknown> } | null;
   ingestLogs: boolean;
   ingestSince: string;
+  bridgeReturnOrderId: number | null;
 }> {
   const data = asRecord(event.data) || event;
   const jobId = pickString(data, ["jobId", "job_id", "id"]);
@@ -157,6 +172,7 @@ async function handleJobComplete(
       pinConfirmed: null,
       ingestLogs: false,
       ingestSince: "",
+      bridgeReturnOrderId: null,
     };
   }
 
@@ -165,21 +181,32 @@ async function handleJobComplete(
   let jobType = typeof jobTypeRaw === "number" ? jobTypeRaw : null;
   const deviceId = pickString(data, ["deviceId", "device_id", "lockId"]) || defaultDeviceId();
 
-  if (jobType == null) {
-    const { data: existing } = await supabase
-      .from("lock_jobs")
-      .select("job_type")
-      .eq("job_id", jobId)
-      .maybeSingle();
-    if (typeof existing?.job_type === "number") jobType = existing.job_type;
-  }
+  const { data: existing } = await supabase
+    .from("lock_jobs")
+    .select("job_type, raw")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (jobType == null && typeof existing?.job_type === "number") jobType = existing.job_type;
+
+  const existingRaw = asRecord(existing?.raw);
+  const mergedRaw = {
+    ...(existingRaw || {}),
+    ...((redactPins(event) as Record<string, unknown>) || {}),
+    ...(existingRaw?.purpose === BRIDGE_RETURN_JOB_PURPOSE
+      ? {
+        purpose: BRIDGE_RETURN_JOB_PURPOSE,
+        order_id: existingRaw.order_id,
+        unlocked_at: existingRaw.unlocked_at,
+      }
+      : {}),
+  };
 
   const { error } = await supabase.from("lock_jobs").upsert({
     job_id: jobId,
     device_id: deviceId,
     job_type: jobType,
     job_status: typeof jobStatusRaw === "number" ? jobStatusRaw : null,
-    raw: redactPins(event),
+    raw: mergedRaw,
     updated_at: new Date().toISOString(),
   }, { onConflict: "job_id" });
 
@@ -192,17 +219,67 @@ async function handleJobComplete(
     console.error("[igloohome-webhook] reconcilePinFromJob failed:", err);
   }
 
-  const ingestLogs = jobType === JOB_TYPE_GET_LOGS && isJobCompleted(jobStatusRaw, data.completed);
+  const completed = isJobCompleted(jobStatusRaw, data.completed);
+  const ingestLogs = jobType === JOB_TYPE_GET_LOGS && completed;
   const ingestSince = pickString(event, ["date"]) ||
     pickString(data, ["date"]) ||
     new Date().toISOString();
+
+  let bridgeReturnOrderId: number | null = null;
+  if (jobType === JOB_TYPE_GET_LOGS && completed) {
+    bridgeReturnOrderId = await orderIdFromBridgeReturnJob(supabase, jobId, existingRaw || mergedRaw);
+  }
 
   return {
     result: { handled: !error, jobId, jobStatus: jobStatusRaw ?? null },
     pinConfirmed,
     ingestLogs,
     ingestSince,
+    bridgeReturnOrderId,
   };
+}
+
+async function handleIglooKeyUsed(
+  supabase: SupabaseClient,
+  event: Record<string, unknown>,
+): Promise<{ orderId: number | null; action: string }> {
+  const data = asRecord(event.data) || event;
+  const tokenId = pickString(data, ["tokenId", "token_id", "keyId", "key_id", "id"]);
+  const unlockedAt = pickString(data, ["unlockedAt", "unlocked_at"]) ||
+    pickString(event, ["date"]) ||
+    new Date().toISOString();
+  const deviceId = pickString(data, ["bluetoothId", "bluetooth_id", "deviceId", "device_id"]) ||
+    pickString(asRecord(event.product), ["id"]) ||
+    defaultDeviceId();
+
+  if (!tokenId) return { orderId: null, action: "missing_token" };
+
+  const orderId = await resolveOrderIdByKeyId(supabase, tokenId, unlockedAt);
+  if (!orderId) return { orderId: null, action: "unmatched_token" };
+
+  // Persist a device unlock row so later PIN-less closes can inherit order_id.
+  if (deviceId) {
+    await recordDeviceEvents(supabase, [{
+      eventType: "unlock",
+      eventTimestamp: unlockedAt,
+      pinCode: null,
+      logType: 11,
+      keyId: tokenId,
+      operationId: pickString(event, ["id"]),
+      deviceId,
+      raw: { source: "iglookey_used", tokenId },
+    }], { deviceId, bridgeId: defaultBridgeId() });
+  }
+
+  // Phone-side iglooKey Used is not Bridge-sourced — return window needs GET_LOGS confirm.
+  const action = await applyLockEvent(supabase, {
+    orderId,
+    eventType: "unlock",
+    eventTimestamp: unlockedAt,
+    notes: `unlock via iglooKey Used (token ${tokenId})`,
+    bridgeSourced: false,
+  });
+  return { orderId, action };
 }
 
 /**
@@ -401,6 +478,7 @@ async function processDeferred(
         eventType: event.eventType,
         eventTimestamp: event.eventTimestamp,
         notes: `${event.eventType} via igloohome-webhook (logType ${event.logType ?? "n/a"})`,
+        bridgeSourced: true,
       });
       console.log(`[igloohome-webhook] Booking #${orderId}: ${action}`);
     }
@@ -409,6 +487,7 @@ async function processDeferred(
 
     if (recorded.length > 0) {
       await sweepGraceHourReturns(supabase);
+      await processPendingBridgeReturns(supabase);
     }
   } catch (err) {
     console.error("[igloohome-webhook] Deferred processing failed:", err);
@@ -469,11 +548,31 @@ Deno.serve(async (req) => {
     }));
 
     if (type === EVENT_JOB_COMPLETE) {
-      const { result, ingestLogs, ingestSince } = await handleJobComplete(supabase, event!);
-      if (ingestLogs) {
+      const { result, ingestLogs, ingestSince, bridgeReturnOrderId } = await handleJobComplete(
+        supabase,
+        event!,
+      );
+      if (bridgeReturnOrderId) {
+        runDeferred((async () => {
+          const ok = await confirmBridgeYardReturn(
+            supabase,
+            bridgeReturnOrderId,
+            new Date().toISOString(),
+          );
+          console.log(
+            `[igloohome-webhook] Bridge GET_LOGS confirmed return for #${bridgeReturnOrderId}: ${ok}`,
+          );
+          if (ingestLogs) await triggerActivityIngest(ingestSince);
+        })());
+      } else if (ingestLogs) {
         runDeferred(triggerActivityIngest(ingestSince));
       }
-      return jsonResponse({ success: true, eventType: type, ...result });
+      return jsonResponse({
+        success: true,
+        eventType: type,
+        ...result,
+        bridgeReturnOrderId,
+      });
     }
 
     if (type === EVENT_BRIDGE_CONNECTION) {
@@ -491,6 +590,28 @@ Deno.serve(async (req) => {
         eventsParsed: parsed,
         eventsStored: stored,
         verifiedBy: verification.method,
+      });
+    }
+
+    if (type === EVENT_IGLOOKEY_CLAIMED) {
+      console.log("[igloohome-webhook] iglooKey claimed", redactPins(event?.data ?? event));
+      return jsonResponse({ success: true, eventType: type, handled: true, action: "logged_claim" });
+    }
+
+    if (type === EVENT_IGLOOKEY_USED) {
+      const { orderId, action } = await handleIglooKeyUsed(supabase, event!);
+      if (orderId) {
+        runDeferred((async () => {
+          await processPendingBridgeReturns(supabase);
+          await sweepGraceHourReturns(supabase);
+        })());
+      }
+      return jsonResponse({
+        success: true,
+        eventType: type,
+        handled: true,
+        orderId,
+        action,
       });
     }
 

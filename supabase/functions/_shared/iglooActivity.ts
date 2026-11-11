@@ -254,7 +254,26 @@ export function parseActivityLogEntry(entry: unknown): LockActivityEvent | null 
     eventTimestamp,
     pinCode: extractPin(nested) || extractPin(obj),
     logType,
-    keyId: pickString(nested, ["keyId", "key_id"]) || pickString(obj, ["keyId", "key_id"]),
+    keyId: pickString(nested, [
+        "keyId",
+        "key_id",
+        "tokenId",
+        "token_id",
+        "passId",
+        "pass_id",
+        "eKeyId",
+        "ekeyId",
+      ]) ||
+      pickString(obj, [
+        "keyId",
+        "key_id",
+        "tokenId",
+        "token_id",
+        "passId",
+        "pass_id",
+        "eKeyId",
+        "ekeyId",
+      ]),
     operationId: pickString(nested, ["operationId", "operation_id"]) ||
       pickString(obj, ["operationId", "operation_id"]),
     deviceId: pickString(nested, ["deviceId", "device_id", "lockId", "productId"]) ||

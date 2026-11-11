@@ -26,6 +26,10 @@ import { resolvePublicSiteUrl } from "../_shared/normalizeSiteUrl.ts";
 import { createAlgoPinWithVariance } from "../_shared/algoPin.ts";
 import { getOAuthToken, GENERATE_PIN_SCOPES } from "../_shared/iglooAuth.ts";
 import { sweepGraceHourReturns } from "../_shared/lockEventState.ts";
+import {
+  bookingHasBridgeReturnPending,
+  processPendingBridgeReturns,
+} from "../_shared/bridgeReturnConfirm.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -129,6 +133,8 @@ function stillOut(booking: Record<string, unknown>, now: Date) {
   if (booking.returned_at) return false;
   if (STOP_STATUSES.has(String(booking.status || ""))) return false;
   if (!booking.rented_out_at) return false;
+  // Unlock in the return window is waiting on Bridge yard contact — do not fee yet.
+  if (bookingHasBridgeReturnPending(booking)) return false;
   if (!bookingNeedsYardLockPin(booking)) return false;
   const { graceEndMs } = getBookingWindow(booking as never);
   return Number.isFinite(graceEndMs) && now.getTime() >= graceEndMs;
@@ -204,6 +210,12 @@ Deno.serve(async (req) => {
     const reconciled = await sweepGraceHourReturns(supabaseAdmin, now);
     if (reconciled > 0) {
       console.log(`[enforce-late-return] Reconciled ${reconciled} return(s) before fees`);
+    }
+    const pendingBridge = await processPendingBridgeReturns(supabaseAdmin, now);
+    if (pendingBridge.attempted > 0 || pendingBridge.due > 0) {
+      console.log(
+        `[enforce-late-return] Bridge return pending: attempted=${pendingBridge.attempted} due=${pendingBridge.due}`,
+      );
     }
     const siteUrl = resolvePublicSiteUrl(null);
     const { data: feeRow } = await supabaseAdmin

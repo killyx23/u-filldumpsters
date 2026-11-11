@@ -107,7 +107,8 @@ npx supabase db push   # or migration deploy for hosted
 https://<project-ref>.supabase.co/functions/v1/igloohome-webhook
 ```
 
-Subscribe to **Activity Log Received (5)**, **Bridge Connection (10)**, and **Job Complete (3)**.
+Subscribe to **Activity Log Received (5)**, **Bridge Connection (10)**, **Job Complete (3)**,
+**iglooKey Claimed (1000)**, and **iglooKey Used (1001)**.
 
 3. Put `IGLOOHOME_PUBLIC_KEY` in Edge Function secrets.
 
