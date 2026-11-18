@@ -87,6 +87,7 @@ export function ManualYardReturnDialog({ booking, onDone, disabled }) {
           status: 'pending_checklist',
           returned_at: at,
           return_lock_at: returnLockAt,
+          return_clock_source: 'manual',
           addons,
         })
         .eq('id', booking.id)

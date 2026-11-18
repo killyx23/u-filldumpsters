@@ -11,6 +11,7 @@
  *   Late fees and stolen flags wait until that pass has run.
  */
 
+import { gpsOwnsLockClock } from "./gpsClock.ts";
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow, RETURN_GRACE_MS } from "./pinTiming.ts";
 import { isDeliveryBooking } from "./deliveryBooking.ts";
 import {
@@ -31,6 +32,8 @@ export type LockEventInput = {
   eventType: "unlock" | "lock" | "breakin";
   eventTimestamp: string;
   notes?: string;
+  /** Lock hardware id, when the event came from a known device. */
+  deviceId?: string | null;
   /**
    * True when the event was delivered by the yard Bridge (webhook type 5 or
    * sync-lock-activity pull). False/omitted for phone-only signals (iglooKey Used 1001).
@@ -211,12 +214,15 @@ async function markRented(
   supabase: SupabaseClient,
   booking: Record<string, unknown>,
   eventTimestamp: string,
+  deviceId?: string | null,
 ): Promise<boolean> {
   if (booking.rented_out_at) return false;
+  if (await gpsOwnsLockClock(supabase, { bookingId: Number(booking.id), deviceId })) return false;
   const { error } = await supabase
     .from("bookings")
     .update({
       rented_out_at: eventTimestamp,
+      checkout_clock_source: "lock",
       status: "Delivered",
     })
     .eq("id", booking.id)
@@ -240,8 +246,10 @@ async function markReturned(
   supabase: SupabaseClient,
   booking: Record<string, unknown>,
   eventTimestamp: string,
+  deviceId?: string | null,
 ): Promise<boolean> {
   if (!booking.rented_out_at || booking.returned_at) return false;
+  if (await gpsOwnsLockClock(supabase, { bookingId: Number(booking.id), deviceId })) return false;
   const addons = (() => {
     if (!getBridgeReturnPending(booking.addons)) {
       return booking.addons && typeof booking.addons === "object" && !Array.isArray(booking.addons)
@@ -260,6 +268,7 @@ async function markReturned(
     .update({
       returned_at: eventTimestamp,
       return_lock_at: eventTimestamp,
+      return_clock_source: "lock",
       status: "pending_checklist",
       ...(addons !== undefined ? { addons } : {}),
     })
@@ -362,7 +371,7 @@ export async function applyLockEvent(
   if (event.eventType === "unlock") {
     let rentedNow = false;
     if (eventMs >= window.startMs && !booking.rented_out_at) {
-      rentedNow = await markRented(supabase, booking, event.eventTimestamp);
+      rentedNow = await markRented(supabase, booking, event.eventTimestamp, event.deviceId);
       if (rentedNow) {
         booking.rented_out_at = event.eventTimestamp;
       }
@@ -381,7 +390,7 @@ export async function applyLockEvent(
     // before we mark returned (and send the return email).
     if (unlockInReturnWindow && booking.rented_out_at && !booking.returned_at) {
       if (event.bridgeSourced) {
-        await markReturned(supabase, booking, event.eventTimestamp);
+        await markReturned(supabase, booking, event.eventTimestamp, event.deviceId);
         return rentedNow ? "marked_rented_and_returned" : "marked_returned";
       }
       await requestBridgeReturnConfirm(supabase, booking, event.eventTimestamp);
@@ -413,7 +422,7 @@ export async function applyLockEvent(
       return inserted ? "logged_lock_awaiting_bridge" : "duplicate_lock";
     }
     const pending = getBridgeReturnPending(booking.addons);
-    await markReturned(supabase, booking, pending?.unlockedAt || event.eventTimestamp);
+    await markReturned(supabase, booking, pending?.unlockedAt || event.eventTimestamp, event.deviceId);
     return "marked_returned";
   }
 
@@ -427,7 +436,7 @@ export async function applyLockEvent(
     return inserted ? "logged_lock" : "duplicate_lock";
   }
 
-  await markReturned(supabase, booking, latest.event_timestamp);
+  await markReturned(supabase, booking, latest.event_timestamp, event.deviceId);
   return "marked_returned";
 }
 

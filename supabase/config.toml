@@ -417,6 +417,11 @@ verify_jwt = true
 # Invoked by pg_cron every 5 minutes with the service_role Bearer token.
 verify_jwt = true
 
+[functions.sync-gps-trackers]
+# Invoked by pg_cron every 2 minutes with the service_role Bearer token.
+# Admins may also call it from Settings to sync now or attach a booking.
+verify_jwt = true
+
 [functions.notify-feedback-chat-reply]
 # Invoked by DB trigger via pg_net with the service_role Bearer token.
 verify_jwt = true

@@ -278,6 +278,7 @@ async function handleIglooKeyUsed(
     eventTimestamp: unlockedAt,
     notes: `unlock via iglooKey Used (token ${tokenId})`,
     bridgeSourced: false,
+    deviceId,
   });
   return { orderId, action };
 }
@@ -479,6 +480,7 @@ async function processDeferred(
         eventTimestamp: event.eventTimestamp,
         notes: `${event.eventType} via igloohome-webhook (logType ${event.logType ?? "n/a"})`,
         bridgeSourced: true,
+        deviceId,
       });
       console.log(`[igloohome-webhook] Booking #${orderId}: ${action}`);
     }

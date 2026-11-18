@@ -460,6 +460,7 @@ Deno.serve(async (req) => {
         eventTimestamp: event.eventTimestamp,
         notes: `${event.eventType} via sync-lock-activity job ${jobId || "ingest"}`,
         bridgeSourced: true,
+        deviceId,
       });
       actions.push({ pin: event.pinCode, orderId, action });
     }

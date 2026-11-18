@@ -39,6 +39,14 @@ import {
 import { IncludedDumpFlatRateCopy } from '@/components/IncludedDumpFlatRateCopy';
 import { listBookingAddonItems } from '@/utils/equipmentReturnDisplay';
 
+function clockSourceLabel(base, source, notified) {
+  if (source === 'gps') return `${base} (GPS)`;
+  if (source === 'lock') return `${base} (lock)`;
+  if (source === 'manual') return `${base} (manual)`;
+  if (notified) return `${base} (lock detected)`;
+  return base;
+}
+
 const LANDFILL_DISPOSAL_FEE_KEY = 'landfill_disposal';
 
 function LandfillDisposalChargePanel({ booking, onUpdate }) {
@@ -1192,6 +1200,8 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
     const handleStatusUpdate = async (bookingId, newStatus, timestampField) => {
         let updates = { status: newStatus };
         if (timestampField) updates[timestampField] = new Date().toISOString();
+        if (timestampField === 'rented_out_at') updates.checkout_clock_source = 'manual';
+        if (timestampField === 'returned_at') updates.return_clock_source = 'manual';
         const { data, error } = await supabase
             .from('bookings')
             .update(updates)
@@ -1227,17 +1237,23 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
 
         let updates = { status: newStatus };
         switch (newStatus) {
-            case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null, return_lock_at: null }; break;
+            case 'Confirmed': updates = { ...updates, delivered_at: null, picked_up_at: null, rented_out_at: null, returned_at: null, return_lock_at: null, checkout_clock_source: null, return_clock_source: null }; break;
             case 'Delivered':
-                 updates = { ...updates, picked_up_at: null, returned_at: null, return_lock_at: null };
+                 updates = { ...updates, picked_up_at: null, returned_at: null, return_lock_at: null, return_clock_source: null };
                  const bookingForDelivered = bookings.find(b => b.id === bookingId);
                  const timestampField = isCustomerPickupService(bookingForDelivered?.plan, bookingForDelivered?.addons || {}) ? 'rented_out_at' : 'delivered_at';
-                 if (!bookingForDelivered?.[timestampField]) updates[timestampField] = new Date().toISOString();
+                 if (!bookingForDelivered?.[timestampField]) {
+                   updates[timestampField] = new Date().toISOString();
+                   if (timestampField === 'rented_out_at') updates.checkout_clock_source = 'manual';
+                 }
                 break;
             case 'pending_checklist':
                  const bookingToComplete = bookings.find(b => b.id === bookingId);
                  const completionTimestampField = isCustomerPickupService(bookingToComplete?.plan, bookingToComplete?.addons || {}) ? 'returned_at' : 'picked_up_at';
-                 if(!bookingToComplete?.[completionTimestampField]) updates[completionTimestampField] = new Date().toISOString();
+                 if(!bookingToComplete?.[completionTimestampField]) {
+                   updates[completionTimestampField] = new Date().toISOString();
+                   if (completionTimestampField === 'returned_at') updates.return_clock_source = 'manual';
+                 }
                 break;
             default: break;
         }
@@ -1439,14 +1455,14 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                 {booking.rented_out_at && (
                                   <DetailItem
                                     icon={<CheckCircle className="text-green-400" />}
-                                    label={booking.rental_started_notified_at ? 'Rented Out On (lock detected)' : 'Rented Out On'}
+                                    label={clockSourceLabel('Rented Out On', booking.checkout_clock_source, booking.rental_started_notified_at)}
                                     value={format(parseISO(booking.rented_out_at), 'Pp')}
                                   />
                                 )}
                                 {booking.returned_at && (
                                   <DetailItem
                                     icon={<CheckCircle className="text-green-400" />}
-                                    label={booking.return_notified_at ? 'Returned On (lock detected)' : 'Returned On'}
+                                    label={clockSourceLabel('Returned On', booking.return_clock_source, booking.return_notified_at)}
                                     value={format(parseISO(booking.returned_at), 'Pp')}
                                   />
                                 )}
@@ -1458,10 +1474,10 @@ export const ActiveRentals = ({ bookings = [], equipment = [], onUpdate, custome
                                   />
                                 )}
                                 {isPickup && !booking.rented_out_at && (
-                                  <p className="text-xs text-blue-200/80 italic">Waiting for first unlock via Wi-Fi bridge — or mark rented manually.</p>
+                                  <p className="text-xs text-blue-200/80 italic">A GPS yard exit sets the rental clock when the tracker has a fresh fix. Otherwise the first unlock does, or you can mark it rented.</p>
                                 )}
                                 {isPickup && booking.rented_out_at && !booking.returned_at && (
-                                  <p className="text-xs text-blue-200/80 italic">A lock close from two hours before the return time marks this returned. If the trailer is in the yard but out of Bluetooth range, mark it returned with a photo or gate scan.</p>
+                                  <p className="text-xs text-blue-200/80 italic">A GPS yard entry sets the return. If the tracker has no fresh fix, a lock close from two hours before the return time does. If the trailer is in the yard but out of range, mark it returned with a photo or gate scan.</p>
                                 )}
                             </div>
                            
