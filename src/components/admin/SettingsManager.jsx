@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Key, UserPlus, Copy, Unlock } from 'lucide-react';
 import { AdminMfaSettings } from '@/components/admin/AdminMfaSettings';
 import LockPresencePanel from '@/components/admin/LockPresencePanel';
-import GpsYardPanel from '@/components/admin/GpsYardPanel';
 
 export const SettingsManager = () => {
   const { isAdmin } = useAuth();
@@ -149,8 +148,6 @@ export const SettingsManager = () => {
       <AdminMfaSettings />
 
       <LockPresencePanel />
-
-      <GpsYardPanel />
 
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
         <h2 className="text-xl font-bold text-white mb-2 flex items-center">

@@ -14,6 +14,7 @@ import { ReviewsManager } from '@/components/admin/ReviewsManager';
 import { FaqsManager } from '@/components/admin/FaqsManager';
 import { PendingVerificationsManager } from '@/components/admin/PendingVerificationsManager';
 import { SettingsManager } from '@/components/admin/SettingsManager';
+import GpsYardPanel from '@/components/admin/GpsYardPanel';
 import { ResourceManagement } from '@/components/admin/ResourceManagement';
 import { FinancialBooksManager } from '@/components/admin/FinancialBooksManager';
 import { AIAssistantMessagesManager } from '@/components/admin/AIAssistantMessagesManager';
@@ -25,7 +26,7 @@ import { AbandonedCheckoutsManager } from '@/components/admin/AbandonedCheckouts
 import { HowCanWeDoBetterManager } from '@/components/admin/HowCanWeDoBetterManager';
 import { ChargesAndFeesManager } from '@/components/admin/ChargesAndFeesManager';
 import { PhoneOrderDesk } from '@/components/admin/phone-order/PhoneOrderDesk';
-import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, Boxes, MailWarning, MessageCircle, Phone } from 'lucide-react';
+import { Users, Calendar, DollarSign, Wrench, Truck, AlertTriangle, Star, Loader2, Bell, HelpCircle, MapPin, Settings, BookOpen, Calculator, AlertCircle, X, Brain, Layers, Gift, Boxes, MailWarning, MessageCircle, Phone, Satellite } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { checkEquipmentPricingHealth } from '@/utils/equipmentPricingDebugHelper';
@@ -325,6 +326,9 @@ export const AdminDashboard = () => {
                         <TabsTrigger value="reviews" className="py-2"><Star className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Reviews</span></TabsTrigger>
                         <TabsTrigger value="faqs" className="py-2"><HelpCircle className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">FAQs</span></TabsTrigger>
                         <TabsTrigger value="resources" className="py-2"><BookOpen className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Resources</span></TabsTrigger>
+                        <TabsTrigger value="gps" className="py-2 bg-cyan-900/20 data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                            <Satellite className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">GPS</span>
+                        </TabsTrigger>
                         <TabsTrigger value="settings" className="py-2"><Settings className="w-4 h-4 mr-1 lg:mr-2" /><span className="hidden lg:inline">Settings</span></TabsTrigger>
                     </TabsList>
                     
@@ -386,6 +390,7 @@ export const AdminDashboard = () => {
                             <TabsContent value="reviews"><ReviewsManager /></TabsContent>
                             <TabsContent value="faqs"><FaqsManager /></TabsContent>
                             <TabsContent value="resources"><ResourceManagement /></TabsContent>
+                            <TabsContent value="gps"><GpsYardPanel /></TabsContent>
                             <TabsContent value="settings"><SettingsManager /></TabsContent>
                         </>
                     )}
