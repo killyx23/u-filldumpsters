@@ -8,15 +8,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { AlertTriangle, Loader2, Lock, RefreshCw, Unlock, WifiOff } from 'lucide-react';
+import { AlertTriangle, Loader2, Lock, RefreshCw, Trash2, Unlock, WifiOff } from 'lucide-react';
 import { format } from 'date-fns';
 import RemoteBridgeControls from '@/components/admin/RemoteBridgeControls';
 import LockOpenCloseTimes from '@/components/admin/LockOpenCloseTimes';
 import { bridgeOnlineFromDevices, loadLockPresenceDevices, lockDisplayFromCommand, watchManualLockAfterCommand } from '@/utils/lockPresence';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-
-const UNLINKED = '__unlinked__';
+import { linkDeviceToUnit, unlinkDeviceFromUnit } from '@/utils/linkUnitAccessory';
 
 const PRESENCE = {
   on_premises: {
@@ -56,8 +55,10 @@ function when(value) {
 
 export default function LockPresencePanel() {
   const [devices, setDevices] = useState([]);
-  const [equipmentOptions, setEquipmentOptions] = useState([]);
+  const [unitOptions, setUnitOptions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [linkForm, setLinkForm] = useState({ deviceId: '', unitId: '' });
+  const [savingLink, setSavingLink] = useState(false);
   const [error, setError] = useState(null);
   const [linkingDeviceId, setLinkingDeviceId] = useState(null);
   const [optimisticTimes, setOptimisticTimes] = useState(null);
@@ -65,13 +66,13 @@ export default function LockPresencePanel() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ devices: next, error: queryError }, equipmentRes] = await Promise.all([
+    const [{ devices: next, error: queryError }, unitRes] = await Promise.all([
       loadLockPresenceDevices(),
       supabase
-        .from('equipment')
-        .select('id, name, type')
-        .order('type', { ascending: true })
-        .order('name', { ascending: true }),
+        .from('inventory_units')
+        .select('id, name, inventory_items(name)')
+        .eq('is_active', true)
+        .order('name'),
     ]);
 
     if (queryError) {
@@ -82,11 +83,11 @@ export default function LockPresencePanel() {
       setDevices(next);
     }
 
-    if (equipmentRes.error) {
-      console.warn('[LockPresencePanel] Could not load equipment catalog:', equipmentRes.error.message);
-      setEquipmentOptions([]);
+    if (unitRes.error) {
+      console.warn('[LockPresencePanel] Could not load units:', unitRes.error.message);
+      setUnitOptions([]);
     } else {
-      setEquipmentOptions(equipmentRes.data || []);
+      setUnitOptions(unitRes.data || []);
     }
 
     setLoading(false);
@@ -97,54 +98,64 @@ export default function LockPresencePanel() {
     return () => stopWatch.current?.();
   }, [load]);
 
-  const linkEquipment = useCallback(
-    async (deviceId, rawValue) => {
-      if (!deviceId) return;
-      const equipmentId = rawValue === UNLINKED || rawValue === '' || rawValue == null
-        ? null
-        : Number(rawValue);
-      if (equipmentId != null && !Number.isFinite(equipmentId)) return;
-
-      setLinkingDeviceId(deviceId);
-      const { error: updateError } = await supabase
-        .from('lock_devices')
-        .update({ equipment_id: equipmentId })
-        .eq('device_id', deviceId);
-
-      if (updateError) {
-        toast({
-          title: 'Could not link lock',
-          description: updateError.message,
-          variant: 'destructive',
-        });
-      } else {
-        const linkedName = equipmentOptions.find((e) => Number(e.id) === equipmentId)?.name;
-        toast({
-          title: equipmentId == null ? 'Lock unlinked' : 'Lock linked to equipment',
-          description: equipmentId == null
-            ? `${deviceId} is no longer mapped to catalog equipment.`
-            : `${deviceId} → ${linkedName || `equipment #${equipmentId}`}`,
-        });
-        await load();
-      }
-      setLinkingDeviceId(null);
-    },
-    [equipmentOptions, load],
+  const unitLabel = (unit) => (
+    unit ? `${unit.name}${unit.inventory_items?.name ? ` · ${unit.inventory_items.name}` : ''}` : 'Unknown trailer'
   );
+
+  const saveLink = async (event) => {
+    event.preventDefault();
+    const device = devices.find((item) => item.device_id === linkForm.deviceId);
+    const unitId = Number(linkForm.unitId);
+    if (!device || !Number.isFinite(unitId)) {
+      toast({ title: 'Pick a lock and a serial unit.', variant: 'destructive' });
+      return;
+    }
+    setSavingLink(true);
+    const { error } = await linkDeviceToUnit(supabase, {
+      kind: 'lock',
+      deviceId: device.device_id,
+      deviceName: device.label || device.device_id,
+      unitId,
+      table: 'lock_devices',
+      idColumn: 'device_id',
+    });
+    setSavingLink(false);
+    if (error) {
+      toast({ title: 'Could not link lock', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setLinkForm({ deviceId: '', unitId: '' });
+    await load();
+  };
+
+  const unlink = async (device) => {
+    setLinkingDeviceId(device.device_id);
+    const { error } = await unlinkDeviceFromUnit(supabase, {
+      kind: 'lock',
+      deviceId: device.device_id,
+      accessoryId: device.accessory_id,
+      table: 'lock_devices',
+      idColumn: 'device_id',
+    });
+    setLinkingDeviceId(null);
+    if (error) toast({ title: 'Could not remove link', description: error.message, variant: 'destructive' });
+    else await load();
+  };
 
   const primary = devices[0] || null;
   const lastOpenedAt = optimisticTimes?.lastOpenedAt ?? primary?.last_opened_at;
   const lastClosedAt = optimisticTimes?.lastClosedAt ?? primary?.last_closed_at;
   const currentState = optimisticTimes?.currentState ?? primary?.current_state ?? null;
+  const linked = devices.filter((device) => device.inventory_unit_id != null);
+  const unlinked = devices.filter((device) => device.inventory_unit_id == null);
 
   return (
     <Card className="bg-white/5 border-white/10">
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
         <div>
-          <CardTitle>Lock &amp; equipment status</CardTitle>
+          <CardTitle>Lock accessories</CardTitle>
           <CardDescription className="text-slate-400">
-            Live state from igloohome webhook events. Locks register themselves the first time
-            they report activity.
+            Every padlock of this kind lives on this card. Linked rows are read-only. If any lock is still unassigned, the extra row mounts it on a serial unit.
           </CardDescription>
         </div>
         <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -192,16 +203,14 @@ export default function LockPresencePanel() {
         {!error && !loading && devices.length === 0 && (
           <p className="text-sm text-slate-400">
             No locks registered yet. A lock appears here automatically after its first webhook
-            delivery, then you can map it to a piece of equipment.
+            delivery, then you can map it to a serial unit.
           </p>
         )}
 
-        {devices.map((device) => {
+        {linked.map((device) => {
           const state = PRESENCE[device.presence] || PRESENCE.unknown;
           const { Icon } = state;
-          const selectValue = device.equipment_id != null
-            ? String(device.equipment_id)
-            : UNLINKED;
+          const unit = unitOptions.find((item) => Number(item.id) === Number(device.inventory_unit_id));
           return (
             <div
               key={device.device_id}
@@ -210,79 +219,34 @@ export default function LockPresencePanel() {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="font-semibold">
-                    {device.equipment_name || device.label || device.device_id}
+                    {device.label || device.device_id} · {unitLabel(unit)}
                   </p>
                   <p className="text-xs text-slate-500 font-mono">{device.device_id}</p>
                 </div>
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${state.className}`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {state.label}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${state.className}`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {state.label}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => unlink(device)}
+                    disabled={linkingDeviceId === device.device_id}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
+                  </Button>
+                </div>
               </div>
-
               <p className="text-sm text-slate-400">{state.detail}</p>
-
               <LockOpenCloseTimes
                 lastOpenedAt={device.last_opened_at}
                 lastClosedAt={device.last_closed_at}
                 currentState={device.current_state}
               />
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs text-slate-400">
-                <span>
-                  Bridge:{' '}
-                  <span
-                    className={
-                      device.bridge_online === false
-                        ? 'text-red-300'
-                        : device.bridge_online
-                        ? 'text-emerald-300'
-                        : 'text-slate-200'
-                    }
-                  >
-                    {device.bridge_online === null || device.bridge_online === undefined
-                      ? 'unreported'
-                      : device.bridge_online
-                      ? 'online'
-                      : 'offline'}
-                  </span>
-                </span>
-                {device.last_order_id && (
-                  <span>
-                    Booking: <span className="text-slate-200">#{device.last_order_id}</span>
-                  </span>
-                )}
-              </div>
-
-              <div className="pt-1 space-y-1.5">
-                <p className="text-xs text-slate-500">Linked equipment</p>
-                <Select
-                  value={selectValue}
-                  onValueChange={(value) => linkEquipment(device.device_id, value)}
-                  disabled={linkingDeviceId === device.device_id}
-                >
-                  <SelectTrigger className="h-9 max-w-md bg-black/30 border-white/15">
-                    <SelectValue placeholder="Link to equipment…" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-white/15 text-white">
-                    <SelectItem value={UNLINKED}>Not linked</SelectItem>
-                    {equipmentOptions.map((item) => (
-                      <SelectItem key={item.id} value={String(item.id)}>
-                        {item.name}
-                        {item.type ? ` (${item.type})` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {!device.equipment_id && (
-                  <p className="text-xs text-amber-300/80">
-                    Pick a catalog item so this lock is mapped to equipment.
-                  </p>
-                )}
-              </div>
-
               {device.last_breakin_at && (
                 <p className="flex items-center gap-2 rounded border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200">
                   <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
@@ -292,6 +256,32 @@ export default function LockPresencePanel() {
             </div>
           );
         })}
+
+        {unlinked.length > 0 && (
+          <form onSubmit={saveLink} className="grid gap-3 rounded border border-dashed border-white/20 p-3 md:grid-cols-[1fr_1fr_auto]">
+            <Select value={linkForm.deviceId || undefined} onValueChange={(value) => setLinkForm({ ...linkForm, deviceId: value })}>
+              <SelectTrigger className="bg-black/30 border-white/15"><SelectValue placeholder="Unlinked lock" /></SelectTrigger>
+              <SelectContent className="bg-slate-900 border-white/15 text-white">
+                {unlinked.map((device) => (
+                  <SelectItem key={device.device_id} value={device.device_id}>
+                    {device.label || device.device_id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={linkForm.unitId || undefined} onValueChange={(value) => setLinkForm({ ...linkForm, unitId: value })}>
+              <SelectTrigger className="bg-black/30 border-white/15"><SelectValue placeholder="Serial unit" /></SelectTrigger>
+              <SelectContent className="bg-slate-900 border-white/15 text-white">
+                {unitOptions.map((unit) => (
+                  <SelectItem key={unit.id} value={String(unit.id)}>{unitLabel(unit)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="submit" disabled={savingLink}>
+              {savingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save link'}
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );

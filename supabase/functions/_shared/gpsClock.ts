@@ -27,6 +27,26 @@ export async function gpsOwnsLockClock(
   const freshAfterMs = Date.now() - GPS_FRESH_MS;
   try {
     if (args.deviceId) {
+      const { data: lock, error: lockError } = await supabase
+        .from("lock_devices")
+        .select("inventory_unit_id")
+        .eq("device_id", args.deviceId)
+        .maybeSingle();
+      if (lockError) {
+        console.error("[gpsClock] lock lookup failed:", lockError.message);
+      } else if (lock?.inventory_unit_id) {
+        const { data, error } = await supabase
+          .from("gps_trackers")
+          .select("is_active, gps_tracker_state(valid, last_valid_at)")
+          .eq("inventory_unit_id", lock.inventory_unit_id)
+          .eq("is_active", true);
+        if (error) {
+          console.error("[gpsClock] unit tracker lookup failed:", error.message);
+          return false;
+        }
+        if ((data ?? []).some((row: TrackerRow) => freshState(row, freshAfterMs))) return true;
+      }
+
       const { data, error } = await supabase
         .from("gps_trackers")
         .select("is_active, gps_tracker_state(valid, last_valid_at)")
@@ -41,22 +61,23 @@ export async function gpsOwnsLockClock(
 
     if (!args.bookingId) return false;
     const { data: lines, error: lineError } = await supabase
-      .from("booking_equipment")
-      .select("equipment_id")
-      .eq("booking_id", args.bookingId);
+      .from("booking_unit_assignments")
+      .select("inventory_unit_id")
+      .eq("booking_id", args.bookingId)
+      .is("released_at", null);
     if (lineError || !lines?.length) return false;
-    const equipmentIds = lines
-      .map((line: { equipment_id?: number | null }) => line.equipment_id)
+    const unitIds = lines
+      .map((line: { inventory_unit_id?: number | null }) => line.inventory_unit_id)
       .filter((id: number | null | undefined) => id != null);
-    if (!equipmentIds.length) return false;
+    if (!unitIds.length) return false;
 
     const { data, error } = await supabase
       .from("gps_trackers")
       .select("is_active, gps_tracker_state(valid, last_valid_at)")
-      .in("equipment_id", equipmentIds)
+      .in("inventory_unit_id", unitIds)
       .eq("is_active", true);
     if (error) {
-      console.error("[gpsClock] equipment tracker lookup failed:", error.message);
+      console.error("[gpsClock] unit tracker lookup failed:", error.message);
       return false;
     }
     return (data ?? []).some((row: TrackerRow) => freshState(row, freshAfterMs));

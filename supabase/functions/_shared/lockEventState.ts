@@ -12,6 +12,7 @@
  */
 
 import { gpsOwnsLockClock } from "./gpsClock.ts";
+import { ensureUnitAssignment, releaseUnitAssignment, unitIdForLock } from "./unitAssignment.ts";
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow, RETURN_GRACE_MS } from "./pinTiming.ts";
 import { isDeliveryBooking } from "./deliveryBooking.ts";
 import {
@@ -232,6 +233,8 @@ async function markRented(
     return false;
   }
   console.log(`[lockEventState] Booking #${booking.id} marked Rented at ${eventTimestamp}`);
+  const unitId = await unitIdForLock(supabase, deviceId);
+  if (unitId) await ensureUnitAssignment(supabase, Number(booking.id), unitId);
 
   if (!booking.rental_started_notified_at) {
     await invokeNotify(supabase, "send-rental-started", {
@@ -284,6 +287,7 @@ async function markReturned(
   booking.returned_at = eventTimestamp;
   if (addons !== undefined) booking.addons = addons;
   console.log(`[lockEventState] Booking #${booking.id} marked Returned at ${eventTimestamp}`);
+  await releaseUnitAssignment(supabase, Number(booking.id));
 
   if (!booking.return_notified_at) {
     await invokeNotify(supabase, "send-return-confirmation", {

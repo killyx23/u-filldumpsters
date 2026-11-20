@@ -4,8 +4,10 @@
  */
 
 import { isDeliveryBooking } from "./deliveryBooking.ts";
-import { CHECKOUT_LEAD_MS, GPS_SILENT_MS, GPS_STREAK, isoFromMs } from "./gpsGeofence.ts";
+import { CHECKOUT_LEAD_MS, GPS_FRESH_MS, GPS_SILENT_MS, GPS_STREAK, isoFromMs } from "./gpsGeofence.ts";
+import { closeCountsAsReturn } from "./lockEventState.ts";
 import { BOOKING_WINDOW_COLUMNS, getBookingWindow } from "./pinTiming.ts";
+import { ensureUnitAssignment, releaseUnitAssignment } from "./unitAssignment.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseClient = any;
@@ -29,7 +31,7 @@ export type TrackerState = {
 
 export type TrackerRecord = {
   macid: string;
-  equipment_id: number | null;
+  inventory_unit_id: number | null;
   is_active: boolean;
 };
 
@@ -122,19 +124,19 @@ export async function resolveAlert(
 
 async function loadCandidates(
   supabase: SupabaseClient,
-  equipmentId: number,
+  unitId: number,
 ): Promise<BookingRow[]> {
   const { data: lines, error } = await supabase
-    .from("booking_equipment")
+    .from("booking_unit_assignments")
     .select("booking_id")
-    .eq("equipment_id", equipmentId)
-    .is("returned_at", null);
+    .eq("inventory_unit_id", unitId)
+    .is("released_at", null);
   if (error || !lines?.length) return [];
   const ids = [...new Set(lines.map((line: { booking_id: number }) => line.booking_id))];
   const { data, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      `id, status, plan, addons, delivery_type, delivery_service, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, checkout_clock_source, return_clock_source, rental_started_notified_at, return_notified_at`,
+      `id, status, plan, addons, delivery_type, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, checkout_clock_source, return_clock_source, rental_started_notified_at, return_notified_at`,
     )
     .in("id", ids)
     .is("returned_at", null)
@@ -144,6 +146,43 @@ async function loadCandidates(
     return [];
   }
   return data ?? [];
+}
+
+const PICKUP_SELECT =
+  `id, status, plan, addons, delivery_type, ${BOOKING_WINDOW_COLUMNS}, rented_out_at, returned_at, checkout_clock_source, return_clock_source, rental_started_notified_at, return_notified_at`;
+
+async function loadPickupCandidates(
+  supabase: SupabaseClient,
+  unitId: number,
+  nowMs: number,
+): Promise<BookingRow[]> {
+  const assigned = await loadCandidates(supabase, unitId);
+  if (assigned.length) return assigned;
+
+  const from = new Date(nowMs - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const to = new Date(nowMs + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(PICKUP_SELECT)
+    .is("returned_at", null)
+    .in("status", ["Confirmed", "Delivered"])
+    .gte("drop_off_date", from)
+    .lte("drop_off_date", to);
+  if (error || !data?.length) {
+    if (error) console.error("[gpsRental] pickup candidate query failed:", error.message);
+    return [];
+  }
+
+  const { data: openLines } = await supabase
+    .from("booking_unit_assignments")
+    .select("booking_id, inventory_unit_id")
+    .is("released_at", null);
+  const blocked = new Set(
+    (openLines ?? [])
+      .filter((line: { inventory_unit_id: number }) => Number(line.inventory_unit_id) !== unitId)
+      .map((line: { booking_id: number }) => Number(line.booking_id)),
+  );
+  return (data as BookingRow[]).filter((booking) => !blocked.has(Number(booking.id)));
 }
 
 function chooseCheckout(candidates: BookingRow[], nowMs: number): { booking: BookingRow | null; reason: "none" | "one" | "many" | "delivery" } {
@@ -256,18 +295,18 @@ export async function onConfirmedOutside(
     checkoutMileage: extras.mileage,
     checkoutFuel: extras.fuel,
   };
-  if (!tracker.equipment_id) {
+  if (!tracker.inventory_unit_id) {
     await raiseAlert(supabase, {
       macid: tracker.macid,
       kind: "unmapped_tracker",
-      message: `Tracker ${tracker.macid} left the yard and is not linked to equipment.`,
+      message: `Tracker ${tracker.macid} left the yard and is not linked to a unit.`,
       payload: { streakAt: atIso, ...extras },
     });
     return keep;
   }
   await resolveAlert(supabase, tracker.macid, "unmapped_tracker");
 
-  const candidates = await loadCandidates(supabase, tracker.equipment_id);
+  const candidates = await loadPickupCandidates(supabase, tracker.inventory_unit_id, nowMs);
   const choice = chooseCheckout(candidates, nowMs);
   const payload = {
     streakAt: atIso,
@@ -303,6 +342,18 @@ export async function onConfirmedOutside(
     return keep;
   }
 
+  const assigned = await ensureUnitAssignment(supabase, Number(choice.booking.id), tracker.inventory_unit_id);
+  if (!assigned) {
+    await raiseAlert(supabase, {
+      macid: tracker.macid,
+      bookingId: Number(choice.booking.id),
+      kind: "ambiguous_booking",
+      message: `Tracker ${tracker.macid} left the yard but booking #${choice.booking.id} could not be assigned to its unit.`,
+      payload,
+    });
+    return keep;
+  }
+
   const applied = await applyGpsCheckout(supabase, choice.booking, atIso);
   if (applied === "skipped") {
     await raiseAlert(supabase, {
@@ -325,13 +376,40 @@ export async function onConfirmedOutside(
   };
 }
 
+async function bookingForYardReturn(
+  supabase: SupabaseClient,
+  state: TrackerState,
+): Promise<BookingRow | null> {
+  if (state.open_booking_id) {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select(PICKUP_SELECT)
+      .eq("id", state.open_booking_id)
+      .maybeSingle();
+    if (error) console.error("[gpsRental] return booking query failed:", error.message);
+    if (data) return data;
+  }
+
+  const { data: tracker } = await supabase
+    .from("gps_trackers")
+    .select("inventory_unit_id")
+    .eq("macid", state.macid)
+    .maybeSingle();
+  if (!tracker?.inventory_unit_id) return null;
+  const assigned = await loadCandidates(supabase, Number(tracker.inventory_unit_id));
+  const rented = assigned.filter((booking) => booking.rented_out_at);
+  return rented.length === 1 ? rented[0] : null;
+}
+
 export async function onConfirmedInside(
   supabase: SupabaseClient,
   state: TrackerState,
   atIso: string,
   mileage: number | null,
+  nowMs?: number,
 ): Promise<{ openBookingId: number | null; applied: boolean }> {
-  if (!state.open_booking_id) {
+  const booking = await bookingForYardReturn(supabase, state);
+  if (!booking) {
     await raiseAlert(supabase, {
       macid: state.macid,
       kind: "return_no_trip",
@@ -341,47 +419,46 @@ export async function onConfirmedInside(
     return { openBookingId: null, applied: false };
   }
 
-  const { data: booking, error } = await supabase
-    .from("bookings")
-    .select(
-      "id, status, addons, returned_at, return_clock_source, return_notified_at, rented_out_at",
-    )
-    .eq("id", state.open_booking_id)
-    .maybeSingle();
-  if (error || !booking) {
-    await raiseAlert(supabase, {
-      macid: state.macid,
-      bookingId: state.open_booking_id,
-      kind: "left_no_booking",
-      message: `Tracker ${state.macid} entered the yard but booking #${state.open_booking_id} was not found.`,
-      payload: { streakAt: atIso },
-    });
-    return { openBookingId: state.open_booking_id, applied: false };
+  const bookingId = Number(booking.id);
+  const atMs = new Date(atIso).getTime();
+  const observedMs = nowMs ?? atMs;
+  const window = getBookingWindow(booking as never);
+  const rentedOutMs = booking.rented_out_at ? new Date(String(booking.rented_out_at)).getTime() : null;
+  const arrivedInWindow = closeCountsAsReturn(atMs, window.endMs, rentedOutMs);
+  const stillHereInWindow = closeCountsAsReturn(observedMs, window.endMs, rentedOutMs);
+  if (!arrivedInWindow && !stillHereInWindow) {
+    return { openBookingId: bookingId, applied: false };
   }
+  const returnStamp = arrivedInWindow ? atIso : new Date(observedMs).toISOString();
 
-  const result = await applyGpsReturn(supabase, booking, atIso, {
+  const result = await applyGpsReturn(supabase, booking, returnStamp, {
     checkout: state.checkout_mileage,
     returned: mileage,
   });
-  if (result === "skipped" && booking.returned_at) return { openBookingId: null, applied: false };
+  if (result === "skipped" && booking.returned_at) {
+    await releaseUnitAssignment(supabase, bookingId);
+    return { openBookingId: null, applied: false };
+  }
   if (result === "alert") {
     const kind = String(booking.status) === "Completed" ? "completed_disagreement" : "manual_return_disagreement";
     await raiseAlert(supabase, {
       macid: state.macid,
-      bookingId: Number(booking.id),
+      bookingId,
       kind,
-      message: `Tracker ${state.macid} is in the yard. Booking #${booking.id} was left unchanged.`,
+      message: `Tracker ${state.macid} is in the yard. Booking #${bookingId} was left unchanged.`,
       payload: { streakAt: atIso },
     });
     return { openBookingId: null, applied: false };
   }
   if (result === "applied") {
+    await releaseUnitAssignment(supabase, bookingId);
     await resolveAlert(supabase, state.macid, "past_return_still_outside");
     await resolveAlert(supabase, state.macid, "returned_but_outside");
     await resolveAlert(supabase, state.macid, "left_no_booking");
+    await resolveAlert(supabase, state.macid, "return_no_trip");
     return { openBookingId: null, applied: true };
   }
-  return { openBookingId: state.open_booking_id, applied: false };
+  return { openBookingId: bookingId, applied: false };
 }
 
 export async function watchOpenTrip(
@@ -390,6 +467,15 @@ export async function watchOpenTrip(
   reading: { hearttimeMs: number | null; serverTimeMs: number | null; mainPower: boolean | null },
   nowMs: number,
 ): Promise<void> {
+  if (state.inside_yard === true && state.open_booking_id && state.last_valid_at) {
+    const atMs = new Date(state.last_valid_at).getTime();
+    if (Number.isFinite(atMs) && nowMs - atMs <= GPS_FRESH_MS) {
+      const stamp = state.streak_inside_at || state.last_valid_at;
+      const trip = await onConfirmedInside(supabase, state, stamp, null, nowMs);
+      state.open_booking_id = trip.openBookingId;
+    }
+  }
+
   if (!state.open_booking_id || state.inside_yard !== false) {
     await resolveAlert(supabase, state.macid, "past_return_still_outside");
     await resolveAlert(supabase, state.macid, "main_power_off");
@@ -510,27 +596,42 @@ export async function attachOpenTrip(
 
   const { data: tracker } = await supabase
     .from("gps_trackers")
-    .select("macid, equipment_id")
+    .select("macid, inventory_unit_id")
     .eq("macid", macid)
     .maybeSingle();
-  if (!tracker?.equipment_id) {
-    return { ok: false, error: "Link this tracker to equipment before attaching a booking." };
+  if (!tracker?.inventory_unit_id) {
+    return { ok: false, error: "Link this tracker to a unit before attaching a booking." };
   }
 
-  const { data: line } = await supabase
-    .from("booking_equipment")
-    .select("booking_id")
+  const { data: openForBooking } = await supabase
+    .from("booking_unit_assignments")
+    .select("id, inventory_unit_id")
     .eq("booking_id", bookingId)
-    .eq("equipment_id", tracker.equipment_id)
+    .is("released_at", null)
     .maybeSingle();
-  if (!line) {
-    return { ok: false, error: "That booking does not include this tracker's equipment." };
+  if (openForBooking && Number(openForBooking.inventory_unit_id) !== Number(tracker.inventory_unit_id)) {
+    return { ok: false, error: "That booking is already assigned to another unit." };
+  }
+  if (!openForBooking) {
+    const { error: assignError } = await supabase.from("booking_unit_assignments").insert({
+      booking_id: bookingId,
+      inventory_unit_id: tracker.inventory_unit_id,
+    });
+    if (assignError) {
+      const taken = assignError.code === "23505";
+      return {
+        ok: false,
+        error: taken
+          ? "That unit already has an open booking."
+          : assignError.message,
+      };
+    }
   }
 
   const { data: booking, error } = await supabase
     .from("bookings")
     .select(
-      "id, status, plan, addons, delivery_type, delivery_service, rented_out_at, returned_at, checkout_clock_source, rental_started_notified_at",
+      "id, status, plan, addons, delivery_type, rented_out_at, returned_at, checkout_clock_source, rental_started_notified_at",
     )
     .eq("id", bookingId)
     .maybeSingle();
@@ -557,6 +658,10 @@ export async function attachOpenTrip(
     checkout_mileage: state?.checkout_mileage ?? null,
     checkout_fuel: state?.checkout_fuel ?? null,
   }).eq("macid", macid);
+  await supabase.from("inventory_units").update({
+    status: "out",
+    updated_at: new Date().toISOString(),
+  }).eq("id", tracker.inventory_unit_id);
 
   await resolveAlert(supabase, macid, "left_no_booking");
   await resolveAlert(supabase, macid, "ambiguous_booking");

@@ -6,12 +6,15 @@
  * and URLs are never logged.
  * never logged.
  *
- * Cron body is {}. An admin may POST { "attach": { "macid", "bookingId" } }.
+ * Cron body is {}. An admin may POST { "attach": { "macid", "bookingId" } }
+ * or { "simulate": { "leave"|"enter": { "macid" } } } when the trailer cannot
+ * physically leave the yard.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import { getCorsHeaders } from "./cors.ts";
 import {
+  GPS_STREAK,
   insideAnyYard,
   isoFromMs,
   parseTrackerRow,
@@ -198,7 +201,7 @@ async function ingestVendorAlarms(
       if (fresh && atIso && (alarm.classify === ALARM_LEAVE || alarm.classify === ALARM_ENTER)) {
         const { data: trackerRow } = await supabase
           .from("gps_trackers")
-          .select("macid, equipment_id, is_active")
+          .select("macid, inventory_unit_id, is_active")
           .eq("macid", alarm.macid)
           .maybeSingle();
         const { data: stateRow } = await supabase
@@ -208,7 +211,7 @@ async function ingestVendorAlarms(
           .maybeSingle();
         const tracker = {
           macid: alarm.macid,
-          equipment_id: trackerRow?.equipment_id == null ? null : Number(trackerRow.equipment_id),
+          inventory_unit_id: trackerRow?.inventory_unit_id == null ? null : Number(trackerRow.inventory_unit_id),
           is_active: trackerRow?.is_active !== false,
         };
         if (alarm.classify === ALARM_LEAVE) {
@@ -320,7 +323,10 @@ Deno.serve(async (req) => {
     if (admin.error) return admin.error;
   }
 
-  let body: { attach?: { macid?: string; bookingId?: number } } = {};
+  let body: {
+    attach?: { macid?: string; bookingId?: number };
+    simulate?: { leave?: { macid?: string }; enter?: { macid?: string } };
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -328,6 +334,95 @@ Deno.serve(async (req) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceKey);
+
+  if (body.simulate?.leave || body.simulate?.enter) {
+    const direction = body.simulate.leave ? "leave" : "enter";
+    const macid = String(
+      (direction === "leave" ? body.simulate.leave?.macid : body.simulate.enter?.macid) || "",
+    ).trim();
+    if (!macid) return json(cors, { error: "macid is required." }, 400);
+
+    const { data: trackerRow } = await supabase
+      .from("gps_trackers")
+      .select("macid, inventory_unit_id, is_active")
+      .eq("macid", macid)
+      .maybeSingle();
+    if (!trackerRow) return json(cors, { error: "Tracker not found." }, 404);
+
+    const { data: stateRow } = await supabase.from("gps_tracker_state").select("*").eq("macid", macid).maybeSingle();
+    let state = stateFromRow(stateRow, macid);
+    const nowMs = Date.now();
+    const atIso = new Date(nowMs).toISOString();
+    const tracker = {
+      macid,
+      inventory_unit_id: trackerRow.inventory_unit_id == null ? null : Number(trackerRow.inventory_unit_id),
+      is_active: trackerRow.is_active !== false,
+    };
+
+    if (direction === "leave") {
+      const trip = await onConfirmedOutside(supabase, tracker, atIso, {
+        mileage: state.checkout_mileage,
+        fuel: state.checkout_fuel,
+        lat: stateRow?.lat ?? null,
+        lon: stateRow?.lon ?? null,
+      }, nowMs);
+      state.inside_yard = false;
+      state.consecutive_outside = GPS_STREAK;
+      state.consecutive_inside = 0;
+      state.streak_outside_at = atIso;
+      state.streak_inside_at = null;
+      state.open_booking_id = trip.openBookingId;
+      state.checkout_mileage = trip.checkoutMileage;
+      state.checkout_fuel = trip.checkoutFuel;
+      state.last_valid_at = atIso;
+      await supabase.from("gps_tracker_state").upsert({
+        macid,
+        inside_yard: state.inside_yard,
+        consecutive_outside: state.consecutive_outside,
+        consecutive_inside: state.consecutive_inside,
+        streak_outside_at: state.streak_outside_at,
+        streak_inside_at: state.streak_inside_at,
+        open_booking_id: state.open_booking_id,
+        checkout_mileage: state.checkout_mileage,
+        checkout_fuel: state.checkout_fuel,
+        last_valid_at: state.last_valid_at,
+        last_reading_at: atIso,
+        updated_at: atIso,
+      });
+      return json(cors, {
+        ok: true,
+        simulated: "leave",
+        openBookingId: trip.openBookingId,
+      });
+    }
+
+    const trip = await onConfirmedInside(supabase, state, atIso, null, nowMs);
+    state.inside_yard = true;
+    state.consecutive_inside = GPS_STREAK;
+    state.consecutive_outside = 0;
+    state.streak_inside_at = atIso;
+    state.streak_outside_at = null;
+    state.open_booking_id = trip.openBookingId;
+    state.last_valid_at = atIso;
+    await supabase.from("gps_tracker_state").upsert({
+      macid,
+      inside_yard: state.inside_yard,
+      consecutive_inside: state.consecutive_inside,
+      consecutive_outside: state.consecutive_outside,
+      streak_inside_at: state.streak_inside_at,
+      streak_outside_at: state.streak_outside_at,
+      open_booking_id: state.open_booking_id,
+      last_valid_at: state.last_valid_at,
+      last_reading_at: atIso,
+      updated_at: atIso,
+    });
+    return json(cors, {
+      ok: true,
+      simulated: "enter",
+      applied: trip.applied,
+      openBookingId: trip.openBookingId,
+    });
+  }
 
   if (body.attach) {
     const macid = String(body.attach.macid || "").trim();
@@ -404,7 +499,7 @@ Deno.serve(async (req) => {
   for (const fix of fixes) {
     const { data: existing } = await supabase
       .from("gps_trackers")
-      .select("macid, full_name, equipment_id, is_active")
+      .select("macid, full_name, inventory_unit_id, is_active")
       .eq("macid", fix.macid)
       .maybeSingle();
     if (!existing) {
@@ -445,15 +540,15 @@ Deno.serve(async (req) => {
 
     const tracker = {
       macid: fix.macid,
-      equipment_id: existing?.equipment_id == null ? null : Number(existing.equipment_id),
+      inventory_unit_id: existing?.inventory_unit_id == null ? null : Number(existing.inventory_unit_id),
       is_active: existing?.is_active !== false,
     };
 
-    if (!tracker.equipment_id) {
+    if (!tracker.inventory_unit_id) {
       await raiseAlert(supabase, {
         macid: fix.macid,
         kind: "unmapped_tracker",
-        message: `Tracker ${fix.fullName || fix.macid} is not linked to equipment.`,
+        message: `Tracker ${fix.fullName || fix.macid} is not linked to a unit.`,
       });
     } else {
       await resolveAlert(supabase, fix.macid, "unmapped_tracker");

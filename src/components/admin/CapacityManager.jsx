@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 const OCCUPANCY_MODELS = ['range', 'dropoff_only', 'dropoff_and_pickup_only', 'same_day'];
 const INHERIT_VALUE = '__inherit__';
+const ACCESSORY_KINDS = ['gps', 'lock', 'other'];
 
 // ─────────────────────────────────────────────────────────────────────────
 // Resources (inventory_items)
@@ -208,29 +209,123 @@ const RequirementForm = ({ requirement, services, resources, open, onSave, onCan
 };
 
 // ─────────────────────────────────────────────────────────────────────────
+// Unit accessories (GPS, lock, other). device_id is a vendor id, not a secret.
+// ─────────────────────────────────────────────────────────────────────────
+
+const AccessoryForm = ({ accessory, unit, open, onSave, onCancel }) => {
+    const [kind, setKind] = useState('gps');
+    const [name, setName] = useState('');
+    const [deviceId, setDeviceId] = useState('');
+    const [notes, setNotes] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        if (open) {
+            setKind(accessory?.kind || 'gps');
+            setName(accessory?.name || '');
+            setDeviceId(accessory?.device_id || '');
+            setNotes(accessory?.notes || '');
+        }
+    }, [accessory, open]);
+
+    const handleSave = async () => {
+        if (!name.trim()) {
+            toast({ title: 'Validation Error', description: 'Name is required.', variant: 'destructive' });
+            return;
+        }
+        if (!ACCESSORY_KINDS.includes(kind)) {
+            toast({ title: 'Validation Error', description: 'Pick GPS, lock, or other.', variant: 'destructive' });
+            return;
+        }
+        setIsSaving(true);
+        await onSave({
+            ...accessory,
+            inventory_unit_id: unit.id,
+            kind,
+            name: name.trim(),
+            device_id: deviceId.trim() || null,
+            notes: notes.trim() || null,
+            quantity: accessory?.quantity || 1,
+        });
+        setIsSaving(false);
+    };
+
+    return (
+        <DialogContent className="bg-gray-900 border-yellow-400 text-white">
+            <DialogHeader>
+                <DialogTitle>{accessory ? 'Edit Accessory' : 'Add Accessory'}</DialogTitle>
+                <DialogDescription>
+                    Hardware on {unit?.name || 'this unit'}. Device id is the tracker macid or lock id. Credentials stay in account settings, not on this row.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+                <div>
+                    <Label>Kind</Label>
+                    <Select value={kind} onValueChange={setKind}>
+                        <SelectTrigger className="bg-white/10"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                            {ACCESSORY_KINDS.map((value) => (
+                                <SelectItem key={value} value={value} className="capitalize">{value}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label htmlFor="acc-name">Name</Label>
+                    <Input id="acc-name" value={name} onChange={(e) => setName(e.target.value)} className="bg-white/10" placeholder="e.g. Sure Trac GPS" />
+                </div>
+                <div>
+                    <Label htmlFor="acc-device">Device id</Label>
+                    <Input id="acc-device" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} className="bg-white/10" placeholder="GPS macid or Igloo device id" />
+                </div>
+                <div>
+                    <Label htmlFor="acc-notes">Notes</Label>
+                    <Input id="acc-notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="bg-white/10" placeholder="Optional comment" />
+                </div>
+            </div>
+            <DialogFooter>
+                <DialogClose asChild><Button variant="ghost" onClick={onCancel}>Cancel</Button></DialogClose>
+                <Button onClick={handleSave} disabled={isSaving}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                    Save Accessory
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    );
+};
+
+// ─────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────
 
 export const CapacityManager = () => {
     const [resources, setResources] = useState([]);
+    const [units, setUnits] = useState([]);
+    const [accessories, setAccessories] = useState([]);
     const [requirements, setRequirements] = useState([]);
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [unitForm, setUnitForm] = useState({ inventory_item_id: '', name: '', serial: '' });
 
     const [isResourceFormOpen, setIsResourceFormOpen] = useState(false);
     const [editingResource, setEditingResource] = useState(null);
     const [isRequirementFormOpen, setIsRequirementFormOpen] = useState(false);
     const [editingRequirement, setEditingRequirement] = useState(null);
+    const [isAccessoryFormOpen, setIsAccessoryFormOpen] = useState(false);
+    const [editingAccessory, setEditingAccessory] = useState(null);
+    const [accessoryUnit, setAccessoryUnit] = useState(null);
 
     const fetchAll = useCallback(async () => {
         setLoading(true);
-        const [resourcesRes, requirementsRes, servicesRes] = await Promise.all([
+        const [resourcesRes, requirementsRes, servicesRes, unitsRes, accessoriesRes] = await Promise.all([
             supabase.from('inventory_items').select('*').order('id'),
             supabase
                 .from('inventory_rules')
                 .select('*, services(id, name, occupancy_model), inventory_items(id, name, total_quantity)')
                 .order('service_id'),
             supabase.from('services').select('id, name, occupancy_model').order('id'),
+            supabase.from('inventory_units').select('*, inventory_items(name)').order('name'),
+            supabase.from('unit_accessories').select('id, inventory_unit_id, kind, name, quantity, device_id, notes').order('kind'),
         ]);
 
         if (resourcesRes.error) {
@@ -249,6 +344,18 @@ export const CapacityManager = () => {
             toast({ title: 'Failed to load services', description: servicesRes.error.message, variant: 'destructive' });
         } else {
             setServices(servicesRes.data || []);
+        }
+
+        if (unitsRes.error) {
+            toast({ title: 'Failed to load units', description: unitsRes.error.message, variant: 'destructive' });
+        } else {
+            setUnits(unitsRes.data || []);
+        }
+
+        if (accessoriesRes.error) {
+            toast({ title: 'Failed to load accessories', description: accessoriesRes.error.message, variant: 'destructive' });
+        } else {
+            setAccessories(accessoriesRes.data || []);
         }
 
         setLoading(false);
@@ -291,6 +398,74 @@ export const CapacityManager = () => {
             toast({ title: 'Failed to delete resource', description: error.message, variant: 'destructive' });
         } else {
             toast({ title: 'Resource deleted successfully' });
+            fetchAll();
+        }
+    };
+
+    const handleAddUnit = async (event) => {
+        event.preventDefault();
+        const name = unitForm.name.trim();
+        const inventoryItemId = Number(unitForm.inventory_item_id);
+        if (!name || !Number.isFinite(inventoryItemId)) {
+            toast({ title: 'Pick a resource and a unit name.', variant: 'destructive' });
+            return;
+        }
+        const { error } = await supabase.from('inventory_units').insert({
+            inventory_item_id: inventoryItemId,
+            name,
+            serial: unitForm.serial.trim() || null,
+            status: 'available',
+            is_active: true,
+        });
+        if (error) {
+            toast({ title: 'Could not add unit', description: error.message, variant: 'destructive' });
+            return;
+        }
+        setUnitForm({ inventory_item_id: '', name: '', serial: '' });
+        fetchAll();
+    };
+
+    const openAccessoryForm = (unit, accessory = null) => {
+        setAccessoryUnit(unit);
+        setEditingAccessory(accessory);
+        setIsAccessoryFormOpen(true);
+    };
+
+    const handleSaveAccessory = async (data) => {
+        const payload = {
+            inventory_unit_id: data.inventory_unit_id,
+            kind: data.kind,
+            name: data.name,
+            quantity: data.quantity || 1,
+            device_id: data.device_id,
+            notes: data.notes,
+            updated_at: new Date().toISOString(),
+        };
+        const query = data.id
+            ? supabase.from('unit_accessories').update(payload).eq('id', data.id)
+            : supabase.from('unit_accessories').insert([payload]);
+        const { error } = await query;
+        if (error) {
+            const description = error.code === '23505'
+                ? 'This unit already has that device id for this kind.'
+                : error.message;
+            toast({ title: 'Failed to save accessory', description, variant: 'destructive' });
+        } else {
+            toast({ title: `Accessory ${data.id ? 'updated' : 'created'} successfully!` });
+            setIsAccessoryFormOpen(false);
+            setEditingAccessory(null);
+            setAccessoryUnit(null);
+            fetchAll();
+        }
+    };
+
+    const handleDeleteAccessory = async (accessory) => {
+        if (!window.confirm(`Remove accessory "${accessory.name}"? Linked GPS or lock rows keep the unit, but lose this accessory link.`)) return;
+        const { error } = await supabase.from('unit_accessories').delete().eq('id', accessory.id);
+        if (error) {
+            toast({ title: 'Failed to delete accessory', description: error.message, variant: 'destructive' });
+        } else {
+            toast({ title: 'Accessory deleted' });
             fetchAll();
         }
     };
@@ -383,6 +558,99 @@ export const CapacityManager = () => {
             </div>
 
             <div className="bg-white/10 p-6 rounded-2xl">
+                <div className="flex items-center gap-2 mb-4">
+                    <Package className="h-6 w-6 text-yellow-400" />
+                    <h2 className="text-2xl font-bold">Serial units</h2>
+                </div>
+                <p className="text-sm text-blue-200 mb-4">
+                    One row per physical asset inside a resource pool. GPS trackers and padlocks attach to a unit, not to the pool.
+                </p>
+                <form onSubmit={handleAddUnit} className="grid gap-3 md:grid-cols-4 mb-4">
+                    <Select value={unitForm.inventory_item_id || undefined} onValueChange={(value) => setUnitForm({ ...unitForm, inventory_item_id: value })}>
+                        <SelectTrigger className="bg-white/10"><SelectValue placeholder="Resource" /></SelectTrigger>
+                        <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                            {resources.map((resource) => (
+                                <SelectItem key={resource.id} value={String(resource.id)}>{resource.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Input value={unitForm.name} onChange={(e) => setUnitForm({ ...unitForm, name: e.target.value })} className="bg-white/10" placeholder="Unit name" />
+                    <Input value={unitForm.serial} onChange={(e) => setUnitForm({ ...unitForm, serial: e.target.value })} className="bg-white/10" placeholder="Serial (optional)" />
+                    <Button type="submit"><Plus className="mr-2 h-4 w-4" /> Add unit</Button>
+                </form>
+                <Table>
+                    <TableHeader>
+                        <TableRow className="border-white/10 hover:bg-transparent">
+                            <TableHead className="text-gray-300">Unit</TableHead>
+                            <TableHead className="text-gray-300">Resource</TableHead>
+                            <TableHead className="text-gray-300">Serial</TableHead>
+                            <TableHead className="text-gray-300">Status</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {units.length === 0 ? (
+                            <TableRow><TableCell colSpan={4} className="text-center text-gray-400 py-6">No serial units yet.</TableCell></TableRow>
+                        ) : units.map((unit) => {
+                            const unitAccessories = accessories.filter((item) => item.inventory_unit_id === unit.id);
+                            return (
+                                <React.Fragment key={unit.id}>
+                                    <TableRow className="border-white/10">
+                                        <TableCell className="font-medium text-white">{unit.name}</TableCell>
+                                        <TableCell className="text-gray-300">{unit.inventory_items?.name || `#${unit.inventory_item_id}`}</TableCell>
+                                        <TableCell className="text-gray-300">{unit.serial || '—'}</TableCell>
+                                        <TableCell className="text-gray-300">{unit.status}</TableCell>
+                                    </TableRow>
+                                    <TableRow className="border-white/10 hover:bg-transparent">
+                                        <TableCell colSpan={4} className="bg-black/20">
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <p className="text-xs uppercase tracking-wide text-gray-400">Accessories</p>
+                                                <Button type="button" size="sm" variant="outline" onClick={() => openAccessoryForm(unit)}>
+                                                    <Plus className="mr-2 h-3 w-3" /> Add accessory
+                                                </Button>
+                                            </div>
+                                            {unitAccessories.length === 0 ? (
+                                                <p className="text-sm text-gray-400">None yet. Add a GPS or lock, then pick it from the GPS yard or lock panel.</p>
+                                            ) : (
+                                                <Table>
+                                                    <TableHeader>
+                                                        <TableRow className="border-white/10 hover:bg-transparent">
+                                                            <TableHead className="text-gray-400">Kind</TableHead>
+                                                            <TableHead className="text-gray-400">Name</TableHead>
+                                                            <TableHead className="text-gray-400">Device id</TableHead>
+                                                            <TableHead className="text-gray-400">Notes</TableHead>
+                                                            <TableHead className="text-gray-400 text-right">Actions</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {unitAccessories.map((item) => (
+                                                            <TableRow key={item.id} className="border-white/10">
+                                                                <TableCell className="capitalize text-gray-200">{item.kind}</TableCell>
+                                                                <TableCell className="text-white">{item.name}</TableCell>
+                                                                <TableCell className="font-mono text-xs text-gray-300">{item.device_id || '—'}</TableCell>
+                                                                <TableCell className="text-gray-300">{item.notes || '—'}</TableCell>
+                                                                <TableCell className="text-right space-x-2">
+                                                                    <Button variant="outline" size="sm" onClick={() => openAccessoryForm(unit, item)}>
+                                                                        <Edit className="h-4 w-4" />
+                                                                    </Button>
+                                                                    <Button variant="destructive" size="sm" onClick={() => handleDeleteAccessory(item)}>
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                    </Button>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            )}
+                                        </TableCell>
+                                    </TableRow>
+                                </React.Fragment>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </div>
+
+            <div className="bg-white/10 p-6 rounded-2xl">
                 <div className="flex justify-between items-center mb-4">
                     <div className="flex items-center gap-2">
                         <Link2 className="h-6 w-6 text-yellow-400" />
@@ -439,6 +707,18 @@ export const CapacityManager = () => {
                     onSave={handleSaveResource}
                     onCancel={() => { setIsResourceFormOpen(false); setEditingResource(null); }}
                 />
+            </Dialog>
+
+            <Dialog open={isAccessoryFormOpen} onOpenChange={setIsAccessoryFormOpen}>
+                {accessoryUnit && (
+                    <AccessoryForm
+                        open={isAccessoryFormOpen}
+                        accessory={editingAccessory}
+                        unit={accessoryUnit}
+                        onSave={handleSaveAccessory}
+                        onCancel={() => { setIsAccessoryFormOpen(false); setEditingAccessory(null); setAccessoryUnit(null); }}
+                    />
+                )}
             </Dialog>
 
             <Dialog open={isRequirementFormOpen} onOpenChange={setIsRequirementFormOpen}>

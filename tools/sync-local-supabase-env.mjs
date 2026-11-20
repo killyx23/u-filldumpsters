@@ -108,11 +108,30 @@ function sqlDollarQuote(tag, value) {
 }
 
 /**
+ * Kong JWT auth needs a real JWT (eyJ...), not the CLI sb_secret_ API key.
+ * pg_net crons that send sb_secret_ as Bearer get 401 Missing authorization header.
+ */
+function pickServiceRoleJwt(env) {
+  const candidates = [
+    env.SERVICE_ROLE_KEY,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+    env.SECRET_KEY,
+  ].filter(Boolean);
+  return candidates.find((value) => String(value).startsWith("eyJ")) || null;
+}
+
+/**
  * pg_net crons run inside the DB container and need vault secrets:
  * - supabase_url: in-docker Kong URL (not host localhost)
- * - service_role_key: local service role JWT
+ * - service_role_key: local service role JWT (eyJ...), never sb_secret_
  */
 function seedLocalVaultCronSecrets(serviceRoleKey) {
+  if (!serviceRoleKey || !String(serviceRoleKey).startsWith("eyJ")) {
+    console.warn(
+      "[sync-local-supabase-env] Skipping vault service_role_key seed: need a JWT (eyJ...), not sb_secret_.",
+    );
+    return;
+  }
   const kongUrl = "http://kong:8000";
   const urlLit = sqlDollarQuote("u", kongUrl);
   const keyLit = sqlDollarQuote("k", serviceRoleKey);
@@ -187,6 +206,7 @@ function run() {
     env.PUBLISHABLE_KEY ?? env.ANON_KEY ?? env.SUPABASE_ANON_KEY;
   const secretKey =
     env.SECRET_KEY ?? env.SERVICE_ROLE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRoleJwt = pickServiceRoleJwt(env);
 
   if (!apiUrl || !publishableKey) {
     console.error(
@@ -234,7 +254,7 @@ function run() {
 
   upsertEnvValues(functionsEnvPath, functionEnvUpdates);
 
-  seedLocalVaultCronSecrets(secretKey);
+  seedLocalVaultCronSecrets(serviceRoleJwt);
 
   const functionsEnv = parseEnvFile(functionsEnvPath);
   const iglooRequired = [
