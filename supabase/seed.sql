@@ -5970,6 +5970,8 @@ update public.inventory_rules
 set occupancy_model = 'dropoff_and_pickup_only', scheduling_granularity = 'slot'
 where service_id = 3 and inventory_item_id = 2;
 
+-- Delivered dump trailer stays on site the whole rental, so the roll-off trailer
+-- (item 2) is held every day, not only on the drop-off and pickup trips.
 update public.inventory_rules
 set occupancy_model = 'range', scheduling_granularity = 'day'
 where service_id = 4 and inventory_item_id in (1, 2);
